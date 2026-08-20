@@ -94,7 +94,7 @@ app.use('/api/purchase-requests', require('./routes/purchaseRequests'))
 app.use('/api/purchases', purchaseSummaryRouter)
 app.use('/api/entries', entriesRouter)
 
-const purchaseReturnsRouter = require('./routes/purchaseReturns')
+
 
 
 
@@ -131,7 +131,7 @@ app.use('/api/stock-alerts', stockAlertsRouter)
 app.use('/api/stock-alert', stockAlertsRouter)
 app.use('/api/purchases', purchasesRouter)
 app.use('/api/lots', lotsRouter)
-app.use('/api/purchase-returns', purchaseReturnsRouter)
+
 app.use('/api/grains', grainsRouter)
 app.use('/api/grind', grainsRouter)
 
