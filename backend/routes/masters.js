@@ -1,7 +1,10 @@
 const express = require('express')
 const router = express.Router()
 const db = require('../config/database')
+<<<<<<< HEAD
 const recycleBinService = require('../services/RecycleBinService')
+=======
+>>>>>>> origin/main
 
 // Helper function to check if table exists
 async function tableExists(tableName) {
@@ -28,6 +31,7 @@ async function columnExists(tableName, columnName) {
   }
 }
 
+<<<<<<< HEAD
 // Helper function to resolve alias to table name and configuration
 const resolveTableConfig = (tableParam) => {
   const actualTable = masterTypeAliases[tableParam] ? masterTypeAliases[tableParam].table : tableParam;
@@ -84,6 +88,8 @@ const normalizeMasterData = async (tableName, rawData) => {
   return filteredData;
 };
 
+=======
+>>>>>>> origin/main
 // Master type aliases mapping
 // hasStatus: true = table has status column and we filter by Active
 // hasStatus: false = table doesn't have status column, return all records
@@ -104,10 +110,17 @@ const masterTypeAliases = {
   flour_mills: { table: 'flour_mill_master', displayField: 'flourmill', hasStatus: true },
   papad_company: { table: 'papad_company_master', displayField: 'name', hasStatus: true },
   papad_companies: { table: 'papad_company_master', displayField: 'name', hasStatus: true },
+<<<<<<< HEAD
   weight: { table: 'weightmaster', displayField: 'name', hasStatus: true },
   weights: { table: 'weightmaster', displayField: 'name', hasStatus: true },
   ledger_group: { table: 'ledgergroupmaster', displayField: 'name', hasStatus: true },
   ledger_groups: { table: 'ledgergroupmaster', displayField: 'name', hasStatus: true },
+=======
+  weight: { table: 'weightmaster', displayField: 'name', hasStatus: false },
+  weights: { table: 'weightmaster', displayField: 'name', hasStatus: false },
+  ledger_group: { table: 'ledgergroupmaster', displayField: 'name', hasStatus: false },
+  ledger_groups: { table: 'ledgergroupmaster', displayField: 'name', hasStatus: false },
+>>>>>>> origin/main
   ledger: { table: 'ledgermaster', displayField: 'name', hasStatus: false },
   ledgers: { table: 'ledgermaster', displayField: 'name', hasStatus: false },
   area: { table: 'area_master', displayField: 'name', hasStatus: true },
@@ -123,9 +136,12 @@ const masterTypeAliases = {
   transports: { table: 'transport_master', displayField: 'name', hasStatus: true },
   godown: { table: 'godown_master', displayField: 'godown_name', hasStatus: false },
   godowns: { table: 'godown_master', displayField: 'godown_name', hasStatus: false },
+<<<<<<< HEAD
   employee: { table: 'employee_master', displayField: 'name', hasStatus: true },
   employees: { table: 'employee_master', displayField: 'name', hasStatus: true },
   employee_master: { table: 'employee_master', displayField: 'name', hasStatus: true },
+=======
+>>>>>>> origin/main
   // Legacy table names also supported
   item_master: { table: 'item_master', displayField: 'item_name', hasStatus: true },
   customer_master: { table: 'customer_master', displayField: 'name', hasStatus: true },
@@ -148,6 +164,7 @@ const masterTypeAliases = {
   sender_master: { table: 'sender_group_master', displayField: 'name', hasStatus: true },
   sender_group_master: { table: 'sender_group_master', displayField: 'name', hasStatus: true },
   person_master: { table: 'person_master', displayField: 'name', hasStatus: true },
+<<<<<<< HEAD
   godown_master: { table: 'godown_master', displayField: 'godown_name', hasStatus: false },
   godown_creation: { table: 'godown_master', displayField: 'godown_name', hasStatus: false },
   purchase_orders: { table: 'purchase_orders', displayField: 'id', hasStatus: false },
@@ -156,11 +173,15 @@ const masterTypeAliases = {
   tax: { table: 'tax_master', displayField: 'tax_name', hasStatus: true },
   taxes: { table: 'tax_master', displayField: 'tax_name', hasStatus: true },
   tax_master: { table: 'tax_master', displayField: 'tax_name', hasStatus: true },
+=======
+  ptrans_master: { table: 'ptrans_master', displayField: 'name', hasStatus: true },
+>>>>>>> origin/main
 }
 
 // Master tables mapping with fields
 // NOTE: Fixed to match actual schema from database/schema.sql
 const masterTables = {
+<<<<<<< HEAD
   tax_master: {
     table: 'tax_master',
     fields: ['id', 'tax_name', 'hsn_code', 'tax_type', 'description', 'gst_rate', 'cgst_rate', 'sgst_rate', 'igst_rate', 'cess_rate', 'calc_type', 'effective_from', 'effective_to', 'status', 'remarks'],
@@ -184,11 +205,18 @@ const masterTables = {
     fields: ['item_code', 'item_name', 'print_name', 'item_group', 'type', 'tax', 'hsn_code', 'status', 'lab_parameters'],
     uniqueField: 'item_code',
     displayField: 'item_name'
+=======
+  item_master: {
+    table: 'item_master',
+    fields: ['item_code', 'item_name', 'print_name', 'item_group', 'type', 'tax', 'hsn_code', 'status'],
+    uniqueField: 'item_code'
+>>>>>>> origin/main
   },
 
   item_groups: {
     table: 'item_groups',
     fields: ['group_code', 'group_name', 'print_name', 'tax'],
+<<<<<<< HEAD
     uniqueField: 'group_code',
     displayField: 'group_name'
   },
@@ -203,28 +231,54 @@ const masterTables = {
     fields: ['ded_code', 'ded_name', 'print_name', 'debit_adjust', 'account_head', 'credit_adjust', 'ded_type', 'calc_type', 'status'],
     uniqueField: 'ded_code',
     displayField: 'ded_name'
+=======
+    uniqueField: 'group_code'
+  },
+  deduction_sales: {
+    table: 'deduction_sales',
+    fields: ['ded_code', 'ded_name', 'print_name', 'adjust_with_sales', 'account_head', 'ded_type', 'calc_type', 'ded_value'],
+    uniqueField: 'ded_code'
+  },
+  deduction_purchase: {
+    table: 'deduction_purchase',
+    fields: ['ded_code', 'ded_name', 'print_name', 'affect_cost_of_goods', 'type', 'debit_side_adjust', 'account_head', 'credit_adjust', 'deduction_type', 'calculation_type', 'deduction_value', 'status'],
+    uniqueField: 'ded_code'
+>>>>>>> origin/main
   },
   customer_master: {
     table: 'customer_master',
     fields: ['name', 'print_name', 'contact_person', 'address1', 'phone_res', 'phone_off', 'mobile1', 'email', 'gst_number', 'area', 'transport', 'limit_days', 'limit_amount', 'opening_balance', 'balance_type', 'status'],
+<<<<<<< HEAD
     uniqueField: 'name',
     displayField: 'name'
+=======
+    uniqueField: 'name'
+>>>>>>> origin/main
   },
   supplier_master: {
     table: 'supplier_master',
     fields: ['name', 'print_name', 'contact_person', 'address1', 'phone_res', 'phone_off', 'mobile1', 'email', 'gst_number', 'area', 'transport', 'limit_days', 'limit_amount', 'opening_balance', 'balance_type', 'status'],
+<<<<<<< HEAD
     uniqueField: 'name',
     displayField: 'name'
+=======
+    uniqueField: 'name'
+>>>>>>> origin/main
   },
   flour_mill_master: {
     table: 'flour_mill_master',
     fields: ['flourmill', 'print_name', 'contact_person', 'address', 'area', 'phone_res', 'phone_off', 'mobile', 'tin_no', 'wages_kg', 'opening_balance', 'opening_balance_type', 'status'],
+<<<<<<< HEAD
     uniqueField: 'flourmill',
     displayField: 'flourmill'
+=======
+    uniqueField: 'flourmill'
+>>>>>>> origin/main
   },
   papad_company_master: {
     table: 'papad_company_master',
     fields: ['name', 'print_name', 'contact_person', 'address1', 'address2', 'address3', 'address4', 'gst_no', 'phone_off', 'phone_res', 'mobile1', 'mobile2', 'area', 'wages_kg', 'opening_balance', 'opening_advance', 'status'],
+<<<<<<< HEAD
     uniqueField: 'name',
     displayField: 'name'
   },
@@ -239,60 +293,109 @@ const masterTables = {
     fields: ['name', 'printname', 'under', 'status'],
     uniqueField: 'name',
     displayField: 'name'
+=======
+    uniqueField: 'name'
+  },
+  weightmaster: {
+    table: 'weightmaster',
+    fields: ['name', 'printname', 'weight'],
+    uniqueField: 'name'
+  },
+  ledgergroupmaster: {
+    table: 'ledgergroupmaster',
+    fields: ['name', 'printname', 'under'],
+    uniqueField: 'name'
+>>>>>>> origin/main
   },
   ledgermaster: {
     table: 'ledgermaster',
     fields: ['name', 'printname', 'alias_name', 'under', 'openingbalance', 'opening_type', 'ledger_type', 'status'],
+<<<<<<< HEAD
     uniqueField: 'name',
     displayField: 'name'
+=======
+    uniqueField: 'name'
+>>>>>>> origin/main
   },
   area_master: {
     table: 'area_master',
     fields: ['name', 'print_name', 'status'],
+<<<<<<< HEAD
     uniqueField: 'name',
     displayField: 'name'
+=======
+    uniqueField: 'name'
+>>>>>>> origin/main
   },
   city_master: {
     table: 'city_master',
     fields: ['name', 'print_name', 'status'],
+<<<<<<< HEAD
     uniqueField: 'name',
     displayField: 'name'
+=======
+    uniqueField: 'name'
+>>>>>>> origin/main
   },
   transport_master: {
     table: 'transport_master',
     fields: ['name', 'print_name', 'status'],
+<<<<<<< HEAD
     uniqueField: 'name',
     displayField: 'name'
+=======
+    uniqueField: 'name'
+>>>>>>> origin/main
   },
   consignee_group_master: {
     table: 'consignee_group_master',
     fields: ['name', 'print_name', 'contact_person', 'address', 'area', 'phone_res', 'phone_off', 'mobile', 'tin_no', 'status'],
+<<<<<<< HEAD
     uniqueField: 'name',
     displayField: 'name'
+=======
+    uniqueField: 'name'
+>>>>>>> origin/main
   },
   sender_group_master: {
     table: 'sender_group_master',
     fields: ['name', 'print_name', 'contact_person', 'address', 'area', 'phone_res', 'phone_off', 'mobile', 'tin_no', 'status'],
+<<<<<<< HEAD
     uniqueField: 'name',
     displayField: 'name'
+=======
+    uniqueField: 'name'
+>>>>>>> origin/main
   },
   person_master: {
     table: 'person_master',
     fields: ['name', 'print_name', 'contact_person', 'address', 'area', 'phone_res', 'phone_off', 'mobile', 'status'],
+<<<<<<< HEAD
     uniqueField: 'name',
     displayField: 'name'
+=======
+    uniqueField: 'name'
+>>>>>>> origin/main
   },
   ptrans_master: {
     table: 'ptrans_master',
     fields: ['name', 'print_name', 'status'],
+<<<<<<< HEAD
     uniqueField: 'name',
     displayField: 'name'
+=======
+    uniqueField: 'name'
+>>>>>>> origin/main
   },
   godown_master: {
     table: 'godown_master',
     fields: ['godown_name', 'print_name', 'contact_person', 'address', 'phone_off', 'mobile1', 'email', 'website', 'area', 'gst_number', 'status'],
+<<<<<<< HEAD
     uniqueField: 'godown_name',
     displayField: 'godown_name'
+=======
+    uniqueField: 'godown_name'
+>>>>>>> origin/main
   }
 }
 
@@ -315,9 +418,13 @@ const validateMasterType = (type) => {
 // Get display field name for a master type
 const getDisplayField = (type) => {
   const config = masterTypeAliases[type] || masterTables[type]
+<<<<<<< HEAD
   if (config && config.displayField) return config.displayField;
   if (config && config.uniqueField) return config.uniqueField;
   return 'name';
+=======
+  return config ? config.displayField : 'name'
+>>>>>>> origin/main
 }
 
 // Get table config for a master type
@@ -336,7 +443,11 @@ router.get('/:type', async (req, res) => {
     if (!type) {
       return res.status(400).json({ 
         success: false,
+<<<<<<< HEAD
         message: 'Invalid master type.' 
+=======
+        message: 'Invalid master type. Valid types: items, item_groups, deduction_sales, deduction_purchase, customers, suppliers, flour_mills, papad_companies, weights, ledger_groups, ledgers, areas, cities, consignees, ptrans, senders, transports' 
+>>>>>>> origin/main
       })
     }
 
@@ -345,12 +456,17 @@ router.get('/:type', async (req, res) => {
       return res.status(400).json({ message: 'Master configuration not found' })
     }
 
+<<<<<<< HEAD
     const tableName = config.table || type
+=======
+    const tableName = config.table
+>>>>>>> origin/main
     
     // Check if table exists
     const exists = await tableExists(tableName)
     if (!exists) {
       console.log(`Table '${tableName}' does not exist`)
+<<<<<<< HEAD
       return res.json({ success: true, data: [] })
     }
     
@@ -383,11 +499,19 @@ router.get('/:type', async (req, res) => {
         }
       }
     }
+=======
+      return res.json([])
+    }
+    
+    const displayField = config.displayField
+    const hasStatus = config.hasStatus
+>>>>>>> origin/main
 
     // Build query - filter active only if table has status field
     let query = `SELECT * FROM ${tableName}`
     const params = []
     
+<<<<<<< HEAD
     if (tableName === 'item_master') {
       query = `
         SELECT 
@@ -410,21 +534,38 @@ router.get('/:type', async (req, res) => {
       }
       query += orderClause
     }
+=======
+    if (hasStatus) {
+      query += ` WHERE (status = 'Active' OR status IS NULL OR status = '')`
+    }
+    
+    // Order by name ASC
+    query += ` ORDER BY ${displayField} ASC`
+>>>>>>> origin/main
 
     const result = await db.query(query, params)
     
     // Return simplified format [{ id, name }]
     const simplified = result.rows.map(row => ({
+<<<<<<< HEAD
       ...row,
       id: row.id || row[displayField] || row.name || row.item_code || row.godown_name,
       godown_name: row.godown_name || row.name || row[displayField] || '',
       name: row[displayField] || row.name || row.item_name || row.godown_name || row.ded_name || row.flourmill || ''
+=======
+      id: row.id,
+      name: row[displayField] || row.name || row.item_name || row.ded_name || row.flourmill || ''
+>>>>>>> origin/main
     }))
 
     res.json({ success: true, data: simplified })
   } catch (error) {
     console.error('Error fetching master records:', error)
+<<<<<<< HEAD
     res.json({ success: false, data: [], error: error.message })
+=======
+    res.json([])
+>>>>>>> origin/main
   }
 })
 
@@ -433,6 +574,7 @@ router.get('/:type', async (req, res) => {
 // ============================================================================
 router.get('/all/:table', async (req, res) => {
   try {
+<<<<<<< HEAD
     const tableNameParam = req.params.table
     const { tableName, tableConfig } = resolveTableConfig(tableNameParam)
 
@@ -441,6 +583,16 @@ router.get('/all/:table', async (req, res) => {
     }
 
     const result = await db.query(`SELECT * FROM ${tableName}`)
+=======
+    const tableName = req.params.table
+    const tableConfig = masterTables[tableName]
+
+    if (!tableConfig) {
+      return res.status(400).json({ message: 'Invalid master table' })
+    }
+
+    const result = await db.query(`SELECT * FROM ${tableConfig.table}`)
+>>>>>>> origin/main
     res.json({ success: true, data: result.rows })
   } catch (error) {
     console.error('Error fetching master records:', error)
@@ -453,6 +605,7 @@ router.get('/all/:table', async (req, res) => {
 // ============================================================================
 router.get('/record/:table/:id', async (req, res) => {
   try {
+<<<<<<< HEAD
     const tableNameParam = req.params.table
     const { tableName, tableConfig } = resolveTableConfig(tableNameParam)
 
@@ -465,6 +618,16 @@ router.get('/record/:table/:id', async (req, res) => {
     if (result.rows.length === 0 && tableConfig?.uniqueField) {
       result = await db.query(`SELECT * FROM ${tableName} WHERE ${tableConfig.uniqueField} = ?`, [req.params.id])
     }
+=======
+    const tableName = req.params.table
+    const tableConfig = masterTables[tableName]
+
+    if (!tableConfig) {
+      return res.status(400).json({ message: 'Invalid master table' })
+    }
+
+    const result = await db.query(`SELECT * FROM ${tableConfig.table} WHERE id = ?`, [req.params.id])
+>>>>>>> origin/main
 
     if (result.rows.length === 0) {
       return res.status(404).json({ message: 'Record not found' })
@@ -477,7 +640,10 @@ router.get('/record/:table/:id', async (req, res) => {
   }
 })
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/main
 // ============================================================================
 // POST CREATE NEW RECORD - Short form /:table (matches frontend call)
 // ============================================================================
@@ -495,6 +661,7 @@ router.post("/:table", async (req, res) => {
       });
     }
 
+<<<<<<< HEAD
     const { tableName, tableConfig } = resolveTableConfig(table);
     if (!tableName) {
       return res.status(400).json({ message: 'Invalid master table' })
@@ -524,6 +691,29 @@ router.post("/:table", async (req, res) => {
         error: err.message,
       });
     }
+=======
+    const keys = Object.keys(data);
+    const values = Object.values(data);
+
+    const placeholders = keys.map(() => "?").join(",");
+
+    const query = `INSERT INTO ${table} (${keys.join(",")}) VALUES (${placeholders})`;
+
+    db.run(query, values, function (err) {
+      if (err) {
+        console.error("❌ DB ERROR:", err);
+        return res.status(500).json({
+          success: false,
+          error: err.message,
+        });
+      }
+
+      res.json({
+        success: true,
+        id: this.lastID,
+      });
+    });
+>>>>>>> origin/main
   } catch (err) {
     console.error("❌ SERVER ERROR:", err);
     res.status(500).json({ success: false, error: err.message });
@@ -536,14 +726,22 @@ router.post("/:table", async (req, res) => {
 // ============================================================================
 router.post('/record/:table', async (req, res) => {
   try {
+<<<<<<< HEAD
     const tableNameParam = req.params.table
     const { tableName, tableConfig } = resolveTableConfig(tableNameParam)
 
     if (!tableName) {
+=======
+    const tableName = req.params.table
+    const tableConfig = masterTables[tableName]
+
+    if (!tableConfig) {
+>>>>>>> origin/main
       return res.status(400).json({ message: 'Invalid master table' })
     }
 
     const data = req.body
+<<<<<<< HEAD
     const filteredData = await normalizeMasterData(tableName, data);
     const keys = Object.keys(filteredData);
     const values = Object.values(filteredData);
@@ -554,6 +752,33 @@ router.post('/record/:table', async (req, res) => {
 
     const placeholders = keys.map(() => '?').join(', ')
     const query = `INSERT INTO ${tableName} (${keys.join(', ')}) VALUES (${placeholders})`
+=======
+    const fields = tableConfig.fields
+    const values = fields.map(field => {
+      // Handle status default
+      if (field === 'status' && !data[field]) {
+        return 'Active'
+      }
+      return data[field] || null
+    })
+
+    // Check for required fields
+    if (fields.includes('name') && !data.name && !data.flourmill) {
+      return res.status(400).json({ message: 'Name is required' })
+    }
+    if (fields.includes('item_name') && !data.item_name) {
+      return res.status(400).json({ message: 'Item name is required' })
+    }
+    if (fields.includes('group_name') && !data.group_name) {
+      return res.status(400).json({ message: 'Group name is required' })
+    }
+    if (fields.includes('ded_name') && !data.ded_name) {
+      return res.status(400).json({ message: 'Deduction name is required' })
+    }
+
+    const placeholders = fields.map(() => '?').join(', ')
+    const query = `INSERT INTO ${tableConfig.table} (${fields.join(', ')}) VALUES (${placeholders})`
+>>>>>>> origin/main
 
     const result = await db.run(query, values)
 
@@ -564,6 +789,11 @@ router.post('/record/:table', async (req, res) => {
     })
   } catch (error) {
     console.error("❌ DB INSERT ERROR:", error.message);
+<<<<<<< HEAD
+=======
+    console.error(error);
+
+>>>>>>> origin/main
     return res.status(500).json({
       success: false,
       error: error.message
@@ -576,14 +806,22 @@ router.post('/record/:table', async (req, res) => {
 // ============================================================================
 router.put('/:table/:id', async (req, res) => {
   try {
+<<<<<<< HEAD
     const tableNameParam = req.params.table
     const { tableName, tableConfig } = resolveTableConfig(tableNameParam)
 
     if (!tableName) {
+=======
+    const tableName = req.params.table
+    const tableConfig = masterTables[tableName]
+
+    if (!tableConfig) {
+>>>>>>> origin/main
       return res.status(400).json({ message: 'Invalid master table' })
     }
 
     const data = req.body
+<<<<<<< HEAD
     const filteredData = await normalizeMasterData(tableName, data);
     const keys = Object.keys(filteredData);
     const values = Object.values(filteredData);
@@ -606,6 +844,16 @@ router.put('/:table/:id', async (req, res) => {
         result = resultFallback
       }
     }
+=======
+    const fields = tableConfig.fields
+    const values = fields.map(field => data[field] || null)
+    values.push(req.params.id) // Add ID for WHERE clause
+
+    const setClause = fields.map(field => `${field} = ?`).join(', ')
+    const query = `UPDATE ${tableConfig.table} SET ${setClause} WHERE id = ?`
+
+    const result = await db.run(query, values)
+>>>>>>> origin/main
 
     if (result.changes > 0) {
       res.json({ success: true, message: 'Record updated successfully' })
@@ -623,14 +871,22 @@ router.put('/:table/:id', async (req, res) => {
 // ============================================================================
 router.put('/record/:table/:id', async (req, res) => {
   try {
+<<<<<<< HEAD
     const tableNameParam = req.params.table
     const { tableName, tableConfig } = resolveTableConfig(tableNameParam)
 
     if (!tableName) {
+=======
+    const tableName = req.params.table
+    const tableConfig = masterTables[tableName]
+
+    if (!tableConfig) {
+>>>>>>> origin/main
       return res.status(400).json({ message: 'Invalid master table' })
     }
 
     const data = req.body
+<<<<<<< HEAD
     const filteredData = await normalizeMasterData(tableName, data);
     const keys = Object.keys(filteredData);
     const values = Object.values(filteredData);
@@ -653,6 +909,16 @@ router.put('/record/:table/:id', async (req, res) => {
         result = resultFallback
       }
     }
+=======
+    const fields = tableConfig.fields
+    const values = fields.map(field => data[field] || null)
+    values.push(req.params.id) // Add ID for WHERE clause
+
+    const setClause = fields.map(field => `${field} = ?`).join(', ')
+    const query = `UPDATE ${tableConfig.table} SET ${setClause} WHERE id = ?`
+
+    const result = await db.run(query, values)
+>>>>>>> origin/main
 
     if (result.changes > 0) {
       res.json({ message: 'Record updated successfully' })
@@ -670,6 +936,7 @@ router.put('/record/:table/:id', async (req, res) => {
 // ============================================================================
 router.delete('/:table/:id', async (req, res) => {
   try {
+<<<<<<< HEAD
     const tableNameParam = req.params.table
     const { tableName, tableConfig } = resolveTableConfig(tableNameParam)
 
@@ -718,6 +985,16 @@ router.delete('/:table/:id', async (req, res) => {
         result = resultFallback
       }
     }
+=======
+    const tableName = req.params.table
+    const tableConfig = masterTables[tableName]
+
+    if (!tableConfig) {
+      return res.status(400).json({ message: 'Invalid master table' })
+    }
+
+    const result = await db.run(`DELETE FROM ${tableConfig.table} WHERE id = ?`, [req.params.id])
+>>>>>>> origin/main
 
     if (result.changes > 0) {
       res.json({ success: true, message: 'Record deleted successfully' })
@@ -735,6 +1012,7 @@ router.delete('/:table/:id', async (req, res) => {
 // ============================================================================
 router.delete('/record/:table/:id', async (req, res) => {
   try {
+<<<<<<< HEAD
     const tableNameParam = req.params.table
     const { tableName, tableConfig } = resolveTableConfig(tableNameParam)
 
@@ -762,6 +1040,16 @@ router.delete('/record/:table/:id', async (req, res) => {
         result = resultFallback
       }
     }
+=======
+    const tableName = req.params.table
+    const tableConfig = masterTables[tableName]
+
+    if (!tableConfig) {
+      return res.status(400).json({ message: 'Invalid master table' })
+    }
+
+    const result = await db.run(`DELETE FROM ${tableConfig.table} WHERE id = ?`, [req.params.id])
+>>>>>>> origin/main
 
     if (result.changes > 0) {
       res.json({ message: 'Record deleted successfully' })
@@ -778,6 +1066,7 @@ router.delete('/record/:table/:id', async (req, res) => {
 // Required response shape: { lot_no: "LOT0007" }
 router.get('/lots/next', async (req, res) => {
   try {
+<<<<<<< HEAD
     let maxNum = 0;
     const tables = [
       { name: 'stock_lots', col: 'lot_no' },
@@ -816,6 +1105,27 @@ router.get('/lots/next', async (req, res) => {
     }
 
     const nextLot = `LOT${String(maxNum + 1).padStart(4, '0')}`;
+=======
+    // Prefer stock_lots if present (it persists lots)
+    const stockLotsExists = await db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='stock_lots'");
+    let nextLot = 'LOT0001';
+
+    if (stockLotsExists.rows.length > 0) {
+      const r = await db.query(
+        `SELECT MAX(CAST(SUBSTR(lot_no, 4) AS INTEGER)) AS maxNum FROM stock_lots WHERE lot_no LIKE 'LOT%'`
+      )
+      const maxNum = r.rows[0]?.maxNum || 0
+      nextLot = `LOT${String(maxNum + 1).padStart(4, '0')}`
+    } else {
+      // Fallback: parse from purchase_items.lot_no
+      const r = await db.query(
+        `SELECT MAX(CAST(SUBSTR(lot_no, 4) AS INTEGER)) AS maxNum FROM purchase_items WHERE lot_no LIKE 'LOT%'`
+      )
+      const maxNum = r.rows[0]?.maxNum || 0
+      nextLot = `LOT${String(maxNum + 1).padStart(4, '0')}`
+    }
+
+>>>>>>> origin/main
     return res.json({ lot_no: nextLot });
   } catch (err) {
     console.error('Error generating next lot number:', err)

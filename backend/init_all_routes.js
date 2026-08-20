@@ -9,6 +9,7 @@ const allTables = [
     name: 'users',
     sql: `CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+<<<<<<< HEAD
       username TEXT NOT NULL,
       password_hash TEXT NOT NULL,
       role TEXT DEFAULT 'user',
@@ -17,6 +18,13 @@ const allTables = [
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(username, company_id)
+=======
+      username TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      role TEXT DEFAULT 'user',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+>>>>>>> origin/main
     )`
   },
   {
@@ -251,7 +259,10 @@ const allTables = [
       name TEXT UNIQUE,
       print_name TEXT,
       contact_person TEXT,
+<<<<<<< HEAD
       address TEXT,
+=======
+>>>>>>> origin/main
       address1 TEXT,
       address2 TEXT,
       address3 TEXT,

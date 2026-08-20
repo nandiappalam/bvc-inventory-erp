@@ -2,6 +2,7 @@ const express = require('express')
 const router = express.Router()
 const db = require('../config/database')
 
+<<<<<<< HEAD
 // Revert stock changes for a weight conversion record
 const revertWeightConversionStock = async (conversionId) => {
   try {
@@ -150,19 +151,35 @@ router.get('/next-sno', async (req, res) => {
 // GET all weight conversion records
 router.get('/', async (req, res) => {
   try {
+=======
+// GET all weight conversion records
+router.get('/', async (req, res) => {
+  try {
+    // First get all weight conversions
+>>>>>>> origin/main
     const result = await db.query(`
       SELECT * FROM weight_conversion ORDER BY id DESC
     `)
     
+<<<<<<< HEAD
     const weightConversions = []
     for (const wc of (result.rows || [])) {
+=======
+    // Then get items for each weight conversion
+    const weightConversions = []
+    for (const wc of result.rows) {
+>>>>>>> origin/main
       const itemsResult = await db.query(
         'SELECT * FROM weight_conversion_items WHERE weight_conversion_id = ?',
         [wc.id]
       )
       weightConversions.push({
         ...wc,
+<<<<<<< HEAD
         items: itemsResult.rows || []
+=======
+        items: itemsResult.rows
+>>>>>>> origin/main
       })
     }
     
@@ -177,7 +194,11 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const weightConversionResult = await db.query('SELECT * FROM weight_conversion WHERE id = ?', [req.params.id])
+<<<<<<< HEAD
     if (!weightConversionResult.rows || weightConversionResult.rows.length === 0) {
+=======
+    if (weightConversionResult.rows.length === 0) {
+>>>>>>> origin/main
       return res.status(404).json({ message: 'Weight conversion record not found' })
     }
 
@@ -185,7 +206,11 @@ router.get('/:id', async (req, res) => {
 
     const weightConversion = {
       ...weightConversionResult.rows[0],
+<<<<<<< HEAD
       items: itemsResult.rows || []
+=======
+      items: itemsResult.rows
+>>>>>>> origin/main
     }
 
     res.json(weightConversion)
@@ -225,6 +250,7 @@ router.post('/', async (req, res) => {
     for (let i = 0; i < items.length; i++) {
       const item = items[i]
       await db.run(`
+<<<<<<< HEAD
         INSERT INTO weight_conversion_items (weight_conversion_id, s_no, item_name, lot_no, weight, qty, total_wt, type)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `, [weightConversionId, i + 1, item.item_name, item.lot_no || '', item.weight || 0, item.qty, item.total_wt || 0, item.type || 'input'])
@@ -233,6 +259,13 @@ router.post('/', async (req, res) => {
     // Process stock update
     await processWeightConversionStock(weightConversionId, formData.date, items);
 
+=======
+        INSERT INTO weight_conversion_items (weight_conversion_id, s_no, item_name, lot_no, weight, qty, total_wt)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `, [weightConversionId, i + 1, item.item_name, item.lot_no || '', item.weight || 0, item.qty, item.total_wt || 0])
+    }
+
+>>>>>>> origin/main
     res.status(201).json({
       message: 'Weight conversion record saved successfully!',
       id: weightConversionId
@@ -249,9 +282,12 @@ router.put('/:id', async (req, res) => {
     const { formData, items } = req.body
     const weightConversionId = req.params.id
 
+<<<<<<< HEAD
     // Revert existing stock
     await revertWeightConversionStock(weightConversionId);
 
+=======
+>>>>>>> origin/main
     // Update weight conversion
     await db.run(`
       UPDATE weight_conversion SET s_no = ?, date = ?, remarks = ?, type = ?, updated_at = CURRENT_TIMESTAMP
@@ -265,6 +301,7 @@ router.put('/:id', async (req, res) => {
     for (let i = 0; i < items.length; i++) {
       const item = items[i]
       await db.run(`
+<<<<<<< HEAD
         INSERT INTO weight_conversion_items (weight_conversion_id, s_no, item_name, lot_no, weight, qty, total_wt, type)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `, [weightConversionId, i + 1, item.item_name, item.lot_no || '', item.weight || 0, item.qty, item.total_wt || 0, item.type || 'input'])
@@ -273,6 +310,13 @@ router.put('/:id', async (req, res) => {
     // Process updated stock
     await processWeightConversionStock(weightConversionId, formData.date, items);
 
+=======
+        INSERT INTO weight_conversion_items (weight_conversion_id, s_no, item_name, lot_no, weight, qty, total_wt)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `, [weightConversionId, i + 1, item.item_name, item.lot_no || '', item.weight || 0, item.qty, item.total_wt || 0])
+    }
+
+>>>>>>> origin/main
     res.json({ message: 'Weight conversion record updated successfully!' })
   } catch (error) {
     console.error('Error updating weight conversion:', error)
@@ -283,6 +327,7 @@ router.put('/:id', async (req, res) => {
 // DELETE weight conversion
 router.delete('/:id', async (req, res) => {
   try {
+<<<<<<< HEAD
     await revertWeightConversionStock(req.params.id);
     await db.run('DELETE FROM weight_conversion_items WHERE weight_conversion_id = ?', [req.params.id])
     await db.run('DELETE FROM weight_conversion WHERE id = ?', [req.params.id])
@@ -290,6 +335,13 @@ router.delete('/:id', async (req, res) => {
   } catch (error) {
     console.error('Error deleting weight conversion:', error)
     res.status(500).json({ success: false, message: 'Error deleting weight conversion', error: error.message })
+=======
+    await db.run('DELETE FROM weight_conversion WHERE id = ?', [req.params.id])
+    res.json({ message: 'Weight conversion record deleted successfully' })
+  } catch (error) {
+    console.error('Error deleting weight conversion:', error)
+    res.status(500).json({ message: 'Error deleting weight conversion' })
+>>>>>>> origin/main
   }
 })
 

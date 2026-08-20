@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Dependencies
 node_modules/
 frontend/node_modules/
@@ -42,3 +43,14 @@ src-tauri/bvc.db
 
 # Private keys
 *.pem
+=======
+node_modules
+dist
+.vite
+.env
+*.log
+
+src-tauri/target
+target
+node_modules
+>>>>>>> origin/main

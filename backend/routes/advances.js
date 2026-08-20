@@ -3,6 +3,7 @@ const router = express.Router()
 const db = require('../config/database')
 const { createAdvanceLedgerEntries, deleteLedgerEntries } = require('../utils/ledgerHelper')
 
+<<<<<<< HEAD
 // GET next S.No for advances
 router.get('/next-sno', async (req, res) => {
   try {
@@ -15,6 +16,8 @@ router.get('/next-sno', async (req, res) => {
   }
 })
 
+=======
+>>>>>>> origin/main
 // GET all advances
 router.get('/', async (req, res) => {
   console.log("🔥 ADVANCE API HIT");
@@ -56,7 +59,11 @@ router.get('/:id', async (req, res) => {
 // POST create new advance
 router.post('/', async (req, res) => {
   try {
+<<<<<<< HEAD
     let { s_no, date, papad_company, amount, dr_cr, pay_mode, remarks } = req.body
+=======
+    let { s_no, date, papad_company, amount, pay_mode, remarks } = req.body
+>>>>>>> origin/main
 
     // Always auto-generate s_no to avoid UNIQUE constraint issues
     const maxSNo = await db.query('SELECT MAX(CAST(s_no AS INTEGER)) as max_s_no FROM advances')
@@ -67,8 +74,13 @@ router.post('/', async (req, res) => {
     }
 
     const result = await db.run(
+<<<<<<< HEAD
       'INSERT INTO advances (s_no, date, papad_company, amount, dr_cr, pay_mode, remarks) VALUES (?, ?, ?, ?, ?, ?, ?)',
       [s_no, date, papad_company, amount, dr_cr || 'Dr', pay_mode || '', remarks || '']
+=======
+      'INSERT INTO advances (s_no, date, papad_company, amount, pay_mode, remarks) VALUES (?, ?, ?, ?, ?, ?)',
+      [s_no, date, papad_company, amount, pay_mode || '', remarks || '']
+>>>>>>> origin/main
     )
 
     const advanceId = result.lastID
@@ -89,7 +101,10 @@ router.post('/', async (req, res) => {
     }
 
     res.status(201).json({
+<<<<<<< HEAD
       success: true,
+=======
+>>>>>>> origin/main
       message: 'Advance created successfully',
       id: advanceId
     })
@@ -106,12 +121,21 @@ router.post('/', async (req, res) => {
 // PUT update advance
 router.put('/:id', async (req, res) => {
   try {
+<<<<<<< HEAD
     const { s_no, date, papad_company, amount, dr_cr, pay_mode, remarks } = req.body
     const advanceId = req.params.id
 
     const result = await db.run(
       'UPDATE advances SET s_no = ?, date = ?, papad_company = ?, amount = ?, dr_cr = ?, pay_mode = ?, remarks = ? WHERE id = ?',
       [s_no, date, papad_company, amount, dr_cr || 'Dr', pay_mode || '', remarks || '', advanceId]
+=======
+    const { s_no, date, papad_company, amount, pay_mode, remarks } = req.body
+    const advanceId = req.params.id
+
+    const result = await db.run(
+      'UPDATE advances SET s_no = ?, date = ?, papad_company = ?, amount = ?, pay_mode = ?, remarks = ? WHERE id = ?',
+      [s_no, date, papad_company, amount, pay_mode || '', remarks || '', advanceId]
+>>>>>>> origin/main
     )
 
     if (result.changes > 0) {

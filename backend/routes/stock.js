@@ -1,6 +1,7 @@
 const express = require('express')
 const router = express.Router()
 const db = require('../config/database')
+<<<<<<< HEAD
 const { rebuildStockLedger } = require('../utils/stockRebuilder')
 
 // Rebuild stock ledger & stock lots
@@ -13,6 +14,8 @@ router.post('/rebuild', async (req, res) => {
     res.status(500).json({ success: false, message: 'Failed to rebuild stock', error: err.message });
   }
 });
+=======
+>>>>>>> origin/main
 
 // ============================================================================
 // STOCK LOTS TABLE MANAGEMENT
@@ -61,6 +64,7 @@ const createIndexes = async () => {
 createIndexes()
 
 // ============================================================================
+<<<<<<< HEAD
 // STOCK CATEGORY DETERMINATION HELPER
 // ============================================================================
 const isWastageItem = (itemName, itemGroup) => {
@@ -190,6 +194,8 @@ const determineLotCategory = async (dbInstance, itemName, itemGroup, lotNo) => {
 };
 
 // ============================================================================
+=======
+>>>>>>> origin/main
 // GET LOT HISTORY - Complete traceability of a lot
 // Param: lot_no
 // Returns: Purchase details, Grind conversions, Sales, Remaining stock
@@ -236,6 +242,7 @@ router.get('/lot-history/:lotNo', async (req, res) => {
       WHERE foi.lot_no = ? OR foi.lot_no LIKE ?
     `, [lotNo, `%${lotNo}%`])
     
+<<<<<<< HEAD
     // Get grain input items (grind) for this lot
     const grainInputItems = await db.query(`
       SELECT gi.*, g.s_no, g.date as grind_date, fmm.flourmill AS flour_mill_name
@@ -267,6 +274,8 @@ router.get('/lot-history/:lotNo', async (req, res) => {
       }))
     ]
     
+=======
+>>>>>>> origin/main
     // Get flour out output lots (flour lots created from this grain lot)
     const flourOutputLots = await db.query(`
       SELECT sl.*, fo.date as created_date
@@ -278,6 +287,7 @@ router.get('/lot-history/:lotNo', async (req, res) => {
         WHERE lot_no = ? OR lot_no LIKE ?
       )
     `, [lotNo, `%${lotNo}%`])
+<<<<<<< HEAD
 
     // Get grain output lots (flour lots created from this grain lot)
     const grainOutputLots = await db.query(`
@@ -297,19 +307,30 @@ router.get('/lot-history/:lotNo', async (req, res) => {
       ...flourOutputLots.rows,
       ...grainOutputLots.rows
     ]
+=======
+>>>>>>> origin/main
     
     res.json({
       lotDetails: lot,
       purchase: purchaseItems.rows,
       sales: salesItems.rows,
+<<<<<<< HEAD
       grind: combinedGrind,
       flourOutput: combinedOutput,
+=======
+      grind: grindItems.rows,
+      flourOutput: flourOutputLots.rows,
+>>>>>>> origin/main
       summary: {
         initialQuantity: lot.quantity,
         remainingQuantity: lot.remaining_quantity,
         soldQuantity: (lot.quantity || 0) - (lot.remaining_quantity || 0),
         totalSales: salesItems.rows.length,
+<<<<<<< HEAD
         totalGrind: combinedGrind.length
+=======
+        totalGrind: grindItems.rows.length
+>>>>>>> origin/main
       }
     })
   } catch (error) {
@@ -328,6 +349,7 @@ router.get('/report', async (req, res) => {
     
     let query = `
       SELECT 
+<<<<<<< HEAD
         s.item_name,
         (SELECT id FROM item_master WHERE LOWER(item_name) = LOWER(s.item_name) LIMIT 1) as item_id,
         (SELECT item_group FROM item_master WHERE LOWER(item_name) = LOWER(s.item_name) LIMIT 1) as item_group,
@@ -341,6 +363,13 @@ router.get('/report', async (req, res) => {
           50
         ) as weight
       FROM stock s
+=======
+        item_name,
+        SUM(CASE WHEN type = 'Purchase' THEN COALESCE(qty, 0) ELSE 0 END) as total_purchased,
+        SUM(CASE WHEN type = 'Sale' THEN COALESCE(ABS(qty), 0) ELSE 0 END) as total_sold,
+        SUM(CASE WHEN type = 'Purchase' THEN COALESCE(qty, 0) ELSE -COALESCE(ABS(qty), 0) END) as balance
+      FROM stock
+>>>>>>> origin/main
       WHERE 1=1
     `
     const params = []
@@ -351,11 +380,16 @@ router.get('/report', async (req, res) => {
     }
     
     if (from_date) {
+<<<<<<< HEAD
       query += ` AND s.date >= ?`
+=======
+      query += ` AND date >= ?`
+>>>>>>> origin/main
       params.push(from_date)
     }
     
     if (to_date) {
+<<<<<<< HEAD
       query += ` AND s.date <= ?`
       params.push(to_date)
     }
@@ -373,6 +407,16 @@ router.get('/report', async (req, res) => {
     }))
 
     res.json(formattedRows)
+=======
+      query += ` AND date <= ?`
+      params.push(to_date)
+    }
+    
+    query += ` GROUP BY item_name ORDER BY item_name ASC`
+    
+    const result = await db.query(query, params)
+    res.json(result.rows)
+>>>>>>> origin/main
   } catch (error) {
     console.error('Error fetching stock report:', error)
     res.status(500).json({ message: 'Error fetching stock report', error: error.message })
@@ -396,6 +440,7 @@ router.get('/lots', async (req, res) => {
         sl.remaining_quantity,
         sl.rate,
         sl.created_at,
+<<<<<<< HEAD
         im.item_group,
         (sl.quantity - sl.remaining_quantity) as sold_qty,
         COALESCE(
@@ -405,6 +450,10 @@ router.get('/lots', async (req, res) => {
         ) as weight
       FROM stock_lots sl
       LEFT JOIN item_master im ON (sl.item_id = im.id OR LOWER(sl.item_name) = LOWER(im.item_name))
+=======
+        (sl.quantity - sl.remaining_quantity) as sold_qty
+      FROM stock_lots sl
+>>>>>>> origin/main
       WHERE 1=1
     `
     const params = []
@@ -417,6 +466,7 @@ router.get('/lots', async (req, res) => {
     query += ` ORDER BY sl.item_name, sl.created_at ASC`
     
     const result = await db.query(query, params)
+<<<<<<< HEAD
 
     const enrichedRows = await Promise.all(result.rows.map(async (row) => {
       const category = await determineLotCategory(db, row.item_name, row.item_group, row.lot_no);
@@ -734,6 +784,9 @@ router.get('/lots', async (req, res) => {
     }));
 
     res.json(enrichedRows)
+=======
+    res.json(result.rows)
+>>>>>>> origin/main
   } catch (error) {
     console.error('Error fetching lot breakdown:', error)
     res.status(500).json({ message: 'Error fetching lot breakdown', error: error.message })
@@ -743,6 +796,7 @@ router.get('/lots', async (req, res) => {
 // ============================================================================
 // GET AVAILABLE LOTS FOR AN ITEM (for Sales Lot Selection)
 // Returns lots with remaining_quantity > 0
+<<<<<<< HEAD
 // ============================================================================
 // GET NEXT AUTO LOT NO (LOT0001 format)
 // ============================================================================
@@ -789,6 +843,8 @@ router.get('/next-lot-no', async (req, res) => {
   }
 });
 
+=======
+>>>>>>> origin/main
 // Query Param: item_id or item_name
 // ============================================================================
 router.get('/available-lots', async (req, res) => {
@@ -802,6 +858,7 @@ router.get('/available-lots', async (req, res) => {
         sl.item_name,
         sl.lot_no,
         sl.remaining_quantity,
+<<<<<<< HEAD
         sl.remaining_quantity AS available_qty,
         sl.remaining_quantity AS balance_qty,
         sl.remaining_quantity AS stock,
@@ -840,10 +897,17 @@ router.get('/available-lots', async (req, res) => {
         AND sl.lot_no NOT IN (
           SELECT DISTINCT lot_no FROM purchase_return_items WHERE lot_no IS NOT NULL AND lot_no != ''
         )
+=======
+        sl.rate,
+        sl.created_at as purchase_date
+      FROM stock_lots sl
+      WHERE sl.remaining_quantity > 0
+>>>>>>> origin/main
     `
     const params = []
     
     if (item_id) {
+<<<<<<< HEAD
       query += ` AND (sl.item_id = ? OR sl.item_id IN (SELECT id FROM item_master WHERE id = ? OR LOWER(item_name) = LOWER(?)))`
       params.push(item_id, item_id, String(item_id))
     }
@@ -887,6 +951,28 @@ router.get('/available-lots', async (req, res) => {
         display: `${row.lot_no}${wtText} | Stock: ${rem} | Rate: ₹${rateVal} | ${supplierName}`
       };
     })
+=======
+      query += ` AND sl.item_id = ?`
+      params.push(item_id)
+    }
+    
+    if (item_name) {
+      query += ` AND sl.item_name = ?`
+      params.push(item_name)
+    }
+    
+    query += ` ORDER BY sl.created_at ASC`
+    
+    const result = await db.query(query, params)
+    
+    // Format response to show stock count
+    const formatted = result.rows.map(row => ({
+      lot_no: row.lot_no,
+      remaining_quantity: row.remaining_quantity,
+      purchase_date: row.purchase_date,
+      display: `${row.lot_no} (${row.remaining_quantity} available)`
+    }))
+>>>>>>> origin/main
     
     res.json(formatted)
   } catch (error) {
@@ -899,7 +985,11 @@ router.get('/available-lots', async (req, res) => {
 // GET AVAILABLE STOCK FOR AN ITEM (for FIFO deduction check)
 // ============================================================================
 // ============================================================================
+<<<<<<< HEAD
 // GET AVAILABLE STOCK FOR AN ITEM (by item_id or item_name)
+=======
+// GET AVAILABLE STOCK FOR AN ITEM (by item_id)
+>>>>>>> origin/main
 // Required by ERP modules: returns lots with available_qty > 0
 // Param: itemId
 // ============================================================================
@@ -909,6 +999,7 @@ router.get('/available/:itemId', async (req, res) => {
 
     const result = await db.query(`
       SELECT
+<<<<<<< HEAD
         sl.id,
         sl.item_id,
         sl.item_name,
@@ -987,6 +1078,29 @@ router.get('/available/:itemId', async (req, res) => {
         display: `${r.lot_no} | Wt: ${wt} kg | Stock: ${r.available_qty} | Rate: ₹${rateVal} | ${supplierName}`
       };
     }))
+=======
+        id,
+        item_id,
+        item_name,
+        lot_no,
+        remaining_quantity AS available_qty,
+        rate,
+        created_at
+      FROM stock_lots
+      WHERE item_id = ?
+      AND remaining_quantity > 0
+      ORDER BY id DESC
+    `, [itemId])
+
+    // Keep frontend contract lightweight
+    res.json(result.rows.map(r => ({
+      lot_no: r.lot_no,
+      available_qty: r.available_qty,
+      id: r.id,
+      rate: r.rate,
+      created_at: r.created_at
+    })))
+>>>>>>> origin/main
   } catch (error) {
     console.error('Error fetching available stock (by item_id):', error)
     res.status(500).json({ message: 'Error fetching available stock', error: error.message })
@@ -1003,6 +1117,7 @@ router.get('/available-item-name/:itemName', async (req, res) => {
     const result = await db.query(`
       SELECT 
         sl.id,
+<<<<<<< HEAD
         sl.item_id,
         sl.item_name,
         sl.lot_no,
@@ -1075,6 +1190,19 @@ router.get('/available-item-name/:itemName', async (req, res) => {
         display: `${r.lot_no} | Wt: ${wt} kg | Stock: ${r.remaining_quantity} | Rate: ₹${rateVal} | ${supplierName}`
       };
     }))
+=======
+        sl.item_name,
+        sl.lot_no,
+        sl.remaining_quantity,
+        sl.rate,
+        sl.created_at
+      FROM stock_lots sl
+      WHERE sl.item_name = ? AND sl.remaining_quantity > 0
+      ORDER BY sl.created_at ASC
+    `, [itemName])
+    
+    res.json(result.rows)
+>>>>>>> origin/main
   } catch (error) {
     console.error('Error fetching available stock:', error)
     res.status(500).json({ message: 'Error fetching available stock', error: error.message })
@@ -1176,6 +1304,7 @@ router.post('/', async (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `, [item_id, item_name, finalLotNo, reference_id, qty || 0, qty || 0, rate || 0])
 
+<<<<<<< HEAD
     try {
       const stockAlerts = require('./stockAlerts');
       if (stockAlerts && typeof stockAlerts.evaluateStockAlerts === 'function') {
@@ -1183,6 +1312,8 @@ router.post('/', async (req, res) => {
       }
     } catch (e) {}
 
+=======
+>>>>>>> origin/main
     res.status(201).json({ 
       message: 'Stock added successfully!', 
       id: result.lastID,
@@ -1250,6 +1381,7 @@ router.post('/deduct', async (req, res) => {
       remainingToDeduct -= deductFromThis
     }
 
+<<<<<<< HEAD
     try {
       const stockAlerts = require('./stockAlerts');
       if (stockAlerts && typeof stockAlerts.evaluateStockAlerts === 'function') {
@@ -1257,6 +1389,8 @@ router.post('/deduct', async (req, res) => {
       }
     } catch (e) {}
 
+=======
+>>>>>>> origin/main
     res.status(201).json({ 
       message: 'Stock deducted successfully (FIFO)!', 
       deductions
@@ -1305,6 +1439,7 @@ router.put('/deduct', async (req, res) => {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [item_name, lot_no, -(qty || 0), -(weight || 0), 0, -(amount || 0), date, type || 'Sale', reference_id])
 
+<<<<<<< HEAD
       try {
         const stockAlerts = require('./stockAlerts');
         if (stockAlerts && typeof stockAlerts.evaluateStockAlerts === 'function') {
@@ -1312,6 +1447,8 @@ router.put('/deduct', async (req, res) => {
         }
       } catch (e) {}
 
+=======
+>>>>>>> origin/main
       res.status(201).json({ 
         message: 'Stock deducted successfully!', 
       })
@@ -1328,12 +1465,15 @@ router.put('/deduct', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     await db.run('DELETE FROM stock WHERE id = ?', [req.params.id])
+<<<<<<< HEAD
     try {
       const stockAlerts = require('./stockAlerts');
       if (stockAlerts && typeof stockAlerts.evaluateStockAlerts === 'function') {
         stockAlerts.evaluateStockAlerts().catch(() => {});
       }
     } catch (e) {}
+=======
+>>>>>>> origin/main
     res.json({ message: 'Stock record deleted successfully' })
   } catch (error) {
     console.error('Error deleting stock:', error)

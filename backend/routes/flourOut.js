@@ -1,11 +1,15 @@
 const express = require('express')
 const router = express.Router()
 const db = require('../config/database')
+<<<<<<< HEAD
 const { deductFlourOutStock, revertFlourOutStock } = require('../utils/stockSync')
+=======
+>>>>>>> origin/main
 
 // GET all flour out records
 router.get('/', async (req, res) => {
   try {
+<<<<<<< HEAD
     // Dynamic sequence auto-repair if any s_no is null or empty
     try {
       const nullSnoCheck = await db.query('SELECT id FROM flour_out WHERE s_no IS NULL OR s_no = "" ORDER BY created_at ASC')
@@ -22,13 +26,19 @@ router.get('/', async (req, res) => {
       console.error('Error auto-repairing flour_out s_no:', migErr)
     }
 
+=======
+>>>>>>> origin/main
     // Get all flour_out records with their items joined
     const result = await db.query(`
       SELECT 
         fo.id,
         fo.s_no as sNo,
         fo.date,
+<<<<<<< HEAD
         COALESCE(pcm.name, fo.papad_company) as papadCompany,
+=======
+        fo.papad_company as papadCompany,
+>>>>>>> origin/main
         fo.remarks,
         fo.total_qty as totalQty,
         fo.total_weight as totalWeight,
@@ -45,7 +55,10 @@ router.get('/', async (req, res) => {
         foi.wages_bag as wagesBag,
         foi.wages
       FROM flour_out fo
+<<<<<<< HEAD
       LEFT JOIN papad_company_master pcm ON (pcm.id = CAST(fo.papad_company AS INTEGER) OR pcm.name = fo.papad_company)
+=======
+>>>>>>> origin/main
       LEFT JOIN flour_out_items foi ON fo.id = foi.flour_out_id
       ORDER BY fo.created_at DESC, foi.id ASC
     `)
@@ -133,6 +146,7 @@ router.get('/', async (req, res) => {
   }
 })
 
+<<<<<<< HEAD
 // GET next s_no for flour-out creation
 router.get('/next-sno', async (req, res) => {
   try {
@@ -145,6 +159,8 @@ router.get('/next-sno', async (req, res) => {
   }
 })
 
+=======
+>>>>>>> origin/main
 // GET flour out by ID
 router.get('/:id', async (req, res) => {
   try {
@@ -172,6 +188,7 @@ router.post('/', async (req, res) => {
   try {
     const { formData, items } = req.body
 
+<<<<<<< HEAD
     const activeItems = (items || []).filter(item => item.item_name || item.itemName);
 
     // Validation
@@ -180,10 +197,19 @@ router.post('/', async (req, res) => {
     }
 
     if (activeItems.some(item => !(item.item_name || item.itemName) || parseFloat(item.qty) <= 0)) {
+=======
+    // Validation
+    if (!formData.date || !formData.papad_company || !items || items.length === 0) {
+      return res.status(400).json({ message: 'Date, papad company, and at least one item are required' })
+    }
+
+    if (items.some(item => !item.item_name || item.qty <= 0)) {
+>>>>>>> origin/main
       return res.status(400).json({ message: 'All items must have a name and positive quantity' })
     }
 
     // Calculate totals
+<<<<<<< HEAD
     const totalQty = activeItems.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0)
     const totalWeight = activeItems.reduce((sum, item) => sum + (parseFloat(item.total_wt || item.totalWt) || 0), 0)
     const totalWages = activeItems.reduce((sum, item) => sum + (parseFloat(item.wages) || 0), 0)
@@ -214,11 +240,29 @@ router.post('/', async (req, res) => {
       INSERT INTO flour_out (s_no, date, papad_company, address, remarks, total_qty, total_weight, total_wages)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `, [sNoVal, formData.date, companyName, formData.address || '', formData.remarks, totalQty, totalWeight, totalWages])
+=======
+    const totalQty = items.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0)
+    const totalWeight = items.reduce((sum, item) => sum + (parseFloat(item.total_wt) || 0), 0)
+    const totalWages = items.reduce((sum, item) => sum + (parseFloat(item.wages) || 0), 0)
+
+    // Check if papad_company exists in papad_company_master, if not, create it
+    const existingCompany = await db.query('SELECT id FROM papad_company_master WHERE name = ?', [formData.papad_company])
+    if (existingCompany.rows.length === 0) {
+      await db.run('INSERT INTO papad_company_master (name, status) VALUES (?, ?)', [formData.papad_company, 'Active'])
+    }
+
+    // Insert flour out first
+    const flourOutResult = await db.run(`
+      INSERT INTO flour_out (s_no, date, papad_company, remarks, total_qty, total_weight, total_wages)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `, [formData.sNo, formData.date, formData.papad_company, formData.remarks, totalQty, totalWeight, totalWages])
+>>>>>>> origin/main
 
     const flourOutId = flourOutResult.lastID
 
     try {
       // Insert flour out items
+<<<<<<< HEAD
       for (const item of activeItems) {
         const item_name = item.item_name || item.itemName;
         const lot_no = item.lot_no || item.lotNo || '';
@@ -233,17 +277,31 @@ router.post('/', async (req, res) => {
         const existingItem = await db.query('SELECT id FROM item_master WHERE item_name = ?', [item_name])
         if (existingItem.rows.length === 0) {
           await db.run('INSERT INTO item_master (item_name, status) VALUES (?, ?)', [item_name, 'Active'])
+=======
+      for (const item of items) {
+        // Check if item exists in item_master, if not, create it
+        const existingItem = await db.query('SELECT id FROM item_master WHERE item_name = ?', [item.item_name])
+        if (existingItem.rows.length === 0) {
+          await db.run('INSERT INTO item_master (item_name, status) VALUES (?, ?)', [item.item_name, 'Active'])
+>>>>>>> origin/main
         }
 
         await db.run(`
           INSERT INTO flour_out_items (flour_out_id, item_name, lot_no, weight, qty, total_wt, papad_kg, wages_bag, wages)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+<<<<<<< HEAD
         `, [flourOutId, item_name, lot_no, weight, qty, total_wt, papad_kg, wages_bag, wages])
       }
 
       // Deduct stock / lots and create ledger tracking records
       await deductFlourOutStock(flourOutId, formData.date, activeItems);
 
+=======
+        `, [flourOutId, item.item_name, item.lot_no || '', item.weight || 0, item.qty, item.total_wt || 0,
+             item.papad_kg || 0, item.wages_bag || 0, item.wages || 0])
+      }
+
+>>>>>>> origin/main
       res.status(201).json({
         message: 'Flour out record saved successfully!',
         id: flourOutId
@@ -265,6 +323,7 @@ router.put('/:id', async (req, res) => {
     const { formData, items } = req.body
     const flourOutId = req.params.id
 
+<<<<<<< HEAD
     const activeItems = (items || []).filter(item => item.item_name || item.itemName);
 
     // Revert existing stock changes first
@@ -276,17 +335,28 @@ router.put('/:id', async (req, res) => {
     const totalWages = activeItems.reduce((sum, item) => sum + (parseFloat(item.wages) || 0), 0)
 
     const sNoVal = formData.sNo || formData.s_no || '';
+=======
+    // Calculate totals
+    const totalQty = items.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0)
+    const totalWeight = items.reduce((sum, item) => sum + (parseFloat(item.total_wt) || 0), 0)
+    const totalWages = items.reduce((sum, item) => sum + (parseFloat(item.wages) || 0), 0)
+>>>>>>> origin/main
 
     // Update flour out
     await db.run(`
       UPDATE flour_out SET s_no = ?, date = ?, papad_company = ?, remarks = ?, total_qty = ?, total_weight = ?, total_wages = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
+<<<<<<< HEAD
     `, [sNoVal, formData.date, formData.papad_company, formData.remarks, totalQty, totalWeight, totalWages, flourOutId])
+=======
+    `, [formData.sNo, formData.date, formData.papad_company, formData.remarks, totalQty, totalWeight, totalWages, flourOutId])
+>>>>>>> origin/main
 
     // Delete existing items
     await db.run('DELETE FROM flour_out_items WHERE flour_out_id = ?', [flourOutId])
 
     // Insert updated items
+<<<<<<< HEAD
     for (const item of activeItems) {
       const item_name = item.item_name || item.itemName;
       const lot_no = item.lot_no || item.lotNo || '';
@@ -306,6 +376,16 @@ router.put('/:id', async (req, res) => {
     // Deduct stock for the new/updated items
     await deductFlourOutStock(flourOutId, formData.date, activeItems);
 
+=======
+    for (const item of items) {
+      await db.run(`
+        INSERT INTO flour_out_items (flour_out_id, item_name, lot_no, weight, qty, total_wt, papad_kg, wages_bag, wages)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [flourOutId, item.item_name, item.lot_no || '', item.weight || 0, item.qty, item.total_wt || 0,
+           item.papad_kg || 0, item.wages_bag || 0, item.wages || 0])
+    }
+
+>>>>>>> origin/main
     res.json({ message: 'Flour out record updated successfully!' })
   } catch (error) {
     console.error('Error updating flour out:', error)
@@ -316,6 +396,7 @@ router.put('/:id', async (req, res) => {
 // DELETE flour out
 router.delete('/:id', async (req, res) => {
   try {
+<<<<<<< HEAD
     const flourOutId = req.params.id;
     
     // Revert existing stock changes first
@@ -327,6 +408,9 @@ router.delete('/:id', async (req, res) => {
     // Delete parent record
     await db.run('DELETE FROM flour_out WHERE id = ?', [flourOutId])
 
+=======
+    await db.run('DELETE FROM flour_out WHERE id = ?', [req.params.id])
+>>>>>>> origin/main
     res.json({ message: 'Flour out record deleted successfully' })
   } catch (error) {
     console.error('Error deleting flour out:', error)

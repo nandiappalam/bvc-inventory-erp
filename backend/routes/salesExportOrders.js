@@ -2,6 +2,7 @@ const express = require('express')
 const router = express.Router()
 const db = require('../config/database')
 
+<<<<<<< HEAD
 // Ensure is_order column exists in sales_export_orders
 async function ensureExportColumns() {
   try {
@@ -38,6 +39,17 @@ router.get('/', async (req, res) => {
     
     const result = await db.query(query, params)
     
+=======
+// GET all sales export orders
+router.get('/', async (req, res) => {
+  try {
+    // First get all sales export orders
+    const result = await db.query(`
+      SELECT * FROM sales_export_orders ORDER BY id DESC
+    `)
+    
+    // Then get items for each order
+>>>>>>> origin/main
     const exportOrders = []
     for (const order of result.rows) {
       const itemsResult = await db.query(
@@ -57,6 +69,7 @@ router.get('/', async (req, res) => {
   }
 })
 
+<<<<<<< HEAD
 // GET next sequential bill_no for sales export orders
 router.get('/next-sno', async (req, res) => {
   try {
@@ -76,6 +89,14 @@ router.get('/:id', async (req, res) => {
     const exportOrderResult = await db.query('SELECT * FROM sales_export_orders WHERE id = ?', [req.params.id])
     if (exportOrderResult.rows.length === 0) {
       return res.status(404).json({ message: 'Sales export record not found' })
+=======
+// GET sales export order by ID
+router.get('/:id', async (req, res) => {
+  try {
+    const exportOrderResult = await db.query('SELECT * FROM sales_export_orders WHERE id = ?', [req.params.id])
+    if (exportOrderResult.rows.length === 0) {
+      return res.status(404).json({ message: 'Sales export order not found' })
+>>>>>>> origin/main
     }
 
     const itemsResult = await db.query('SELECT * FROM sales_export_order_items WHERE sales_export_order_id = ?', [req.params.id])
@@ -87,6 +108,7 @@ router.get('/:id', async (req, res) => {
 
     res.json(exportOrder)
   } catch (error) {
+<<<<<<< HEAD
     console.error('Error fetching sales export record:', error)
     res.status(500).json({ message: 'Error fetching sales export record' })
   }
@@ -96,6 +118,16 @@ router.get('/:id', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     await ensureExportColumns();
+=======
+    console.error('Error fetching sales export order:', error)
+    res.status(500).json({ message: 'Error fetching sales export order record' })
+  }
+})
+
+// POST create new sales export order
+router.post('/', async (req, res) => {
+  try {
+>>>>>>> origin/main
     const { formData, items } = req.body
 
     // Validation
@@ -103,6 +135,7 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ message: 'Date, bill number, and at least one item are required' })
     }
 
+<<<<<<< HEAD
     // Filter out rows that don't have a valid description or item name
     const validItems = items.filter(item => {
       const name = item.description || item.itemName || item.item_name;
@@ -120,19 +153,37 @@ router.post('/', async (req, res) => {
     const isOrderValue = formData.is_order ? 1 : 0;
 
     // Insert sales export order/invoice
+=======
+    if (items.some(item => !item.container_no || item.qty <= 0)) {
+      return res.status(400).json({ message: 'All items must have container number and positive quantity' })
+    }
+
+    // Calculate totals
+    const totalQty = items.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0)
+    const totalUsdAmt = items.reduce((sum, item) => sum + (parseFloat(item.usd_amt) || 0), 0)
+    const totalInrAmt = items.reduce((sum, item) => sum + (parseFloat(item.inr_amt) || 0), 0)
+
+    // Insert sales export order
+>>>>>>> origin/main
     const exportOrderResult = await db.run(`
       INSERT INTO sales_export_orders (bill_no, date, order_no_dt, dis_port, dest_country, final_destin, sender,
                                       net_wt, advance, exporter, consignee, buyer_other, other_ref, pre_carriage,
                                       vessel_flt_no, consigned_to, gross_wt, sign, place_of_rcpt, loading_port,
                                       origin_country, delivery_terms, payment_terms, pur_transport, driver,
+<<<<<<< HEAD
                                       lorry_no, remarks, total_qty, total_usd_amt, total_inr_amt, is_order)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+=======
+                                      lorry_no, remarks, total_qty, total_usd_amt, total_inr_amt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+>>>>>>> origin/main
     `, [formData.billNo, formData.date, formData.orderNoDt, formData.disPort, formData.destCountry,
          formData.finalDestin, formData.sender, formData.netWt, formData.advance, formData.exporter,
          formData.consignee, formData.buyerOther, formData.otherRef, formData.preCarriage,
          formData.vesselFltNo, formData.consignedTo, formData.grossWt, formData.sign,
          formData.placeOfRcpt, formData.loadingPort, formData.originCountry, formData.deliveryTerms,
          formData.paymentTerms, formData.purTransport, formData.driver, formData.lorryNo,
+<<<<<<< HEAD
          formData.remarks, totalQty, totalUsdAmt, totalInrAmt, isOrderValue])
 
     const exportOrderId = exportOrderResult.lastID
@@ -151,10 +202,19 @@ router.post('/', async (req, res) => {
       const usdAmt = parseFloat(item.usdAmt || item.usd_amt) || (qty * usdRate);
       const inrAmt = parseFloat(item.inrAmt || item.inr_amt) || (usdAmt * convRate);
 
+=======
+         formData.remarks, totalQty, totalUsdAmt, totalInrAmt])
+
+    const exportOrderId = exportOrderResult.lastID
+
+    // Insert sales export order items
+    for (const item of items) {
+>>>>>>> origin/main
       await db.run(`
         INSERT INTO sales_export_order_items (sales_export_order_id, container_no, kind_of_package, description,
                                              qty_in_kg, mfd_exp_dt, lot_no, qty, usd_rate, conv_rate, usd_amt, inr_amt)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+<<<<<<< HEAD
       `, [exportOrderId, containerNo, kindOfPackage, description, qtyInKg,
            mfdExpDt, lotNo, qty, usdRate, convRate, usdAmt, inrAmt])
 
@@ -229,16 +289,42 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     await ensureExportColumns();
+=======
+      `, [exportOrderId, item.containerNo, item.kindOfPackage, item.description, item.qtyInKg,
+           item.mfdExpDt, item.lotNo, item.qty, item.usdRate, item.convRate, item.usdAmt, item.inrAmt])
+    }
+
+    res.status(201).json({
+      message: 'Sales export order saved successfully!',
+      id: exportOrderId
+    })
+  } catch (error) {
+    console.error('Error saving sales export order:', error)
+    res.status(500).json({ message: 'Error saving sales export order', error: error.message })
+  }
+})
+
+// PUT update sales export order
+router.put('/:id', async (req, res) => {
+  try {
+>>>>>>> origin/main
     const { formData, items } = req.body
     const exportOrderId = req.params.id
 
     // Calculate totals
     const totalQty = items.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0)
+<<<<<<< HEAD
     const totalUsdAmt = items.reduce((sum, item) => sum + (parseFloat(item.usd_amt || item.usdAmt) || 0), 0)
     const totalInrAmt = items.reduce((sum, item) => sum + (parseFloat(item.inr_amt || item.inrAmt) || 0), 0)
     const isOrderValue = formData.is_order ? 1 : 0;
 
     // Update sales export main
+=======
+    const totalUsdAmt = items.reduce((sum, item) => sum + (parseFloat(item.usd_amt) || 0), 0)
+    const totalInrAmt = items.reduce((sum, item) => sum + (parseFloat(item.inr_amt) || 0), 0)
+
+    // Update sales export order
+>>>>>>> origin/main
     await db.run(`
       UPDATE sales_export_orders SET bill_no = ?, date = ?, order_no_dt = ?, dis_port = ?, dest_country = ?,
                                      final_destin = ?, sender = ?, net_wt = ?, advance = ?, exporter = ?,
@@ -247,7 +333,11 @@ router.put('/:id', async (req, res) => {
                                      place_of_rcpt = ?, loading_port = ?, origin_country = ?,
                                      delivery_terms = ?, payment_terms = ?, pur_transport = ?, driver = ?,
                                      lorry_no = ?, remarks = ?, total_qty = ?, total_usd_amt = ?, total_inr_amt = ?,
+<<<<<<< HEAD
                                      is_order = ?, updated_at = CURRENT_TIMESTAMP
+=======
+                                     updated_at = CURRENT_TIMESTAMP
+>>>>>>> origin/main
       WHERE id = ?
     `, [formData.billNo, formData.date, formData.orderNoDt, formData.disPort, formData.destCountry,
          formData.finalDestin, formData.sender, formData.netWt, formData.advance, formData.exporter,
@@ -255,13 +345,18 @@ router.put('/:id', async (req, res) => {
          formData.vesselFltNo, formData.consignedTo, formData.grossWt, formData.sign,
          formData.placeOfRcpt, formData.loadingPort, formData.originCountry, formData.deliveryTerms,
          formData.paymentTerms, formData.purTransport, formData.driver, formData.lorryNo,
+<<<<<<< HEAD
          formData.remarks, totalQty, totalUsdAmt, totalInrAmt, isOrderValue, exportOrderId])
+=======
+         formData.remarks, totalQty, totalUsdAmt, totalInrAmt, exportOrderId])
+>>>>>>> origin/main
 
     // Delete existing items
     await db.run('DELETE FROM sales_export_order_items WHERE sales_export_order_id = ?', [exportOrderId])
 
     // Insert updated items
     for (const item of items) {
+<<<<<<< HEAD
       const containerNo = item.containerNo || item.container_no || '';
       const kindOfPackage = item.kindOfPackage || item.kind_of_package || '';
       const description = item.description || '';
@@ -274,10 +369,13 @@ router.put('/:id', async (req, res) => {
       const usdAmt = parseFloat(item.usdAmt || item.usd_amt) || (qty * usdRate);
       const inrAmt = parseFloat(item.inrAmt || item.inr_amt) || (usdAmt * convRate);
 
+=======
+>>>>>>> origin/main
       await db.run(`
         INSERT INTO sales_export_order_items (sales_export_order_id, container_no, kind_of_package, description,
                                              qty_in_kg, mfd_exp_dt, lot_no, qty, usd_rate, conv_rate, usd_amt, inr_amt)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+<<<<<<< HEAD
       `, [exportOrderId, containerNo, kindOfPackage, description, qtyInKg,
            mfdExpDt, lotNo, qty, usdRate, convRate, usdAmt, inrAmt])
     }
@@ -298,6 +396,27 @@ router.delete('/:id', async (req, res) => {
   } catch (error) {
     console.error('Error deleting record:', error)
     res.status(500).json({ success: false, message: 'Error deleting record' })
+=======
+      `, [exportOrderId, item.containerNo, item.kindOfPackage, item.description, item.qtyInKg,
+           item.mfdExpDt, item.lotNo, item.qty, item.usdRate, item.convRate, item.usdAmt, item.inrAmt])
+    }
+
+    res.json({ message: 'Sales export order updated successfully!' })
+  } catch (error) {
+    console.error('Error updating sales export order:', error)
+    res.status(500).json({ message: 'Error updating sales export order' })
+  }
+})
+
+// DELETE sales export order
+router.delete('/:id', async (req, res) => {
+  try {
+    await db.run('DELETE FROM sales_export_orders WHERE id = ?', [req.params.id])
+    res.json({ message: 'Sales export order deleted successfully' })
+  } catch (error) {
+    console.error('Error deleting sales export order:', error)
+    res.status(500).json({ message: 'Error deleting sales export order' })
+>>>>>>> origin/main
   }
 })
 

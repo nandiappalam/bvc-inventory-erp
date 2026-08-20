@@ -2,11 +2,18 @@ const sqlite3 = require('sqlite3').verbose()
 const path = require('path')
 
 const dbPath = path.join(__dirname, '../database/bvc.db')
+<<<<<<< HEAD
 let db
 
 async function initializeDatabase() {
   console.log('Initializing database schema...\n')
   db = new sqlite3.Database(dbPath)
+=======
+const db = new sqlite3.Database(dbPath)
+
+async function initializeDatabase() {
+  console.log('Initializing database schema...\n')
+>>>>>>> origin/main
 
   // Master tables with their schemas
   const masterTables = [
@@ -195,7 +202,10 @@ async function initializeDatabase() {
         name TEXT UNIQUE,
         print_name TEXT,
         contact_person TEXT,
+<<<<<<< HEAD
         address TEXT,
+=======
+>>>>>>> origin/main
         address1 TEXT,
         address2 TEXT,
         address3 TEXT,
@@ -279,6 +289,7 @@ async function initializeDatabase() {
         pay_type TEXT DEFAULT 'Credit',
         inv_date DATE,
         type TEXT DEFAULT 'Urad',
+<<<<<<< HEAD
         contact_person TEXT,
         address TEXT,
         area TEXT,
@@ -287,6 +298,10 @@ async function initializeDatabase() {
         email TEXT,
         tax_type TEXT DEFAULT 'Exclusive',
         tax_percent REAL DEFAULT 0,
+=======
+        address TEXT,
+        tax_type TEXT DEFAULT 'Exclusive',
+>>>>>>> origin/main
         godown TEXT,
         remarks TEXT,
         total_qty REAL DEFAULT 0,
@@ -296,7 +311,10 @@ async function initializeDatabase() {
         disc_amount REAL DEFAULT 0,
         tax_amount REAL DEFAULT 0,
         net_amount REAL DEFAULT 0,
+<<<<<<< HEAD
         deduction_amount REAL DEFAULT 0,
+=======
+>>>>>>> origin/main
         auto_wages REAL DEFAULT 0,
         vat_percent REAL DEFAULT 0,
         vat REAL DEFAULT 0,
@@ -312,6 +330,7 @@ async function initializeDatabase() {
       sql: `CREATE TABLE IF NOT EXISTS purchase_items (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         purchase_id INTEGER,
+<<<<<<< HEAD
         item_id INTEGER,
         item_name TEXT NOT NULL,
         lot_no TEXT,
@@ -325,12 +344,23 @@ async function initializeDatabase() {
         disc_amount REAL DEFAULT 0,
         tax_percent REAL DEFAULT 0,
         tax_amount REAL DEFAULT 0,
+=======
+        item_name TEXT NOT NULL,
+        lot_no TEXT,
+        weight REAL DEFAULT 0,
+        qty REAL DEFAULT 0,
+        total_wt REAL DEFAULT 0,
+        rate REAL DEFAULT 0,
+        disc_percent REAL DEFAULT 0,
+        tax_percent REAL DEFAULT 0,
+>>>>>>> origin/main
         amount REAL DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (purchase_id) REFERENCES purchases(id) ON DELETE CASCADE
       )`
     },
     {
+<<<<<<< HEAD
       name: 'purchase_deductions',
       sql: `CREATE TABLE IF NOT EXISTS purchase_deductions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -408,6 +438,8 @@ async function initializeDatabase() {
       )`
     },
     {
+=======
+>>>>>>> origin/main
       name: 'sales',
       sql: `CREATE TABLE IF NOT EXISTS sales (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -467,6 +499,7 @@ async function initializeDatabase() {
         quantity REAL DEFAULT 0,
         remaining_quantity REAL DEFAULT 0,
         rate REAL DEFAULT 0,
+<<<<<<< HEAD
         qc_status TEXT DEFAULT 'QC_PENDING',
         usable_for_production INTEGER DEFAULT 0,
         ledger_posted INTEGER DEFAULT 0,
@@ -476,6 +509,8 @@ async function initializeDatabase() {
         hold_reason TEXT,
         rejection_reason TEXT,
         unloading_status TEXT DEFAULT 'PENDING_DECISION',
+=======
+>>>>>>> origin/main
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )`
     },
@@ -527,6 +562,7 @@ async function initializeDatabase() {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         grain_id INTEGER,
         item_name TEXT NOT NULL,
+<<<<<<< HEAD
         lot_no TEXT,
         weight REAL DEFAULT 0,
         qty REAL DEFAULT 0,
@@ -542,6 +578,8 @@ async function initializeDatabase() {
         grain_id INTEGER,
         item_name TEXT NOT NULL,
         lot_no TEXT,
+=======
+>>>>>>> origin/main
         weight REAL DEFAULT 0,
         qty REAL DEFAULT 0,
         total_wt REAL DEFAULT 0,
@@ -613,6 +651,7 @@ async function initializeDatabase() {
       )`
     },
     {
+<<<<<<< HEAD
       name: 'purchase_orders',
       sql: `CREATE TABLE IF NOT EXISTS purchase_orders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -666,6 +705,8 @@ async function initializeDatabase() {
       )`
     },
     {
+=======
+>>>>>>> origin/main
       name: 'papad_in',
       sql: `CREATE TABLE IF NOT EXISTS papad_in (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -730,15 +771,23 @@ async function initializeDatabase() {
       )`
     },
     {
+<<<<<<< HEAD
       name: 'sales_return',
       sql: `CREATE TABLE IF NOT EXISTS sales_return (
+=======
+      name: 'sales_returns',
+      sql: `CREATE TABLE IF NOT EXISTS sales_returns (
+>>>>>>> origin/main
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         s_no INTEGER NOT NULL,
         date DATE NOT NULL,
         customer TEXT,
+<<<<<<< HEAD
         pay_type TEXT,
         tax_type TEXT,
         address TEXT,
+=======
+>>>>>>> origin/main
         remarks TEXT,
         total_qty REAL DEFAULT 0,
         total_wt REAL DEFAULT 0,
@@ -761,7 +810,11 @@ async function initializeDatabase() {
         tax_perc REAL DEFAULT 0,
         total_amt REAL DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+<<<<<<< HEAD
         FOREIGN KEY (sales_return_id) REFERENCES sales_return(id)
+=======
+        FOREIGN KEY (sales_return_id) REFERENCES sales_returns(id)
+>>>>>>> origin/main
       )`
     },
     {
@@ -775,6 +828,7 @@ async function initializeDatabase() {
         remarks TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )`
+<<<<<<< HEAD
     },
     {
       name: 'quotations',
@@ -1058,6 +1112,8 @@ async function initializeDatabase() {
         retry_count INTEGER DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )`
+=======
+>>>>>>> origin/main
     }
   ]
 
@@ -1183,6 +1239,7 @@ async function initializeDatabase() {
   })
 
   console.log('\n✓ Database initialization complete!')
+<<<<<<< HEAD
   if (require.main === module) {
     await new Promise((resolve) => {
       db.close((err) => {
@@ -1205,3 +1262,17 @@ if (require.main === module) {
 } else {
   module.exports = initializeDatabase;
 }
+=======
+}
+
+initializeDatabase()
+  .then(() => {
+    db.close()
+    process.exit(0)
+  })
+  .catch(err => {
+    console.error('Error:', err)
+    db.close()
+    process.exit(1)
+  })
+>>>>>>> origin/main

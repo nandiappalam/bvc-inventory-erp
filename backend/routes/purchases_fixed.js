@@ -7,7 +7,10 @@
 const express = require('express')
 const router = express.Router()
 const db = require('../config/database')
+<<<<<<< HEAD
 const recycleBinService = require('../services/RecycleBinService')
+=======
+>>>>>>> origin/main
 const { createPurchaseLedgerEntries, deleteLedgerEntries } = require('../utils/ledgerHelper')
 
 const normalizePurchaseItem = (item) => {
@@ -52,6 +55,7 @@ const ensurePurchaseDeductionsTable = async () => {
     console.error('Error ensuring purchase_deductions table:', err.message)
   }
 }
+<<<<<<< HEAD
 let purchaseDeductionsPromise = null;
 const ensurePurchaseDeductions = () => {
   if (!purchaseDeductionsPromise) {
@@ -69,6 +73,9 @@ router.use(async (req, res, next) => {
     next(err);
   }
 });
+=======
+ensurePurchaseDeductionsTable()
+>>>>>>> origin/main
 
 // GET all purchases
 router.get('/', async (req, res) => {
@@ -107,6 +114,7 @@ router.get('/purchase-list', async (req, res) => {
   try {
     const sql = `SELECT
       p.id,
+<<<<<<< HEAD
       p.s_no AS s_no,
       p.inv_no AS inv_no,
       p.inv_no AS invoice_no,
@@ -116,6 +124,16 @@ router.get('/purchase-list', async (req, res) => {
 
       s.print_name AS supplier_name,
       COALESCE(s.address1, p.address, '') AS address,
+=======
+      p.inv_no AS inv_no,
+      p.inv_no AS invoice_no,
+      p.date,
+      p.date AS invoice_date,
+
+      s.name AS supplier_name,
+      COALESCE(s.address1, p.address, '') AS address,
+      COALESCE(s.address1, p.address) AS supplier_address,
+>>>>>>> origin/main
 
       COALESCE(im.item_name, pi.item_name, '') AS item_name,
       pi.lot_no,
@@ -130,6 +148,7 @@ router.get('/purchase-list', async (req, res) => {
       pi.disc_amount AS discount_amount,
       pi.tax_percent,
       pi.tax_amount,
+<<<<<<< HEAD
       pi.tax_amount AS tax_amount,
       pi.amount,
 
@@ -141,10 +160,18 @@ router.get('/purchase-list', async (req, res) => {
       pi.amount AS net_amount,
       p.grand_total AS grand_total,
       qci.id AS qc_id
+=======
+      pi.amount,
+
+      COALESCE(p.deduction_amount, 0) AS deduction_amount,
+      COALESCE(p.deduction_amount, 0) AS total_deduction,
+      (COALESCE(pi.amount, 0) + COALESCE(p.deduction_amount, 0)) AS grand_total
+>>>>>>> origin/main
     FROM purchases p
     LEFT JOIN supplier_master s ON s.id = p.supplier
     LEFT JOIN purchase_items pi ON pi.purchase_id = p.id
     LEFT JOIN item_master im ON im.id = pi.item_id
+<<<<<<< HEAD
     LEFT JOIN (
       SELECT
         purchase_id,
@@ -155,6 +182,9 @@ router.get('/purchase-list', async (req, res) => {
     ) pad ON pad.purchase_id = p.id
     LEFT JOIN qc_inspections qci ON qci.purchase_id = p.id AND qci.rm_lot_no = pi.lot_no
     ORDER BY p.date DESC, p.id DESC`
+=======
+    ORDER BY p.id DESC`
+>>>>>>> origin/main
 
     const rows = await db.query(sql)
     res.json(rows.rows)
@@ -187,6 +217,7 @@ router.get('/:id', async (req, res) => {
       deductionsResult = []
     }
 
+<<<<<<< HEAD
     // Supplier / Godown display names
     // Schema columns in schema.sql:
     // - supplier_master: name
@@ -229,6 +260,16 @@ router.get('/:id', async (req, res) => {
 
 
 
+=======
+    const supplierName = purchaseData.supplier
+      ? (await db.query('SELECT name FROM supplier_master WHERE id = ?', [purchaseData.supplier])).rows[0]?.name
+      : purchaseData.supplier
+
+    const godownName = purchaseData.godown
+      ? (await db.query('SELECT name FROM godown_master WHERE id = ?', [purchaseData.godown])).rows[0]?.name
+      : purchaseData.godown
+
+>>>>>>> origin/main
     purchaseData.supplier_name = supplierName
     purchaseData.godown_name = godownName
 
@@ -324,7 +365,11 @@ router.post('/', async (req, res) => {
         ? Number(normalizedItem.tax_amount)
         : Number((((taxableAmount * taxPercent) / 100)).toFixed(2));
 
+<<<<<<< HEAD
       const amount = Number((baseAmount + taxAmount).toFixed(2));
+=======
+      const amount = Number((taxableAmount + taxAmount).toFixed(2));
+>>>>>>> origin/main
       const netAmount = amount;
 
       let lotNo = normalizedItem.lot_no
@@ -350,7 +395,11 @@ router.post('/', async (req, res) => {
         discountAmount,
         taxPercent,
         taxAmount,
+<<<<<<< HEAD
         amount
+=======
+        Number(taxableAmount.toFixed(2))
+>>>>>>> origin/main
       ])
 
       let itemId = normalizedItem.item_id
@@ -371,7 +420,11 @@ router.post('/', async (req, res) => {
       await db.run(`
         INSERT INTO stock (item_name, lot_no, qty, weight, rate, amount, date, type, reference_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, 'Purchase', ?)
+<<<<<<< HEAD
       `, [normalizedItem.item_name, lotNo, qty, totalWt, rate, amount, formData.date, purchaseId])
+=======
+      `, [normalizedItem.item_name, lotNo, qty, totalWt, rate, Number(taxableAmount.toFixed(2)), formData.date, purchaseId])
+>>>>>>> origin/main
     }
 
     for (const ded of deductions) {
@@ -401,14 +454,22 @@ router.post('/', async (req, res) => {
         baseAmount: parseFloat(totals.baseAmount) || 0,
         taxAmount: parseFloat(totals.taxAmount) || 0,
         discAmount: parseFloat(totals.discAmount) || 0,
+<<<<<<< HEAD
         netAmount: parseFloat(totals.grandTotal) || 0,
         deductions: deductions || []
+=======
+        netAmount: parseFloat(totals.grandTotal) || 0
+>>>>>>> origin/main
       })
     } catch (ledgerError) {
       console.error('Error creating ledger entries:', ledgerError)
     }
 
+<<<<<<< HEAD
     res.status(201).json({ success: true, message: 'Purchase saved successfully!', id: purchaseId })
+=======
+    res.status(201).json({ message: 'Purchase saved successfully!', id: purchaseId })
+>>>>>>> origin/main
   } catch (error) {
     console.error('Error saving purchase:', error)
     res.status(500).json({ message: 'Error saving purchase', error: error.message })
@@ -461,6 +522,7 @@ router.put('/:id', async (req, res) => {
       purchaseId
     ])
 
+<<<<<<< HEAD
     // Preserve existing stock lot statuses before deletion
     const existingLotsResult = await db.query(`
       SELECT lot_no, qc_status, unloading_status, godown_id, usable_for_production, approval_status, approval_date 
@@ -474,6 +536,8 @@ router.put('/:id', async (req, res) => {
       }
     }
 
+=======
+>>>>>>> origin/main
     await db.run('DELETE FROM stock_lots WHERE purchase_id = ?', [purchaseId])
     await db.run('DELETE FROM stock WHERE reference_id = ? AND type = ?', [purchaseId, 'Purchase'])
     await db.run('DELETE FROM purchase_items WHERE purchase_id = ?', [purchaseId])
@@ -497,7 +561,10 @@ router.put('/:id', async (req, res) => {
       const taxAmount = normalizedItem.tax_amount
         ? Number(normalizedItem.tax_amount)
         : Number((((taxableAmount * taxPercent) / 100)).toFixed(2))
+<<<<<<< HEAD
       const amount = Number((baseAmount + taxAmount).toFixed(2));
+=======
+>>>>>>> origin/main
 
 
       let lotNo = normalizedItem.lot_no
@@ -521,7 +588,11 @@ router.put('/:id', async (req, res) => {
         discountAmount,
         taxPercent,
         taxAmount,
+<<<<<<< HEAD
         amount
+=======
+        Number(taxableAmount.toFixed(2))
+>>>>>>> origin/main
       ])
 
       let itemId = normalizedItem.item_id
@@ -539,6 +610,7 @@ router.put('/:id', async (req, res) => {
         VALUES (?, ?, ?, ?, ?, ?, ?)
       `, [itemId, normalizedItem.item_name, lotNo, purchaseId, qty, qty, rate])
 
+<<<<<<< HEAD
       // Re-apply preserved status if this lot number already existed
       const key = lotNo.toUpperCase();
       if (preservedStatuses[key]) {
@@ -568,6 +640,12 @@ router.put('/:id', async (req, res) => {
         INSERT INTO stock (item_name, lot_no, qty, weight, rate, amount, date, type, reference_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, 'Purchase', ?)
       `, [normalizedItem.item_name, lotNo, qty, totalWt, rate, amount, formData.date, purchaseId])
+=======
+      await db.run(`
+        INSERT INTO stock (item_name, lot_no, qty, weight, rate, amount, date, type, reference_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'Purchase', ?)
+      `, [normalizedItem.item_name, lotNo, qty, totalWt, rate, Number(taxableAmount.toFixed(2)), formData.date, purchaseId])
+>>>>>>> origin/main
     }
 
     for (const ded of deductions) {
@@ -588,6 +666,7 @@ router.put('/:id', async (req, res) => {
       ])
     }
 
+<<<<<<< HEAD
     try {
       await deleteLedgerEntries(purchaseId, 'Purchase')
       await createPurchaseLedgerEntries({
@@ -606,6 +685,9 @@ router.put('/:id', async (req, res) => {
     }
 
     res.json({ success: true, message: 'Purchase updated successfully!' })
+=======
+    res.json({ message: 'Purchase updated successfully!' })
+>>>>>>> origin/main
   } catch (error) {
     console.error('Error updating purchase:', error)
     res.status(500).json({ message: 'Error updating purchase', error: error.message })
@@ -624,7 +706,10 @@ router.delete('/:id', async (req, res) => {
 
     if (lotCheck.rows.length > 0) {
       return res.status(400).json({
+<<<<<<< HEAD
         success: false,
+=======
+>>>>>>> origin/main
         message: 'Cannot delete purchase - stock from this lot has been used in sales or grinding. Please reverse those transactions first.'
       })
     }
@@ -639,11 +724,15 @@ router.delete('/:id', async (req, res) => {
 
     if (flourCheck.rows.length > 0) {
       return res.status(400).json({
+<<<<<<< HEAD
         success: false,
+=======
+>>>>>>> origin/main
         message: `Cannot delete purchase - lots have been used in Grind (Flour Out) records. Please delete Grind records first. Reference: ${flourCheck.rows[0]?.s_no || 'Multiple'}`
       })
     }
 
+<<<<<<< HEAD
     try {
       const pRes = await db.query('SELECT * FROM purchases WHERE id = ?', [purchaseId]);
       if (pRes.rows && pRes.rows.length > 0) {
@@ -676,6 +765,9 @@ router.delete('/:id', async (req, res) => {
 
     await db.run('DELETE FROM stock_lots WHERE purchase_id = ?', [purchaseId])
     await db.run("DELETE FROM stock WHERE reference_id = ? AND type = 'Purchase'", [purchaseId])
+=======
+    await db.run('DELETE FROM stock_lots WHERE purchase_id = ?', [purchaseId])
+>>>>>>> origin/main
 
     try {
       await deleteLedgerEntries(purchaseId)
@@ -687,10 +779,17 @@ router.delete('/:id', async (req, res) => {
     await db.run('DELETE FROM purchase_items WHERE purchase_id = ?', [purchaseId])
     await db.run('DELETE FROM purchases WHERE id = ?', [purchaseId])
 
+<<<<<<< HEAD
     res.json({ success: true, message: 'Purchase deleted successfully' })
   } catch (error) {
     console.error('Error deleting purchase:', error)
     res.status(500).json({ success: false, message: 'Error deleting purchase', error: error.message })
+=======
+    res.json({ message: 'Purchase deleted successfully' })
+  } catch (error) {
+    console.error('Error deleting purchase:', error)
+    res.status(500).json({ message: 'Error deleting purchase', error: error.message })
+>>>>>>> origin/main
   }
 })
 

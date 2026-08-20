@@ -7,8 +7,13 @@ const fs = require('fs')
 const db = require('./config/database')
 
 const app = express()
+<<<<<<< HEAD
 // AI Studio requires port 3000 strictly, but we allow configuration in dev
 const PORT = process.env.PORT || 3001
+=======
+// Render uses PORT env; default to 5000 to match Vite proxy
+const PORT = process.env.PORT || 10000
+>>>>>>> origin/main
 let actualPort = PORT
 
 // Process-level crash protection (prevents 502s from uncaught errors)
@@ -46,8 +51,12 @@ app.use(cors({
 // Explicitly handle OPTIONS preflight for all routes
 app.options('*', cors());
 
+<<<<<<< HEAD
 app.use(express.json({ limit: '50mb' }))
 app.use(express.urlencoded({ extended: true, limit: '50mb' }))
+=======
+app.use(express.json())
+>>>>>>> origin/main
 const frontendPath = path.join(__dirname, '../frontend/dist')
 
 // Serve static frontend files
@@ -77,6 +86,7 @@ app.use('/Entry', express.static(path.join(__dirname, '../Entry')))
 
 // Routes
 const purchasesRouter = require('./routes/purchases_fixed')
+<<<<<<< HEAD
 const purchaseSummaryRouter = require('./routes/purchaseSummary')
 const entriesRouter = require('./routes/entries')
 
@@ -88,6 +98,11 @@ app.use('/api/entries', entriesRouter)
 const purchaseReturnsRouter = require('./routes/purchaseReturns')
 
 
+=======
+
+
+const purchaseReturnsRouter = require('./routes/purchaseReturns')
+>>>>>>> origin/main
 const grainsRouter = require('./routes/grains')
 const flourOutRouter = require('./routes/flourOut')
 const flourOutReturnsRouter = require('./routes/flourOutReturns')
@@ -106,6 +121,7 @@ const authRouter = require('./routes/auth')
 const dbRouter = require('./routes/db')
 const vehicleMovementsRouter = require('./routes/vehicle-movements')
 const papadCompaniesRouter = require('./routes/papadCompanies')
+<<<<<<< HEAD
 const lotsRouter = require('./routes/lots')
 const dashboardRouter = require('./routes/dashboard')
 const workOrdersRouter = require('./routes/workOrders')
@@ -120,11 +136,18 @@ app.use('/api/lots', lotsRouter)
 app.use('/api/purchase-returns', purchaseReturnsRouter)
 app.use('/api/grains', grainsRouter)
 app.use('/api/grind', grainsRouter)
+=======
+
+app.use('/api/purchases', purchasesRouter)
+app.use('/api/purchase-returns', purchaseReturnsRouter)
+app.use('/api/grains', grainsRouter)
+>>>>>>> origin/main
 app.use('/api/flour-out', flourOutRouter)
 app.use('/api/flour-out-returns', flourOutReturnsRouter)
 // Alias for flour-out-return (without 's') - used by some frontend components
 app.use('/api/flour-out-return', flourOutReturnsRouter)
 app.use('/api/sales', salesRouter)
+<<<<<<< HEAD
 app.use('/api/sales-order', salesRouter)
 app.use('/api/sales-orders', salesRouter)
 app.use('/api/sales-display', salesRouter)
@@ -132,10 +155,15 @@ app.use('/api/sales-returns', salesReturnsRouter)
 app.use('/api/masters', mastersRouter)
 app.use('/api/taxes', require('./routes/taxMaster'))
 app.use('/api/tax-master', require('./routes/taxMaster'))
+=======
+app.use('/api/sales-returns', salesReturnsRouter)
+app.use('/api/masters', mastersRouter)
+>>>>>>> origin/main
 app.use('/api/advances', advancesRouter)
 // Alias for advance (without 's') - used by some frontend components
 app.use('/api/advance', advancesRouter)
 app.use('/api/papad-in', papadInRouter)
+<<<<<<< HEAD
 app.use('/api/papad-return', require('./routes/papadReturn'))
 app.use('/api/papad-returns', require('./routes/papadReturn'))
 app.use('/api/cheque-printing', require('./routes/chequePrinting'))
@@ -151,27 +179,42 @@ app.use('/api/packing', require('./routes/packing'))
 app.use('/api/sales-export-orders', salesExportOrdersRouter)
 app.use('/api/quotations', require('./routes/quotations'))
 app.use('/api', require('./routes/purchaseOrderRoutes'))
+=======
+app.use('/api/stock', stockRouter)
+app.use('/api/reports', reportsRouter)
+app.use('/api/weight-conversion', weightConversionRouter)
+app.use('/api/sales-export-orders', salesExportOrdersRouter)
+>>>>>>> origin/main
 app.use('/api/open', openRouter)
 
 // Accounts Reports API - Mounted under /api/accounts
 app.use('/api/accounts', reportsRouter)
 
+<<<<<<< HEAD
 // Companies, Auth and Features API
 app.use('/api/companies', companiesRouter)
 app.use('/api/auth', authRouter)
 app.use('/api/features', require('./routes/features'))
 app.use('/api/financial-years', require('./routes/financialYears'))
+=======
+// Companies and Auth API
+app.use('/api/companies', companiesRouter)
+app.use('/api/auth', authRouter)
+>>>>>>> origin/main
 
 // Database query API (for Tauri-style queries)
 app.use('/api/vouchers', require('./routes/vouchers'))
 app.use('/api/db', dbRouter)
 app.use('/api/vehicle-movements', vehicleMovementsRouter)
 app.use('/api/papad-companies', papadCompaniesRouter)
+<<<<<<< HEAD
 app.use('/api/recycle-bin', require('./routes/recycleBin'))
 app.use('/api/qc', require('./routes/qc'))
 app.use('/api/quality', require('./routes/qc'))
 app.use('/api/compliance', require('./routes/compliance'))
 app.use('/api/documents', require('./routes/compliance'))
+=======
+>>>>>>> origin/main
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -189,6 +232,7 @@ app.get('/api/health', (req, res) => {
   }
 })*/
 
+<<<<<<< HEAD
 // Ensure any unmatched /api route returns JSON 404 for all HTTP methods (placed before static files)
 app.all(['/api', '/api/*'], (req, res) => {
   res.status(404).json({ success: false, message: `API route not found: ${req.method} ${req.originalUrl}` });
@@ -201,6 +245,17 @@ app.get('*', (req, res) => {
   if (req.originalUrl.startsWith('/api')) {
     return res.status(404).json({ success: false, message: `API route not found: ${req.method} ${req.originalUrl}` });
   }
+=======
+app.use(express.static(frontendPath));
+
+// Serve React app for any unmatched routes
+app.get('*', (req, res) => {
+  // Ignore API routes
+  if (req.path.startsWith('/api')) {
+    return res.status(404).json({ message: 'API route not found' });
+  }
+
+>>>>>>> origin/main
   const indexPath = path.join(frontendPath, 'index.html');
 
   if (fs.existsSync(indexPath)) {
@@ -339,8 +394,12 @@ async function initializeMasterTables() {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT UNIQUE,
         printname TEXT,
+<<<<<<< HEAD
         weight REAL,
         status TEXT DEFAULT 'Active'
+=======
+        weight REAL
+>>>>>>> origin/main
       )`
     },
     {
@@ -349,8 +408,12 @@ async function initializeMasterTables() {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT UNIQUE,
         printname TEXT,
+<<<<<<< HEAD
         under TEXT,
         status TEXT DEFAULT 'Active'
+=======
+        under TEXT
+>>>>>>> origin/main
       )`
     },
     {
@@ -418,8 +481,11 @@ async function initializeMasterTables() {
         area TEXT,
         wages_kg REAL DEFAULT 0,
         opening_balance REAL DEFAULT 0,
+<<<<<<< HEAD
         opening_balance_type TEXT DEFAULT 'Cr',
         tin_no TEXT,
+=======
+>>>>>>> origin/main
         status TEXT DEFAULT 'Active'
       )`
     },
@@ -430,7 +496,10 @@ async function initializeMasterTables() {
         name TEXT UNIQUE,
         print_name TEXT,
         contact_person TEXT,
+<<<<<<< HEAD
         address TEXT,
+=======
+>>>>>>> origin/main
         address1 TEXT,
         address2 TEXT,
         address3 TEXT,
@@ -438,7 +507,10 @@ async function initializeMasterTables() {
         gst_no TEXT,
         phone_off TEXT,
         phone_res TEXT,
+<<<<<<< HEAD
         mobile TEXT,
+=======
+>>>>>>> origin/main
         mobile1 TEXT,
         mobile2 TEXT,
         area TEXT,
@@ -512,6 +584,7 @@ async function initializeMasterTables() {
         item_name TEXT,
         lot_no TEXT,
         qty REAL DEFAULT 0,
+<<<<<<< HEAD
         weight REAL DEFAULT 0,
         rate REAL DEFAULT 0,
         amount REAL DEFAULT 0,
@@ -519,6 +592,11 @@ async function initializeMasterTables() {
         reference_id INTEGER,
         status TEXT DEFAULT 'Active',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+=======
+        rate REAL DEFAULT 0,
+        type TEXT,
+        status TEXT DEFAULT 'Active'
+>>>>>>> origin/main
       )`
     },
     {
@@ -538,14 +616,22 @@ async function initializeMasterTables() {
       name: 'users',
       sql: `CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+<<<<<<< HEAD
         username TEXT NOT NULL,
+=======
+        username TEXT UNIQUE NOT NULL,
+>>>>>>> origin/main
         password_hash TEXT NOT NULL,
         role TEXT DEFAULT 'user',
         company_id INTEGER,
         status TEXT DEFAULT 'Active',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+<<<<<<< HEAD
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(username, company_id)
+=======
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+>>>>>>> origin/main
       )`
     },
     {
@@ -565,6 +651,7 @@ async function initializeMasterTables() {
         tare_weight REAL DEFAULT 0,
         net_weight REAL DEFAULT 0,
         status TEXT DEFAULT 'IN',
+<<<<<<< HEAD
         item_name TEXT,
         qty REAL DEFAULT 0,
         weight REAL DEFAULT 0,
@@ -655,6 +742,8 @@ async function initializeMasterTables() {
         sent_at DATETIME,
         failure_reason TEXT,
         retry_count INTEGER DEFAULT 0,
+=======
+>>>>>>> origin/main
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )`
     }
@@ -679,6 +768,7 @@ async function initializeMasterTables() {
   } catch (error) {
     console.log('Error verifying tables:', error.message)
   }
+<<<<<<< HEAD
 
   // Seed default ledgers on startup
   const defaultLedgers = [
@@ -716,10 +806,17 @@ async function initializeMasterTables() {
 
 // Start server after initialization
 const server = app.listen(PORT, '0.0.0.0', async () => {
+=======
+}
+
+// Start server after initialization
+app.listen(PORT, '0.0.0.0', async () => {
+>>>>>>> origin/main
   console.log(`HTTP Server is running on port ${PORT}`)
   console.log(`Health check: http://localhost:${PORT}/api/health`)
   console.log(`Network access: http://0.0.0.0:${PORT}/api/health`)
   
+<<<<<<< HEAD
   // Run full database initialization (including purchases, sales, etc.)
   try {
     const initDatabase = require('./init_db')
@@ -741,10 +838,13 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
     console.error('⚠️ Database initialization error on startup:', err.message)
   }
 
+=======
+>>>>>>> origin/main
   // Initialize master tables
   await initializeMasterTables()
 })
 
+<<<<<<< HEAD
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
     console.log(`Port ${PORT} is already in use by active server instance.`)
@@ -753,4 +853,6 @@ server.on('error', (err) => {
   }
 })
 
+=======
+>>>>>>> origin/main
 module.exports = app

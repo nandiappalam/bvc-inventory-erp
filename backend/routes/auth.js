@@ -16,6 +16,7 @@ const createAuthTables = async () => {
     console.log('Companies table ready')
     
     // Create users table
+<<<<<<< HEAD
     await db.run(`CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT, 
       username TEXT NOT NULL, 
@@ -57,10 +58,21 @@ const createAuthTables = async () => {
     console.log('Users table ready')
     
     // Create user_permissions table
+=======
+    await db.run(`CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, role TEXT DEFAULT 'user', company_id INTEGER, status TEXT DEFAULT 'Active', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)`)
+    console.log('Users table ready')
+    
+    // Create user_permissions table
+    await db.run(`DROP TABLE IF EXISTS user_permissions`)
+>>>>>>> origin/main
     await db.run(`CREATE TABLE IF NOT EXISTS user_permissions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, module_name TEXT NOT NULL, page_name TEXT NOT NULL, can_view INTEGER DEFAULT 0, can_create INTEGER DEFAULT 0, can_edit INTEGER DEFAULT 0, can_delete INTEGER DEFAULT 0, can_print INTEGER DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, UNIQUE(user_id, module_name, page_name))`)
     console.log('User_permissions table ready')
 
     // Create login_history table
+<<<<<<< HEAD
+=======
+    await db.run(`DROP TABLE IF EXISTS login_history`)
+>>>>>>> origin/main
     await db.run(`CREATE TABLE IF NOT EXISTS login_history (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, company_id INTEGER, login_time DATETIME DEFAULT CURRENT_TIMESTAMP, logout_time DATETIME, ip_address TEXT)`)
     console.log('Login_history table ready')
     
@@ -112,12 +124,20 @@ setTimeout(seedDefaultData, 2000)
 // GET login history
 router.get('/login-history/:userId', async (req, res) => {
   try {
+<<<<<<< HEAD
     await db.run(`CREATE TABLE IF NOT EXISTS login_history (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, company_id INTEGER, login_time DATETIME DEFAULT CURRENT_TIMESTAMP, logout_time DATETIME, ip_address TEXT)`)
     const result = await db.query(`SELECT lh.*, u.username FROM login_history lh LEFT JOIN users u ON lh.user_id = u.id WHERE lh.user_id = ? ORDER BY lh.login_time DESC LIMIT 50`, [req.params.userId])
     res.json(result.rows || [])
   } catch (error) {
     console.error('Error fetching login history:', error)
     res.json([])
+=======
+    const result = await db.query(`SELECT lh.*, u.username FROM login_history lh LEFT JOIN users u ON lh.user_id = u.id WHERE lh.user_id = ? ORDER BY lh.login_time DESC LIMIT 50`, [req.params.userId])
+    res.json(result.rows)
+  } catch (error) {
+    console.error('Error fetching login history:', error)
+    res.status(500).json({ message: 'Error fetching login history', error: error.message })
+>>>>>>> origin/main
   }
 })
 
@@ -135,11 +155,16 @@ router.get('/permissions/:userId', async (req, res) => {
 // POST login
 router.post('/login', async (req, res) => {
   try {
+<<<<<<< HEAD
     let { username, password, company_id } = req.body
+=======
+    const { username, password, company_id } = req.body
+>>>>>>> origin/main
     if (!username || !password) {
       return res.status(400).json({ message: 'Username and password are required' })
     }
 
+<<<<<<< HEAD
     const trimmedUsername = String(username).trim()
     const companyIdNum = company_id ? parseInt(company_id, 10) : null
     const bcrypt = require('bcryptjs')
@@ -212,12 +237,46 @@ router.post('/login', async (req, res) => {
 
     const activeCompanyId = companyIdNum || userCandidate.company_id || 1
     const companyResult = await db.query('SELECT * FROM companies WHERE id = ?', [activeCompanyId])
+=======
+    let userResult;
+    if (company_id) {
+      userResult = await db.query('SELECT rowid as id, username, password_hash, role, status, company_id FROM users WHERE username = ? AND company_id = ?', [username, company_id])
+    } else {
+      userResult = await db.query('SELECT rowid as id, username, password_hash, role, status, company_id FROM users WHERE username = ?', [username])
+    }
+
+    if (userResult.rows.length === 0) {
+      return res.status(401).json({ message: 'Invalid username or password' })
+    }
+
+    const user = userResult.rows[0]
+    console.log('Login user found:', user.username)
+
+    const bcrypt = require('bcryptjs')
+    let isValidPassword = false
+    if (user.password_hash && user.password_hash.startsWith('$2')) {
+      isValidPassword = await bcrypt.compare(password, user.password_hash)
+    } else {
+      isValidPassword = (password === user.password_hash)
+    }
+
+    if (!isValidPassword) {
+      return res.status(401).json({ message: 'Invalid username or password' })
+    }
+
+    if (user.status === 'Inactive') {
+      return res.status(401).json({ message: 'User account is inactive' })
+    }
+
+    const companyResult = await db.query('SELECT * FROM companies WHERE id = ?', [user.company_id])
+>>>>>>> origin/main
     const company = companyResult.rows[0]
 
     if (!company) {
       return res.status(401).json({ message: 'User company not found' })
     }
 
+<<<<<<< HEAD
     const permissionsResult = await db.query(
       `SELECT module_name, page_name, can_view, can_create, can_edit, can_delete, can_print FROM user_permissions WHERE user_id = ?`,
       [userCandidate.id]
@@ -241,6 +300,21 @@ router.post('/login', async (req, res) => {
       permissions: permissions,
       isAdmin: isAdmin,
       login_history_id: loginHistoryId
+=======
+    const permissionsResult = await db.query(`SELECT module_name, page_name, can_view, can_create, can_edit, can_delete, can_print FROM user_permissions WHERE user_id = ?`, [user.id])
+    const permissions = permissionsResult.rows
+    const isAdmin = user.role === 'admin' || user.role === 'Admin'
+
+    const loginResult = await db.run('INSERT INTO login_history (user_id, company_id, ip_address) VALUES (?, ?, ?)', [user.id, user.company_id, req.ip])
+
+    res.json({
+      message: 'Login successful',
+      user: { id: user.id, username: user.username, role: user.role, company_id: user.company_id, company_name: company.name },
+      company: company,
+      permissions: permissions,
+      isAdmin: isAdmin,
+      login_history_id: loginResult.lastInsertRowid
+>>>>>>> origin/main
     })
   } catch (error) {
     console.error('Login error:', error)
@@ -268,13 +342,19 @@ router.post('/users', async (req, res) => {
   console.log('Request body:', JSON.stringify(req.body))
   
   try {
+<<<<<<< HEAD
     let { username, password, role, status, company_id, permissions } = req.body
+=======
+    const { username, password, role, status, company_id, permissions } = req.body
+    console.log('Parsed fields:', { username, password, role, status, company_id })
+>>>>>>> origin/main
 
     if (!username || !password || !company_id) {
       console.log('Validation failed: missing required fields')
       return res.status(400).json({ message: 'Username, password and company are required' })
     }
 
+<<<<<<< HEAD
     username = String(username).trim()
     const companyIdNum = parseInt(company_id, 10)
 
@@ -287,6 +367,28 @@ router.post('/users', async (req, res) => {
 
     if (existingUser.rows.length > 0) {
       return res.status(400).json({ message: `Username "${username}" already exists for this company` })
+=======
+    // Check if users table exists
+    try {
+      const tableCheck = await db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+      console.log('Users table check:', tableCheck.rows)
+    } catch (e) {
+      console.log('Table check error:', e.message)
+    }
+
+    // Check for existing user - username has global UNIQUE constraint
+    console.log('Checking for existing user...')
+    const existingUser = await db.query('SELECT id, company_id FROM users WHERE username = ?', [username])
+    console.log('Existing user result:', existingUser.rows)
+
+    if (existingUser.rows.length > 0) {
+      // If user exists, check if it's for the same company
+      const existingForCompany = existingUser.rows.find(u => u.company_id === parseInt(company_id));
+      if (existingForCompany) {
+        return res.status(400).json({ message: 'Username already exists for this company' })
+      }
+      return res.status(400).json({ message: 'Username already exists in the system' })
+>>>>>>> origin/main
     }
 
     // Insert new user - hash the password
@@ -296,7 +398,11 @@ router.post('/users', async (req, res) => {
     
     const userResult = await db.run(
       'INSERT INTO users (username, password_hash, role, status, company_id) VALUES (?, ?, ?, ?, ?)',
+<<<<<<< HEAD
       [username, passwordHash, role || 'Staff', status || 'Active', companyIdNum]
+=======
+      [username, passwordHash, role || 'user', status || 'Active', company_id]
+>>>>>>> origin/main
     )
     console.log('User inserted, ID:', userResult.lastID)
     const userId = userResult.lastID
@@ -317,10 +423,22 @@ router.post('/users', async (req, res) => {
     console.log('User created successfully!')
     res.status(201).json({ message: 'User created successfully!', id: userId })
   } catch (error) {
+<<<<<<< HEAD
     console.error('=== ERROR creating user ===', error)
     if (error.code === 'SQLITE_CONSTRAINT' || error.message.includes('UNIQUE constraint failed')) {
       return res.status(400).json({ message: 'Username already exists for this company. Please choose a different username.' })
     }
+=======
+    console.error('=== ERROR creating user ===')
+    console.error('Error:', error)
+    console.error('Stack:', error.stack)
+    
+    // Handle UNIQUE constraint error specifically
+    if (error.code === 'SQLITE_CONSTRAINT' || error.message.includes('UNIQUE constraint failed')) {
+      return res.status(400).json({ message: 'Username already exists in the system. Please choose a different username.' })
+    }
+    
+>>>>>>> origin/main
     res.status(500).json({ message: 'Error creating user', error: error.message })
   }
 })
@@ -330,7 +448,11 @@ router.get('/users/:companyId', async (req, res) => {
   try {
     // Join with companies table to get company name
     const result = await db.query(`
+<<<<<<< HEAD
       SELECT u.id as id, u.username, u.role, u.status, u.created_at, u.company_id,
+=======
+      SELECT u.rowid as id, u.username, u.role, u.status, u.created_at, u.company_id,
+>>>>>>> origin/main
              c.name as company_name
       FROM users u
       LEFT JOIN companies c ON u.company_id = c.id
@@ -348,7 +470,11 @@ router.get('/users/:companyId', async (req, res) => {
 router.get('/users', async (req, res) => {
   try {
     const result = await db.query(`
+<<<<<<< HEAD
       SELECT u.id as id, u.username, u.role, u.status, u.created_at, u.company_id,
+=======
+      SELECT u.rowid as id, u.username, u.role, u.status, u.created_at, u.company_id,
+>>>>>>> origin/main
              c.name as company_name
       FROM users u
       LEFT JOIN companies c ON u.company_id = c.id
@@ -364,6 +490,7 @@ router.get('/users', async (req, res) => {
 // GET single user with permissions
 router.get('/users/:companyId/:userId', async (req, res) => {
   try {
+<<<<<<< HEAD
     let userResult = await db.query('SELECT id, username, role, status, company_id, created_at FROM users WHERE id = ? AND company_id = ?', [req.params.userId, req.params.companyId])
     if (userResult.rows.length === 0) {
       userResult = await db.query('SELECT id, username, role, status, company_id, created_at FROM users WHERE id = ?', [req.params.userId])
@@ -374,6 +501,14 @@ router.get('/users/:companyId/:userId', async (req, res) => {
     const user = userResult.rows[0]
     const permResult = await db.query(`SELECT module_name, page_name, can_view, can_create, can_edit, can_delete, can_print FROM user_permissions WHERE user_id = ?`, [user.id])
     res.json({ ...user, permissions: permResult.rows })
+=======
+    const userResult = await db.query('SELECT id, username, role, status, company_id, created_at FROM users WHERE id = ? AND company_id = ?', [req.params.userId, req.params.companyId])
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ message: 'User not found' })
+    }
+    const permResult = await db.query(`SELECT module_name, page_name, can_view, can_create, can_edit, can_delete, can_print FROM user_permissions WHERE user_id = ?`, [req.params.userId])
+    res.json({ ...userResult.rows[0], permissions: permResult.rows })
+>>>>>>> origin/main
   } catch (error) {
     console.error('Error fetching user:', error)
     res.status(500).json({ message: 'Error fetching user', error: error.message })
@@ -383,16 +518,23 @@ router.get('/users/:companyId/:userId', async (req, res) => {
 // PUT update user
 router.put('/users/:userId', async (req, res) => {
   try {
+<<<<<<< HEAD
     const { username, password, role, status, company_id, permissions } = req.body
     const { userId } = req.params
 
     const companyIdNum = company_id ? parseInt(company_id, 10) : null
 
+=======
+    const { username, password, role, status, permissions } = req.body
+    const { userId } = req.params
+
+>>>>>>> origin/main
     if (password) {
       // Hash the password before updating
       const bcrypt = require('bcryptjs')
       const saltRounds = 10
       const passwordHash = await bcrypt.hash(password, saltRounds)
+<<<<<<< HEAD
       if (companyIdNum) {
         await db.run('UPDATE users SET username = ?, password_hash = ?, role = ?, status = ?, company_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [username, passwordHash, role, status, companyIdNum, userId])
       } else {
@@ -407,6 +549,14 @@ router.put('/users/:userId', async (req, res) => {
     }
 
     if (permissions && Array.isArray(permissions)) {
+=======
+      await db.run('UPDATE users SET username = ?, password_hash = ?, role = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [username, passwordHash, role, status, userId])
+    } else {
+      await db.run('UPDATE users SET username = ?, role = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [username, role, status, userId])
+    }
+
+    if (permissions) {
+>>>>>>> origin/main
       await db.run('DELETE FROM user_permissions WHERE user_id = ?', [userId])
       for (const perm of permissions) {
         if (perm.can_view || perm.can_create || perm.can_edit || perm.can_delete || perm.can_print) {

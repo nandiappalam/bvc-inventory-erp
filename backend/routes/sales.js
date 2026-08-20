@@ -1,16 +1,21 @@
 const express = require('express')
 const router = express.Router()
 const db = require('../config/database')
+<<<<<<< HEAD
 const recycleBinService = require('../services/RecycleBinService')
 const { createSalesLedgerEntries, deleteLedgerEntries } = require('../utils/ledgerHelper')
 const { rebuildStockLedger } = require('../utils/stockRebuilder')
 
 // Ensure is_order column exists in sales table
 db.run("ALTER TABLE sales ADD COLUMN is_order INTEGER DEFAULT 0").catch(() => {});
+=======
+const { createSalesLedgerEntries, deleteLedgerEntries } = require('../utils/ledgerHelper')
+>>>>>>> origin/main
 
 // GET all sales
 router.get('/', async (req, res) => {
   try {
+<<<<<<< HEAD
     const isOrderQuery = req.query.is_order;
     let query = `
       SELECT s.id,
@@ -73,12 +78,28 @@ router.get('/', async (req, res) => {
     }
 
     res.json(salesList);
+=======
+    const result = await db.query(`
+      SELECT s.*,
+             json_group_array(
+               json_object('id', si.id, 'itemName', si.item_name, 'lotNo', si.lot_no,
+                          'weight', si.weight, 'qty', si.qty, 'totalWt', si.total_wt,
+                          'rate', si.rate, 'discPerc', si.disc_perc, 'taxPerc', si.tax_perc, 'totalAmt', si.total_amt)
+             ) as items
+      FROM sales s
+      LEFT JOIN sales_items si ON s.id = si.sales_id
+      GROUP BY s.id
+      ORDER BY s.created_at DESC
+    `)
+    res.json(result.rows)
+>>>>>>> origin/main
   } catch (error) {
     console.error('Error fetching sales:', error)
     res.status(500).json({ message: 'Error fetching sales', error: error.message })
   }
 })
 
+<<<<<<< HEAD
 // GET next sequential s_no (Bill No / Order No) for sales
 router.get('/next-sno', async (req, res) => {
   try {
@@ -98,6 +119,8 @@ router.get('/next-sno', async (req, res) => {
   }
 });
 
+=======
+>>>>>>> origin/main
 // GET sales by ID
 router.get('/:id', async (req, res) => {
   try {
@@ -108,6 +131,7 @@ router.get('/:id', async (req, res) => {
 
     const itemsResult = await db.query('SELECT * FROM sales_items WHERE sales_id = ?', [req.params.id])
 
+<<<<<<< HEAD
     const salesRow = salesResult.rows[0];
     let deductions = [];
     if (salesRow.deductions_json) {
@@ -121,6 +145,10 @@ router.get('/:id', async (req, res) => {
     const sales = {
       ...salesRow,
       deductions,
+=======
+    const sales = {
+      ...salesResult.rows[0],
+>>>>>>> origin/main
       items: itemsResult.rows
     }
 
@@ -137,6 +165,7 @@ router.post('/', async (req, res) => {
     const { formData, items, totals } = req.body
 
     // Validation
+<<<<<<< HEAD
     if (!formData.date || (!formData.customer && !formData.customer_id) || !items || items.length === 0) {
       return res.status(400).json({ message: 'Date, customer, and at least one item are required' })
     }
@@ -198,6 +227,26 @@ router.post('/', async (req, res) => {
       deductionsJson,
       formData.is_order ? 1 : 0
     ]);
+=======
+    if (!formData.date || !formData.customer || !items || items.length === 0) {
+      return res.status(400).json({ message: 'Date, customer, and at least one item are required' })
+    }
+
+    if (items.some(item => !item.itemName || item.qty <= 0 || item.rate <= 0)) {
+      return res.status(400).json({ message: 'All items must have a name, positive quantity, and positive rate' })
+    }
+
+    // Calculate totals
+    const totalQty = items.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0)
+    const totalWt = items.reduce((sum, item) => sum + (parseFloat(item.totalWt) || 0), 0)
+    const totalAmt = items.reduce((sum, item) => sum + (parseFloat(item.totalAmt) || 0), 0)
+
+    // Insert sales
+    const salesResult = await db.run(`
+      INSERT INTO sales (s_no, date, customer, remarks, total_qty, total_wt, total_amt)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `, [formData.sNo, formData.date, formData.customer, formData.remarks, totalQty, totalWt, totalAmt])
+>>>>>>> origin/main
 
     const salesId = salesResult.lastID
 
@@ -259,6 +308,7 @@ router.post('/', async (req, res) => {
     // Create sales ledger entries
     try {
       await createSalesLedgerEntries({
+<<<<<<< HEAD
         customer: formData.customer_id || formData.customer || '',
         date: formData.date || new Date().toISOString().split('T')[0],
         invNo: billNo,
@@ -287,6 +337,24 @@ router.post('/', async (req, res) => {
 
     res.status(201).json({
       message: 'Sales record saved successfully!',
+=======
+        customer: formData.customer,
+        date: formData.date,
+        invNo: formData.sNo,
+        salesId: salesId,
+        totalAmount: totalAmt,
+        taxAmount: 0,
+        discAmount: 0
+      })
+      console.log('Sales ledger entries created for sales ID:', salesId)
+    } catch (ledgerError) {
+      console.error('Error creating sales ledger entries:', ledgerError)
+      // Continue even if ledger entries fail - don't rollback the sales
+    }
+
+    res.status(201).json({
+      message: 'Sales record saved successfully! Stock deducted via FIFO.',
+>>>>>>> origin/main
       id: salesId
     })
   } catch (error) {
@@ -295,6 +363,7 @@ router.post('/', async (req, res) => {
   }
 })
 
+<<<<<<< HEAD
 // Helper to revert stock / lot deductions for a sale
 const revertSalesStock = async (salesId) => {
   try {
@@ -344,12 +413,15 @@ const revertSalesStock = async (salesId) => {
   }
 }
 
+=======
+>>>>>>> origin/main
 // PUT update sales
 router.put('/:id', async (req, res) => {
   try {
     const { formData, items, totals } = req.body
     const salesId = req.params.id
 
+<<<<<<< HEAD
     const activeItems = (items || []).filter(item => item.item_name || item.itemName)
 
     const isOrder = !!(formData.is_order || req.body.is_order || false)
@@ -426,10 +498,23 @@ router.put('/:id', async (req, res) => {
       isOrder ? 1 : 0,
       salesId
     ])
+=======
+    // Calculate totals
+    const totalQty = items.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0)
+    const totalWt = items.reduce((sum, item) => sum + (parseFloat(item.totalWt) || 0), 0)
+    const totalAmt = items.reduce((sum, item) => sum + (parseFloat(item.totalAmt) || 0), 0)
+
+    // Update sales
+    await db.run(`
+      UPDATE sales SET s_no = ?, date = ?, customer = ?, remarks = ?, total_qty = ?, total_wt = ?, total_amt = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `, [formData.sNo, formData.date, formData.customer, formData.remarks, totalQty, totalWt, totalAmt, salesId])
+>>>>>>> origin/main
 
     // Delete existing items
     await db.run('DELETE FROM sales_items WHERE sales_id = ?', [salesId])
 
+<<<<<<< HEAD
     // Insert updated items and deduct stock
     for (const item of activeItems) {
       const itemName = item.item_name || item.itemName
@@ -503,10 +588,35 @@ router.put('/:id', async (req, res) => {
         }] : []
       })
       console.log('✓ Sales ledger entries and voucher chain updated for sales ID:', salesId)
+=======
+    // Insert updated items
+    for (const item of items) {
+      await db.run(`
+        INSERT INTO sales_items (sales_id, item_name, lot_no, weight, qty, total_wt, rate, disc_perc, tax_perc, total_amt)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [salesId, item.itemName, item.lotNo || '', item.weight || 0, item.qty, item.totalWt || 0,
+           item.rate, item.discPerc || 0, item.taxPerc || 0, item.totalAmt || 0])
+    }
+
+    // Update sales ledger entries
+    try {
+      await deleteLedgerEntries(salesId)
+      await createSalesLedgerEntries({
+        customer: formData.customer,
+        date: formData.date,
+        invNo: formData.sNo,
+        salesId: salesId,
+        totalAmount: totalAmt,
+        taxAmount: 0,
+        discAmount: 0
+      })
+      console.log('Sales ledger entries updated for sales ID:', salesId)
+>>>>>>> origin/main
     } catch (ledgerError) {
       console.error('Error updating sales ledger entries:', ledgerError)
     }
 
+<<<<<<< HEAD
     try {
       await rebuildStockLedger();
     } catch (e) {
@@ -517,6 +627,12 @@ router.put('/:id', async (req, res) => {
   } catch (error) {
     console.error('Error updating sales:', error)
     res.status(500).json({ success: false, message: 'Error updating sales', error: error.message })
+=======
+    res.json({ message: 'Sales record updated successfully!' })
+  } catch (error) {
+    console.error('Error updating sales:', error)
+    res.status(500).json({ message: 'Error updating sales' })
+>>>>>>> origin/main
   }
 })
 
@@ -524,6 +640,7 @@ router.put('/:id', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const salesId = req.params.id
+<<<<<<< HEAD
 
     try {
       const sRes = await db.query('SELECT * FROM sales WHERE id = ?', [salesId]);
@@ -551,6 +668,9 @@ router.delete('/:id', async (req, res) => {
     // Revert existing stock changes first
     await revertSalesStock(salesId)
 
+=======
+    
+>>>>>>> origin/main
     // Delete sales ledger entries first
     try {
       await deleteLedgerEntries(salesId)
@@ -558,6 +678,7 @@ router.delete('/:id', async (req, res) => {
       console.error('Error deleting sales ledger entries:', ledgerError)
     }
     
+<<<<<<< HEAD
     // Delete sales items manually to be safe
     await db.run('DELETE FROM sales_items WHERE sales_id = ?', [salesId])
 
@@ -569,6 +690,9 @@ router.delete('/:id', async (req, res) => {
       console.error('Error rebuilding stock after deleting sale:', e);
     }
 
+=======
+    await db.run('DELETE FROM sales WHERE id = ?', [salesId])
+>>>>>>> origin/main
     res.json({ message: 'Sales record deleted successfully' })
   } catch (error) {
     console.error('Error deleting sales:', error)

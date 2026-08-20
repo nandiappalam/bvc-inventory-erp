@@ -1,0 +1,44 @@
+{
+  "header": {
+    "date": "2026-01-01",
+    "supplier": "SUPPLIER_A",
+    "godown": "GODOWN_A",
+    "pay_type": "Credit",
+    "tax_method": "Exclusive",
+    "tax_rate": 5,
+    "inv_no": "INV-001",
+    "inv_date": "2026-01-01",
+    "remarks": "Test"
+  },
+  "items": [
+    {
+      "itemName": "ITEM_A",
+      "lotNo": "",
+      "qty": 50,
+      "per_unit_weight": 50,
+      "rate": 2000,
+      "disc_percent": 2,
+      "tax_percent": 5
+    }
+  ],
+  "deductions": [
+    { "name": "Freight", "type": "Add", "calc_type": "Amount", "value": 1000, "remarks": "Add" },
+    { "name": "Packing", "type": "Add", "calc_type": "Amount", "value": 500, "remarks": "Add" },
+    { "name": "Cash Discount", "type": "Less", "calc_type": "Percentage", "value": 2, "remarks": "Less" }
+  ],
+  "expected": {
+    "totalWeight": 2500,
+    "gross": 100000,
+    "discount": 2000,
+    "taxable": 98000,
+    "gst": 4900,
+    "sgst": 2450,
+    "cgst": 2450,
+    "igst": 0,
+    "net": 102900,
+    "additions": 1500,
+    "deductions": 2058,
+    "final_amount": 102342
+  }
+}
+

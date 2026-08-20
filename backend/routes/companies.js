@@ -78,6 +78,7 @@ router.post('/', async (req, res) => {
 
     console.log('Insert result:', result);
 
+<<<<<<< HEAD
     // Seed default ledgers when a company is created
     const defaultLedgers = [
       { name: 'Cash', under: 'Cash', type: 'Cash' },
@@ -111,6 +112,8 @@ router.post('/', async (req, res) => {
       }
     }
 
+=======
+>>>>>>> origin/main
     res.status(201).json({
       message: 'Company created successfully!',
       id: result.lastInsertRowid
