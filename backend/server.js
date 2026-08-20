@@ -8,7 +8,7 @@ const db = require('./config/database')
 
 const app = express()
 // AI Studio requires port 3000 strictly, but we allow configuration in dev
-const PORT = process.env.PORT || 3001
+
 
 // Render uses PORT env; default to 5000 to match Vite proxy
 const PORT = process.env.PORT || 10000
