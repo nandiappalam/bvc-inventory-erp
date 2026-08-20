@@ -225,6 +225,97 @@ module.exports = async function autoMigrate() {
     console.log('✗ Error ensuring user_permissions:', err.message);
   }
 
+  // Stock Alert Tables
+  try {
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS stock_alert_config (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_id INTEGER,
+        item_name TEXT NOT NULL,
+        godown_id INTEGER,
+        godown_name TEXT NOT NULL DEFAULT 'All Godowns',
+        minimum_qty REAL DEFAULT 0,
+        reorder_level REAL DEFAULT 0,
+        critical_level REAL DEFAULT 0,
+        alert_enabled INTEGER DEFAULT 1,
+        in_app_enabled INTEGER DEFAULT 1,
+        email_enabled INTEGER DEFAULT 1,
+        sms_enabled INTEGER DEFAULT 0,
+        whatsapp_enabled INTEGER DEFAULT 0,
+        offline_enabled INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS stock_alert_contacts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        contact_name TEXT NOT NULL,
+        department TEXT DEFAULT 'Purchase',
+        phone TEXT,
+        email TEXT,
+        active INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS stock_alert_config_contacts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        config_id INTEGER NOT NULL,
+        contact_id INTEGER NOT NULL,
+        is_primary INTEGER DEFAULT 0,
+        is_cc INTEGER DEFAULT 1,
+        FOREIGN KEY (config_id) REFERENCES stock_alert_config(id) ON DELETE CASCADE,
+        FOREIGN KEY (contact_id) REFERENCES stock_alert_contacts(id) ON DELETE CASCADE
+      )
+    `);
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS stock_alerts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        config_id INTEGER,
+        item_id INTEGER,
+        item_name TEXT NOT NULL,
+        godown_id INTEGER,
+        godown_name TEXT NOT NULL DEFAULT 'Main Godown',
+        alert_type TEXT NOT NULL,
+        current_qty REAL DEFAULT 0,
+        minimum_qty REAL DEFAULT 0,
+        reorder_level REAL DEFAULT 0,
+        critical_level REAL DEFAULT 0,
+        status TEXT DEFAULT 'OPEN',
+        triggered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        resolved_at DATETIME,
+        resolved_reason TEXT
+      )
+    `);
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS stock_alert_notifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        alert_id INTEGER,
+        contact_id INTEGER,
+        contact_name TEXT,
+        contact_email TEXT,
+        contact_phone TEXT,
+        channel TEXT NOT NULL,
+        message TEXT,
+        status TEXT DEFAULT 'PENDING',
+        sent_at DATETIME,
+        failure_reason TEXT,
+        retry_count INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await db.run(`CREATE INDEX IF NOT EXISTS idx_stock_alert_cfg ON stock_alert_config(item_name, godown_name)`);
+    await db.run(`CREATE INDEX IF NOT EXISTS idx_stock_alerts_status ON stock_alerts(status, alert_type)`);
+    console.log('✓ Stock alert engine tables are ready');
+  } catch (err) {
+    console.log('✗ Error ensuring stock alert tables:', err.message);
+  }
+
+  await safeAddColumn('item_master', 'minimum_qty', 'REAL DEFAULT 0');
+  await safeAddColumn('item_master', 'reorder_level', 'REAL DEFAULT 0');
+  await safeAddColumn('item_master', 'critical_level', 'REAL DEFAULT 0');
+  await safeAddColumn('item_master', 'alert_enabled', 'INTEGER DEFAULT 1');
   await safeAddColumn('stock', 'status', "TEXT DEFAULT 'Active'");
   await safeAddColumn('stock', 'godown', "TEXT DEFAULT 'Main Godown'");
   await safeAddColumn('stock', 'godown_id', 'INTEGER DEFAULT 1');
@@ -238,176 +329,6 @@ module.exports = async function autoMigrate() {
   await safeAddColumn('stock', 'reference_id', 'INTEGER');
   await safeAddColumn('item_master', 'type', "TEXT DEFAULT 'Urad'");
   await safeAddColumn('item_master', 'lab_parameters', 'TEXT');
-  await safeAddColumn('item_master', 'unit', "TEXT DEFAULT 'kg'");
-  await safeAddColumn('item_master', 'minimum_qty', 'REAL DEFAULT 0');
-  await safeAddColumn('item_master', 'reorder_level', 'REAL DEFAULT 0');
-  await safeAddColumn('item_master', 'critical_level', 'REAL DEFAULT 0');
-  await safeAddColumn('item_master', 'alert_enabled', 'INTEGER DEFAULT 1');
-
-  // Keep work-order and stock-alert schema upgrades after base tables exist.
-  await db.run(`
-    CREATE TABLE IF NOT EXISTS work_orders (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      work_order_no TEXT UNIQUE,
-      work_unit TEXT NOT NULL,
-      flour_mill_id INTEGER,
-      product TEXT NOT NULL,
-      product_id INTEGER,
-      date DATE NOT NULL,
-      status TEXT DEFAULT 'ISSUED',
-      expected_output_qty REAL DEFAULT 0,
-      expected_output_wt REAL DEFAULT 0,
-      actual_output_qty REAL DEFAULT 0,
-      actual_output_wt REAL DEFAULT 0,
-      rejection_wt REAL DEFAULT 0,
-      elevator_wt REAL DEFAULT 0,
-      waste_flour_wt REAL DEFAULT 0,
-      sieve_flour_wt REAL DEFAULT 0,
-      other_wastage_wt REAL DEFAULT 0,
-      grind_id INTEGER,
-      remarks TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-  await db.run(`
-    CREATE TABLE IF NOT EXISTS work_order_items (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      work_order_id INTEGER NOT NULL,
-      lot_no TEXT,
-      supplier TEXT,
-      item_name TEXT NOT NULL,
-      item_id INTEGER,
-      weight REAL DEFAULT 0,
-      input_qty REAL DEFAULT 0,
-      kgs REAL DEFAULT 0,
-      rate REAL DEFAULT 0,
-      output_item TEXT,
-      output_qty REAL DEFAULT 0,
-      output_weight REAL DEFAULT 0,
-      output_kgs REAL DEFAULT 0,
-      fg_lot_no TEXT,
-      rejection_wt REAL DEFAULT 0,
-      elevator_wt REAL DEFAULT 0,
-      waste_flour_wt REAL DEFAULT 0,
-      sieve_flour_wt REAL DEFAULT 0,
-      wastage_category TEXT,
-      wastage_qty REAL DEFAULT 0,
-      wastage_wt REAL DEFAULT 0,
-      wastage_lot_no TEXT,
-      FOREIGN KEY (work_order_id) REFERENCES work_orders(id) ON DELETE CASCADE
-    )
-  `);
-  await db.run(`
-    CREATE TABLE IF NOT EXISTS work_order_outputs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      work_order_id INTEGER NOT NULL,
-      output_item TEXT NOT NULL,
-      item_id INTEGER,
-      fg_lot_no TEXT,
-      weight REAL DEFAULT 0,
-      expected_qty REAL DEFAULT 0,
-      output_kgs REAL DEFAULT 0,
-      rate REAL DEFAULT 0,
-      remarks TEXT,
-      FOREIGN KEY (work_order_id) REFERENCES work_orders(id) ON DELETE CASCADE
-    )
-  `);
-  await db.run(`
-    CREATE TABLE IF NOT EXISTS work_order_wastages (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      work_order_id INTEGER NOT NULL,
-      category TEXT NOT NULL,
-      item_name TEXT,
-      lot_no TEXT,
-      weight REAL DEFAULT 1,
-      qty REAL DEFAULT 0,
-      total_wt REAL DEFAULT 0,
-      remarks TEXT,
-      FOREIGN KEY (work_order_id) REFERENCES work_orders(id) ON DELETE CASCADE
-    )
-  `);
-  await safeAddColumn('grains', 'work_order_id', 'INTEGER');
-  await safeAddColumn('grains', 'work_order_no', 'TEXT');
-
-  await db.run(`
-    CREATE TABLE IF NOT EXISTS stock_alert_config (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      item_id INTEGER,
-      item_name TEXT NOT NULL,
-      godown_id INTEGER,
-      godown_name TEXT NOT NULL DEFAULT 'All Godowns',
-      minimum_qty REAL DEFAULT 0,
-      reorder_level REAL DEFAULT 0,
-      critical_level REAL DEFAULT 0,
-      alert_enabled INTEGER DEFAULT 1,
-      in_app_enabled INTEGER DEFAULT 1,
-      email_enabled INTEGER DEFAULT 1,
-      sms_enabled INTEGER DEFAULT 0,
-      whatsapp_enabled INTEGER DEFAULT 0,
-      offline_enabled INTEGER DEFAULT 1,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-  await db.run(`
-    CREATE TABLE IF NOT EXISTS stock_alert_contacts (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      contact_name TEXT NOT NULL,
-      department TEXT DEFAULT 'Purchase',
-      phone TEXT,
-      email TEXT,
-      active INTEGER DEFAULT 1,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-  await db.run(`
-    CREATE TABLE IF NOT EXISTS stock_alert_config_contacts (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      config_id INTEGER NOT NULL,
-      contact_id INTEGER NOT NULL,
-      is_primary INTEGER DEFAULT 0,
-      is_cc INTEGER DEFAULT 1,
-      FOREIGN KEY (config_id) REFERENCES stock_alert_config(id) ON DELETE CASCADE,
-      FOREIGN KEY (contact_id) REFERENCES stock_alert_contacts(id) ON DELETE CASCADE
-    )
-  `);
-  await db.run(`
-    CREATE TABLE IF NOT EXISTS stock_alerts (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      config_id INTEGER,
-      item_id INTEGER,
-      item_name TEXT NOT NULL,
-      godown_id INTEGER,
-      godown_name TEXT NOT NULL DEFAULT 'Main Godown',
-      alert_type TEXT NOT NULL,
-      current_qty REAL DEFAULT 0,
-      minimum_qty REAL DEFAULT 0,
-      reorder_level REAL DEFAULT 0,
-      critical_level REAL DEFAULT 0,
-      status TEXT DEFAULT 'OPEN',
-      triggered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      resolved_at DATETIME,
-      resolved_reason TEXT
-    )
-  `);
-  await db.run(`
-    CREATE TABLE IF NOT EXISTS stock_alert_notifications (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      alert_id INTEGER,
-      contact_id INTEGER,
-      contact_name TEXT,
-      contact_email TEXT,
-      contact_phone TEXT,
-      channel TEXT NOT NULL,
-      message TEXT,
-      status TEXT DEFAULT 'PENDING',
-      sent_at DATETIME,
-      failure_reason TEXT,
-      retry_count INTEGER DEFAULT 0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
 
   // Ensure Masala item group and items exist
   try {

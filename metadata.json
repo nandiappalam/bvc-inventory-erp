@@ -1,0 +1,6 @@
+{
+  "name": "BVC Exports ERP - Cleaning & Compliance Records",
+  "description": "Production & Quality Assurance cleaning checklists, sanitation audits, hygiene logs, and printable compliance records.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

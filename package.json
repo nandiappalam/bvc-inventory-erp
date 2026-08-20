@@ -7,23 +7,23 @@
     "backend"
   ],
   "scripts": {
-    "tauri": "tauri",
-    "frontend": "npm --workspace frontend run dev -- --host 0.0.0.0 --port 5173",
-    "backend": "set PORT=3001&& node backend/server.js",
-    "desktop:dev": "concurrently --kill-others-on-fail --names API,UI \"npm run backend\" \"npm run frontend\"",
     "build:frontend": "cd frontend && npm run build",
     "build": "npm run build:frontend",
-    "dev": "npm run desktop:dev",
+    "frontend": "cd frontend && npm run dev",
+    "backend": "node backend/server.js",
+    "dev": "concurrently \"npm run backend\" \"cd frontend && npm run dev -- --host 0.0.0.0 --port 3000\"",
     "start": "node backend/server.js",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
     "lint": "cd frontend && npm run lint"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.10.1"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^1.6.3",
-    "@types/node": "^25.9.2",
-    "concurrently": "^9.2.4"
+    "@tauri-apps/cli": "^1.5.0",
+    "@types/node": "^25.9.2"
   },
   "author": "",
   "license": "MIT"

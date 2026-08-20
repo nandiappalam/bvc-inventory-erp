@@ -3,168 +3,193 @@ const router = express.Router();
 const db = require('../config/database');
 
 // ============================================================================
-// DATABASE SCHEMA INITIALIZATION
+// DATABASE SCHEMA INITIALIZATION (IDEMPOTENT & THREAD-SAFE)
 // ============================================================================
-const initStockAlertTables = async () => {
-  try {
-    // 1. Stock Alert Configurations Table (Item + Godown thresholds)
-    await db.run(`
-      CREATE TABLE IF NOT EXISTS stock_alert_config (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        item_id INTEGER,
-        item_name TEXT NOT NULL,
-        godown_id INTEGER,
-        godown_name TEXT NOT NULL DEFAULT 'All Godowns',
-        minimum_qty REAL DEFAULT 0,
-        reorder_level REAL DEFAULT 0,
-        critical_level REAL DEFAULT 0,
-        alert_enabled INTEGER DEFAULT 1,
-        in_app_enabled INTEGER DEFAULT 1,
-        email_enabled INTEGER DEFAULT 1,
-        sms_enabled INTEGER DEFAULT 0,
-        whatsapp_enabled INTEGER DEFAULT 0,
-        offline_enabled INTEGER DEFAULT 1,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
+let initPromise = null;
 
-    // Ensure item_master has the alert threshold columns
+const ensureStockAlertTables = async () => {
+  if (initPromise) return initPromise;
+
+  initPromise = (async () => {
     try {
-      const imColsRes = await db.query(`PRAGMA table_info(item_master)`);
-      const imCols = new Set((imColsRes.rows || []).map(c => c.name));
-      if (!imCols.has('minimum_qty')) await db.run(`ALTER TABLE item_master ADD COLUMN minimum_qty REAL DEFAULT 0`);
-      if (!imCols.has('reorder_level')) await db.run(`ALTER TABLE item_master ADD COLUMN reorder_level REAL DEFAULT 0`);
-      if (!imCols.has('critical_level')) await db.run(`ALTER TABLE item_master ADD COLUMN critical_level REAL DEFAULT 0`);
-      if (!imCols.has('alert_enabled')) await db.run(`ALTER TABLE item_master ADD COLUMN alert_enabled INTEGER DEFAULT 1`);
-    } catch (e) {
-      console.log('Notice checking item_master columns:', e.message);
-    }
-
-    // 2. Alert Contacts Master Table
-    await db.run(`
-      CREATE TABLE IF NOT EXISTS stock_alert_contacts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        contact_name TEXT NOT NULL,
-        department TEXT DEFAULT 'Purchase',
-        phone TEXT,
-        email TEXT,
-        active INTEGER DEFAULT 1,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-
-    // 3. Mapping: Alert Config <-> Contacts (Multi-contact mapping)
-    await db.run(`
-      CREATE TABLE IF NOT EXISTS stock_alert_config_contacts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        config_id INTEGER NOT NULL,
-        contact_id INTEGER NOT NULL,
-        is_primary INTEGER DEFAULT 0,
-        is_cc INTEGER DEFAULT 1,
-        FOREIGN KEY (config_id) REFERENCES stock_alert_config(id) ON DELETE CASCADE,
-        FOREIGN KEY (contact_id) REFERENCES stock_alert_contacts(id) ON DELETE CASCADE
-      )
-    `);
-
-    // 4. Stock Alerts (Active & Historical alert records)
-    await db.run(`
-      CREATE TABLE IF NOT EXISTS stock_alerts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        config_id INTEGER,
-        item_id INTEGER,
-        item_name TEXT NOT NULL,
-        godown_id INTEGER,
-        godown_name TEXT NOT NULL DEFAULT 'Main Godown',
-        alert_type TEXT NOT NULL, -- 'CRITICAL', 'LOW', 'REORDER'
-        current_qty REAL DEFAULT 0,
-        minimum_qty REAL DEFAULT 0,
-        reorder_level REAL DEFAULT 0,
-        critical_level REAL DEFAULT 0,
-        status TEXT DEFAULT 'OPEN', -- 'OPEN', 'RESOLVED', 'ACKNOWLEDGED'
-        triggered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        resolved_at DATETIME,
-        resolved_reason TEXT
-      )
-    `);
-
-    // 5. Stock Alert Notification Queue (In-App, Email, SMS, WhatsApp, Offline)
-    await db.run(`
-      CREATE TABLE IF NOT EXISTS stock_alert_notifications (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        alert_id INTEGER,
-        contact_id INTEGER,
-        contact_name TEXT,
-        contact_email TEXT,
-        contact_phone TEXT,
-        channel TEXT NOT NULL, -- 'IN_APP', 'EMAIL', 'SMS', 'WHATSAPP', 'OFFLINE'
-        message TEXT,
-        status TEXT DEFAULT 'PENDING', -- 'PENDING', 'SENT', 'FAILED', 'RESOLVED'
-        sent_at DATETIME,
-        failure_reason TEXT,
-        retry_count INTEGER DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-
-    // Create helpful indexes
-    await db.run(`CREATE INDEX IF NOT EXISTS idx_stock_alert_cfg ON stock_alert_config(item_name, godown_name)`);
-    await db.run(`CREATE INDEX IF NOT EXISTS idx_stock_alerts_status ON stock_alerts(status, alert_type)`);
-
-    // Seed default contacts if empty
-    const contactsCheck = await db.query('SELECT COUNT(*) as count FROM stock_alert_contacts');
-    if (!contactsCheck.rows || contactsCheck.rows[0].count === 0) {
+      // 1. Stock Alert Configurations Table (Item + Godown thresholds)
       await db.run(`
-        INSERT INTO stock_alert_contacts (contact_name, department, phone, email, active)
-        VALUES 
-          ('Purchase Manager', 'Purchase', '+91 98765 43210', 'purchase@bvcerp.com', 1),
-          ('Store Manager', 'Stores & Godown', '+91 98765 43211', 'stores@bvcerp.com', 1),
-          ('Production Head', 'Production', '+91 98765 43212', 'production@bvcerp.com', 1),
-          ('General Accounts', 'Accounts', '+91 98765 43213', 'accounts@bvcerp.com', 1)
+        CREATE TABLE IF NOT EXISTS stock_alert_config (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          item_id INTEGER,
+          item_name TEXT NOT NULL,
+          godown_id INTEGER,
+          godown_name TEXT NOT NULL DEFAULT 'All Godowns',
+          minimum_qty REAL DEFAULT 0,
+          reorder_level REAL DEFAULT 0,
+          critical_level REAL DEFAULT 0,
+          alert_enabled INTEGER DEFAULT 1,
+          in_app_enabled INTEGER DEFAULT 1,
+          email_enabled INTEGER DEFAULT 1,
+          sms_enabled INTEGER DEFAULT 0,
+          whatsapp_enabled INTEGER DEFAULT 0,
+          offline_enabled INTEGER DEFAULT 1,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
       `);
-      console.log('Stock alert default contacts seeded.');
-    }
 
-    // Seed initial default configurations for standard items if table is empty
-    const configCheck = await db.query('SELECT COUNT(*) as count FROM stock_alert_config');
-    if (!configCheck.rows || configCheck.rows[0].count === 0) {
-      const sampleItems = await db.query('SELECT id, item_name, type FROM item_master LIMIT 10');
-      if (sampleItems.rows && sampleItems.rows.length > 0) {
-        for (const itm of sampleItems.rows) {
-          const nameLower = (itm.item_name || '').toLowerCase();
-          let minQ = 500, reorderQ = 1000, critQ = 200;
-          if (nameLower.includes('flour') || nameLower.includes('atta')) {
-            minQ = 300; reorderQ = 700; critQ = 100;
-          } else if (nameLower.includes('papad') || nameLower.includes('pack')) {
-            minQ = 200; reorderQ = 500; critQ = 50;
-          }
-
-          await db.run(`
-            INSERT INTO stock_alert_config 
-            (item_id, item_name, godown_id, godown_name, minimum_qty, reorder_level, critical_level, alert_enabled, in_app_enabled, email_enabled, offline_enabled)
-            VALUES (?, ?, NULL, 'All Godowns', ?, ?, ?, 1, 1, 1, 1)
-          `, [itm.id, itm.item_name, minQ, reorderQ, critQ]);
-        }
-        console.log('Stock alert default item configs seeded.');
+      // Ensure item_master has the alert threshold columns
+      try {
+        const imColsRes = await db.query(`PRAGMA table_info(item_master)`);
+        const imCols = new Set((imColsRes.rows || []).map(c => c.name));
+        if (!imCols.has('minimum_qty')) await db.run(`ALTER TABLE item_master ADD COLUMN minimum_qty REAL DEFAULT 0`);
+        if (!imCols.has('reorder_level')) await db.run(`ALTER TABLE item_master ADD COLUMN reorder_level REAL DEFAULT 0`);
+        if (!imCols.has('critical_level')) await db.run(`ALTER TABLE item_master ADD COLUMN critical_level REAL DEFAULT 0`);
+        if (!imCols.has('alert_enabled')) await db.run(`ALTER TABLE item_master ADD COLUMN alert_enabled INTEGER DEFAULT 1`);
+      } catch (e) {
+        // item_master might not exist during earliest init step
       }
-    }
 
-    console.log('Stock Alert Engine database tables ready.');
-    setTimeout(() => {
-      evaluateStockAlerts().catch(e => console.log('Initial stock alert evaluation:', e.message));
-    }, 1500);
-  } catch (err) {
-    console.error('Error initializing Stock Alert tables:', err);
-  }
+      // 2. Alert Contacts Master Table
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS stock_alert_contacts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          contact_name TEXT NOT NULL,
+          department TEXT DEFAULT 'Purchase',
+          phone TEXT,
+          email TEXT,
+          active INTEGER DEFAULT 1,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // 3. Mapping: Alert Config <-> Contacts (Multi-contact mapping)
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS stock_alert_config_contacts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          config_id INTEGER NOT NULL,
+          contact_id INTEGER NOT NULL,
+          is_primary INTEGER DEFAULT 0,
+          is_cc INTEGER DEFAULT 1,
+          FOREIGN KEY (config_id) REFERENCES stock_alert_config(id) ON DELETE CASCADE,
+          FOREIGN KEY (contact_id) REFERENCES stock_alert_contacts(id) ON DELETE CASCADE
+        )
+      `);
+
+      // 4. Stock Alerts (Active & Historical alert records)
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS stock_alerts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          config_id INTEGER,
+          item_id INTEGER,
+          item_name TEXT NOT NULL,
+          godown_id INTEGER,
+          godown_name TEXT NOT NULL DEFAULT 'Main Godown',
+          alert_type TEXT NOT NULL, -- 'CRITICAL', 'LOW', 'REORDER'
+          current_qty REAL DEFAULT 0,
+          minimum_qty REAL DEFAULT 0,
+          reorder_level REAL DEFAULT 0,
+          critical_level REAL DEFAULT 0,
+          status TEXT DEFAULT 'OPEN', -- 'OPEN', 'RESOLVED', 'ACKNOWLEDGED'
+          triggered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          resolved_at DATETIME,
+          resolved_reason TEXT
+        )
+      `);
+
+      // 5. Stock Alert Notification Queue (In-App, Email, SMS, WhatsApp, Offline)
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS stock_alert_notifications (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          alert_id INTEGER,
+          contact_id INTEGER,
+          contact_name TEXT,
+          contact_email TEXT,
+          contact_phone TEXT,
+          channel TEXT NOT NULL, -- 'IN_APP', 'EMAIL', 'SMS', 'WHATSAPP', 'OFFLINE'
+          message TEXT,
+          status TEXT DEFAULT 'PENDING', -- 'PENDING', 'SENT', 'FAILED', 'RESOLVED'
+          sent_at DATETIME,
+          failure_reason TEXT,
+          retry_count INTEGER DEFAULT 0,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // Create helpful indexes
+      try {
+        await db.run(`CREATE INDEX IF NOT EXISTS idx_stock_alert_cfg ON stock_alert_config(item_name, godown_name)`);
+        await db.run(`CREATE INDEX IF NOT EXISTS idx_stock_alerts_status ON stock_alerts(status, alert_type)`);
+      } catch (idxErr) {}
+
+      // Seed default contacts if empty
+      try {
+        const contactsCheck = await db.query('SELECT COUNT(*) as count FROM stock_alert_contacts');
+        if (!contactsCheck.rows || contactsCheck.rows[0].count === 0) {
+          await db.run(`
+            INSERT INTO stock_alert_contacts (contact_name, department, phone, email, active)
+            VALUES 
+              ('Purchase Manager', 'Purchase', '+91 98765 43210', 'purchase@bvcerp.com', 1),
+              ('Store Manager', 'Stores & Godown', '+91 98765 43211', 'stores@bvcerp.com', 1),
+              ('Production Head', 'Production', '+91 98765 43212', 'production@bvcerp.com', 1),
+              ('General Accounts', 'Accounts', '+91 98765 43213', 'accounts@bvcerp.com', 1)
+          `);
+          console.log('Stock alert default contacts seeded.');
+        }
+      } catch (cSeedErr) {}
+
+      // Seed initial default configurations for standard items if table is empty
+      try {
+        const configCheck = await db.query('SELECT COUNT(*) as count FROM stock_alert_config');
+        if (!configCheck.rows || configCheck.rows[0].count === 0) {
+          const sampleItems = await db.query('SELECT id, item_name, type FROM item_master LIMIT 10');
+          if (sampleItems.rows && sampleItems.rows.length > 0) {
+            for (const itm of sampleItems.rows) {
+              const nameLower = (itm.item_name || '').toLowerCase();
+              let minQ = 500, reorderQ = 1000, critQ = 200;
+              if (nameLower.includes('flour') || nameLower.includes('atta')) {
+                minQ = 300; reorderQ = 700; critQ = 100;
+              } else if (nameLower.includes('papad') || nameLower.includes('pack')) {
+                minQ = 200; reorderQ = 500; critQ = 50;
+              }
+
+              await db.run(`
+                INSERT INTO stock_alert_config 
+                (item_id, item_name, godown_id, godown_name, minimum_qty, reorder_level, critical_level, alert_enabled, in_app_enabled, email_enabled, offline_enabled)
+                VALUES (?, ?, NULL, 'All Godowns', ?, ?, ?, 1, 1, 1, 1)
+              `, [itm.id, itm.item_name, minQ, reorderQ, critQ]);
+            }
+            console.log('Stock alert default item configs seeded.');
+          }
+        }
+      } catch (cfgSeedErr) {}
+
+      console.log('Stock Alert Engine database tables ready.');
+    } catch (err) {
+      console.error('Error initializing Stock Alert tables:', err);
+      initPromise = null; // Reset so retry can happen
+      throw err;
+    }
+  })();
+
+  return initPromise;
 };
 
-// Initialize tables on startup
-initStockAlertTables();
+// Guarantee tables are ready for every router endpoint
+router.use(async (req, res, next) => {
+  try {
+    await ensureStockAlertTables();
+    next();
+  } catch (err) {
+    console.error('Stock Alert Middleware Table Init Error:', err);
+    next();
+  }
+});
+
+// Trigger background initialization
+ensureStockAlertTables().catch(() => {});
 
 // ============================================================================
 // HELPER: CALCULATE ACCURATE LIVE STOCK (GODOWN-WISE & ITEM-WISE)
 // ============================================================================
 async function calculateLiveStock() {
+  await ensureStockAlertTables();
   const stockMap = new Map();
   const itemTotalMap = new Map();
 

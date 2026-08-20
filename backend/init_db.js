@@ -975,6 +975,89 @@ async function initializeDatabase() {
         remarks TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )`
+    },
+    {
+      name: 'stock_alert_config',
+      sql: `CREATE TABLE IF NOT EXISTS stock_alert_config (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_id INTEGER,
+        item_name TEXT NOT NULL,
+        godown_id INTEGER,
+        godown_name TEXT NOT NULL DEFAULT 'All Godowns',
+        minimum_qty REAL DEFAULT 0,
+        reorder_level REAL DEFAULT 0,
+        critical_level REAL DEFAULT 0,
+        alert_enabled INTEGER DEFAULT 1,
+        in_app_enabled INTEGER DEFAULT 1,
+        email_enabled INTEGER DEFAULT 1,
+        sms_enabled INTEGER DEFAULT 0,
+        whatsapp_enabled INTEGER DEFAULT 0,
+        offline_enabled INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`
+    },
+    {
+      name: 'stock_alert_contacts',
+      sql: `CREATE TABLE IF NOT EXISTS stock_alert_contacts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        contact_name TEXT NOT NULL,
+        department TEXT DEFAULT 'Purchase',
+        phone TEXT,
+        email TEXT,
+        active INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`
+    },
+    {
+      name: 'stock_alert_config_contacts',
+      sql: `CREATE TABLE IF NOT EXISTS stock_alert_config_contacts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        config_id INTEGER NOT NULL,
+        contact_id INTEGER NOT NULL,
+        is_primary INTEGER DEFAULT 0,
+        is_cc INTEGER DEFAULT 1,
+        FOREIGN KEY (config_id) REFERENCES stock_alert_config(id) ON DELETE CASCADE,
+        FOREIGN KEY (contact_id) REFERENCES stock_alert_contacts(id) ON DELETE CASCADE
+      )`
+    },
+    {
+      name: 'stock_alerts',
+      sql: `CREATE TABLE IF NOT EXISTS stock_alerts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        config_id INTEGER,
+        item_id INTEGER,
+        item_name TEXT NOT NULL,
+        godown_id INTEGER,
+        godown_name TEXT NOT NULL DEFAULT 'Main Godown',
+        alert_type TEXT NOT NULL,
+        current_qty REAL DEFAULT 0,
+        minimum_qty REAL DEFAULT 0,
+        reorder_level REAL DEFAULT 0,
+        critical_level REAL DEFAULT 0,
+        status TEXT DEFAULT 'OPEN',
+        triggered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        resolved_at DATETIME,
+        resolved_reason TEXT
+      )`
+    },
+    {
+      name: 'stock_alert_notifications',
+      sql: `CREATE TABLE IF NOT EXISTS stock_alert_notifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        alert_id INTEGER,
+        contact_id INTEGER,
+        contact_name TEXT,
+        contact_email TEXT,
+        contact_phone TEXT,
+        channel TEXT NOT NULL,
+        message TEXT,
+        status TEXT DEFAULT 'PENDING',
+        sent_at DATETIME,
+        failure_reason TEXT,
+        retry_count INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`
     }
   ]
 

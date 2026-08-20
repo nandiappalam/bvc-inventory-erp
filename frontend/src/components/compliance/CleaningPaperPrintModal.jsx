@@ -11,7 +11,6 @@ import {
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import PrintIcon from '@mui/icons-material/Print';
-import DownloadIcon from '@mui/icons-material/Download';
 
 export default function CleaningPaperPrintModal({ open, onClose, record, isBlank = false }) {
   if (!record && !isBlank) return null;
@@ -61,7 +60,7 @@ export default function CleaningPaperPrintModal({ open, onClose, record, isBlank
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
           <PrintIcon />
           <Typography variant="h6" sx={{ fontWeight: 700, fontSize: '1.05rem' }}>
-            Official Paper Format Print Preview {isBlank ? '(Blank Form)' : `— ${r.record_no || code}`}
+            Official BVC Paper Format Print Preview {isBlank ? '(Blank Form)' : `— ${r.record_no || code}`}
           </Typography>
         </Box>
         <IconButton size="small" onClick={onClose} sx={{ color: '#fff' }}>
@@ -91,17 +90,20 @@ export default function CleaningPaperPrintModal({ open, onClose, record, isBlank
             }
           }}
         >
-          {/* RENDER DEDICATED PAPER FORMATS */}
-          {code === 'C1' && <C1PaperFormat record={r} isBlank={isBlank} />}
-          {code === 'C2' && <C2PaperFormat record={r} isBlank={isBlank} />}
-          {code === 'C3' && <C3PaperFormat record={r} isBlank={isBlank} />}
-          {code === 'C4' && <C4PaperFormat record={r} isBlank={isBlank} />}
-          {code === 'C5' && <C5PaperFormat record={r} isBlank={isBlank} />}
-          {code === 'C6' && <C6PaperFormat record={r} isBlank={isBlank} />}
-          {code === 'C7' && <C7PaperFormat record={r} isBlank={isBlank} />}
-          {code === 'C8' && <C8PaperFormat record={r} isBlank={isBlank} />}
-          {code === 'C9' && <C9PaperFormat record={r} isBlank={isBlank} />}
-          {code === 'C10' && <C10PaperFormat record={r} isBlank={isBlank} />}
+          {code === 'C1' && <C1Paper record={r} isBlank={isBlank} />}
+          {code === 'C2' && <C2Paper record={r} isBlank={isBlank} />}
+          {code === 'C3' && <C3Paper record={r} isBlank={isBlank} />}
+          {code === 'C4' && <C4Paper record={r} isBlank={isBlank} />}
+          {code === 'C5' && <C5Paper record={r} isBlank={isBlank} />}
+          {code === 'C6' && <C6Paper record={r} isBlank={isBlank} />}
+          {code === 'C7' && <C7Paper record={r} isBlank={isBlank} />}
+          {code === 'C8' && <C8Paper record={r} isBlank={isBlank} />}
+          {code === 'C9' && <C9Paper record={r} isBlank={isBlank} />}
+          {code === 'C10' && <C10Paper record={r} isBlank={isBlank} />}
+          {code === 'C11' && <C11Paper record={r} isBlank={isBlank} />}
+          {code === 'C12' && <C12Paper record={r} isBlank={isBlank} />}
+          {code === 'C13' && <C13Paper record={r} isBlank={isBlank} />}
+          {code === 'C14' && <C14Paper record={r} isBlank={isBlank} />}
         </Box>
       </DialogContent>
 
@@ -119,894 +121,1132 @@ export default function CleaningPaperPrintModal({ open, onClose, record, isBlank
           Print Official Record
         </Button>
       </DialogActions>
-
-      {/* Global Print Styles */}
-      <style>{`
-        @media print {
-          body * {
-            visibility: hidden;
-          }
-          #official-cleaning-paper-record, #official-cleaning-paper-record * {
-            visibility: visible;
-          }
-          #official-cleaning-paper-record {
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 100%;
-            margin: 0;
-            padding: 10mm;
-            border: 2px solid #000 !important;
-            background: #fff !important;
-            color: #000 !important;
-          }
-          @page {
-            size: A4 portrait;
-            margin: 8mm;
-          }
-        }
-      `}</style>
     </Dialog>
   );
 }
 
-// ----------------------------------------------------------------------
-// C1: CLEANING CHECKLIST PRODUCTION AREA (Daily) - FORMAT NO. : BVC/CP/CL/01
-// ----------------------------------------------------------------------
-function C1PaperFormat({ record, isBlank }) {
+// C1: PRODUCTION AREA CLEANING (DAILY)
+function C1Paper({ record, isBlank }) {
   const chk = record.checklist || {};
-  const points = isBlank ? [
-    { point: 'SWEEP THE AREA WITH PLASTIC BROOM.', status: '', remarks: '' },
-    { point: 'REMOVE ALL UNWANTED MATERIAL FROM PROCESS BEFORE START THE WORK', status: '', remarks: '' },
-    { point: 'RUB THE STAINED AREA WITH 1% (100ML/10LITRES) SOAP SOLUTION.', status: '', remarks: '' },
-    { point: 'MOP THE AREA WITH WATER TREATED WITH 1% (100ML/10LITRES) SODIUM HYPO CHLORIDE SOLUTION', status: '', remarks: '' }
-  ] : (chk.cleaning_points && chk.cleaning_points.length > 0 ? chk.cleaning_points : [
-    { point: 'SWEEP THE AREA WITH PLASTIC BROOM.', status: 'OK', remarks: 'Area swept clean' },
-    { point: 'REMOVE ALL UNWANTED MATERIAL FROM PROCESS BEFORE START THE WORK', status: 'OK', remarks: 'Zero process debris' },
-    { point: 'RUB THE STAINED AREA WITH 1% (100ML/10LITRES) SOAP SOLUTION.', status: 'OK', remarks: 'Stains scrubbed' },
-    { point: 'MOP THE AREA WITH WATER TREATED WITH 1% (100ML/10LITRES) SODIUM HYPO CHLORIDE SOLUTION', status: 'OK', remarks: 'Disinfected with 1% NaOCl' }
-  ]);
+  const activities = chk.activities || [
+    { s_no: 1, activity: 'SWEEP THE AREA WITH PLASTIC BROOM.', status: 'OK', remarks: '' },
+    { s_no: 2, activity: 'REMOVE ALL UNWANTED MATERIAL FROM PROCESS BEFORE START THE WORK', status: 'OK', remarks: '' },
+    { s_no: 3, activity: 'RUB THE STAINED AREA WITH 1% (100ML/10LITRES) SOAP SOLUTION.', status: 'OK', remarks: '' },
+    { s_no: 4, activity: 'MOP THE AREA WITH WATER TREATED WITH 1% (100ML/10LITRES) SODIUM HYPO CHLORIDE SOLUTION', status: 'OK', remarks: '' }
+  ];
 
   return (
     <Box>
-      {/* Top Header Table */}
-      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: '12px' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12 }}>
         <tbody>
           <tr>
-            <td style={{ width: '35%', border: '1px solid #000', padding: '10px', textAlign: 'center', verticalAlign: 'middle' }}>
-              <div style={{ fontWeight: 'bold', fontSize: '16px', letterSpacing: '0.5px' }}>BVC EXPORTS PVT LIMITED</div>
+            <td style={{ border: '2px solid #000', padding: '14px', width: '38%', textAlign: 'center' }}>
+              <Typography sx={{ fontWeight: 800, fontSize: '1.05rem', color: '#000' }}>
+                BVC EXPORTS PVT LIMITED
+              </Typography>
             </td>
-            <td style={{ width: '40%', border: '1px solid #000', padding: '10px', textAlign: 'center', verticalAlign: 'middle' }}>
-              <div style={{ fontWeight: 'bold', fontSize: '15px' }}>CLEANING CHECKLIST</div>
-              <div style={{ fontWeight: 'bold', fontSize: '14px' }}>PRODUCTION AREA</div>
-              <div style={{ fontSize: '13px' }}>(Daily)</div>
+            <td style={{ border: '2px solid #000', padding: '8px', width: '37%', textAlign: 'center' }}>
+              <Typography sx={{ fontWeight: 800, fontSize: '1.05rem', color: '#000' }}>
+                CLEANING CHECKLIST<br />PRODUCTION AREA<br /><span style={{ fontSize: '0.9rem', fontWeight: 600 }}>(Daily)</span>
+              </Typography>
             </td>
-            <td style={{ width: '25%', border: '1px solid #000', padding: '6px 10px', fontSize: '12px', verticalAlign: 'middle' }}>
+            <td style={{ border: '2px solid #000', padding: '6px 10px', width: '25%', fontSize: '0.82rem' }}>
               <div><strong>FORMAT NO.</strong> : BVC/CP/CL/01</div>
               <div><strong>REV. NO.</strong> : 00</div>
-              <div><strong>DATE</strong> : {isBlank ? '' : (record.record_date || '29.05.2017')}</div>
+              <div><strong>DATE :</strong> {isBlank ? '' : record.record_date}</div>
               <div><strong>PAGE</strong> : 1 OF 1</div>
             </td>
           </tr>
         </tbody>
       </table>
 
-      {/* Meta Bar */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 8px', fontSize: '13px', fontWeight: 'bold', border: '1px solid #000', marginBottom: '12px' }}>
-        <div>CHECKED BY (OPERATOR) : <span style={{ fontWeight: 'normal', textDecoration: 'underline' }}>{isBlank ? '___________________' : (record.inspector_name || record.prepared_by || 'Operator')}</span></div>
-        <div>VERIFIED BY : <span style={{ fontWeight: 'normal', textDecoration: 'underline' }}>{isBlank ? '___________________' : (record.supervisor_name || record.verified_by || 'Unit Supervisor')}</span></div>
-      </div>
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12 }}>
+        <tbody>
+          <tr>
+            <td style={{ border: '2px solid #000', padding: '8px 12px', width: '50%' }}>
+              <strong>CHECKED BY (OPERATOR) :</strong> {isBlank ? '' : (record.inspector_name || 'Operator')}
+            </td>
+            <td style={{ border: '2px solid #000', padding: '8px 12px', width: '50%' }}>
+              <strong>VERIFIED BY : UNIT SUPERVISOR</strong> {isBlank ? '' : (record.supervisor_name || 'Supervisor')}
+            </td>
+          </tr>
+        </tbody>
+      </table>
 
-      {/* Checklist Table */}
-      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: '14px', fontSize: '12px' }}>
+      {/* Activities Grid */}
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12 }}>
         <thead>
-          <tr style={{ background: '#f1f5f9' }}>
-            <th style={{ border: '1px solid #000', padding: '8px 6px', width: '8%', textAlign: 'center' }}>SL.NO.</th>
-            <th style={{ border: '1px solid #000', padding: '8px 10px', width: '55%', textAlign: 'left' }}>ACTIVITIES</th>
-            <th style={{ border: '1px solid #000', padding: '8px 6px', width: '15%', textAlign: 'center' }}>STATUS</th>
-            <th style={{ border: '1px solid #000', padding: '8px 8px', width: '22%', textAlign: 'left' }}>REMARKS</th>
+          <tr style={{ background: '#f8fafc' }}>
+            <th style={{ border: '2px solid #000', padding: '6px', width: '6%', textAlign: 'center' }}>SL.NO.</th>
+            <th style={{ border: '2px solid #000', padding: '6px', width: '36%', textAlign: 'left' }}>ACTIVITIES</th>
+            <th style={{ border: '2px solid #000', padding: '4px', width: '38%', textAlign: 'center' }}>
+              <div style={{ borderBottom: '1px solid #000', paddingBottom: 2, marginBottom: 2 }}>DAILY EXECUTION MATRIX</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(16, 1fr)', fontSize: '0.65rem' }}>
+                {Array.from({ length: 16 }, (_, i) => <div key={i}>{i + 1}</div>)}
+              </div>
+            </th>
+            <th style={{ border: '2px solid #000', padding: '6px', width: '20%', textAlign: 'left' }}>REMARKS</th>
           </tr>
         </thead>
         <tbody>
-          {points.map((p, idx) => (
+          {activities.map((act, idx) => (
             <tr key={idx}>
-              <td style={{ border: '1px solid #000', padding: '10px 6px', textAlign: 'center', fontWeight: 'bold' }}>{idx + 1}.</td>
-              <td style={{ border: '1px solid #000', padding: '10px', fontWeight: '600' }}>{p.point || p.activity}</td>
-              <td style={{ border: '1px solid #000', padding: '10px 6px', textAlign: 'center', fontWeight: 'bold', fontSize: '14px' }}>
-                {isBlank ? '' : (p.status === 'OK' || p.status === 'CHECK' || p.status === '✓' ? '✓ CHECK' : (p.status === 'H' ? 'H HOLIDAY' : (p.status || '✓ CHECK')))}
+              <td style={{ border: '2px solid #000', padding: '8px', textAlign: 'center', fontWeight: 700 }}>{act.s_no}.</td>
+              <td style={{ border: '2px solid #000', padding: '8px', fontWeight: 600, fontSize: '0.85rem' }}>{act.activity}</td>
+              <td style={{ border: '2px solid #000', padding: '4px', textAlign: 'center' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(16, 1fr)', fontSize: '0.75rem', fontWeight: 700 }}>
+                  {Array.from({ length: 16 }, (_, i) => (
+                    <div key={i} style={{ borderRight: '1px solid #ccc' }}>
+                      {isBlank ? '' : (act.status === 'OK' ? '√' : act.status === 'HOLIDAY' ? 'H' : 'X')}
+                    </div>
+                  ))}
+                </div>
               </td>
-              <td style={{ border: '1px solid #000', padding: '10px 8px' }}>
-                {isBlank ? '' : (p.remarks || 'Standard compliance verified')}
-              </td>
+              <td style={{ border: '2px solid #000', padding: '8px', fontSize: '0.85rem' }}>{isBlank ? '' : (act.remarks || 'Cleaned as per SOP')}</td>
             </tr>
           ))}
         </tbody>
       </table>
 
-      {/* Legend & Verification */}
-      <div style={{ display: 'flex', justifyContent: 'space-around', border: '1px solid #000', padding: '8px', fontSize: '12px', fontWeight: 'bold', marginBottom: '20px' }}>
-        <div>[ √ ] CHECK</div>
-        <div>[ H ] HOLIDAY</div>
-        <div>[ X ] NOT CHECK</div>
-      </div>
-
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '30px', padding: '0 20px', fontSize: '13px' }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ borderTop: '1px solid #000', width: '200px', paddingTop: '4px', fontWeight: 'bold' }}>
-            {isBlank ? 'Signature of Operator' : (record.inspector_name || 'Operator Signature')}
-          </div>
-          <div style={{ fontSize: '11px', color: '#555' }}>OPERATOR / CHECKED BY</div>
-        </div>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ borderTop: '1px solid #000', width: '200px', paddingTop: '4px', fontWeight: 'bold' }}>
-            {isBlank ? 'Signature of Supervisor' : (record.supervisor_name || 'Unit Supervisor Signature')}
-          </div>
-          <div style={{ fontSize: '11px', color: '#555' }}>UNIT SUPERVISOR / VERIFIED BY</div>
-        </div>
-      </div>
+      <Box sx={{ border: '1px solid #000', p: 1, display: 'flex', justifyContent: 'space-around', alignItems: 'center' }}>
+        <Box><strong>[ √ ]</strong> CHECK</Box>
+        <Box><strong>[ H ]</strong> HOLIDAY</Box>
+        <Box><strong>[ X ]</strong> NOT CHECK</Box>
+      </Box>
     </Box>
   );
 }
 
-// ----------------------------------------------------------------------
-// C2: CLEANING CHECKLIST MACHINERIES (15 DAYS ONCE) - FORMAT NO. : BVC/CP/CL/02
-// ----------------------------------------------------------------------
-function C2PaperFormat({ record, isBlank }) {
+// C2: MACHINERIES (15 DAYS ONCE)
+function C2Paper({ record, isBlank }) {
   const chk = record.checklist || {};
-  const items = isBlank ? [
-    { title: 'SWEEP THE AREA WITH PLASTIC BROOM.', status: '', remarks: '' },
-    { title: 'REMOVE ALL UNWANTED MATERIAL FROM PROCESS BEFORE START THE WORK', status: '', remarks: '' },
-    { title: 'Clean /Scrap residues Screw blades & Clean the hopper & Discharge nozzles thoroughly', status: '', remarks: '' },
-    { title: 'CLEAN THE DUST AS PER PROCEDURES:\n1. Motor Cover\n2. De-Stonner\n3. Pulse roller', status: '', remarks: '' }
-  ] : [
-    { title: 'SWEEP THE AREA WITH PLASTIC BROOM.', status: '✓ CHECK', remarks: 'Area swept' },
-    { title: 'REMOVE ALL UNWANTED MATERIAL FROM PROCESS BEFORE START THE WORK', status: '✓ CHECK', remarks: 'Clean and clear' },
-    { title: 'Clean /Scrap residues Screw blades & Clean the hopper & Discharge nozzles thoroughly', status: '✓ CHECK', remarks: 'Screw blades & hoppers scraped clean' },
-    { title: 'CLEAN THE DUST AS PER PROCEDURES:\n1. Motor Cover\n2. De-Stonner\n3. Pulse roller', status: '✓ CHECK', remarks: 'Dust vacuumed and air blow cleaned' }
-  ];
+  const activities = chk.activities || [];
 
   return (
     <Box>
-      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: '12px' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12 }}>
         <tbody>
           <tr>
-            <td style={{ width: '35%', border: '1px solid #000', padding: '10px', textAlign: 'center' }}>
-              <div style={{ fontWeight: 'bold', fontSize: '16px' }}>BVC EXPORTS PVT LIMITED</div>
+            <td style={{ border: '2px solid #000', padding: '14px', width: '38%', textAlign: 'center' }}>
+              <Typography sx={{ fontWeight: 800, fontSize: '1.05rem' }}>BVC EXPORTS PVT LIMITED</Typography>
             </td>
-            <td style={{ width: '40%', border: '1px solid #000', padding: '10px', textAlign: 'center' }}>
-              <div style={{ fontWeight: 'bold', fontSize: '15px' }}>CLEANING CHECKLIST</div>
-              <div style={{ fontWeight: 'bold', fontSize: '14px' }}>MACHINERIES</div>
-              <div style={{ fontSize: '13px' }}>(15 DAYS ONCE)</div>
+            <td style={{ border: '2px solid #000', padding: '8px', width: '37%', textAlign: 'center' }}>
+              <Typography sx={{ fontWeight: 800, fontSize: '1.05rem' }}>
+                CLEANING CHECKLIST<br />MACHINERIES<br /><span style={{ fontSize: '0.9rem', fontWeight: 600 }}>(15 DAYS ONCE)</span>
+              </Typography>
             </td>
-            <td style={{ width: '25%', border: '1px solid #000', padding: '6px 10px', fontSize: '12px' }}>
+            <td style={{ border: '2px solid #000', padding: '6px 10px', width: '25%', fontSize: '0.82rem' }}>
               <div><strong>FORMAT NO.</strong> : BVC/CP/CL/02</div>
               <div><strong>REV. NO.</strong> : 00</div>
-              <div><strong>DATE</strong> : {isBlank ? '' : (record.record_date || '29.05.2017')}</div>
-              <div><strong>PAGE</strong> : 1 OF 1</div>
+              <div><strong>DATE :</strong> 29.05.2017</div>
+              <div><strong>PAGE :</strong> 1 OF 1</div>
             </td>
           </tr>
         </tbody>
       </table>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 10px', fontSize: '13px', fontWeight: 'bold', border: '1px solid #000', marginBottom: '12px' }}>
-        <div>MACHINE NAME & CODE : <span style={{ fontWeight: 'normal' }}>{isBlank ? '___________________' : (chk.machine_name || 'Pulse Hammer Mill & De-Stoner #01')}</span></div>
-        <div>RESPONSIBILITY : <span style={{ fontWeight: 'normal' }}>{isBlank ? '___________________' : (record.inspector_name || 'Milling Operator')}</span></div>
-      </div>
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12 }}>
+        <tbody>
+          <tr>
+            <td style={{ border: '2px solid #000', padding: '8px 12px', width: '50%' }}>
+              <strong>MACHINE NAME & CODE :</strong> {isBlank ? '' : (record.area_location || chk.machine_name || 'Pulse Hammer Mill #01')}
+            </td>
+            <td style={{ border: '2px solid #000', padding: '8px 12px', width: '50%' }}>
+              <strong>RESPONSIBILITY :</strong> {isBlank ? '' : (chk.responsibility || 'Operator / Cleaner')}
+            </td>
+          </tr>
+        </tbody>
+      </table>
 
-      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: '14px', fontSize: '12px' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12 }}>
         <thead>
-          <tr style={{ background: '#f1f5f9' }}>
-            <th style={{ border: '1px solid #000', padding: '8px 6px', width: '8%', textAlign: 'center' }}>SL.NO.</th>
-            <th style={{ border: '1px solid #000', padding: '8px 10px', width: '55%', textAlign: 'left' }}>ACTIVITIES</th>
-            <th style={{ border: '1px solid #000', padding: '8px 6px', width: '15%', textAlign: 'center' }}>STATUS</th>
-            <th style={{ border: '1px solid #000', padding: '8px 8px', width: '22%', textAlign: 'left' }}>REMARKS</th>
+          <tr style={{ background: '#f8fafc', fontSize: '0.75rem' }}>
+            <th style={{ border: '2px solid #000', padding: '6px', width: '5%' }}>SL.NO.</th>
+            <th style={{ border: '2px solid #000', padding: '6px', width: '35%', textAlign: 'left' }}>ACTIVITIES</th>
+            {['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'].map(m => (
+              <th key={m} style={{ border: '1px solid #000', padding: '2px', width: '3%' }}>{m}</th>
+            ))}
+            <th style={{ border: '1px solid #000', padding: '4px', width: '8%' }}>CHECKED BY</th>
+            <th style={{ border: '1px solid #000', padding: '4px', width: '8%' }}>VERIFIED BY</th>
+            <th style={{ border: '2px solid #000', padding: '6px', width: '8%' }}>REMARKS</th>
           </tr>
         </thead>
         <tbody>
-          {items.map((it, idx) => (
-            <tr key={idx}>
-              <td style={{ border: '1px solid #000', padding: '10px 6px', textAlign: 'center', fontWeight: 'bold' }}>{idx + 1}.</td>
-              <td style={{ border: '1px solid #000', padding: '10px', fontWeight: '600', whiteSpace: 'pre-line' }}>{it.title}</td>
-              <td style={{ border: '1px solid #000', padding: '10px 6px', textAlign: 'center', fontWeight: 'bold' }}>{isBlank ? '' : it.status}</td>
-              <td style={{ border: '1px solid #000', padding: '10px 8px' }}>{isBlank ? '' : it.remarks}</td>
+          {activities.map((act, idx) => (
+            <tr key={idx} style={{ fontSize: '0.8rem' }}>
+              <td style={{ border: '2px solid #000', padding: '6px', textAlign: 'center', fontWeight: 700 }}>{act.s_no}.</td>
+              <td style={{ border: '2px solid #000', padding: '6px', fontWeight: 600, whiteSpace: 'pre-line' }}>{act.activity}</td>
+              {Array.from({ length: 12 }, (_, i) => (
+                <td key={i} style={{ border: '1px solid #000', padding: '2px', textAlign: 'center', fontWeight: 700 }}>
+                  {isBlank ? '' : '√'}
+                </td>
+              ))}
+              <td style={{ border: '1px solid #000', padding: '4px', textAlign: 'center' }}>{isBlank ? '' : (record.inspector_name || 'Operator')}</td>
+              <td style={{ border: '1px solid #000', padding: '4px', textAlign: 'center' }}>{isBlank ? '' : (record.supervisor_name || 'Supervisor')}</td>
+              <td style={{ border: '2px solid #000', padding: '6px' }}>{isBlank ? '' : (act.remarks || 'OK')}</td>
             </tr>
           ))}
         </tbody>
       </table>
 
-      <div style={{ display: 'flex', justifyContent: 'space-around', border: '1px solid #000', padding: '8px', fontSize: '12px', fontWeight: 'bold', marginBottom: '20px' }}>
-        <div>[ √ ] CHECK</div>
-        <div>[ H ] HOLIDAY</div>
-        <div>[ X ] NOT CHECK</div>
-      </div>
-
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '30px', padding: '0 20px', fontSize: '13px' }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ borderTop: '1px solid #000', width: '200px', paddingTop: '4px', fontWeight: 'bold' }}>{isBlank ? '' : (record.prepared_by || 'Operator')}</div>
-          <div style={{ fontSize: '11px', color: '#555' }}>CHECKED BY</div>
-        </div>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ borderTop: '1px solid #000', width: '200px', paddingTop: '4px', fontWeight: 'bold' }}>{isBlank ? '' : (record.verified_by || 'Plant Supervisor')}</div>
-          <div style={{ fontSize: '11px', color: '#555' }}>VERIFIED BY</div>
-        </div>
-      </div>
+      <Box sx={{ border: '1px solid #000', p: 1, display: 'flex', justifyContent: 'space-around', alignItems: 'center' }}>
+        <Box><strong>[ √ ]</strong> CHECK</Box>
+        <Box><strong>[ H ]</strong> HOLIDAY</Box>
+        <Box><strong>[ X ]</strong> NOT CHECK</Box>
+      </Box>
     </Box>
   );
 }
 
-// ----------------------------------------------------------------------
-// C3: CLEANING CHECKLIST PEST CONTROL (MONTHLY ONCE) - FORMAT NO. : BVC/CP/CL/03
-// ----------------------------------------------------------------------
-function C3PaperFormat({ record, isBlank }) {
-  const items = isBlank ? [
-    { title: 'BEFORE TO STOP THE PRODUCTION\nRAW MATERIAL MOVE & CLOSED', status: '', remarks: '' },
-    { title: 'MACHINE PARTS OPENED & RESIDUES TO BE REMOVED.\nCONDUCT THE PEST CONTROL ACTIVITIES WITH PCI OPERATORS WITH APPROVED CHEMICALS', status: '', remarks: '' },
-    { title: 'WASHED THOROUGHLY TREATED SURFACE WITH HOT WATER.\nTHEN RINSE AND WASHED WITH FRESH WATER, WIPE WITH CLOTH AND DRY.', status: '', remarks: '' },
-    { title: 'INITIAL RUN WITH SMALL QUANTITIES OF PRODUCT.\nREMOVE THE INITIAL RUN PRODUCT AND USE MACHINE FOR PRODUCTION/PACKAGING.', status: '', remarks: '' }
-  ] : [
-    { title: 'BEFORE TO STOP THE PRODUCTION\nRAW MATERIAL MOVE & CLOSED', status: '✓ CHECK', remarks: 'All RM covers sealed' },
-    { title: 'MACHINE PARTS OPENED & RESIDUES TO BE REMOVED.\nCONDUCT THE PEST CONTROL ACTIVITIES WITH PCI OPERATORS WITH APPROVED CHEMICALS', status: '✓ CHECK', remarks: 'PCI chemical applied safely' },
-    { title: 'WASHED THOROUGHLY TREATED SURFACE WITH HOT WATER.\nTHEN RINSE AND WASHED WITH FRESH WATER, WIPE WITH CLOTH AND DRY.', status: '✓ CHECK', remarks: 'Hot water washed & dried' },
-    { title: 'INITIAL RUN WITH SMALL QUANTITIES OF PRODUCT.\nREMOVE THE INITIAL RUN PRODUCT AND USE MACHINE FOR PRODUCTION/PACKAGING.', status: '✓ CHECK', remarks: 'Purge run discarded properly' }
-  ];
+// C3: PEST CONTROL (MONTHLY ONCE)
+function C3Paper({ record, isBlank }) {
+  const chk = record.checklist || {};
+  const activities = chk.activities || [];
 
   return (
     <Box>
-      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: '12px' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12 }}>
         <tbody>
           <tr>
-            <td style={{ width: '35%', border: '1px solid #000', padding: '10px', textAlign: 'center' }}>
-              <div style={{ fontWeight: 'bold', fontSize: '16px' }}>BVC EXPORTS PVT LIMITED</div>
+            <td style={{ border: '2px solid #000', padding: '14px', width: '38%', textAlign: 'center' }}>
+              <Typography sx={{ fontWeight: 800, fontSize: '1.05rem' }}>BVC EXPORTS PVT LIMITED</Typography>
             </td>
-            <td style={{ width: '40%', border: '1px solid #000', padding: '10px', textAlign: 'center' }}>
-              <div style={{ fontWeight: 'bold', fontSize: '15px' }}>CLEANING CHECKLIST</div>
-              <div style={{ fontWeight: 'bold', fontSize: '14px' }}>PEST CONTROL</div>
-              <div style={{ fontSize: '13px' }}>(MONTHLY ONCE)</div>
+            <td style={{ border: '2px solid #000', padding: '8px', width: '37%', textAlign: 'center' }}>
+              <Typography sx={{ fontWeight: 800, fontSize: '1.05rem' }}>
+                CLEANING CHECKLIST<br />PEST CONTROL<br /><span style={{ fontSize: '0.9rem', fontWeight: 600 }}>(MONTHLY ONCE)</span>
+              </Typography>
             </td>
-            <td style={{ width: '25%', border: '1px solid #000', padding: '6px 10px', fontSize: '12px' }}>
+            <td style={{ border: '2px solid #000', padding: '6px 10px', width: '25%', fontSize: '0.82rem' }}>
               <div><strong>FORMAT NO.</strong> : BVC/CP/CL/03</div>
               <div><strong>REV. NO.</strong> : 00</div>
-              <div><strong>DATE</strong> : {isBlank ? '' : (record.record_date || '29.05.2017')}</div>
-              <div><strong>PAGE</strong> : 1 OF 1</div>
+              <div><strong>DATE :</strong> 29.05.2017</div>
+              <div><strong>PAGE :</strong> 1 OF 1</div>
             </td>
           </tr>
         </tbody>
       </table>
 
-      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: '14px', fontSize: '12px' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12 }}>
         <thead>
-          <tr style={{ background: '#f1f5f9' }}>
-            <th style={{ border: '1px solid #000', padding: '8px 6px', width: '8%', textAlign: 'center' }}>SL.NO.</th>
-            <th style={{ border: '1px solid #000', padding: '8px 10px', width: '55%', textAlign: 'left' }}>ACTIVITIES</th>
-            <th style={{ border: '1px solid #000', padding: '8px 6px', width: '15%', textAlign: 'center' }}>STATUS</th>
-            <th style={{ border: '1px solid #000', padding: '8px 8px', width: '22%', textAlign: 'left' }}>REMARKS</th>
+          <tr style={{ background: '#f8fafc', fontSize: '0.75rem' }}>
+            <th style={{ border: '2px solid #000', padding: '6px', width: '5%' }}>SL.NO.</th>
+            <th style={{ border: '2px solid #000', padding: '6px', width: '35%', textAlign: 'left' }}>ACTIVITIES</th>
+            {['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'].map(m => (
+              <th key={m} style={{ border: '1px solid #000', padding: '2px', width: '3%' }}>{m}</th>
+            ))}
+            <th style={{ border: '1px solid #000', padding: '4px', width: '8%' }}>CHECKED BY</th>
+            <th style={{ border: '1px solid #000', padding: '4px', width: '8%' }}>VERIFIED BY</th>
+            <th style={{ border: '2px solid #000', padding: '6px', width: '8%' }}>REMARKS</th>
           </tr>
         </thead>
         <tbody>
-          {items.map((it, idx) => (
-            <tr key={idx}>
-              <td style={{ border: '1px solid #000', padding: '10px 6px', textAlign: 'center', fontWeight: 'bold' }}>{idx + 1}.</td>
-              <td style={{ border: '1px solid #000', padding: '10px', fontWeight: '600', whiteSpace: 'pre-line' }}>{it.title}</td>
-              <td style={{ border: '1px solid #000', padding: '10px 6px', textAlign: 'center', fontWeight: 'bold' }}>{isBlank ? '' : it.status}</td>
-              <td style={{ border: '1px solid #000', padding: '10px 8px' }}>{isBlank ? '' : it.remarks}</td>
+          {activities.map((act, idx) => (
+            <tr key={idx} style={{ fontSize: '0.8rem' }}>
+              <td style={{ border: '2px solid #000', padding: '6px', textAlign: 'center', fontWeight: 700 }}>{act.s_no}.</td>
+              <td style={{ border: '2px solid #000', padding: '6px', fontWeight: 600, whiteSpace: 'pre-line' }}>{act.activity}</td>
+              {Array.from({ length: 12 }, (_, i) => (
+                <td key={i} style={{ border: '1px solid #000', padding: '2px', textAlign: 'center', fontWeight: 700 }}>
+                  {isBlank ? '' : '√'}
+                </td>
+              ))}
+              <td style={{ border: '1px solid #000', padding: '4px', textAlign: 'center' }}>{isBlank ? '' : (record.inspector_name || 'PCI Op')}</td>
+              <td style={{ border: '1px solid #000', padding: '4px', textAlign: 'center' }}>{isBlank ? '' : (record.supervisor_name || 'QA Incharge')}</td>
+              <td style={{ border: '2px solid #000', padding: '6px' }}>{isBlank ? '' : (act.remarks || 'Completed')}</td>
             </tr>
           ))}
         </tbody>
       </table>
 
-      <div style={{ display: 'flex', justifyContent: 'space-around', border: '1px solid #000', padding: '8px', fontSize: '12px', fontWeight: 'bold', marginBottom: '20px' }}>
-        <div>[ √ ] CHECK</div>
-        <div>[ H ] HOLIDAY</div>
-        <div>[ X ] NOT CHECK</div>
-      </div>
-
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '30px', padding: '0 20px', fontSize: '13px' }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ borderTop: '1px solid #000', width: '200px', paddingTop: '4px', fontWeight: 'bold' }}>{isBlank ? '' : (record.prepared_by || 'PCI Incharge')}</div>
-          <div style={{ fontSize: '11px', color: '#555' }}>CHECKED BY</div>
-        </div>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ borderTop: '1px solid #000', width: '200px', paddingTop: '4px', fontWeight: 'bold' }}>{isBlank ? '' : (record.verified_by || 'QA Manager')}</div>
-          <div style={{ fontSize: '11px', color: '#555' }}>VERIFIED BY</div>
-        </div>
-      </div>
+      <Box sx={{ border: '1px solid #000', p: 1, display: 'flex', justifyContent: 'space-around', alignItems: 'center' }}>
+        <Box><strong>[ √ ]</strong> CHECK</Box>
+        <Box><strong>[ H ]</strong> HOLIDAY</Box>
+        <Box><strong>[ X ]</strong> NOT CHECK</Box>
+      </Box>
     </Box>
   );
 }
 
-// ----------------------------------------------------------------------
-// C4: CLEANING CHECKLIST WATER TANK (15 DAYS ONCE) - FORMAT NO. : BVC/CP/CL/04
-// ----------------------------------------------------------------------
-function C4PaperFormat({ record, isBlank }) {
-  const items = isBlank ? [
-    { title: 'Before clean the tank to stop the production. Remove the water by using plastic buckets.', status: '', remarks: '' },
-    { title: 'Mop the area with water treated with 1% (100Ml/10Litres) Sodium hypo chloride Solution.', status: '', remarks: '' },
-    { title: 'Clean the water tank thoroughly by using plastic brooms.', status: '', remarks: '' },
-    { title: 'If any damages find inform to unit supervisor. After the cleaning to put 3-4 bucket of water for dust removing. Then allowed for production.', status: '', remarks: '' }
-  ] : [
-    { title: 'Before clean the tank to stop the production. Remove the water by using plastic buckets.', status: '✓ CHECK', remarks: 'Water drained' },
-    { title: 'Mop the area with water treated with 1% (100Ml/10Litres) Sodium hypo chloride Solution.', status: '✓ CHECK', remarks: '1% Hypochlorite applied' },
-    { title: 'Clean the water tank thoroughly by using plastic brooms.', status: '✓ CHECK', remarks: 'Tank scrubbed clean' },
-    { title: 'If any damages find inform to unit supervisor. After the cleaning to put 3-4 bucket of water for dust removing. Then allowed for production.', status: '✓ CHECK', remarks: 'Flushed 4 buckets, cleared' }
-  ];
+// C4: WATER TANK (15 DAYS ONCE)
+function C4Paper({ record, isBlank }) {
+  const chk = record.checklist || {};
+  const activities = chk.activities || [];
 
   return (
     <Box>
-      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: '12px' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12 }}>
         <tbody>
           <tr>
-            <td style={{ width: '35%', border: '1px solid #000', padding: '10px', textAlign: 'center' }}>
-              <div style={{ fontWeight: 'bold', fontSize: '16px' }}>BVC EXPORTS PVT LIMITED</div>
+            <td style={{ border: '2px solid #000', padding: '14px', width: '38%', textAlign: 'center' }}>
+              <Typography sx={{ fontWeight: 800, fontSize: '1.05rem' }}>BVC EXPORTS PVT LIMITED</Typography>
             </td>
-            <td style={{ width: '40%', border: '1px solid #000', padding: '10px', textAlign: 'center' }}>
-              <div style={{ fontWeight: 'bold', fontSize: '15px' }}>CLEANING CHECKLIST</div>
-              <div style={{ fontWeight: 'bold', fontSize: '14px' }}>WATER TANK</div>
-              <div style={{ fontSize: '13px' }}>(15 DAYS ONCE)</div>
+            <td style={{ border: '2px solid #000', padding: '8px', width: '37%', textAlign: 'center' }}>
+              <Typography sx={{ fontWeight: 800, fontSize: '1.05rem' }}>
+                CLEANING CHECKLIST<br />WATER TANK<br /><span style={{ fontSize: '0.9rem', fontWeight: 600 }}>(15 DAYS ONCE)</span>
+              </Typography>
             </td>
-            <td style={{ width: '25%', border: '1px solid #000', padding: '6px 10px', fontSize: '12px' }}>
+            <td style={{ border: '2px solid #000', padding: '6px 10px', width: '25%', fontSize: '0.82rem' }}>
               <div><strong>FORMAT NO.</strong> : BVC/CP/CL/04</div>
               <div><strong>REV. NO.</strong> : 00</div>
-              <div><strong>DATE</strong> : {isBlank ? '' : (record.record_date || '29.05.2017')}</div>
-              <div><strong>PAGE</strong> : 1 OF 1</div>
+              <div><strong>DATE :</strong> 29.05.2017</div>
+              <div><strong>PAGE :</strong> 1 OF 1</div>
             </td>
           </tr>
         </tbody>
       </table>
 
-      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: '14px', fontSize: '12px' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12 }}>
         <thead>
-          <tr style={{ background: '#f1f5f9' }}>
-            <th style={{ border: '1px solid #000', padding: '8px 6px', width: '8%', textAlign: 'center' }}>SL.NO.</th>
-            <th style={{ border: '1px solid #000', padding: '8px 10px', width: '55%', textAlign: 'left' }}>ACTIVITIES</th>
-            <th style={{ border: '1px solid #000', padding: '8px 6px', width: '15%', textAlign: 'center' }}>STATUS</th>
-            <th style={{ border: '1px solid #000', padding: '8px 8px', width: '22%', textAlign: 'left' }}>REMARKS</th>
+          <tr style={{ background: '#f8fafc', fontSize: '0.75rem' }}>
+            <th style={{ border: '2px solid #000', padding: '6px', width: '5%' }}>SL.NO.</th>
+            <th style={{ border: '2px solid #000', padding: '6px', width: '35%', textAlign: 'left' }}>ACTIVITIES</th>
+            {['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'].map(m => (
+              <th key={m} style={{ border: '1px solid #000', padding: '2px', width: '3%' }}>{m}</th>
+            ))}
+            <th style={{ border: '1px solid #000', padding: '4px', width: '8%' }}>CHECKED BY</th>
+            <th style={{ border: '1px solid #000', padding: '4px', width: '8%' }}>VERIFIED BY</th>
+            <th style={{ border: '2px solid #000', padding: '6px', width: '8%' }}>REMARKS</th>
           </tr>
         </thead>
         <tbody>
-          {items.map((it, idx) => (
-            <tr key={idx}>
-              <td style={{ border: '1px solid #000', padding: '10px 6px', textAlign: 'center', fontWeight: 'bold' }}>{idx + 1}.</td>
-              <td style={{ border: '1px solid #000', padding: '10px', fontWeight: '600' }}>{it.title}</td>
-              <td style={{ border: '1px solid #000', padding: '10px 6px', textAlign: 'center', fontWeight: 'bold' }}>{isBlank ? '' : it.status}</td>
-              <td style={{ border: '1px solid #000', padding: '10px 8px' }}>{isBlank ? '' : it.remarks}</td>
+          {activities.map((act, idx) => (
+            <tr key={idx} style={{ fontSize: '0.8rem' }}>
+              <td style={{ border: '2px solid #000', padding: '6px', textAlign: 'center', fontWeight: 700 }}>{act.s_no}.</td>
+              <td style={{ border: '2px solid #000', padding: '6px', fontWeight: 600, whiteSpace: 'pre-line' }}>{act.activity}</td>
+              {Array.from({ length: 12 }, (_, i) => (
+                <td key={i} style={{ border: '1px solid #000', padding: '2px', textAlign: 'center', fontWeight: 700 }}>
+                  {isBlank ? '' : '√'}
+                </td>
+              ))}
+              <td style={{ border: '1px solid #000', padding: '4px', textAlign: 'center' }}>{isBlank ? '' : (record.inspector_name || 'Sanitation')}</td>
+              <td style={{ border: '1px solid #000', padding: '4px', textAlign: 'center' }}>{isBlank ? '' : (record.supervisor_name || 'Supervisor')}</td>
+              <td style={{ border: '2px solid #000', padding: '6px' }}>{isBlank ? '' : (act.remarks || 'Clean')}</td>
             </tr>
           ))}
         </tbody>
       </table>
 
-      <div style={{ display: 'flex', justifyContent: 'space-around', border: '1px solid #000', padding: '8px', fontSize: '12px', fontWeight: 'bold', marginBottom: '20px' }}>
-        <div>[ √ ] CHECK</div>
-        <div>[ H ] HOLIDAY</div>
-        <div>[ X ] NOT CHECK</div>
-      </div>
-
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '30px', padding: '0 20px', fontSize: '13px' }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ borderTop: '1px solid #000', width: '200px', paddingTop: '4px', fontWeight: 'bold' }}>{isBlank ? '' : (record.prepared_by || 'Sanitation Staff')}</div>
-          <div style={{ fontSize: '11px', color: '#555' }}>CHECKED BY</div>
-        </div>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ borderTop: '1px solid #000', width: '200px', paddingTop: '4px', fontWeight: 'bold' }}>{isBlank ? '' : (record.verified_by || 'Plant Supervisor')}</div>
-          <div style={{ fontSize: '11px', color: '#555' }}>VERIFIED BY</div>
-        </div>
-      </div>
+      <Box sx={{ border: '1px solid #000', p: 1, display: 'flex', justifyContent: 'space-around', alignItems: 'center' }}>
+        <Box><strong>[ √ ]</strong> CHECK</Box>
+        <Box><strong>[ H ]</strong> HOLIDAY</Box>
+        <Box><strong>[ X ]</strong> NOT CHECK</Box>
+      </Box>
     </Box>
   );
 }
 
-// ----------------------------------------------------------------------
-// C5: CLEANING CHECKLIST WINDOW-GLASS (MONTHLY ONCE) - FORMAT NO. : BVC/CP/CL/05
-// ----------------------------------------------------------------------
-function C5PaperFormat({ record, isBlank }) {
-  const items = isBlank ? [
-    { title: 'BEFORE TO STOP THE PRODUCTION\nTO CLEAN WINDOW BY USING COTTON CLOTH.', status: '', remarks: '' },
-    { title: 'TO APPLY 2ML OF COLIN WITH COTTON CLOTH AND TO RUB THE SURFACE\nIF ANY DAMAGES FIND INFORM TO UNIT SUPERVISOR.', status: '', remarks: '' }
-  ] : [
-    { title: 'BEFORE TO STOP THE PRODUCTION\nTO CLEAN WINDOW BY USING COTTON CLOTH.', status: '✓ CHECK', remarks: 'Wiped dust-free' },
-    { title: 'TO APPLY 2ML OF COLIN WITH COTTON CLOTH AND TO RUB THE SURFACE\nIF ANY DAMAGES FIND INFORM TO UNIT SUPERVISOR.', status: '✓ CHECK', remarks: 'Glass cleaned with Colin, no crack' }
-  ];
+// C5: WINDOW-GLASS (MONTHLY ONCE)
+function C5Paper({ record, isBlank }) {
+  const chk = record.checklist || {};
+  const activities = chk.activities || [];
 
   return (
     <Box>
-      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: '12px' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12 }}>
         <tbody>
           <tr>
-            <td style={{ width: '35%', border: '1px solid #000', padding: '10px', textAlign: 'center' }}>
-              <div style={{ fontWeight: 'bold', fontSize: '16px' }}>BVC EXPORTS PVT LIMITED</div>
+            <td style={{ border: '2px solid #000', padding: '14px', width: '38%', textAlign: 'center' }}>
+              <Typography sx={{ fontWeight: 800, fontSize: '1.05rem' }}>BVC EXPORTS PVT LIMITED</Typography>
             </td>
-            <td style={{ width: '40%', border: '1px solid #000', padding: '10px', textAlign: 'center' }}>
-              <div style={{ fontWeight: 'bold', fontSize: '15px' }}>CLEANING CHECKLIST</div>
-              <div style={{ fontWeight: 'bold', fontSize: '14px' }}>WINDOW-GLASS</div>
-              <div style={{ fontSize: '13px' }}>(MONTHLY ONCE)</div>
+            <td style={{ border: '2px solid #000', padding: '8px', width: '37%', textAlign: 'center' }}>
+              <Typography sx={{ fontWeight: 800, fontSize: '1.05rem' }}>
+                CLEANING CHECKLIST<br />WINDOW-GLASS<br /><span style={{ fontSize: '0.9rem', fontWeight: 600 }}>(MONTHLY ONCE)</span>
+              </Typography>
             </td>
-            <td style={{ width: '25%', border: '1px solid #000', padding: '6px 10px', fontSize: '12px' }}>
+            <td style={{ border: '2px solid #000', padding: '6px 10px', width: '25%', fontSize: '0.82rem' }}>
               <div><strong>FORMAT NO.</strong> : BVC/CP/CL/05</div>
               <div><strong>REV. NO.</strong> : 00</div>
-              <div><strong>DATE</strong> : {isBlank ? '' : (record.record_date || '29.05.2017')}</div>
-              <div><strong>PAGE</strong> : 1 OF 1</div>
+              <div><strong>DATE :</strong> 29.05.2017</div>
+              <div><strong>PAGE :</strong> 1 OF 1</div>
             </td>
           </tr>
         </tbody>
       </table>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 10px', fontSize: '13px', fontWeight: 'bold', border: '1px solid #000', marginBottom: '12px' }}>
-        <div>WINDOW ID CODE : <span style={{ fontWeight: 'normal' }}>{isBlank ? '___________________' : (record.checklist?.window_id || 'WIN-MILL-01 to 08')}</span></div>
-        <div>LOCATION : <span style={{ fontWeight: 'normal' }}>{isBlank ? '___________________' : (record.area_location || 'Milling Hall & Packaging Area')}</span></div>
-      </div>
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12 }}>
+        <tbody>
+          <tr>
+            <td style={{ border: '2px solid #000', padding: '8px 12px', width: '50%' }}>
+              <strong>WINDOW ID CODE :</strong> {isBlank ? '' : (chk.window_id_code || 'WIN-MIL-01 to 08')}
+            </td>
+            <td style={{ border: '2px solid #000', padding: '8px 12px', width: '50%' }}>
+              <strong>LOCATION :</strong> {isBlank ? '' : (record.area_location || chk.location || 'Milling Hall Line 1')}
+            </td>
+          </tr>
+        </tbody>
+      </table>
 
-      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: '14px', fontSize: '12px' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12 }}>
         <thead>
-          <tr style={{ background: '#f1f5f9' }}>
-            <th style={{ border: '1px solid #000', padding: '8px 6px', width: '8%', textAlign: 'center' }}>SL.NO.</th>
-            <th style={{ border: '1px solid #000', padding: '8px 10px', width: '55%', textAlign: 'left' }}>ACTIVITIES</th>
-            <th style={{ border: '1px solid #000', padding: '8px 6px', width: '15%', textAlign: 'center' }}>STATUS</th>
-            <th style={{ border: '1px solid #000', padding: '8px 8px', width: '22%', textAlign: 'left' }}>REMARKS</th>
+          <tr style={{ background: '#f8fafc', fontSize: '0.75rem' }}>
+            <th style={{ border: '2px solid #000', padding: '6px', width: '5%' }}>SL.NO.</th>
+            <th style={{ border: '2px solid #000', padding: '6px', width: '35%', textAlign: 'left' }}>ACTIVITIES</th>
+            {['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'].map(m => (
+              <th key={m} style={{ border: '1px solid #000', padding: '2px', width: '3%' }}>{m}</th>
+            ))}
+            <th style={{ border: '1px solid #000', padding: '4px', width: '8%' }}>CHECKED BY</th>
+            <th style={{ border: '1px solid #000', padding: '4px', width: '8%' }}>VERIFIED BY</th>
+            <th style={{ border: '2px solid #000', padding: '6px', width: '8%' }}>REMARKS</th>
           </tr>
         </thead>
         <tbody>
-          {items.map((it, idx) => (
-            <tr key={idx}>
-              <td style={{ border: '1px solid #000', padding: '10px 6px', textAlign: 'center', fontWeight: 'bold' }}>{idx + 1}.</td>
-              <td style={{ border: '1px solid #000', padding: '10px', fontWeight: '600', whiteSpace: 'pre-line' }}>{it.title}</td>
-              <td style={{ border: '1px solid #000', padding: '10px 6px', textAlign: 'center', fontWeight: 'bold' }}>{isBlank ? '' : it.status}</td>
-              <td style={{ border: '1px solid #000', padding: '10px 8px' }}>{isBlank ? '' : it.remarks}</td>
+          {activities.map((act, idx) => (
+            <tr key={idx} style={{ fontSize: '0.8rem' }}>
+              <td style={{ border: '2px solid #000', padding: '6px', textAlign: 'center', fontWeight: 700 }}>{act.s_no}.</td>
+              <td style={{ border: '2px solid #000', padding: '6px', fontWeight: 600, whiteSpace: 'pre-line' }}>{act.activity}</td>
+              {Array.from({ length: 12 }, (_, i) => (
+                <td key={i} style={{ border: '1px solid #000', padding: '2px', textAlign: 'center', fontWeight: 700 }}>
+                  {isBlank ? '' : '√'}
+                </td>
+              ))}
+              <td style={{ border: '1px solid #000', padding: '4px', textAlign: 'center' }}>{isBlank ? '' : (record.inspector_name || 'Housekeeper')}</td>
+              <td style={{ border: '1px solid #000', padding: '4px', textAlign: 'center' }}>{isBlank ? '' : (record.supervisor_name || 'Supervisor')}</td>
+              <td style={{ border: '2px solid #000', padding: '6px' }}>{isBlank ? '' : (act.remarks || 'Glass clear')}</td>
             </tr>
           ))}
         </tbody>
       </table>
 
-      <div style={{ display: 'flex', justifyContent: 'space-around', border: '1px solid #000', padding: '8px', fontSize: '12px', fontWeight: 'bold', marginBottom: '20px' }}>
-        <div>[ √ ] CHECK</div>
-        <div>[ H ] HOLIDAY</div>
-        <div>[ X ] NOT CHECK</div>
-      </div>
-
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '30px', padding: '0 20px', fontSize: '13px' }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ borderTop: '1px solid #000', width: '200px', paddingTop: '4px', fontWeight: 'bold' }}>{isBlank ? '' : (record.prepared_by || 'Housekeeper')}</div>
-          <div style={{ fontSize: '11px', color: '#555' }}>CHECKED BY</div>
-        </div>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ borderTop: '1px solid #000', width: '200px', paddingTop: '4px', fontWeight: 'bold' }}>{isBlank ? '' : (record.verified_by || 'Unit Supervisor')}</div>
-          <div style={{ fontSize: '11px', color: '#555' }}>VERIFIED BY</div>
-        </div>
-      </div>
+      <Box sx={{ border: '1px solid #000', p: 1, display: 'flex', justifyContent: 'space-around', alignItems: 'center' }}>
+        <Box><strong>[ √ ]</strong> CHECK</Box>
+        <Box><strong>[ H ]</strong> HOLIDAY</Box>
+        <Box><strong>[ X ]</strong> NOT CHECK</Box>
+      </Box>
     </Box>
   );
 }
 
-// ----------------------------------------------------------------------
-// C6: CLEANING CHECKLIST WOOD-PALLET (15 DAYS ONCE) - FORMAT NO. : BVC/CP/CL/06
-// ----------------------------------------------------------------------
-function C6PaperFormat({ record, isBlank }) {
-  const items = isBlank ? [
-    { title: 'Before clean the pallet to place out the pallet from store area.', status: '', remarks: '' },
-    { title: 'Wipe out dust from the pallet.', status: '', remarks: '' },
-    { title: 'Check out the pallet if any damage observed. & Wipe out the damaged pallet from the store area.', status: '', remarks: '' },
-    { title: 'Inform to the unit supervisor if any damage observed.', status: '', remarks: '' }
-  ] : [
-    { title: 'Before clean the pallet to place out the pallet from store area.', status: '✓ CHECK', remarks: 'Pallets isolated outside store' },
-    { title: 'Wipe out dust from the pallet.', status: '✓ CHECK', remarks: 'Dust brushed and wiped' },
-    { title: 'Check out the pallet if any damage observed. & Wipe out the damaged pallet from the store area.', status: '✓ CHECK', remarks: 'No broken planks' },
-    { title: 'Inform to the unit supervisor if any damage observed.', status: '✓ CHECK', remarks: 'Reported to supervisor' }
-  ];
+// C6: WOOD-PALLET (15 DAYS ONCE)
+function C6Paper({ record, isBlank }) {
+  const chk = record.checklist || {};
+  const activities = chk.activities || [];
 
   return (
     <Box>
-      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: '12px' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12 }}>
         <tbody>
           <tr>
-            <td style={{ width: '35%', border: '1px solid #000', padding: '10px', textAlign: 'center' }}>
-              <div style={{ fontWeight: 'bold', fontSize: '16px' }}>BVC EXPORTS PVT LIMITED</div>
+            <td style={{ border: '2px solid #000', padding: '14px', width: '38%', textAlign: 'center' }}>
+              <Typography sx={{ fontWeight: 800, fontSize: '1.05rem' }}>BVC EXPORTS PVT LIMITED</Typography>
             </td>
-            <td style={{ width: '40%', border: '1px solid #000', padding: '10px', textAlign: 'center' }}>
-              <div style={{ fontWeight: 'bold', fontSize: '15px' }}>CLEANING CHECKLIST</div>
-              <div style={{ fontWeight: 'bold', fontSize: '14px' }}>WOOD-PALLET</div>
-              <div style={{ fontSize: '13px' }}>(15 DAYS ONCE)</div>
+            <td style={{ border: '2px solid #000', padding: '8px', width: '37%', textAlign: 'center' }}>
+              <Typography sx={{ fontWeight: 800, fontSize: '1.05rem' }}>
+                CLEANING CHECKLIST<br />WOOD-PALLET<br /><span style={{ fontSize: '0.9rem', fontWeight: 600 }}>(15 DAYS ONCE)</span>
+              </Typography>
             </td>
-            <td style={{ width: '25%', border: '1px solid #000', padding: '6px 10px', fontSize: '12px' }}>
+            <td style={{ border: '2px solid #000', padding: '6px 10px', width: '25%', fontSize: '0.82rem' }}>
               <div><strong>FORMAT NO.</strong> : BVC/CP/CL/06</div>
               <div><strong>REV. NO.</strong> : 00</div>
-              <div><strong>DATE</strong> : {isBlank ? '' : (record.record_date || '29.05.2017')}</div>
-              <div><strong>PAGE</strong> : 1 OF 1</div>
+              <div><strong>DATE :</strong> 29.05.2017</div>
+              <div><strong>PAGE :</strong> 1 OF 1</div>
             </td>
           </tr>
         </tbody>
       </table>
 
-      <div style={{ padding: '6px 10px', fontSize: '13px', fontWeight: 'bold', border: '1px solid #000', marginBottom: '12px' }}>
-        PALLET CODE / NO : <span style={{ fontWeight: 'normal' }}>{isBlank ? '___________________' : (record.checklist?.pallet_id || 'PLT-WD-01 to 50')}</span>
-      </div>
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12 }}>
+        <tbody>
+          <tr>
+            <td style={{ border: '2px solid #000', padding: '8px 12px' }}>
+              <strong>PALLET CODE/NO :</strong> {isBlank ? '' : (record.area_location || chk.pallet_code || 'PLT-WD-01 to 50')}
+            </td>
+          </tr>
+        </tbody>
+      </table>
 
-      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: '14px', fontSize: '12px' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12 }}>
         <thead>
-          <tr style={{ background: '#f1f5f9' }}>
-            <th style={{ border: '1px solid #000', padding: '8px 6px', width: '8%', textAlign: 'center' }}>SL.NO.</th>
-            <th style={{ border: '1px solid #000', padding: '8px 10px', width: '55%', textAlign: 'left' }}>ACTIVITIES</th>
-            <th style={{ border: '1px solid #000', padding: '8px 6px', width: '15%', textAlign: 'center' }}>STATUS</th>
-            <th style={{ border: '1px solid #000', padding: '8px 8px', width: '22%', textAlign: 'left' }}>REMARKS</th>
+          <tr style={{ background: '#f8fafc', fontSize: '0.75rem' }}>
+            <th style={{ border: '2px solid #000', padding: '6px', width: '5%' }}>SL.NO.</th>
+            <th style={{ border: '2px solid #000', padding: '6px', width: '35%', textAlign: 'left' }}>ACTIVITIES</th>
+            {['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'].map(m => (
+              <th key={m} style={{ border: '1px solid #000', padding: '2px', width: '3%' }}>{m}</th>
+            ))}
+            <th style={{ border: '1px solid #000', padding: '4px', width: '8%' }}>CHECKED BY</th>
+            <th style={{ border: '1px solid #000', padding: '4px', width: '8%' }}>VERIFIED BY</th>
+            <th style={{ border: '2px solid #000', padding: '6px', width: '8%' }}>REMARKS</th>
+          </tr>
+        </thead>
+        <tbody>
+          {activities.map((act, idx) => (
+            <tr key={idx} style={{ fontSize: '0.8rem' }}>
+              <td style={{ border: '2px solid #000', padding: '6px', textAlign: 'center', fontWeight: 700 }}>{act.s_no}.</td>
+              <td style={{ border: '2px solid #000', padding: '6px', fontWeight: 600, whiteSpace: 'pre-line' }}>{act.activity}</td>
+              {Array.from({ length: 12 }, (_, i) => (
+                <td key={i} style={{ border: '1px solid #000', padding: '2px', textAlign: 'center', fontWeight: 700 }}>
+                  {isBlank ? '' : '√'}
+                </td>
+              ))}
+              <td style={{ border: '1px solid #000', padding: '4px', textAlign: 'center' }}>{isBlank ? '' : (record.inspector_name || 'Store Staff')}</td>
+              <td style={{ border: '1px solid #000', padding: '4px', textAlign: 'center' }}>{isBlank ? '' : (record.supervisor_name || 'Supervisor')}</td>
+              <td style={{ border: '2px solid #000', padding: '6px' }}>{isBlank ? '' : (act.remarks || 'Pallets OK')}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <Box sx={{ border: '1px solid #000', p: 1, display: 'flex', justifyContent: 'space-around', alignItems: 'center' }}>
+        <Box><strong>[ √ ]</strong> CHECK</Box>
+        <Box><strong>[ H ]</strong> HOLIDAY</Box>
+        <Box><strong>[ X ]</strong> NOT CHECK</Box>
+      </Box>
+    </Box>
+  );
+}
+
+// C7: TOILET INSPECTION CHECK LIST
+function C7Paper({ record, isBlank }) {
+  const chk = record.checklist || {};
+  const items = chk.check_items || [];
+
+  return (
+    <Box>
+      <Box sx={{ textAlign: 'center', border: '2px solid #000', p: 1.5, mb: 2 }}>
+        <Typography sx={{ fontWeight: 800, fontSize: '1.15rem' }}>BVC EXPORTS PVT LTD</Typography>
+        <Typography sx={{ fontWeight: 800, fontSize: '1.05rem' }}>TOILET INSPECTION CHECK LIST</Typography>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1, fontSize: '0.88rem', px: 2 }}>
+          <div><strong>DOC Ref :</strong> BVC-QA-F-05</div>
+          <div><strong>Month :</strong> {isBlank ? '' : (chk.month || 'Current Month')}</div>
+          <div><strong>Toilet :</strong> {isBlank ? '' : (record.area_location || chk.toilet_name || 'Block A')}</div>
+        </Box>
+      </Box>
+
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12 }}>
+        <thead>
+          <tr style={{ background: '#f8fafc', fontSize: '0.78rem' }}>
+            <th style={{ border: '2px solid #000', padding: '6px', width: '5%' }}>Sl.No</th>
+            <th style={{ border: '2px solid #000', padding: '6px', width: '35%', textAlign: 'left' }}>Check for</th>
+            {Array.from({ length: 31 }, (_, i) => (
+              <th key={i} style={{ border: '1px solid #000', padding: '1px', fontSize: '0.62rem' }}>{i + 1}</th>
+            ))}
           </tr>
         </thead>
         <tbody>
           {items.map((it, idx) => (
-            <tr key={idx}>
-              <td style={{ border: '1px solid #000', padding: '10px 6px', textAlign: 'center', fontWeight: 'bold' }}>{idx + 1}.</td>
-              <td style={{ border: '1px solid #000', padding: '10px', fontWeight: '600' }}>{it.title}</td>
-              <td style={{ border: '1px solid #000', padding: '10px 6px', textAlign: 'center', fontWeight: 'bold' }}>{isBlank ? '' : it.status}</td>
-              <td style={{ border: '1px solid #000', padding: '10px 8px' }}>{isBlank ? '' : it.remarks}</td>
+            <tr key={idx} style={{ fontSize: '0.75rem' }}>
+              <td style={{ border: '2px solid #000', padding: '6px', textAlign: 'center', fontWeight: 700 }}>{it.s_no || idx + 1}</td>
+              <td style={{ border: '2px solid #000', padding: '6px', fontWeight: 600 }}>{it.item}</td>
+              {Array.from({ length: 31 }, (_, i) => (
+                <td key={i} style={{ border: '1px solid #000', padding: '1px', textAlign: 'center', fontWeight: 700 }}>
+                  {isBlank ? '' : '✓'}
+                </td>
+              ))}
             </tr>
           ))}
         </tbody>
       </table>
 
-      <div style={{ display: 'flex', justifyContent: 'space-around', border: '1px solid #000', padding: '8px', fontSize: '12px', fontWeight: 'bold', marginBottom: '20px' }}>
-        <div>[ √ ] CHECK</div>
-        <div>[ H ] HOLIDAY</div>
-        <div>[ X ] NOT CHECK</div>
-      </div>
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12 }}>
+        <tbody>
+          <tr>
+            <td style={{ border: '2px solid #000', padding: '8px 12px', width: '50%' }}>
+              <strong>Done By: House Keeper</strong> {isBlank ? '' : (record.inspector_name || 'House Keeper')}
+            </td>
+            <td style={{ border: '2px solid #000', padding: '8px 12px', width: '50%' }}>
+              <strong>Checked by : HR MANAGER</strong> {isBlank ? '' : (record.supervisor_name || 'HR MANAGER')}
+            </td>
+          </tr>
+        </tbody>
+      </table>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '30px', padding: '0 20px', fontSize: '13px' }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ borderTop: '1px solid #000', width: '200px', paddingTop: '4px', fontWeight: 'bold' }}>{isBlank ? '' : (record.prepared_by || 'Store Keeper')}</div>
-          <div style={{ fontSize: '11px', color: '#555' }}>CHECKED BY</div>
-        </div>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ borderTop: '1px solid #000', width: '200px', paddingTop: '4px', fontWeight: 'bold' }}>{isBlank ? '' : (record.verified_by || 'Unit Supervisor')}</div>
-          <div style={{ fontSize: '11px', color: '#555' }}>VERIFIED BY</div>
-        </div>
-      </div>
+      <Box sx={{ border: '1px solid #000', p: 1, textAlign: 'center', fontWeight: 700 }}>
+        ✓- Yes &nbsp;&nbsp;&nbsp;&nbsp; X- No
+      </Box>
     </Box>
   );
 }
 
-// ----------------------------------------------------------------------
-// C7: TOILET INSPECTION CHECK LIST (Daily) - DOC Ref : BVC-QA-F-05
-// ----------------------------------------------------------------------
-function C7PaperFormat({ record, isBlank }) {
+// C8: VEHICLE LOADING/UNLOADING INSPECTION REPORT
+function C8Paper({ record, isBlank }) {
   const chk = record.checklist || {};
-  const params = [
-    'Floor / Area Cleanliness',
-    'Urinal area cleanliness',
-    'Water tap working',
-    'Water availability',
-    'Soap Solution availability',
-    'Bucket / Tub availability',
-    'Flush working condition',
-    'Lights working',
-    'Hand dryer / Towel available'
-  ];
+  const points = chk.check_points || [];
 
   return (
     <Box>
-      <div style={{ textAlign: 'center', border: '2px solid #000', padding: '8px', marginBottom: '10px' }}>
-        <div style={{ fontWeight: 'bold', fontSize: '16px' }}>BVC EXPORTS PVT LTD</div>
-        <div style={{ fontWeight: 'bold', fontSize: '14px' }}>TOILET INSPECTION CHECK LIST</div>
-      </div>
+      <Box sx={{ textAlign: 'center', border: '2px solid #000', p: 1.5, mb: 2 }}>
+        <Typography sx={{ fontWeight: 800, fontSize: '1.15rem' }}>
+          VEHICLE LOADING/UN LOADING INSPECTION REPORT
+        </Typography>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1.5, fontSize: '0.88rem' }}>
+          <div><strong>DOC Ref :</strong> BVC/QA/F/07</div>
+          <div><strong>Date :</strong> {isBlank ? '' : record.record_date}</div>
+        </Box>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1, fontSize: '0.88rem' }}>
+          <div><strong>Customer / Qty :</strong> {isBlank ? '' : (chk.customer_qty || 'Royal Foods Exporters / 500 Bags')}</div>
+          <div><strong>Vehicle No :</strong> {isBlank ? '' : (record.area_location || chk.vehicle_no || 'TN-58-AX-9912')}</div>
+        </Box>
+      </Box>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 10px', fontSize: '12px', fontWeight: 'bold', border: '1px solid #000', marginBottom: '10px' }}>
-        <div>DOC Ref : BVC-QA-F-05</div>
-        <div>Month : {isBlank ? '___________________' : (record.record_date?.slice(0, 7) || '2026-08')}</div>
-        <div>Toilet : {isBlank ? '___________________' : (record.area_location || 'Gents Restroom Block A')}</div>
-      </div>
-
-      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: '14px', fontSize: '12px' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12 }}>
         <thead>
-          <tr style={{ background: '#f1f5f9' }}>
-            <th style={{ border: '1px solid #000', padding: '6px', width: '8%', textAlign: 'center' }}>Sl.No</th>
-            <th style={{ border: '1px solid #000', padding: '6px 10px', width: '50%', textAlign: 'left' }}>Check for</th>
-            <th style={{ border: '1px solid #000', padding: '6px', width: '20%', textAlign: 'center' }}>Status (✓- Yes / X- No)</th>
-            <th style={{ border: '1px solid #000', padding: '6px 10px', width: '22%', textAlign: 'left' }}>Remarks</th>
+          <tr style={{ background: '#f8fafc' }}>
+            <th style={{ border: '2px solid #000', padding: '8px', width: '8%', textAlign: 'center' }}>Sl.No</th>
+            <th style={{ border: '2px solid #000', padding: '8px', width: '45%', textAlign: 'left' }}>Check for</th>
+            <th style={{ border: '2px solid #000', padding: '8px', width: '10%', textAlign: 'center' }}>OK</th>
+            <th style={{ border: '2px solid #000', padding: '8px', width: '10%', textAlign: 'center' }}>Not OK</th>
+            <th style={{ border: '2px solid #000', padding: '8px', width: '27%', textAlign: 'left' }}>REMARKS / Vehicle No</th>
           </tr>
         </thead>
         <tbody>
-          {params.map((item, idx) => {
-            const found = (chk.checklist || []).find(c => c.item === item) || {};
-            const isOk = found.status === 'OK' || found.status === 'Yes' || found.status === '✓' || true;
-            return (
-              <tr key={idx}>
-                <td style={{ border: '1px solid #000', padding: '8px 6px', textAlign: 'center', fontWeight: 'bold' }}>{idx + 1}</td>
-                <td style={{ border: '1px solid #000', padding: '8px 10px', fontWeight: '600' }}>{item}</td>
-                <td style={{ border: '1px solid #000', padding: '8px', textAlign: 'center', fontWeight: 'bold', fontSize: '14px' }}>
-                  {isBlank ? '' : (isOk ? '✓ Yes' : 'X No')}
-                </td>
-                <td style={{ border: '1px solid #000', padding: '8px 10px' }}>
-                  {isBlank ? '' : (found.remarks || 'Clean & verified')}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-
-      <div style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '20px', padding: '4px' }}>
-        Legend: ✓- Yes &nbsp;&nbsp;&nbsp; X- No
-      </div>
-
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '30px', padding: '0 20px', fontSize: '13px' }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ borderTop: '1px solid #000', width: '200px', paddingTop: '4px', fontWeight: 'bold' }}>{isBlank ? '' : (record.prepared_by || 'House Keeper')}</div>
-          <div style={{ fontSize: '11px', color: '#555' }}>Done By: House Keeper</div>
-        </div>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ borderTop: '1px solid #000', width: '200px', paddingTop: '4px', fontWeight: 'bold' }}>{isBlank ? '' : (record.verified_by || 'HR MANAGER')}</div>
-          <div style={{ fontSize: '11px', color: '#555' }}>Checked by : HR MANAGER</div>
-        </div>
-      </div>
-    </Box>
-  );
-}
-
-// ----------------------------------------------------------------------
-// C8: VEHICLE LOADING/UN LOADING INSPECTION REPORT - DOC Ref : BVC/QA/F/07
-// ----------------------------------------------------------------------
-function C8PaperFormat({ record, isBlank }) {
-  const chk = record.checklist || {};
-  const points = [
-    'Cleanliness of truck - Dust / Dirt',
-    'No Pest / Pest droppings',
-    'No foreign material / Moisture',
-    'Doors are intact- Good condition',
-    'No corrosion (platform / all inner area)',
-    'Truck sealing (empty and after loading)',
-    'Any unwanted Odour',
-    'Tarpalin in the truck(clean/damage)',
-    'General acceptance of truck'
-  ];
-
-  return (
-    <Box>
-      <div style={{ textAlign: 'center', border: '2px solid #000', padding: '8px', marginBottom: '8px' }}>
-        <div style={{ fontWeight: 'bold', fontSize: '15px' }}>VEHICLE LOADING/UN LOADING INSPECTION REPORT</div>
-      </div>
-
-      <table style={{ width: '100%', borderCollapse: 'collapse', border: '1px solid #000', marginBottom: '10px', fontSize: '12px' }}>
-        <tbody>
-          <tr>
-            <td style={{ border: '1px solid #000', padding: '6px 10px', width: '50%' }}>
-              <strong>DOC Ref</strong> : BVC/QA/F/07
-            </td>
-            <td style={{ border: '1px solid #000', padding: '6px 10px', width: '50%' }}>
-              <strong>Date</strong> : {isBlank ? '' : (record.record_date || new Date().toISOString().split('T')[0])}
-            </td>
-          </tr>
-          <tr>
-            <td style={{ border: '1px solid #000', padding: '6px 10px' }}>
-              <strong>Customer / Qty</strong> : {isBlank ? '' : (chk.customer ? `${chk.customer} / ${chk.quantity || '25 MT'}` : (record.customer_name || 'Royal Foods / 500 Bags'))}
-            </td>
-            <td style={{ border: '1px solid #000', padding: '6px 10px' }}>
-              <strong>Vehicle No</strong> : {isBlank ? '' : (chk.vehicle_no || record.vehicle_no || 'TN-58-AX-9912')}
-            </td>
-          </tr>
-        </tbody>
-      </table>
-
-      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: '14px', fontSize: '12px' }}>
-        <thead>
-          <tr style={{ background: '#f1f5f9' }}>
-            <th style={{ border: '1px solid #000', padding: '8px 6px', width: '8%', textAlign: 'center' }}>Sl.No</th>
-            <th style={{ border: '1px solid #000', padding: '8px 10px', width: '45%', textAlign: 'left' }}>Check for</th>
-            <th style={{ border: '1px solid #000', padding: '8px 6px', width: '12%', textAlign: 'center' }}>OK</th>
-            <th style={{ border: '1px solid #000', padding: '8px 6px', width: '12%', textAlign: 'center' }}>Not OK</th>
-            <th style={{ border: '1px solid #000', padding: '8px 8px', width: '23%', textAlign: 'left' }}>REMARKS / Vehicle No</th>
-          </tr>
-        </thead>
-        <tbody>
-          {points.map((pt, idx) => {
-            const found = (chk.checklist || []).find(c => c.check_point && c.check_point.includes(pt.split(' - ')[0])) || {};
-            const isOk = !isBlank;
-            return (
-              <tr key={idx}>
-                <td style={{ border: '1px solid #000', padding: '8px 6px', textAlign: 'center', fontWeight: 'bold' }}>{idx + 1}</td>
-                <td style={{ border: '1px solid #000', padding: '8px 10px', fontWeight: '600' }}>{pt}</td>
-                <td style={{ border: '1px solid #000', padding: '8px 6px', textAlign: 'center', fontSize: '14px', fontWeight: 'bold' }}>
-                  {isBlank ? '' : (isOk ? '✓' : '')}
-                </td>
-                <td style={{ border: '1px solid #000', padding: '8px 6px', textAlign: 'center', fontSize: '14px', fontWeight: 'bold' }}>
-                  {isBlank ? '' : (!isOk ? 'X' : '')}
-                </td>
-                <td style={{ border: '1px solid #000', padding: '8px 8px' }}>
-                  {isBlank ? '' : (found.remarks || 'Compliant')}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '30px', padding: '0 20px', fontSize: '13px' }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ borderTop: '1px solid #000', width: '200px', paddingTop: '4px', fontWeight: 'bold' }}>{isBlank ? '' : (record.prepared_by || 'Security Officer')}</div>
-          <div style={{ fontSize: '11px', color: '#555' }}>Checked by : (Security)</div>
-        </div>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ borderTop: '1px solid #000', width: '200px', paddingTop: '4px', fontWeight: 'bold' }}>{isBlank ? '' : (record.verified_by || 'Dispatch Clerk')}</div>
-          <div style={{ fontSize: '11px', color: '#555' }}>Verified by : (clerk)</div>
-        </div>
-      </div>
-    </Box>
-  );
-}
-
-// ----------------------------------------------------------------------
-// C9: Food Handlers Personal Hygiene Log - Form No: BVC/QA/F/01
-// ----------------------------------------------------------------------
-function C9PaperFormat({ record, isBlank }) {
-  const chk = record.checklist || {};
-  const rows = isBlank ? Array.from({ length: 11 }, (_, i) => ({
-    s_no: i + 1,
-    shift: '',
-    emp_name: '',
-    area: '',
-    ppe: '',
-    nails: '',
-    wounds: '',
-    illness: '',
-    jewels: '',
-    chemicals: '',
-    smoking: '',
-    remarks: '',
-    action: ''
-  })) : (chk.employees && chk.employees.length > 0 ? chk.employees : [
-    { s_no: 1, shift: 'D', emp_name: 'Murugan K', area: 'Milling', ppe: '✓', nails: '✓', wounds: '✓', illness: '✓', jewels: '✓', chemicals: '✓', smoking: '✓', remarks: 'Fit', action: 'Nil' },
-    { s_no: 2, shift: 'D', emp_name: 'Suresh P', area: 'Packing', ppe: '✓', nails: '✓', wounds: '✓', illness: '✓', jewels: '✓', chemicals: '✓', smoking: '✓', remarks: 'Fit', action: 'Nil' },
-    { s_no: 3, shift: 'D', emp_name: 'Anand R', area: 'Sifting', ppe: '✓', nails: '✓', wounds: '✓', illness: '✓', jewels: '✓', chemicals: '✓', smoking: '✓', remarks: 'Fit', action: 'Nil' },
-    { s_no: 4, shift: 'D', emp_name: 'Kavitha M', area: 'Packing', ppe: '✓', nails: '✓', wounds: '✓', illness: '✓', jewels: '✓', chemicals: '✓', smoking: '✓', remarks: 'Fit', action: 'Nil' },
-    { s_no: 5, shift: 'D', emp_name: 'Govindan V', area: 'Store', ppe: '✓', nails: '✓', wounds: '✓', illness: '✓', jewels: '✓', chemicals: '✓', smoking: '✓', remarks: 'Fit', action: 'Nil' }
-  ]);
-
-  return (
-    <Box>
-      {/* Header */}
-      <table style={{ width: '100%', borderCollapse: 'collapse', border: '1px solid #000', marginBottom: '8px' }}>
-        <tbody>
-          <tr>
-            <td style={{ width: '70%', padding: '8px 12px', textAlign: 'center' }}>
-              <div style={{ fontWeight: 'bold', fontSize: '16px' }}>BVC EXPORTS (PVT) LTD</div>
-              <div style={{ fontWeight: 'bold', fontSize: '15px' }}>Food Handlers Personal Hygiene Log</div>
-            </td>
-            <td style={{ width: '30%', padding: '6px 10px', fontSize: '11px', borderLeft: '1px solid #000' }}>
-              <div><strong>Form No</strong>: BVC/QA/F/01</div>
-              <div><strong>Rev.No</strong> : 0</div>
-              <div><strong>Date</strong>: 29.05.2017</div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-
-      <div style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '8px' }}>
-        Date: {isBlank ? '___________________' : (record.record_date || new Date().toISOString().split('T')[0])}
-      </div>
-
-      {/* Main Hygiene Table */}
-      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: '12px', fontSize: '10px' }}>
-        <thead>
-          <tr style={{ background: '#f1f5f9' }}>
-            <th rowSpan="2" style={{ border: '1px solid #000', padding: '4px', width: '3%', textAlign: 'center' }}>Sl. No</th>
-            <th rowSpan="2" style={{ border: '1px solid #000', padding: '4px', width: '4%', textAlign: 'center' }}>Shift</th>
-            <th rowSpan="2" style={{ border: '1px solid #000', padding: '4px', width: '14%', textAlign: 'left' }}>Worker Name</th>
-            <th rowSpan="2" style={{ border: '1px solid #000', padding: '4px', width: '10%', textAlign: 'left' }}>Area</th>
-            <th colSpan="7" style={{ border: '1px solid #000', padding: '4px', textAlign: 'center' }}>✓-ok &nbsp;&nbsp; X- Not Ok</th>
-            <th rowSpan="2" style={{ border: '1px solid #000', padding: '4px', width: '10%', textAlign: 'left' }}>Remarks</th>
-            <th rowSpan="2" style={{ border: '1px solid #000', padding: '4px', width: '10%', textAlign: 'left' }}>Corrective Action</th>
-          </tr>
-          <tr style={{ background: '#f8fafc', fontSize: '9px' }}>
-            <th style={{ border: '1px solid #000', padding: '3px', width: '8%' }}>Wearing PPEs (Head Cover/ Mask/)</th>
-            <th style={{ border: '1px solid #000', padding: '3px', width: '8%' }}>Nail Trimming/No discharges ear/eye/nose</th>
-            <th style={{ border: '1px solid #000', padding: '3px', width: '7%' }}>Free from Visible wounds</th>
-            <th style={{ border: '1px solid #000', padding: '3px', width: '8%' }}>No symptoms illness / Running nose</th>
-            <th style={{ border: '1px solid #000', padding: '3px', width: '8%' }}>No exposed jewels/ belongings</th>
-            <th style={{ border: '1px solid #000', padding: '3px', width: '8%' }}>No use of mehandi, chemicals</th>
-            <th style={{ border: '1px solid #000', padding: '3px', width: '7%' }}>No Smoking /chewing</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, idx) => (
+          {points.map((pt, idx) => (
             <tr key={idx}>
-              <td style={{ border: '1px solid #000', padding: '4px', textAlign: 'center', fontWeight: 'bold' }}>{idx + 1}</td>
-              <td style={{ border: '1px solid #000', padding: '4px', textAlign: 'center' }}>{isBlank ? '' : (row.shift || 'D')}</td>
-              <td style={{ border: '1px solid #000', padding: '4px', fontWeight: '600' }}>{isBlank ? '' : (row.emp_name || row.worker_name || '')}</td>
-              <td style={{ border: '1px solid #000', padding: '4px' }}>{isBlank ? '' : (row.area || row.department || 'Production')}</td>
-              <td style={{ border: '1px solid #000', padding: '4px', textAlign: 'center', fontWeight: 'bold' }}>{isBlank ? '' : (row.ppe || '✓')}</td>
-              <td style={{ border: '1px solid #000', padding: '4px', textAlign: 'center', fontWeight: 'bold' }}>{isBlank ? '' : (row.nails || '✓')}</td>
-              <td style={{ border: '1px solid #000', padding: '4px', textAlign: 'center', fontWeight: 'bold' }}>{isBlank ? '' : (row.wounds || '✓')}</td>
-              <td style={{ border: '1px solid #000', padding: '4px', textAlign: 'center', fontWeight: 'bold' }}>{isBlank ? '' : (row.illness || '✓')}</td>
-              <td style={{ border: '1px solid #000', padding: '4px', textAlign: 'center', fontWeight: 'bold' }}>{isBlank ? '' : (row.jewels || '✓')}</td>
-              <td style={{ border: '1px solid #000', padding: '4px', textAlign: 'center', fontWeight: 'bold' }}>{isBlank ? '' : (row.chemicals || '✓')}</td>
-              <td style={{ border: '1px solid #000', padding: '4px', textAlign: 'center', fontWeight: 'bold' }}>{isBlank ? '' : (row.smoking || '✓')}</td>
-              <td style={{ border: '1px solid #000', padding: '4px' }}>{isBlank ? '' : (row.remarks || 'Fit')}</td>
-              <td style={{ border: '1px solid #000', padding: '4px' }}>{isBlank ? '' : (row.action || 'Nil')}</td>
+              <td style={{ border: '2px solid #000', padding: '8px', textAlign: 'center', fontWeight: 700 }}>{pt.s_no || idx + 1}</td>
+              <td style={{ border: '2px solid #000', padding: '8px', fontWeight: 600 }}>{pt.item}</td>
+              <td style={{ border: '2px solid #000', padding: '8px', textAlign: 'center', fontWeight: 700 }}>
+                {isBlank ? '' : (pt.ok ? '✓' : '')}
+              </td>
+              <td style={{ border: '2px solid #000', padding: '8px', textAlign: 'center', fontWeight: 700 }}>
+                {isBlank ? '' : (pt.not_ok ? 'X' : '')}
+              </td>
+              <td style={{ border: '2px solid #000', padding: '8px' }}>{isBlank ? '' : (pt.remarks || '')}</td>
             </tr>
           ))}
         </tbody>
       </table>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '20px', padding: '0 20px', fontSize: '12px' }}>
-        <div>CheckedBy: <span style={{ fontWeight: 'bold' }}>{isBlank ? '___________________' : (record.inspector_name || 'QMR')}</span></div>
-        <div>Approved By: <span style={{ fontWeight: 'bold' }}>{isBlank ? '___________________' : (record.supervisor_name || 'Managing Director')}</span></div>
-      </div>
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000' }}>
+        <tbody>
+          <tr>
+            <td style={{ border: '2px solid #000', padding: '14px 12px', width: '50%' }}>
+              <strong>Checked by :</strong> {isBlank ? '' : (record.inspector_name || 'Security')}
+              <div style={{ fontSize: '0.85rem', color: '#555', marginTop: 4 }}>(Security)</div>
+            </td>
+            <td style={{ border: '2px solid #000', padding: '14px 12px', width: '50%' }}>
+              <strong>Verified by :</strong> {isBlank ? '' : (record.supervisor_name || 'Dispatch Clerk')}
+              <div style={{ fontSize: '0.85rem', color: '#555', marginTop: 4 }}>(clerk)</div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </Box>
   );
 }
 
-// ----------------------------------------------------------------------
-// C10: PRIMARY PACKING MATERIAL INSPECTION RECORD (PPMI)
-// ----------------------------------------------------------------------
-function C10PaperFormat({ record, isBlank }) {
+// C9: FOOD HANDLERS PERSONAL HYGIENE LOG
+function C9Paper({ record, isBlank }) {
   const chk = record.checklist || {};
-  const params = [
-    { name: 'Physical Parameters', std: 'Free from contamination & dust' },
-    { name: 'Bottom Stitching', std: 'Even, double folded, minimum 3 stitches/inch' },
-    { name: 'Top Open', std: 'Clean cut, non-frayed' },
-    { name: 'Liner', std: 'Virgin Food Grade LDPE, 50 Micron' },
-    { name: 'Size', std: '24 x 36 inches (± 0.5 inch)' },
-    { name: 'Weight', std: '120g ± 5g per bag' },
-    { name: 'Printing space on top', std: 'Minimum 4 inches border clearance' },
-    { name: 'Printing Matter', std: 'Brand name, Net Wt, FSSAI, Batch text crisp' },
-    { name: 'Printing Ink', std: 'Non-toxic, food grade, rub-proof' }
-  ];
+  const workers = chk.workers || [];
 
   return (
     <Box>
-      <table style={{ width: '100%', borderCollapse: 'collapse', border: '1px solid #000', marginBottom: '8px' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12 }}>
         <tbody>
           <tr>
-            <td style={{ width: '35%', padding: '8px 12px', textAlign: 'center', borderRight: '1px solid #000' }}>
-              <div style={{ fontWeight: 'bold', fontSize: '15px' }}>BVC EXPORTS PRIVATE LIMITED</div>
+            <td style={{ border: '2px solid #000', padding: '12px', width: '70%', textAlign: 'center' }}>
+              <Typography sx={{ fontWeight: 800, fontSize: '1.15rem' }}>BVC EXPORTS (PVT) LTD</Typography>
+              <Typography sx={{ fontWeight: 800, fontSize: '1.05rem', mt: 0.5 }}>
+                Food Handlers Personal Hygiene Log
+              </Typography>
             </td>
-            <td style={{ width: '40%', padding: '8px 12px', textAlign: 'center', borderRight: '1px solid #000' }}>
-              <div style={{ fontWeight: 'bold', fontSize: '14px' }}>PRIMARY PACKING MATERIAL INSPECTION RECORD</div>
-            </td>
-            <td style={{ width: '25%', padding: '6px 10px', fontSize: '11px' }}>
-              <div><strong>PPMI:</strong> {isBlank ? '' : (record.record_no || 'PPMI/2026/001')}</div>
-              <div><strong>DATE:</strong> {isBlank ? '' : (record.record_date || new Date().toISOString().split('T')[0])}</div>
-              <div><strong>SUPPLIER:</strong> {isBlank ? '' : (chk.supplier || record.supplier_name || 'Sri Krishna Packaging')}</div>
-              <div><strong>INVOICE NO:</strong> {isBlank ? '' : (chk.purchase_no || 'INV-2026-881')}</div>
+            <td style={{ border: '2px solid #000', padding: '8px 12px', width: '30%', fontSize: '0.82rem' }}>
+              <div><strong>Form No:</strong> BVC/QA/F/01</div>
+              <div><strong>Rev.No :</strong> 0</div>
+              <div><strong>Date:</strong> 29.05.2017</div>
             </td>
           </tr>
         </tbody>
       </table>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 10px', fontSize: '12px', fontWeight: 'bold', border: '1px solid #000', marginBottom: '8px' }}>
-        <div>Date: {isBlank ? '___________________' : (record.record_date || new Date().toISOString().split('T')[0])}</div>
-        <div>Time : {isBlank ? '___________________' : (chk.inspection_time || '10:30 AM')}</div>
-      </div>
+      <Box sx={{ mb: 1, fontSize: '0.9rem' }}>
+        <strong>Date:</strong> {isBlank ? '' : record.record_date}
+      </Box>
 
-      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: '14px', fontSize: '12px' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12, fontSize: '0.74rem' }}>
         <thead>
-          <tr style={{ background: '#f1f5f9' }}>
-            <th style={{ border: '1px solid #000', padding: '6px', width: '8%', textAlign: 'center' }}>S.NO</th>
-            <th style={{ border: '1px solid #000', padding: '6px 10px', width: '30%', textAlign: 'left' }}>PARAMETERS</th>
-            <th style={{ border: '1px solid #000', padding: '6px 10px', width: '26%', textAlign: 'left' }}>STD WITH TOLERANCE</th>
-            <th style={{ border: '1px solid #000', padding: '6px 10px', width: '20%', textAlign: 'left' }}>OBSERVATIONS</th>
-            <th style={{ border: '1px solid #000', padding: '6px 10px', width: '16%', textAlign: 'left' }}>ACTION TAKEN</th>
+          <tr style={{ background: '#f8fafc' }}>
+            <th rowSpan={2} style={{ border: '1px solid #000', padding: '4px', textAlign: 'center' }}>Sl. No</th>
+            <th rowSpan={2} style={{ border: '1px solid #000', padding: '4px', textAlign: 'center' }}>Shift</th>
+            <th rowSpan={2} style={{ border: '1px solid #000', padding: '4px', textAlign: 'left', minWidth: 100 }}>Worker Name</th>
+            <th rowSpan={2} style={{ border: '1px solid #000', padding: '4px', textAlign: 'left', minWidth: 80 }}>Area</th>
+            <th colSpan={7} style={{ border: '1px solid #000', padding: '4px', textAlign: 'center' }}>✓-ok &nbsp; X- Not Ok</th>
+            <th rowSpan={2} style={{ border: '1px solid #000', padding: '4px', textAlign: 'left', minWidth: 80 }}>Remarks</th>
+            <th rowSpan={2} style={{ border: '1px solid #000', padding: '4px', textAlign: 'left', minWidth: 80 }}>Corrective Action</th>
+          </tr>
+          <tr style={{ background: '#f8fafc', fontSize: '0.68rem' }}>
+            <th style={{ border: '1px solid #000', padding: '2px' }}>Wearing PPEs</th>
+            <th style={{ border: '1px solid #000', padding: '2px' }}>Nail Trimming</th>
+            <th style={{ border: '1px solid #000', padding: '2px' }}>Free from Visible wounds</th>
+            <th style={{ border: '1px solid #000', padding: '2px' }}>No illness / nose</th>
+            <th style={{ border: '1px solid #000', padding: '2px' }}>No exposed jewels</th>
+            <th style={{ border: '1px solid #000', padding: '2px' }}>No chemicals/ointment</th>
+            <th style={{ border: '1px solid #000', padding: '2px' }}>No Smoking /chewing</th>
           </tr>
         </thead>
         <tbody>
-          {params.map((p, idx) => {
-            const found = (chk.parameters || []).find(param => param.parameter && param.parameter.toLowerCase().includes(p.name.toLowerCase().split(' ')[0])) || {};
-            return (
-              <tr key={idx}>
-                <td style={{ border: '1px solid #000', padding: '8px 6px', textAlign: 'center', fontWeight: 'bold' }}>{idx + 1}</td>
-                <td style={{ border: '1px solid #000', padding: '8px 10px', fontWeight: '600' }}>{p.name}</td>
-                <td style={{ border: '1px solid #000', padding: '8px 10px', fontSize: '11px' }}>{p.std}</td>
-                <td style={{ border: '1px solid #000', padding: '8px 10px', fontWeight: 'bold' }}>{isBlank ? '' : (found.observed || 'Conforms to standard')}</td>
-                <td style={{ border: '1px solid #000', padding: '8px 10px' }}>{isBlank ? '' : (found.result === 'Pass' || !found.result ? 'Accepted' : found.result)}</td>
-              </tr>
-            );
-          })}
+          {(isBlank ? Array.from({ length: 11 }, (_, i) => ({ s_no: i + 1, shift: `${i + 1}. D`, worker_name: '', area: '' })) : workers).map((w, idx) => (
+            <tr key={idx}>
+              <td style={{ border: '1px solid #000', padding: '4px', textAlign: 'center', fontWeight: 700 }}>{w.s_no || idx + 1}</td>
+              <td style={{ border: '1px solid #000', padding: '4px', textAlign: 'center' }}>{w.shift || `${idx + 1}. D`}</td>
+              <td style={{ border: '1px solid #000', padding: '4px', fontWeight: 600 }}>{w.worker_name}</td>
+              <td style={{ border: '1px solid #000', padding: '4px' }}>{w.area}</td>
+              <td style={{ border: '1px solid #000', padding: '4px', textAlign: 'center', fontWeight: 700 }}>{isBlank ? '' : (w.wearing_ppes || '✓')}</td>
+              <td style={{ border: '1px solid #000', padding: '4px', textAlign: 'center', fontWeight: 700 }}>{isBlank ? '' : (w.nail_trimming || '✓')}</td>
+              <td style={{ border: '1px solid #000', padding: '4px', textAlign: 'center', fontWeight: 700 }}>{isBlank ? '' : (w.free_wounds || '✓')}</td>
+              <td style={{ border: '1px solid #000', padding: '4px', textAlign: 'center', fontWeight: 700 }}>{isBlank ? '' : (w.no_illness || '✓')}</td>
+              <td style={{ border: '1px solid #000', padding: '4px', textAlign: 'center', fontWeight: 700 }}>{isBlank ? '' : (w.no_jewels || '✓')}</td>
+              <td style={{ border: '1px solid #000', padding: '4px', textAlign: 'center', fontWeight: 700 }}>{isBlank ? '' : (w.no_chemicals || '✓')}</td>
+              <td style={{ border: '1px solid #000', padding: '4px', textAlign: 'center', fontWeight: 700 }}>{isBlank ? '' : (w.no_smoking || '✓')}</td>
+              <td style={{ border: '1px solid #000', padding: '4px' }}>{isBlank ? '' : (w.remarks || '')}</td>
+              <td style={{ border: '1px solid #000', padding: '4px' }}>{isBlank ? '' : (w.corrective_action || '')}</td>
+            </tr>
+          ))}
         </tbody>
       </table>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '30px', padding: '0 20px', fontSize: '13px' }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ borderTop: '1px solid #000', width: '200px', paddingTop: '4px', fontWeight: 'bold' }}>{isBlank ? '' : (record.prepared_by || 'QC Inspector')}</div>
-          <div style={{ fontSize: '11px', color: '#555' }}>Prepared By</div>
-        </div>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ borderTop: '1px solid #000', width: '200px', paddingTop: '4px', fontWeight: 'bold' }}>{isBlank ? '' : (record.verified_by || 'QA Head')}</div>
-          <div style={{ fontSize: '11px', color: '#555' }}>Approved By</div>
-        </div>
-      </div>
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000' }}>
+        <tbody>
+          <tr>
+            <td style={{ border: '2px solid #000', padding: '12px', width: '50%' }}>
+              <strong>CheckedBy: QMR</strong> {isBlank ? '' : (record.inspector_name || 'QMR')}
+            </td>
+            <td style={{ border: '2px solid #000', padding: '12px', width: '50%' }}>
+              <strong>Approved By: Managing Director</strong> {isBlank ? '' : (record.supervisor_name || 'Managing Director')}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </Box>
+  );
+}
+
+// C10: PRIMARY PACKING MATERIAL INSPECTION RECORD
+function C10Paper({ record, isBlank }) {
+  const chk = record.checklist || {};
+  const params = chk.parameters || [];
+
+  return (
+    <Box>
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12 }}>
+        <tbody>
+          <tr>
+            <td style={{ border: '2px solid #000', padding: '14px', width: '38%', textAlign: 'center' }}>
+              <Typography sx={{ fontWeight: 800, fontSize: '1.05rem' }}>BVC EXPORTS PRIVATE LIMITED</Typography>
+            </td>
+            <td style={{ border: '2px solid #000', padding: '8px', width: '37%', textAlign: 'center' }}>
+              <Typography sx={{ fontWeight: 800, fontSize: '1.05rem' }}>
+                PRIMARY PACKING<br />MATERIAL INSPECTION<br />RECORD
+              </Typography>
+            </td>
+            <td style={{ border: '2px solid #000', padding: '6px 10px', width: '25%', fontSize: '0.82rem' }}>
+              <div><strong>PPMI:</strong> {isBlank ? '' : (chk.ppmi_no || 'PPMI-01')}</div>
+              <div><strong>DATE:</strong> {isBlank ? '' : record.record_date}</div>
+              <div><strong>SUPPLIER:</strong> {isBlank ? '' : (chk.supplier || 'Sri Krishna Packaging')}</div>
+              <div><strong>INVOICE NO:</strong> {isBlank ? '' : (chk.invoice_no || 'INV-2026-01')}</div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12 }}>
+        <tbody>
+          <tr>
+            <td style={{ border: '2px solid #000', padding: '6px 12px', width: '50%' }}>
+              <strong>Date:</strong> {isBlank ? '' : record.record_date}
+            </td>
+            <td style={{ border: '2px solid #000', padding: '6px 12px', width: '50%' }}>
+              <strong>Time :</strong> {isBlank ? '' : (chk.time || '10:30 AM')}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12 }}>
+        <thead>
+          <tr style={{ background: '#f8fafc' }}>
+            <th style={{ border: '2px solid #000', padding: '8px', width: '8%', textAlign: 'center' }}>S.NO</th>
+            <th style={{ border: '2px solid #000', padding: '8px', width: '25%', textAlign: 'left' }}>PARAMETERS</th>
+            <th style={{ border: '2px solid #000', padding: '8px', width: '32%', textAlign: 'left' }}>STD WITH TOLORANCE</th>
+            <th style={{ border: '2px solid #000', padding: '8px', width: '20%', textAlign: 'left' }}>OBSERVATIONS</th>
+            <th style={{ border: '2px solid #000', padding: '8px', width: '15%', textAlign: 'left' }}>ACTION TAKEN</th>
+          </tr>
+        </thead>
+        <tbody>
+          {params.map((p, idx) => (
+            <tr key={idx}>
+              <td style={{ border: '2px solid #000', padding: '8px', textAlign: 'center', fontWeight: 700 }}>{p.s_no || idx + 1}</td>
+              <td style={{ border: '2px solid #000', padding: '8px', fontWeight: 600 }}>{p.parameter}</td>
+              <td style={{ border: '2px solid #000', padding: '8px' }}>{isBlank ? '' : p.std_tolerance}</td>
+              <td style={{ border: '2px solid #000', padding: '8px' }}>{isBlank ? '' : p.observations}</td>
+              <td style={{ border: '2px solid #000', padding: '8px' }}>{isBlank ? '' : p.action_taken}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000' }}>
+        <tbody>
+          <tr>
+            <td style={{ border: '2px solid #000', padding: '12px', width: '50%' }}>
+              <strong>Prepared By</strong> {isBlank ? '' : (record.inspector_name || 'QC Inspector')}
+            </td>
+            <td style={{ border: '2px solid #000', padding: '12px', width: '50%' }}>
+              <strong>Approved By</strong> {isBlank ? '' : (record.supervisor_name || 'QA Head')}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </Box>
+  );
+}
+
+// C11: GLASS AND PLASTIC CONTROL CHECKLIST
+function C11Paper({ record, isBlank }) {
+  const chk = record.checklist || {};
+  const params = chk.parameters || [];
+
+  return (
+    <Box>
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12 }}>
+        <tbody>
+          <tr>
+            <td style={{ border: '2px solid #000', padding: '14px', width: '38%', textAlign: 'center' }}>
+              <Typography sx={{ fontWeight: 800, fontSize: '1.05rem' }}>BVC EXPORTS PRIVATE LIMITED</Typography>
+            </td>
+            <td style={{ border: '2px solid #000', padding: '8px', width: '37%', textAlign: 'center' }}>
+              <Typography sx={{ fontWeight: 800, fontSize: '1.05rem' }}>
+                GLASS AND PLASTIC<br />CONTROL CHECKLIST
+              </Typography>
+            </td>
+            <td style={{ border: '2px solid #000', padding: '6px 10px', width: '25%', fontSize: '0.82rem' }}>
+              <div><strong>BVC/QA/F/03</strong></div>
+              <div><strong>Rev.No./Date :</strong> 00/29.05.2017</div>
+              <div><strong>Page no :</strong> 1 of 1</div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12 }}>
+        <tbody>
+          <tr>
+            <td style={{ border: '2px solid #000', padding: '6px 12px', width: '50%' }}>
+              <strong>Date /shift :</strong> {isBlank ? '' : `${record.record_date} / ${chk.shift || 'Day Shift'}`}
+            </td>
+            <td style={{ border: '2px solid #000', padding: '6px 12px', width: '50%' }}>
+              <strong>Time :</strong> {isBlank ? '' : (chk.time || '09:00 AM')}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12 }}>
+        <thead>
+          <tr style={{ background: '#f8fafc' }}>
+            <th style={{ border: '2px solid #000', padding: '6px', width: '6%', textAlign: 'center' }}>Sl.no</th>
+            <th style={{ border: '2px solid #000', padding: '6px', width: '42%', textAlign: 'left' }}>PARAMETERS</th>
+            <th style={{ border: '2px solid #000', padding: '6px', width: '10%', textAlign: 'center' }}>Checklist</th>
+            <th style={{ border: '2px solid #000', padding: '6px', width: '12%', textAlign: 'center' }}>Conditons</th>
+            <th style={{ border: '2px solid #000', padding: '6px', width: '15%', textAlign: 'left' }}>OBSERVATIONS</th>
+            <th style={{ border: '2px solid #000', padding: '6px', width: '15%', textAlign: 'left' }}>ACTION TAKEN</th>
+          </tr>
+        </thead>
+        <tbody>
+          {params.map((p, idx) => (
+            <tr key={idx}>
+              <td style={{ border: '2px solid #000', padding: '6px', textAlign: 'center', fontWeight: 700 }}>{p.s_no || idx + 1}</td>
+              <td style={{ border: '2px solid #000', padding: '6px', fontSize: '0.85rem' }}>{p.parameter}</td>
+              <td style={{ border: '2px solid #000', padding: '6px', textAlign: 'center', fontWeight: 700 }}>{isBlank ? '' : p.checklist}</td>
+              <td style={{ border: '2px solid #000', padding: '6px', textAlign: 'center', fontWeight: 700 }}>{isBlank ? '' : p.condition}</td>
+              <td style={{ border: '2px solid #000', padding: '6px' }}>{isBlank ? '' : p.observations}</td>
+              <td style={{ border: '2px solid #000', padding: '6px' }}>{isBlank ? '' : p.action_taken}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <Box sx={{ border: '1px solid #000', p: 1, mb: 1.5, fontSize: '0.8rem' }}>
+        <strong>Conditions :</strong> IR - immediate repair required &nbsp;|&nbsp; NI : Check at next inspection &nbsp;|&nbsp; O.K- no problem noted
+      </Box>
+
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000' }}>
+        <tbody>
+          <tr>
+            <td style={{ border: '2px solid #000', padding: '10px 12px', width: '50%' }}>
+              <strong>PREPARED BY</strong> {isBlank ? '' : (record.inspector_name || 'QA Officer')}
+            </td>
+            <td style={{ border: '2px solid #000', padding: '10px 12px', width: '50%' }}>
+              <strong>APPROVED BY</strong> {isBlank ? '' : (record.supervisor_name || 'QA Manager')}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </Box>
+  );
+}
+
+// C12: PLASTIC PALLET CONTROL CHECKLIST
+function C12Paper({ record, isBlank }) {
+  const chk = record.checklist || {};
+  const params = chk.parameters || [];
+
+  return (
+    <Box>
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12 }}>
+        <tbody>
+          <tr>
+            <td style={{ border: '2px solid #000', padding: '14px', width: '38%', textAlign: 'center' }}>
+              <Typography sx={{ fontWeight: 800, fontSize: '1.05rem' }}>BVC EXPORTS PRIVATE LIMITED</Typography>
+            </td>
+            <td style={{ border: '2px solid #000', padding: '8px', width: '37%', textAlign: 'center' }}>
+              <Typography sx={{ fontWeight: 800, fontSize: '1.05rem' }}>
+                PLASTIC PALLET CONTROL<br />CHECKLIST
+              </Typography>
+            </td>
+            <td style={{ border: '2px solid #000', padding: '6px 10px', width: '25%', fontSize: '0.82rem' }}>
+              <div><strong>BVC/QA/F/04</strong></div>
+              <div><strong>Rev.No./Date :</strong> 00/29.05.2017</div>
+              <div><strong>Page no :</strong> 1 of 1</div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12 }}>
+        <tbody>
+          <tr>
+            <td style={{ border: '2px solid #000', padding: '6px 12px', width: '50%' }}>
+              <strong>Date /shift :</strong> {isBlank ? '' : `${record.record_date} / ${chk.shift || 'Day Shift'}`}
+            </td>
+            <td style={{ border: '2px solid #000', padding: '6px 12px', width: '50%' }}>
+              <strong>Time :</strong> {isBlank ? '' : (chk.time || '09:30 AM')}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12 }}>
+        <thead>
+          <tr style={{ background: '#f8fafc' }}>
+            <th style={{ border: '2px solid #000', padding: '6px', width: '6%', textAlign: 'center' }}>Sl.no</th>
+            <th style={{ border: '2px solid #000', padding: '6px', width: '46%', textAlign: 'left' }}>PARAMETERS</th>
+            <th style={{ border: '2px solid #000', padding: '6px', width: '14%', textAlign: 'center' }}>STD WITH TOLERANCE</th>
+            <th style={{ border: '2px solid #000', padding: '6px', width: '17%', textAlign: 'left' }}>OBSERVATIONS</th>
+            <th style={{ border: '2px solid #000', padding: '6px', width: '17%', textAlign: 'left' }}>ACTION TAKEN</th>
+          </tr>
+        </thead>
+        <tbody>
+          {params.map((p, idx) => (
+            <tr key={idx}>
+              <td style={{ border: '2px solid #000', padding: '6px', textAlign: 'center', fontWeight: 700 }}>{p.s_no || idx + 1}</td>
+              <td style={{ border: '2px solid #000', padding: '6px', fontSize: '0.85rem' }}>{p.parameter}</td>
+              <td style={{ border: '2px solid #000', padding: '6px', textAlign: 'center', fontWeight: 700 }}>{isBlank ? '' : p.std_tolerance}</td>
+              <td style={{ border: '2px solid #000', padding: '6px' }}>{isBlank ? '' : p.observations}</td>
+              <td style={{ border: '2px solid #000', padding: '6px' }}>{isBlank ? '' : p.action_taken}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <Box sx={{ border: '1px solid #000', p: 1, mb: 1.5, fontSize: '0.8rem' }}>
+        <strong>Conditions:</strong> IR - immediate repair required &nbsp;|&nbsp; NI: Check at next inspection &nbsp;|&nbsp; O.K-no problem noted
+      </Box>
+
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000' }}>
+        <tbody>
+          <tr>
+            <td style={{ border: '2px solid #000', padding: '10px 12px', width: '50%' }}>
+              <strong>PREPARED BY</strong> {isBlank ? '' : (record.inspector_name || 'QA Officer')}
+            </td>
+            <td style={{ border: '2px solid #000', padding: '10px 12px', width: '50%' }}>
+              <strong>APPROVED BY</strong> {isBlank ? '' : (record.supervisor_name || 'QA Manager')}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </Box>
+  );
+}
+
+// C13: ROUTINE RODENT BAIT MONITORING RECORD
+function C13Paper({ record, isBlank }) {
+  const chk = record.checklist || {};
+  const internal = chk.internal_stations || [];
+  const outside = chk.outside_stations || [];
+
+  return (
+    <Box>
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12 }}>
+        <tbody>
+          <tr>
+            <td style={{ border: '2px solid #000', padding: '12px', width: '70%', textAlign: 'center' }}>
+              <Typography sx={{ fontWeight: 800, fontSize: '1.1rem' }}>BVC EXPORTS PVT LIMITED</Typography>
+              <Typography sx={{ fontWeight: 700, fontSize: '0.95rem' }}>
+                Routine Rodent bait Monitoring Record - Internal & Outside
+              </Typography>
+            </td>
+            <td style={{ border: '2px solid #000', padding: '6px 10px', width: '30%', fontSize: '0.82rem' }}>
+              <div><strong>Rec No :</strong> BVC/QA/F/10</div>
+              <div><strong>Rev No:</strong> 01</div>
+              <div><strong>Rev.Date:</strong> 01.01.2023</div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12 }}>
+        <tbody>
+          <tr>
+            <td style={{ border: '2px solid #000', padding: '6px 12px', width: '33%' }}>
+              <strong>Month-</strong> {isBlank ? '' : (chk.month || 'Current Month')}
+            </td>
+            <td style={{ border: '2px solid #000', padding: '6px 12px', width: '33%' }}>
+              <strong>Prepared By:</strong> Vasu
+            </td>
+            <td style={{ border: '2px solid #000', padding: '6px 12px', width: '34%' }}>
+              <strong>Approved By (FSTL):</strong> Mr. Sasikumar
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <Typography sx={{ fontWeight: 700, fontSize: '0.9rem', bgcolor: '#e2e8f0', p: 0.8, border: '1px solid #000' }}>
+        Routine Rodent bait Monitoring Record-Internal (Rodent Trap station internal of the factory premises)
+      </Typography>
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 8, fontSize: '0.72rem' }}>
+        <thead>
+          <tr style={{ background: '#f8fafc' }}>
+            <th style={{ border: '1px solid #000', padding: '4px', width: '15%' }}>Date/Trap Station</th>
+            {Array.from({ length: 31 }, (_, i) => (
+              <th key={i} style={{ border: '1px solid #000', padding: '1px' }}>{i + 1}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {['RTS-1', 'RTS-2', 'RTS-3', 'RTS-4', 'RTS-5', 'RTS-6', 'RTS-7', 'RTS-8'].map((st, idx) => (
+            <tr key={idx}>
+              <td style={{ border: '1px solid #000', padding: '4px', fontWeight: 700 }}>{st}</td>
+              {Array.from({ length: 31 }, (_, i) => (
+                <td key={i} style={{ border: '1px solid #000', padding: '1px', textAlign: 'center' }}>
+                  {isBlank ? '' : '✓'}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <Box sx={{ border: '1px solid #000', p: 1, mb: 2, fontSize: '0.85rem' }}>
+        <strong>CAPA :</strong> {isBlank ? '' : (chk.internal_capa || 'All internal snap traps inspected daily. Zero rodent intrusion observed.')}
+      </Box>
+
+      <Typography sx={{ fontWeight: 700, fontSize: '0.9rem', bgcolor: '#e2e8f0', p: 0.8, border: '1px solid #000' }}>
+        Routine Rodent bait Monitoring Record-Outside
+      </Typography>
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 8, fontSize: '0.72rem' }}>
+        <thead>
+          <tr style={{ background: '#f8fafc' }}>
+            <th style={{ border: '1px solid #000', padding: '4px', width: '15%' }}>Date/Bait Station</th>
+            {Array.from({ length: 31 }, (_, i) => (
+              <th key={i} style={{ border: '1px solid #000', padding: '1px' }}>{i + 1}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {['RBS-1', 'RBS-2'].map((st, idx) => (
+            <tr key={idx}>
+              <td style={{ border: '1px solid #000', padding: '4px', fontWeight: 700 }}>{st}</td>
+              {Array.from({ length: 31 }, (_, i) => (
+                <td key={i} style={{ border: '1px solid #000', padding: '1px', textAlign: 'center' }}>
+                  {isBlank ? '' : '✓'}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <Box sx={{ border: '1px solid #000', p: 1, mb: 2, fontSize: '0.85rem' }}>
+        <strong>CAPA :</strong> {isBlank ? '' : (chk.outside_capa || 'Perimeter bait stations secure, locked and dry.')}
+      </Box>
+
+      <Box sx={{ border: '1px solid #000', p: 1, display: 'flex', justifyContent: 'space-between' }}>
+        <div><strong>Verified By :</strong> Vasu (Pest Officer)</div>
+        <div><strong>QA Manager :</strong> Mr. Sasikumar</div>
+      </Box>
+    </Box>
+  );
+}
+
+// C14: ROUTINE / PREVENTIVE MAINTENANCE CHECKLIST
+function C14Paper({ record, isBlank }) {
+  const chk = record.checklist || {};
+  const criteria = chk.criteria || [];
+
+  return (
+    <Box>
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12 }}>
+        <tbody>
+          <tr>
+            <td style={{ border: '2px solid #000', padding: '12px', width: '60%', textAlign: 'center' }}>
+              <Typography sx={{ fontWeight: 800, fontSize: '1.05rem' }}>BVC EXPORTS PRIVATE LIMITED</Typography>
+              <Typography sx={{ fontWeight: 800, fontSize: '1rem', mt: 0.5 }}>
+                ROUTINE/PREVENTIVE MAINTENANCE CHECKLIST
+              </Typography>
+            </td>
+            <td style={{ border: '2px solid #000', padding: '8px 12px', width: '40%', fontSize: '0.82rem' }}>
+              <div><strong>FORMAL NUMBER :</strong> BVC/MNTF/03</div>
+              <div><strong>REV.NO/DATE :</strong> {isBlank ? '' : record.record_date}</div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12 }}>
+        <tbody>
+          <tr>
+            <td style={{ border: '2px solid #000', padding: '6px 12px', width: '33%' }}>
+              <strong>M/C NO :</strong> {isBlank ? '' : (chk.machine_no || 'MCH-MIL-01')}
+            </td>
+            <td style={{ border: '2px solid #000', padding: '6px 12px', width: '33%' }}>
+              <strong>M/C NAME :</strong> {isBlank ? '' : (record.area_location || chk.machine_name || 'Pulse Hammer Mill #01')}
+            </td>
+            <td style={{ border: '2px solid #000', padding: '6px 12px', width: '34%' }}>
+              <strong>OPERATOR NAME :</strong> {isBlank ? '' : (record.inspector_name || chk.operator_name || 'Murugan K')}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', marginBottom: 12 }}>
+        <thead>
+          <tr style={{ background: '#f8fafc', fontSize: '0.74rem' }}>
+            <th style={{ border: '2px solid #000', padding: '6px', width: '22%', textAlign: 'left' }}>Criteria</th>
+            <th style={{ border: '2px solid #000', padding: '6px', width: '10%', textAlign: 'center' }}>Frequency</th>
+            {Array.from({ length: 31 }, (_, i) => (
+              <th key={i} style={{ border: '1px solid #000', padding: '1px', fontSize: '0.62rem' }}>{i + 1}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {criteria.map((c, idx) => (
+            <tr key={idx} style={{ fontSize: '0.74rem' }}>
+              <td style={{ border: '2px solid #000', padding: '6px', fontWeight: 600 }}>{c.criteria}</td>
+              <td style={{ border: '2px solid #000', padding: '6px', textAlign: 'center' }}>{c.frequency}</td>
+              {Array.from({ length: 31 }, (_, i) => (
+                <td key={i} style={{ border: '1px solid #000', padding: '1px', textAlign: 'center', fontWeight: 700 }}>
+                  {isBlank ? '' : '✓'}
+                </td>
+              ))}
+            </tr>
+          ))}
+          <tr style={{ fontSize: '0.74rem' }}>
+            <td style={{ border: '2px solid #000', padding: '6px', fontWeight: 700 }}>Checked by - Operator</td>
+            <td style={{ border: '2px solid #000', padding: '6px' }}></td>
+            {Array.from({ length: 31 }, (_, i) => (
+              <td key={i} style={{ border: '1px solid #000', padding: '1px', textAlign: 'center', fontSize: '0.6rem' }}>
+                {isBlank ? '' : 'OP'}
+              </td>
+            ))}
+          </tr>
+        </tbody>
+      </table>
+
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000' }}>
+        <tbody>
+          <tr>
+            <td style={{ border: '2px solid #000', padding: '10px 12px' }}>
+              <strong>Approved by: Plant Incharge</strong> {isBlank ? '' : (record.supervisor_name || 'Plant Incharge')}
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </Box>
   );
 }

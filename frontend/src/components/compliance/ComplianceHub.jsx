@@ -72,6 +72,7 @@ export default function ComplianceHub() {
   };
 
   const [activeTab, setActiveTab] = useState(getInitialTab);
+  const [activeTraceLot, setActiveTraceLot] = useState('LOT0014');
   const [dashboardData, setDashboardData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -158,7 +159,7 @@ export default function ComplianceHub() {
         >
           <Tab icon={<DashboardIcon />} iconPosition="start" label="Document Dashboard" />
           <Tab icon={<PrecisionManufacturingIcon />} iconPosition="start" label="Production Records (P1–P8)" />
-          <Tab icon={<SanitizerIcon />} iconPosition="start" label="Cleaning Records (C1–C10)" />
+          <Tab icon={<SanitizerIcon />} iconPosition="start" label="Cleaning Records (C1–C14)" />
           <Tab icon={<DescriptionIcon />} iconPosition="start" label="Controlled Documents (D1–D11)" />
           <Tab icon={<FormatListBulletedIcon />} iconPosition="start" label="Document Templates" />
           <Tab icon={<CalendarMonthIcon />} iconPosition="start" label="Document Schedule" />
@@ -185,6 +186,10 @@ export default function ComplianceHub() {
           {activeTab === 1 && (
             <ProductionRecordsList
               onRefresh={fetchDashboard}
+              onNavigateToTrace={(lotNo) => {
+                if (lotNo) setActiveTraceLot(lotNo);
+                handleTabChange(null, 9);
+              }}
               onOpenTraceability={() => handleTabChange(null, 9)}
             />
           )}
@@ -249,7 +254,10 @@ export default function ComplianceHub() {
 
           {/* Tab 9: Traceability Engine (P8) */}
           {activeTab === 9 && (
-            <TraceabilityEngine />
+            <TraceabilityEngine
+              targetLot={activeTraceLot}
+              onLotChange={(lot) => setActiveTraceLot(lot)}
+            />
           )}
 
           {/* Tab 10: Recall Management (D9) */}
