@@ -787,41 +787,54 @@ async function initializeMasterTables() {
 // Start server after initialization
 const server = app.listen(PORT, '0.0.0.0', async () => {
 
-
-// Start server after initialization
-app.listen(PORT, '0.0.0.0', async () => {
-
   console.log(`HTTP Server is running on port ${PORT}`)
   console.log(`Health check: http://localhost:${PORT}/api/health`)
   console.log(`Network access: http://0.0.0.0:${PORT}/api/health`)
-  
 
-  // Run full database initialization (including purchases, sales, etc.)
+  // Run full database initialization
   try {
     const initDatabase = require('./init_db')
     await initDatabase()
     console.log('✓ Full database initialization complete on startup')
-    
-    // Ensure voucher tables (voucher, voucher_entry, ledger_entries) exist and sync
-    const { ensureVoucherTables, syncAllLedgers } = require('./utils/ledgerHelper')
+
+    // Ensure voucher tables and ledger sync
+    const {
+      ensureVoucherTables,
+      syncAllLedgers
+    } = require('./utils/ledgerHelper')
+
     await ensureVoucherTables()
     console.log('✓ Voucher tables initialized successfully on startup')
+
     await syncAllLedgers()
     console.log('✓ Ledger sync and rebuild successfully completed on startup')
 
-    // Rebuild and synchronize stock lots and stock ledger
-    const { rebuildStockLedger } = require('./utils/stockRebuilder')
+    // Rebuild stock ledger
+    const {
+      rebuildStockLedger
+    } = require('./utils/stockRebuilder')
+
     await rebuildStockLedger()
     console.log('✓ Stock lots & stock ledger re-synchronized on startup')
+
   } catch (err) {
-    console.error('⚠️ Database initialization error on startup:', err.message)
+    console.error(
+      '⚠️ Database initialization error on startup:',
+      err.message
+    )
   }
 
-
   // Initialize master tables
-  await initializeMasterTables()
+  try {
+    await initializeMasterTables()
+    console.log('✓ Master tables initialized successfully')
+  } catch (err) {
+    console.error(
+      '⚠️ Master table initialization error:',
+      err.message
+    )
+  }
 })
-
 
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
