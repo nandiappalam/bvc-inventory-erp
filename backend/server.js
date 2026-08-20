@@ -230,58 +230,46 @@ app.get('/api/health', (req, res) => {
 })*/
 
 
-// Ensure any unmatched /api route returns JSON 404 for all HTTP methods (placed before static files)
+// Ensure any unmatched /api route returns JSON 404
 app.all(['/api', '/api/*'], (req, res) => {
-  res.status(404).json({ success: false, message: `API route not found: ${req.method} ${req.originalUrl}` });
+  res.status(404).json({
+    success: false,
+    message: `API route not found: ${req.method} ${req.originalUrl}`
+  });
 });
 
+// Serve frontend static files
 app.use(express.static(frontendPath));
 
-// Serve React app for any unmatched non-API frontend routes
+// Serve React app for unmatched frontend routes
 app.get('*', (req, res) => {
-  if (req.originalUrl.startsWith('/api')) {
-    return res.status(404).json({ success: false, message: `API route not found: ${req.method} ${req.originalUrl}` });
-  }
-
-app.use(express.static(frontendPath));
-
-// Serve React app for any unmatched routes
-app.get('*', (req, res) => {
-  // Ignore API routes
+  // API routes should not return index.html
   if (req.path.startsWith('/api')) {
-    return res.status(404).json({ message: 'API route not found' });
-  
+    return res.status(404).json({
+      success: false,
+      message: `API route not found: ${req.method} ${req.originalUrl}`
+    });
+  }
+
   const indexPath = path.join(frontendPath, 'index.html');
 
   if (fs.existsSync(indexPath)) {
     return res.sendFile(indexPath);
   }
 
-  res.send('Frontend not built. API is running.');
+  return res.send('Frontend not built. API is running.');
 });
-  // Let static files pass through (IMPORTANT)
- /* const filePath = path.join(frontendPath, req.path);
-  if (fs.existsSync(filePath)) {
-    return res.sendFile(filePath);
-  }
-
-  // React fallback
-  const indexPath = path.join(frontendPath, 'index.html');
-  if (fs.existsSync(indexPath)) {
-    return res.sendFile(indexPath);
-  }*/
-
- // res.send('Frontend not built. API is running.');
 
 // Global error handling middleware (catches all unhandled route errors)
 app.use((err, req, res, next) => {
-  console.error('🔥 GLOBAL ERROR HANDLER:', err.stack || err)
+  console.error('🔥 GLOBAL ERROR HANDLER:', err.stack || err);
+
   res.status(err.status || 500).json({
     success: false,
     error: err.message || 'Internal Server Error',
     path: req.path
-  })
-})
+  });
+});
 
 // Initialize master tables on startup
 async function initializeMasterTables() {
