@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Area Update</title>
+    <link rel="stylesheet" href="city-create.css">
+</head>
+<body>
+
+
+
+<!-- Overlay background -->
+<div class="overlay">
+
+    <!-- Form Box -->
+    <div class="form-box">
+        <div class="form-title">Area Update</div>
+
+        <div class="form-body">
+            <div class="form-row">
+                <label>Area</label>
+                <input type="text" name="area" required>
+            </div>
+
+            <div class="form-row">
+                <label>Print Name</label>
+                <input type="text" name="print_name">
+            </div>
+
+            <div class="form-row">
+                <label>Status</label>
+                <select name="status">
+                    <option>Active</option>
+                    <option>Inactive</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="form-footer">
+            <button onclick="updateArea(event)">Update</button>
+            <button onclick="cancelUpdate()">Cancel</button>
+        </div>
+    </div>
+
+</div>
+
+<!-- Bottom Status Bar -->
+<div class="status-bar">
+    Ready
+    <span class="right">27-01-2025</span>
+</div>
+
+<script>
+async function loadArea() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const id = urlParams.get('id');
+
+    if (!id) {
+        alert('No area ID provided');
+        window.location.href = 'area display.html';
+        return;
+    }
+
+    try {
+        const response = await fetch(`http://localhost:3000/api/masters/area_master/${id}`);
+        const area = await response.json();
+
+        if (response.ok) {
+            document.querySelector('input[name="area"]').value = area.name;
+            document.querySelector('input[name="print_name"]').value = area.print_name || '';
+            document.querySelector('select[name="status"]').value = area.status;
+        } else {
+            alert('Error loading area data');
+            window.location.href = 'area display.html';
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+        window.location.href = 'area display.html';
+    }
+}
+
+async function updateArea(event) {
+    event.preventDefault();
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const id = urlParams.get('id');
+
+    const areaName = document.querySelector('input[name="area"]').value.trim();
+    const printName = document.querySelector('input[name="print_name"]').value;
+    const status = document.querySelector('select[name="status"]').value;
+
+    if (!areaName) {
+        alert('Area name is required');
+        return;
+    }
+
+    try {
+        const response = await fetch(`http://localhost:3000/api/masters/area_master/${id}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                name: areaName,
+                print_name: printName,
+                status: status
+            })
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            alert('Area updated successfully');
+            window.location.href = 'area display.html';
+        } else {
+            alert('Error: ' + result.message);
+        }
+    } catch (error) {
+        alert('Error updating area: ' + error.message);
+    }
+}
+
+function cancelUpdate() {
+    window.location.href = 'area display.html';
+}
+
+document.addEventListener('DOMContentLoaded', loadArea);
+</script>
+
+</body>
+</html>
+
+

@@ -1,0 +1,71 @@
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background-color: #dfe6ee;
+}
+
+/* App background */
+.app-container {
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Entry card */
+.entry-box {
+    width: 450px;
+    background: #ffffff;
+    padding: 30px 40px;
+    box-shadow: 0 0 10px rgba(0,0,0,0.2);
+    border-radius: 4px;
+}
+
+/* Title */
+.entry-box h3 {
+    margin-top: 0;
+    color: #1e4ed8;
+    border-bottom: 2px solid #1e4ed8;
+    padding-bottom: 8px;
+}
+
+/* Rows */
+.form-row {
+    display: flex;
+    align-items: center;
+    margin: 18px 0;
+}
+
+.form-row label {
+    width: 120px;
+    font-size: 14px;
+    color: #333;
+}
+
+/* Inputs */
+.form-row input {
+    flex: 1;
+    padding: 6px 8px;
+    border: 1px solid #1e4ed8;
+    outline: none;
+    font-size: 14px;
+}
+
+/* Button */
+.btn-row {
+    text-align: right;
+    margin-top: 25px;
+}
+
+button {
+    background-color: #1e4ed8;
+    color: #fff;
+    border: none;
+    padding: 6px 20px;
+    font-size: 14px;
+    cursor: pointer;
+}
+
+button:hover {
+    background-color: #163bb5;
+}

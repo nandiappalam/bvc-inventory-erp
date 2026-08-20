@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Ledger Display</title>
+    <link rel="stylesheet" href="ledger display D.css">
+    <script>
+        async function loadLedgers() {
+            try {
+                const response = await fetch('http://localhost:3000/api/masters/ledgermaster');
+                const ledgers = await response.json();
+
+                const tbody = document.querySelector('.grid-table tbody');
+                tbody.innerHTML = '';
+
+                ledgers.forEach((ledger, index) => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${index + 1}</td>
+                        <td>${ledger.name}</td>
+                        <td>${ledger.printname || ''}</td>
+                        <td>${ledger.under || ''}</td>
+                        <td>${ledger.openingbalance || 0}</td>
+                        <td>${ledger.area || ''}</td>
+                        <td>${ledger.credit || 0}</td>
+                        <td>${ledger.debit || 0}</td>
+                        <td>
+                            <button onclick="editLedger(${ledger.id})">Edit</button>
+                            <button onclick="deleteLedger(${ledger.id})">Delete</button>
+                        </td>
+                    `;
+                    tbody.appendChild(row);
+                });
+
+                document.querySelector('.footer-bar').innerHTML = `Rows: ${ledgers.length} <span class="footer-right">Options</span>`;
+            } catch (error) {
+                console.error('Error loading ledgers:', error);
+            }
+        }
+
+        async function deleteLedger(id) {
+            if (!confirm('Are you sure you want to delete this ledger?')) return;
+
+            try {
+                const response = await fetch(`http://localhost:3000/api/masters/ledgermaster/${id}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    alert('Ledger deleted successfully');
+                    loadLedgers();
+                } else {
+                    const result = await response.json();
+                    alert('Error: ' + result.message);
+                }
+            } catch (error) {
+                alert('Error deleting ledger: ' + error.message);
+            }
+        }
+
+        function editLedger(id) {
+            alert('Edit functionality would be implemented here for ledger ID: ' + id);
+        }
+
+        document.addEventListener('DOMContentLoaded', loadLedgers);
+    </script>
+</head>
+<body>
+
+<div class="app-container">
+    <div class="entry-box">
+        <h3>Ledger Display</h3>
+
+        <div class="table-wrapper">
+            <table class="grid-table">
+                <thead>
+                    <tr>
+                        <th>S.No</th>
+                        <th>Ledger Name</th>
+                        <th>Print Name</th>
+                        <th>Under</th>
+                        <th>Opening Balance</th>
+                        <th>Area</th>
+                        <th>Credit</th>
+                        <th>Debit</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Data will be loaded here -->
+                </tbody>
+            </table>
+        </div>
+
+        <div class="footer-bar">
+            Rows: 0
+            <span class="footer-right">Options</span>
+        </div>
+    </div>
+</div>
+
+</body>
+</html>

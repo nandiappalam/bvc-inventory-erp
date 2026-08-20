@@ -1,0 +1,108 @@
+.weight-conversion-create{
+    margin:0;
+    font-family:Tahoma, Arial;
+    font-size:17px;
+    background:#eaf2ff;
+}
+
+/* TOP HEADER */
+.header{
+    background:#1f4fa3;
+    color:#fff;
+    padding:6px 10px;
+    display:flex;
+    justify-content:space-between;
+}
+
+/* MENU BAR */
+.menu{
+    background:#f5f8ff;
+    padding:6px 10px;
+    border-bottom:1px solid #9bb4e0;
+}
+.menu span{
+    margin-right:18px;
+}
+
+/* MAIN WINDOW */
+.window{
+    margin:10px;
+    border:1px solid #9bb4e0;
+    background:#fff;
+}
+
+/* TITLE */
+.title{
+    background:#3f6fc0;
+    color:#fff;
+    padding:6px 10px;
+    font-weight:bold;
+}
+
+/* FORM ROW */
+.form-row{
+    display:flex;
+     
+    padding:10px;
+    background:#f9fbff;
+}
+
+.form-group{
+    display:flex;
+    align-items:center;
+    margin-bottom:6px;
+	margin-left:25px;
+}
+
+.form-group label{
+    width:70px;
+	font-size:20px;
+}
+
+input{
+    height:20px;
+    border:1px solid #9bb4e0;
+    padding:4px 8px;
+	margin-left:25px;
+}
+
+/* TABLE */
+table{
+    width:70%;
+    border-collapse:collapse;
+    margin-top:5px;
+}
+
+th{
+    background:#3f6fc0;
+    color:#fff;
+    height:24px;
+    border:1px solid #9bb4e0;
+}
+
+td{
+    height:22px;
+    border:1px solid #9bb4e0;
+}
+
+/* FOOTER TABLE */
+.footer-table{
+    margin-top:205px;
+	
+}
+
+/* SAVE BUTTON */
+.save-bar{
+    display:flex;
+    justify-content:flex-end;
+    padding:10px;
+	margin-top:305px;
+}
+
+button{
+    padding:6px 25px;
+    background:#3f6fc0;
+    color:#fff;
+    border:1px solid #1f4fa3;
+    cursor:pointer;
+}

@@ -1,0 +1,169 @@
+/* Papad Company style - Compact 2-panel layout for Vehicle Movement Create */
+
+.vehicle-create-page {
+  padding: 8px 12px;
+  max-width: 1400px;
+  margin: 0 auto;
+  min-height: 100vh;
+  height: auto;
+  box-sizing: border-box;
+}
+
+.vehicle-create-page::-webkit-scrollbar {
+  width: 6px;
+}
+.vehicle-create-page::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+.vehicle-create-page::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+.vehicle-create-page::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+/* Header */
+.vehicle-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #e0e0e0;
+  flex-wrap: wrap;
+  gap: 6px;
+  position: relative;
+  background: #fff;
+  z-index: 10;
+}
+
+.vehicle-header h2 {
+  margin: 0;
+  color: #333;
+  font-size: 18px;
+}
+
+/* Form Container */
+.vehicle-form-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+/* Panels */
+.vehicle-left-panel,
+.vehicle-right-panel {
+  background: #fafafa;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 10px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.panel-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #444;
+  margin-bottom: 8px;
+  padding-bottom: 4px;
+  border-bottom: 2px solid #007bff;
+}
+
+/* Form Fields Grid */
+.section-fields {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px 12px;
+}
+
+.section-fields .field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 0;
+}
+
+.section-fields .field-group.full-span {
+  grid-column: span 2;
+}
+
+.section-fields .field-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #555;
+  margin-bottom: 1px;
+}
+
+.section-fields input,
+.section-fields select {
+  height: 32px !important;
+  padding: 4px 8px !important;
+  border: 1px solid #ccc !important;
+  border-radius: 4px !important;
+  font-size: 12px !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+  background-color: #fff !important;
+}
+
+.section-fields input:focus,
+.section-fields select:focus {
+  border-color: #007bff !important;
+  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.15) !important;
+}
+
+/* Footer Actions */
+.vehicle-footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 2px solid #e0e0e0;
+  margin-bottom: 20px;
+}
+
+.btn-save {
+  padding: 6px 20px;
+  background: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.btn-cancel {
+  padding: 6px 20px;
+  background: #6c757d;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* Responsive */
+@media (min-width: 1024px) {
+  .vehicle-form-container {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+
+  .vehicle-left-panel,
+  .vehicle-right-panel {
+    flex: 1;
+  }
+}
+
+@media (max-width: 600px) {
+  .vehicle-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+

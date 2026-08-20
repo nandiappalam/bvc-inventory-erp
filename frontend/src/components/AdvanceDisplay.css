@@ -1,0 +1,169 @@
+/* Advance Display Styles */
+
+.advance-display {
+  font-family: Arial, sans-serif;
+  margin: 0;
+  padding: 0;
+  background-color: #f0f6ff;
+  min-height: 100vh;
+}
+
+/* Header */
+.header {
+  background-color: #1f4fb2;
+  color: white;
+  padding: 10px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 18px;
+  font-weight: bold;
+}
+
+/* Title */
+.title {
+  background-color: #3b6fd8;
+  color: white;
+  padding: 10px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 16px;
+  font-weight: bold;
+}
+
+/* Filter Bar */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.filter-bar label {
+  color: white;
+  font-weight: bold;
+}
+
+.filter-bar input[type="date"] {
+  padding: 5px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+}
+
+/* Container */
+.container {
+  margin: 20px;
+  background-color: white;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  overflow-x: auto;
+}
+
+.container table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0;
+}
+
+.container th {
+  background-color: #e8f0ff;
+  border: 1px solid #ddd;
+  padding: 12px 8px;
+  text-align: left;
+  font-weight: bold;
+  color: #333;
+}
+
+.container td {
+  border: 1px solid #ddd;
+  padding: 10px 8px;
+  color: #555;
+}
+
+.container tr:nth-child(even) {
+  background-color: #f9f9f9;
+}
+
+.container tr:hover {
+  background-color: #f0f8ff;
+}
+
+/* Footer */
+.footer {
+  background-color: #e8f0ff;
+  padding: 15px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-top: 2px solid #1f4fb2;
+}
+
+.btn {
+  background-color: #1f4fb2;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  margin-right: 10px;
+  cursor: pointer;
+  border-radius: 3px;
+  font-weight: bold;
+}
+
+.btn:hover {
+  background-color: #0d3a8a;
+}
+
+.right-info {
+  color: #333;
+  font-weight: bold;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .header, .title {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .filter-bar {
+    margin-top: 10px;
+  }
+
+  .footer {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .container {
+    margin: 10px;
+  }
+
+  .container table {
+    font-size: 14px;
+  }
+
+  .container th, .container td {
+    padding: 8px 4px;
+  }
+}
+
+/* Table wrapper to allow vertical scrolling while keeping header visible */
+.table-wrapper{max-height:520px;overflow:auto;margin:20px}
+.table-wrapper table thead th{position:sticky;top:0;z-index:2;background:#e8f0ff}
+.actions-cell{display:flex;gap:6px}
+.action-btn{background:#3b6fd8;color:#fff;border:none;padding:6px 10px;border-radius:3px;cursor:pointer}
+.action-btn.danger{background:#c62828}
+
+/* Modal styles */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;z-index:1200}
+.modal{background:#fff;padding:18px;border-radius:6px;min-width:320px;max-width:720px;border:1px solid #ddd}
+.modal h3{margin-top:0}
+.modal-body{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+.modal-body label{font-weight:600}
+.modal-body input{padding:8px;border:1px solid #ccc;border-radius:3px}
+.modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:12px}
+
+/* Message box */
+.message-box{padding:10px 12px;margin:12px 20px;border-radius:4px}
+.message-box.success{background:#e6f4ea;color:#2e7d32}
+.message-box.error{background:#fdecea;color:#c62828}

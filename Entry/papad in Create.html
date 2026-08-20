@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Papad In Creation</title>
+    <style>
+        :root {
+            --win-header-bg: #2d5a4c; /* Dark green from top bar */
+            --form-bg: #d4e1d1;       /* Light sage green background */
+            --grid-header: #9bb19a;   /* Header color for internal grids */
+            --border-gray: #7f8c8d;
+        }
+
+        body {
+            background-color: #f0f0f0;
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+
+        .window {
+            width: 100%
+            background-color: var(--form-bg);
+            border: 1px solid var(--border-gray);
+            margin: auto;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+        }
+
+        /* Top Title Bar */
+        .window-header {
+            background-color: var(--win-header-bg);
+            color: white;
+            padding: 5px 10px;
+            font-size: 13px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .close-btn {
+            background: #bdc3c7;
+            border: 1px solid #666;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        /* Top Header Info Section */
+        .info-bar {
+            padding: 50px;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            border-bottom: 1px solid var(--border-gray);
+        }
+
+        .field-group { display: flex; align-items: center; margin-bottom: 20px; }
+        .field-group label { width: 50px; font-size: 12px; }
+        .field-group input { flex: 1; border: 2px solid #999; padding: 5px; background: #fff; }
+
+        /* Grid Sections */
+        .section-container { padding: 10px; }
+        .section-title { 
+            font-size: 20px; 
+            font-weight: bold; 
+            color: #2c3e50; 
+            margin-bottom: 5px; 
+        }
+
+        .data-grid {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 17px;
+            background: white;
+            margin-bottom: 50px;
+        }
+
+        .data-grid th {
+            background-color: var(--grid-header);
+            border: 1px solid var(--border-gray);
+            padding: 4px;
+            text-align: left;
+        }
+
+        .data-grid td {
+            border: 1px solid var(--border-gray);
+            height: 25px;
+            padding: 0;
+        }
+
+        .data-grid input {
+            width: 100%;
+            height: 100%;
+            border: none;
+            padding: 0 5px;
+            box-sizing: border-box;
+        }
+
+        /* Footer */
+        .window-footer {
+            background: #c2d1bf;
+            padding: 8px;
+            text-align: right;
+            border-top: 1px solid var(--border-gray);
+        }
+
+        .save-btn {
+            padding: 3px 25px;
+            background: #fff;
+            border: 1px solid var(--border-gray);
+            font-weight: bold;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+<div class="window">
+    <div class="window-header">
+        <span>Papad In Creation</span>
+    </div>
+
+    <div class="info-bar">
+        <div>
+            <div class="field-group"><label>S.No</label><input type="text" value="178"></div>
+            <div class="field-group"><label>Date</label><input type="text" value="29/01/2026"></div>
+        </div>
+        <div>
+            <div class="field-group"><label>Wt Scale</label><input type="text" value="No"></div>
+            <div class="field-group"><label>Remarks</label><input type="text"></div>
+        </div>
+        <div>
+            <div class="field-group"><label>Papad Company</label><input type="text"></div>
+        </div>
+    </div>
+
+    <div class="section-container">
+        <div class="section-title">Papad Details :</div>
+        <table class="data-grid">
+            <thead>
+                <tr>
+                    <th style="width: 250px;">Item Name</th>
+                    <th>Box (Papad)</th>
+                    <th>Wt (Papad)</th>
+                    <th>Box (Empty)</th>
+                    <th>Wt (Empty)</th>
+                    <th>Tot Wt</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><input type="text"></td>
+                    <td><input type="text"></td>
+                    <td><input type="text"></td>
+                    <td><input type="text"></td>
+                    <td><input type="text"></td>
+                    <td><input type="text"></td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="section-title">Flour Details :</div>
+        <table class="data-grid">
+            <thead>
+                <tr>
+                    <th style="width: 40px;">S.No</th>
+                    <th>Item Name</th>
+                    <th>Kg</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td align="center">1</td>
+                    <td><input type="text"></td>
+                    <td><input type="text"></td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="window-footer">
+        <button class="save-btn">Save</button>
+    </div>
+</div>
+
+</body>
+</html>

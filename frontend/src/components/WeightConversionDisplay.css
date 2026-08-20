@@ -1,0 +1,102 @@
+body{
+    margin:0;
+    font-family:Tahoma, Arial;
+    font-size:17px;
+    background:#eef4ff;
+}
+
+/* HEADER */
+.header{
+    background:#1e4fa8;
+    color:#fff;
+    padding:6px 10px;
+    display:flex;
+    justify-content:space-between;
+}
+
+/* MAIN WINDOW */
+.window{
+    margin:10px;
+    background:#fff;
+    border:1px solid #9bb4e0;
+}
+
+/* TITLE BAR */
+.title{
+    background:#3d6fd1;
+    color:#fff;
+    padding:6px 10px;
+    font-weight:bold;
+    display:flex;
+    justify-content:space-between;
+}
+
+/* DATE BAR */
+.date-box input{
+    height:20px;
+    border:1px solid #9bb4e0;
+    padding:2px 4px;
+}
+
+/* TABLE */
+table{
+    width:70%;
+    border-collapse:collapse;
+	margin-top:10px;
+}
+
+th{
+    background:#3d6fd1;
+    color:#fff;
+    border:1px solid #9bb4e0;
+    height:24px;
+}
+
+td{
+    border:1px solid #9bb4e0;
+    height:22px;
+    text-align:center;
+}
+
+
+
+/* FOOTER BAR */
+.footer{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    padding:6px 10px;
+    background:#1e4fa8;
+    border-top:1px solid #9bb4e0;
+	margin-top:650px;
+}
+
+/* BUTTONS */
+button{
+    padding:5px 18px;
+    margin-right:6px;
+    background:#3d6fd1;
+    color:#fff;
+    border:1px solid #1e4fa8;
+    cursor:pointer;
+}
+/* ===== FILTER BAR ===== */
+.filter-bar{
+    padding:0px 10px;
+    display:flex;
+    justify-content:flex-end;
+    gap:6px;
+    border-bottom:1px solid #8aa4d8;
+    height:25px;
+}
+
+.filter-bar label{
+    font-size:15px;
+    margin-top:3px;
+}
+
+.filter-bar input{
+    height:20px;
+    border:1px solid #8aa4d8;
+    width:150px;
+}

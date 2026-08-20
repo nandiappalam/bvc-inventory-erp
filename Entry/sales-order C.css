@@ -1,0 +1,131 @@
+body {
+  margin: 0;
+  font-family: Tahoma, Arial, sans-serif;
+  background: #eef4ff;
+  font-size: 12px;
+}
+
+/* HEADER */
+.top-header {
+  background: #1e4fa8;
+  color: #fff;
+  padding: 4px 8px;
+  display: flex;
+  justify-content: space-between;
+}
+
+.system-title {
+  background: #2f6ad9;
+  color: white;
+  text-align: center;
+  padding: 6px;
+  font-weight: bold;
+}
+
+/* MENU */
+.menu-bar {
+  background: #e5edff;
+  border-bottom: 1px solid #9bb7f0;
+  padding: 4px 8px;
+}
+.menu-bar span {
+  margin-right: 15px;
+}
+.menu-bar .active {
+  color: red;
+  font-weight: bold;
+}
+.menu-bar .quit {
+  float: right;
+}
+
+/* SCREEN NAME */
+.screen-name {
+  background: #f7f9ff;
+  border-bottom: 1px solid #9bb7f0;
+  padding: 5px 8px;
+  font-weight: bold;
+}
+
+/* FORM */
+.form-header {
+  display: flex;
+  gap: 10px;
+  padding: 8px;
+}
+.block {
+  width: 230px;
+}
+.block.wide {
+  width: 320px;
+}
+.block div {
+  display: flex;
+  margin-bottom: 5px;
+}
+label {
+  width: 90px;
+  font-weight: bold;
+}
+input {
+  flex: 1;
+  height: 20px;
+  border: 1px solid #9bb7f0;
+  background: #fff;
+}
+
+/* GRID */
+.grid-area {
+  padding: 8px;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+}
+th {
+  background: #2f6ad9;
+  color: white;
+  border: 1px solid #9bb7f0;
+  height: 22px;
+}
+td {
+  border: 1px solid #c3d5fa;
+  height: 24px;
+}
+
+/* BOTTOM */
+.bottom-section {
+  display: flex;
+  gap: 10px;
+  padding: 8px;
+}
+.summary, .deduction {
+  background: #f7f9ff;
+  padding: 6px;
+}
+.summary div,
+.deduction div {
+  display: flex;
+  margin-bottom: 4px;
+}
+.summary label,
+.deduction label {
+  width: 80px;
+}
+
+.final-box {
+  text-align: center;
+}
+.final-amount {
+  font-size: 22px;
+  font-weight: bold;
+  margin-bottom: 6px;
+}
+.save-btn {
+  padding: 5px 18px;
+  background: #2f6ad9;
+  color: white;
+  border: 1px solid #1e4fa8;
+  cursor: pointer;
+}

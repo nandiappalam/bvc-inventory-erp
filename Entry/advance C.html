@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Advance Creation</title>
+
+<style>
+body{
+    margin:0;
+    font-family:Tahoma, Arial;
+    font-size:17px;
+    background:#f0f6ff;
+}
+
+/* HEADER */
+.header{
+    background:#1f4fb2;
+    color:white;
+    padding:6px 10px;
+    display:flex;
+    justify-content:space-between;
+}
+
+
+/* TITLE */
+.title{
+    background:#3b6fd8;
+    color:white;
+    padding:6px 10px;
+    font-weight:bold;
+}
+
+/* CENTER PANEL */
+.panel{
+    width:620px;
+    margin:80px auto;
+    background:#eaf1ff;
+    border:1px solid #9db7e8;
+    padding:20px 25px;
+    align-items:center;
+}
+
+/* FORM ROW */
+.row{
+    display:flex;
+    align-items:center;
+    margin-bottom:12px;
+}
+
+.label{
+    width:130px;
+}
+
+.colon{
+    width:15px;
+    text-align:center;
+}
+
+input, select{
+    height:22px;
+    border:1px solid #9db7e8;
+    padding:2px 5px;
+}
+
+/* SMALL INPUT */
+.small{
+    width:60px;
+}
+
+/* MEDIUM */
+.medium{
+    width:150px;
+}
+
+/* LARGE */
+.large{
+    width:220px;
+}
+
+/* SAVE BUTTON */
+.save-btn{
+    text-align:right;
+    margin-top:15px;
+}
+
+button{
+    padding:5px 20px;
+    background:#3b6fd8;
+    color:white;
+    border:1px solid #1f4fb2;
+    cursor:pointer;
+}
+</style>
+</head>
+
+<body>
+
+<!-- HEADER -->
+<div class="header">
+    <div>Inventory Management System</div>
+    <div>A.S. MOORTHY & CO</div>
+</div>
+
+<!-- TITLE -->
+<div class="title">Advance Creation</div>
+
+<!-- FORM PANEL -->
+<div class="panel">
+
+    <div class="row">
+        <div class="label">S.No</div>
+        <div class="colon">:</div>
+        <input type="text" class="small" value="">
+    </div>
+
+    <div class="row">
+        <div class="label">Date</div>
+        <div class="colon">:</div>
+        <input type="Date" class="medium" value="">
+    </div>
+
+    <div class="row">
+        <div class="label">Papad Company</div>
+        <div class="colon">:</div>
+        <input type="text" class="large">
+    </div>
+
+    <div class="row">
+        <div class="label">Amount</div>
+        <div class="colon">:</div>
+        <input type="text" class="medium">
+        &nbsp;
+        <input type="text" class="small" value="Dr">
+    </div>
+
+    <div class="row">
+        <div class="label">Pay Mode</div>
+        <div class="colon">:</div>
+        <input type="text" class="large">
+    </div>
+
+    <div class="row">
+        <div class="label">Remarks</div>
+        <div class="colon">:</div>
+        <input type="text"   style="width:400px">
+    </div>
+
+    <div class="save-btn">
+        <button>Save</button>
+    </div>
+
+</div>
+
+</body>
+</html>

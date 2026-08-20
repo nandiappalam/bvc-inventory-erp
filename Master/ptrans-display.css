@@ -1,0 +1,80 @@
+* {
+    box-sizing: border-box;
+    font-family: Tahoma, Arial, sans-serif;
+}
+
+body {
+    margin: 0;
+    background-color: #c9ced9;
+}
+
+/* Window title */
+.window-title {
+    background: linear-gradient(#b9c7ec, #8fa4d8);
+    padding: 6px 10px;
+    font-weight: bold;
+    border-bottom: 1px solid #4c63a3;
+}
+
+.window-title .company {
+    float: right;
+}
+
+/* Menu */
+.menu-bar {
+    background-color: #e6e6e6;
+    padding: 5px 10px;
+    border-bottom: 1px solid #999;
+}
+
+.menu-bar span {
+    margin-right: 20px;
+    cursor: default;
+}
+
+/* Main content */
+.content {
+    padding: 10px;
+    height: calc(100vh - 90px);
+}
+
+/* Table container */
+.table-box {
+    background-color: #ffffff;
+    border: 1px solid #7a8bc0;
+    height: 100%;
+    overflow: auto;
+}
+
+/* Table */
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+thead {
+    background-color: #d9e1f2;
+}
+
+th, td {
+    border: 1px solid #9aaad6;
+    padding: 5px 8px;
+    font-size: 14px;
+    text-align: left;
+}
+
+tbody tr:hover {
+    background-color: #edf2ff;
+}
+
+/* Status bar */
+.status-bar {
+    background-color: #e6e6e6;
+    border-top: 1px solid #999;
+    padding: 5px 10px;
+    font-size: 13px;
+}
+
+.status-bar .right {
+    float: right;
+}

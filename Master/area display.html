@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Area Display</title>
+    <link rel="stylesheet" href="area-display.css">
+    <script>
+        async function loadAreas() {
+            try {
+                const response = await fetch('http://localhost:3000/api/masters/area_master');
+                const areas = await response.json();
+
+                const tbody = document.querySelector('.grid-table tbody');
+                tbody.innerHTML = '';
+
+                areas.forEach((area, index) => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${index + 1}</td>
+                        <td>${area.name}</td>
+                        <td>${area.print_name || ''}</td>
+                        <td>${area.status}</td>
+                        <td>
+                            <button onclick="editArea(${area.id})">Edit</button>
+                            <button onclick="deleteArea(${area.id})">Delete</button>
+                        </td>
+                    `;
+                    tbody.appendChild(row);
+                });
+
+                document.querySelector('.footer-bar').innerHTML = `Rows: ${areas.length} <span class="footer-right">Options</span>`;
+            } catch (error) {
+                console.error('Error loading areas:', error);
+            }
+        }
+
+        async function deleteArea(id) {
+            if (!confirm('Are you sure you want to delete this area?')) return;
+
+            try {
+                const response = await fetch(`http://localhost:3000/api/masters/area_master/${id}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    alert('Area deleted successfully');
+                    loadAreas();
+                } else {
+                    const result = await response.json();
+                    alert('Error: ' + result.message);
+                }
+            } catch (error) {
+                alert('Error deleting area: ' + error.message);
+            }
+        }
+
+        function editArea(id) {
+            // For now, just alert. In a full implementation, this would open an edit form
+            alert('Edit functionality would be implemented here for area ID: ' + id);
+        }
+
+        document.addEventListener('DOMContentLoaded', loadAreas);
+    </script>
+</head>
+<body>
+
+<!-- Top Header -->
+<div class="top-bar">
+    Inventory Management System
+    <span class="company">A.S. MOORTHY & CO</span>
+</div>
+
+<!-- Window Title -->
+<div class="window-header">
+    Area Display
+    <span class="close">✕</span>
+</div>
+
+<!-- Table Area -->
+<div class="table-wrapper">
+    <table class="grid-table">
+        <thead>
+            <tr>
+                <th>S.No</th>
+                <th>Area</th>
+                <th>Print Name</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Data will be loaded here -->
+        </tbody>
+    </table>
+</div>
+
+<!-- Footer -->
+<div class="footer-bar">
+    Rows: 0
+    <span class="footer-right">Options</span>
+</div>
+
+</body>
+</html>

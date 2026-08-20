@@ -1,0 +1,92 @@
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: #eaf2ff;
+}
+
+/* Top Header */
+.top-header {
+  background: #2c5fb8;
+  color: white;
+  padding: 6px 10px;
+  font-weight: bold;
+  display: flex;
+  justify-content: space-between;
+}
+
+/* Menu */
+.menu-bar {
+  background: #dbe8ff;
+  border-bottom: 1px solid #9bb6e5;
+  padding: 5px;
+}
+
+.menu-bar span {
+  margin-right: 15px;
+  cursor: pointer;
+}
+
+.menu-bar .active {
+  color: red;
+  font-weight: bold;
+}
+
+/* Title */
+.title-bar {
+  background: #f5f8ff;
+  border-bottom: 1px solid #9bb6e5;
+  padding: 6px 10px;
+  display: flex;
+  justify-content: space-between;
+  font-weight: bold;
+}
+
+.date-box input {
+  margin-left: 5px;
+}
+
+/* Table */
+.table-container {
+  padding: 10px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: white;
+}
+
+th {
+  background: #2c5fb8;
+  color: white;
+  border: 1px solid #9bb6e5;
+  padding: 5px;
+  font-size: 13px;
+}
+
+td {
+  border: 1px solid #c5d6f5;
+  height: 28px;
+}
+
+/* Footer */
+.footer-bar {
+  background: #f5f8ff;
+  border-top: 1px solid #9bb6e5;
+  padding: 6px 10px;
+  display: flex;
+  justify-content: space-between;
+}
+
+button {
+  background: #2c5fb8;
+  color: white;
+  border: none;
+  padding: 5px 12px;
+  margin-right: 5px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #1f4da0;
+}

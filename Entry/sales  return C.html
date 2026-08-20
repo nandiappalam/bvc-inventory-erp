@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Sales return Creation</title>
+
+<style>
+body{
+    margin:0;
+    font-family:Tahoma, Arial;
+    background:#dfe9ff;
+}
+
+/* ===== TOP FRAME ===== */
+.top-frame{
+    background:#1f4fb2;
+    color:#fff;
+    padding:6px 12px;
+    font-size:13px;
+}
+
+.menu-frame{
+    background:#f2f6ff;
+    border-bottom:1px solid #6b8fdc;
+    padding:6px 12px;
+    font-size:13px;
+}
+.menu-frame span{
+    margin-right:18px;
+}
+
+/* ===== MAIN FRAME ===== */
+.main{
+    margin:8px;
+    border:1px solid #6b8fdc;
+    background:#fff;
+}
+
+/* ===== TITLE BAR ===== */
+.title{
+    background:#2f6fd6;
+    color:white;
+    padding:6px 10px;
+    font-weight:bold;
+}
+
+/* ===== ENTRY FORM (MIDDLE - TOP) ===== */
+.entry-box{
+    background:#eef4ff;
+    padding:8px;
+    border-bottom:1px solid #6b8fdc;
+}
+
+.row{
+    display:flex;
+    margin-bottom:6px;
+}
+
+.label{
+    width:110px;
+    font-size:15px;
+	font-weight:bold;
+    padding-top:4px;
+}
+
+input{
+    height:22px;
+    border:1px solid #6b8fdc;
+    width:250px;
+}
+
+.space{ width:25px; }
+
+/* ===== ITEM GRID ===== */
+.grid{
+    background:#e9f1ff;
+    height:600px;
+    border-top:1px solid #6b8fdc;
+    border-bottom:1px solid #6b8fdc;
+	
+}
+
+table{
+    width:100%;
+    border-collapse:collapse;
+    font-size:12px;
+}
+
+th{
+    background:#2f6fd6;
+    color:white;
+    border:1px solid #6b8fdc;
+    height:24px;
+	font-size:15px;
+}
+
+td{
+    border:1px solid #6b8fdc;
+    height:22px;
+}
+
+td input{
+    width:100%;
+    height:20px;
+    border:none;
+}
+
+/* ===== BOTTOM FRAME ===== */
+.bottom{
+    display:flex;
+    background:#eef4ff;
+}
+
+/* LEFT */
+.bottom-left{
+    width:45%;
+    border-right:1px solid #6b8fdc;
+    padding:8px;
+}
+
+/* RIGHT */
+.bottom-right{
+    width:55%;
+    padding:12px;
+    text-align:center;
+}
+
+.total{
+    font-size:18px;
+    font-weight:bold;
+    margin-bottom:10px;
+}
+
+.save-btn{
+    padding:6px 22px;
+    background:#2f6fd6;
+    color:white;
+    border:1px solid #1f4fb2;
+    cursor:pointer;
+}
+</style>
+</head>
+
+<body>
+
+<!-- ===== TOP FRAME ===== -->
+<div class="top-frame">
+    Inventory Management System
+</div>
+
+<!-- ===== MAIN FRAME ===== -->
+<div class="main">
+
+<div class="title">Sales Return Creation</div>
+
+<!-- ===== MIDDLE FRAME (INPUTS) ===== -->
+<div class="entry-box">
+
+<div class="row">
+    <div class="label">Bill No</div><input>
+    <div class="space"></div>
+    <div class="label">Date</div><input>
+    <div class="space"></div>
+    <div class="label">Customer</div><input>
+	<div class="space"></div>
+	<div class="label">Pay Type</div><input>
+	<div class="space"></div>
+</div>
+
+<div class="row">
+    <div class="label">Pay Type</div><input>
+    <div class="space"></div>
+    <div class="label">Tax Type</div><input>
+    <div class="space"></div>
+    <div class="label">Address</div><input>
+</div>
+
+</div>
+
+<!-- ===== ITEM ENTRY GRID ===== -->
+<div class="grid">
+<table>
+<thead>
+<tr>
+    <th>Item Name</th>
+    <th>Lot No</th>
+    <th>Qty</th>
+    <th>Box</th>
+    <th>Rate</th>
+    <th>Disc %</th>
+    <th>Tax %</th>
+    <th>Amount</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><input></td><td><input></td><td><input></td><td><input></td>
+<td><input></td><td><input></td><td><input></td><td><input></td>
+</tr>
+<tr>
+<td><input></td><td><input></td><td><input></td><td><input></td>
+<td><input></td><td><input></td><td><input></td><td><input></td>
+</tr>
+<tr>
+<td><input></td><td><input></td><td><input></td><td><input></td>
+<td><input></td><td><input></td><td><input></td><td><input></td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<!-- ===== BOTTOM FRAME ===== -->
+<div class="bottom">
+
+<div class="bottom-left">
+<table>
+<tr>
+<th>Tax %</th>
+<th>Amount</th>
+<th>Bill Amt</th>
+<th>Tax Amt</th>
+<th>Total Amt</th>
+</tr>
+<tr>
+<td><input></td><td><input></td><td><input></td><td><input></td><td><input></td>
+</tr>
+</table>
+</div>
+
+<div class="bottom-right">
+<table>
+<tr>
+<th>Deduction</th>
+<th>percent%</th>
+<th>Amount</th>
+<th>Remarks</th>
+</tr>
+<tr>
+<td><input></td><td><input></td><td><input></td><td><input></td>
+</tr>
+</table>
+<div class="total">0.00</div>
+<button class="save-btn">Save</button>
+</div>
+
+</div>
+
+</div>
+
+</body>
+</html>

@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Packing Creation</title>
+
+<style>
+body{
+    margin:0;
+    font-family:Tahoma, Arial;
+    background:#eaf2ff;
+    font-size:17px;
+}
+
+/* ===== HEADER ===== */
+.header{
+    background:#2f5fa7;
+    color:#fff;
+    padding:6px 10px;
+    display:flex;
+    justify-content:space-between;
+	
+}
+
+/* ===== MAIN WINDOW ===== */
+.window{
+    margin:8px;
+    border:1px solid #8aa4d8;
+    background:white;
+
+}
+
+/* ===== TITLE ===== */
+.title{
+    background:#3f6fc0;
+    color:white;
+    padding:6px 10px;
+    font-weight:bold;
+	
+}
+
+/* ===== SECTION ===== */
+.section{
+    border-top:1px solid #8aa4d8;
+    padding:15px;
+    background:#f9fbff;
+	
+}
+.section1{
+    border-top:1px solid #8aa4d8;
+    padding:15px;
+    background:#f9fbff;
+	margin-top:150px;
+	
+}
+.section2{
+    border-top:1px solid #8aa4d8;
+    padding:15px;
+    background:#f9fbff;
+	margin-top:150px;
+	
+}
+.row{
+    display:flex;
+    gap:10px;
+    margin-bottom:6px;
+}
+.label{ width:80px; }
+input{
+    height:25px;
+    border:1px solid #8aa4d8;
+    width:160px;
+}
+
+/* ===== TABLE ===== */
+table{
+    width:50%;
+    border-collapse:collapse;
+    margin-top:6px;
+	  
+}
+th{
+    background:#3f6fc0;
+    color:white;
+    border:1px solid #8aa4d8;
+    height:22px;
+}
+td{
+    border:1px solid #8aa4d8;
+    height:22px;
+}
+
+/* ===== BOTTOM ===== */
+.bottom{
+    display:flex;
+    border-top:1px solid #8aa4d8;
+	margin-top:100px;
+}
+.bottom-left,
+.bottom-right{
+    flex:1;
+    padding:8px;
+    background:#f4f7ff;
+}
+.bottom-right{
+    text-align:right;
+}
+button{
+    padding:5px 20px;
+    background:#3f6fc0;
+    color:white;
+    border:1px solid #2f5fa7;
+    cursor:pointer;
+}
+</style>
+</head>
+
+<body>
+
+<!-- HEADER -->
+<div class="header">
+    <div>Inventory Management System</div>
+    <div>A.S. MOORTHY & CO</div>
+</div>
+
+<div class="window">
+
+<!-- TITLE -->
+<div class="title">Packing Creation</div>
+
+<!-- TOP FRAME -->
+<div class="section">
+    <div class="row">
+        <div class="label">S.No</div><input>
+        <div class="label">Date</div><input type="Date">
+        <div class="label">Remarks</div><input style="width:300px">
+    </div>
+</div>
+
+<!-- PACKING FROM -->
+<div class="section">
+    <b>Packing From</b>
+    <table>
+        <tr>
+            <th>Item Name</th>
+            <th>Lot No</th>
+            <th>Kg</th>
+        </tr>
+        <tr><td></td><td input style="width:200px"></td><td input style="width:250px"></td></tr>
+    </table>
+</div>
+
+<!-- PACKING MATERIAL -->
+<div class="section1">
+    <b>Packing Material</b>
+    <table>
+        <tr>
+            <th>Item Name</th>
+            <th>Lot No</th>
+            <th>Qty</th>
+        </tr>
+        <tr><td></td><td input style="width:200px"></td><td input style="width:250px"></td></tr>
+    </table>
+</div>
+
+<!-- PACKING TO -->
+<div class="section2">
+    <b>Packing To</b>
+    <table>
+        <tr>
+            <th>Lot.No</th>
+            <th>Item Name</th>
+            <th>Box</th>
+        </tr>
+        <tr><td input style="width:200px"></td><td></td><td></td></tr>
+    </table>
+</div>
+
+<!-- BOTTOM FRAME -->
+<div class="bottom">
+    <div class="bottom-left">
+        Status : Ready
+    </div>
+    <div class="bottom-right">
+        <button>Save</button>
+    </div>
+</div>
+
+</div>
+
+</body>
+</html>

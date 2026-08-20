@@ -1,0 +1,397 @@
+/* ============================================
+   Papad Company Create - Compact, Scrollable UI
+   ============================================ */
+
+/* Page wrapper - full height with scroll */
+.papad-company-page {
+  padding: 8px 12px;
+  max-width: 1400px;
+  margin: 0 auto;
+  min-height: auto;
+  box-sizing: border-box;
+}
+
+/* Custom scrollbar for webkit browsers */
+.papad-company-page::-webkit-scrollbar {
+  width: 6px;
+}
+.papad-company-page::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+.papad-company-page::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+.papad-company-page::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+/* Header */
+.papad-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #e0e0e0;
+  flex-wrap: wrap;
+  gap: 6px;
+  position: relative;
+  background: #fff;
+  z-index: 10;
+}
+
+.papad-header h2 {
+  margin: 0;
+  color: #333;
+  font-size: 18px;
+}
+
+.papad-nav {
+  display: flex;
+  gap: 6px;
+}
+
+.btn-nav {
+  padding: 5px 10px;
+  background: #f0f0f0;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.2s;
+}
+
+.btn-nav:hover {
+  background: #e0e0e0;
+}
+
+/* Message */
+.message {
+  padding: 6px 10px;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.message.success {
+  background: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
+}
+
+.message.error {
+  background: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
+}
+
+/* Form Container */
+.papad-form-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+/* Panels */
+.papad-left-panel,
+.papad-right-panel {
+  background: #fafafa;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 10px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.panel-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #444;
+  margin-bottom: 8px;
+  padding-bottom: 4px;
+  border-bottom: 2px solid #007bff;
+}
+
+/* ============================================
+   FORM FIELDS - 2-COLUMN GRID LAYOUT
+   ============================================ */
+
+.section-fields {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px 12px;
+}
+
+/* Override SmartField / master.css styles for compact layout */
+.section-fields .field-group,
+.section-fields .field-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 0 !important;
+}
+
+.section-fields .field-group.full-span,
+.section-fields .field-wrapper.full-span {
+  grid-column: span 2;
+}
+
+.section-fields .field-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #555;
+  margin-bottom: 1px;
+}
+
+/* CRITICAL: Override the 42px tall uniform-input from master.css */
+.section-fields .uniform-input,
+.section-fields input,
+.section-fields select,
+.section-fields textarea {
+  height: 32px !important;
+  min-height: 32px !important;
+  padding: 4px 8px !important;
+  border: 1px solid #ccc !important;
+  border-radius: 4px !important;
+  font-size: 12px !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+  background-color: #fff !important;
+  outline: none !important;
+  transition: border-color 0.2s, box-shadow 0.2s !important;
+}
+
+.section-fields .uniform-input:focus,
+.section-fields input:focus,
+.section-fields select:focus,
+.section-fields textarea:focus {
+  border-color: #007bff !important;
+  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.15) !important;
+}
+
+.section-fields textarea {
+  min-height: 50px !important;
+  height: auto !important;
+  resize: vertical;
+}
+
+.section-fields select {
+  cursor: pointer;
+}
+
+/* Readonly field styling */
+.section-fields .readonly-field {
+  background-color: #f5f5f5 !important;
+  color: #666 !important;
+  cursor: not-allowed !important;
+}
+
+/* ============================================
+   ENTRY TABLE
+   ============================================ */
+
+.entry-table-container {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.entry-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  table-layout: fixed;
+}
+
+.entry-table th,
+.entry-table td {
+  border: 1px solid #ddd;
+  padding: 3px 2px;
+  text-align: center;
+}
+
+.entry-table th {
+  background: #f0f0f0;
+  font-weight: 600;
+  color: #555;
+  white-space: nowrap;
+  font-size: 10px;
+}
+
+.entry-table td {
+  background: #fff;
+}
+
+.entry-table input {
+  width: 100%;
+  padding: 2px 4px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  font-size: 11px;
+  box-sizing: border-box;
+  height: 26px;
+}
+
+.entry-table input.papad-date-input {
+  cursor: pointer;
+  height: 28px;
+  padding: 2px 4px;
+}
+
+.entry-table input.papad-date-input::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.85;
+  padding: 1px;
+  margin-left: 2px;
+}
+
+.entry-table input.papad-date-input::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+
+.entry-table input:focus {
+  outline: none;
+  border-color: #007bff;
+}
+
+.btn-delete-row {
+  background: #dc3545;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  padding: 2px 6px;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.btn-delete-row:hover:not(:disabled) {
+  background: #c82333;
+}
+
+.btn-delete-row:disabled {
+  background: #e0e0e0;
+  color: #999;
+  cursor: not-allowed;
+}
+
+.btn-add-row {
+  margin-top: 6px;
+  padding: 5px 10px;
+  background: #28a745;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.btn-add-row:hover {
+  background: #218838;
+}
+
+/* Footer Actions */
+.papad-footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 2px solid #e0e0e0;
+  margin-bottom: 20px;
+}
+
+.btn-save {
+  padding: 6px 20px;
+  background: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 0.2s;
+}
+
+.btn-save:hover:not(:disabled) {
+  background: #0056b3;
+}
+
+.btn-save:disabled {
+  background: #6c757d;
+  cursor: not-allowed;
+}
+
+.btn-cancel {
+  padding: 6px 20px;
+  background: #6c757d;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 0.2s;
+}
+
+.btn-cancel:hover {
+  background: #545b62;
+}
+
+/* ============================================
+   RESPONSIVE - Large screens side by side
+   ============================================ */
+
+@media (min-width: 1024px) {
+  .papad-form-container {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+
+  .papad-left-panel,
+  .papad-right-panel {
+    flex: 1;
+  }
+}
+
+/* ============================================
+   RESPONSIVE - Small screens
+   ============================================ */
+
+@media (max-width: 1023px) {
+  .papad-header h2 {
+    font-size: 16px;
+  }
+
+  .section-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .section-fields .field-group.full-span,
+  .section-fields .field-wrapper.full-span {
+    grid-column: span 1;
+  }
+}
+
+@media (max-width: 600px) {
+  .papad-company-page {
+    padding: 6px 8px;
+  }
+
+  .papad-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .papad-nav {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .btn-nav {
+    font-size: 11px;
+    padding: 4px 8px;
+  }
+}
+

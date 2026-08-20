@@ -1,0 +1,67 @@
+body {
+    margin: 0;
+    font-family: Arial, Helvetica, sans-serif;
+    background-color: #dde5f0;
+}
+
+/* Top software bar */
+.top-bar {
+    background-color: #1e40af;
+    color: white;
+    padding: 8px 14px;
+    font-weight: bold;
+}
+
+.top-bar span {
+    float: right;
+    font-size: 13px;
+}
+
+/* Title bar */
+.title-bar {
+    background-color: #f1f5fb;
+    padding: 6px 14px;
+    border-bottom: 2px solid #1e40af;
+    font-weight: bold;
+}
+
+/* Grid */
+.grid-wrapper {
+    height: calc(100vh - 100px);
+    overflow-y: auto;
+    background: white;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+thead {
+    background-color: #e6efff;
+}
+
+th, td {
+    border: 1px solid #c9d6e8;
+    padding: 6px 8px;
+    height: 26px;
+}
+
+.slno {
+    width: 50px;
+    text-align: center;
+}
+
+/* Hover like desktop software */
+tbody tr:hover {
+    background-color: #f0f7ff;
+}
+
+/* Status bar */
+.status-bar {
+    background-color: #e6edf7;
+    padding: 6px 12px;
+    font-size: 12px;
+    border-top: 1px solid #c9d6e8;
+}

@@ -1,0 +1,63 @@
+body {
+  margin: 0;
+  font-family: Tahoma, Arial, sans-serif;
+}
+
+/* Desktop background */
+.screen {
+  height: 100vh;
+  background: #c7cbe6;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 30px;
+}
+
+/* Window box */
+.window {
+  width: 900px;
+  background: #efefef;
+  border: 1px solid #2f3e9e;
+}
+
+/* Title bar */
+.title-bar {
+  background: #2f3e9e;
+  color: #ffffff;
+  padding: 6px 10px;
+  font-size: 14px;
+}
+
+/* Table section */
+.table-area {
+  background: #ffffff;
+  margin: 10px;
+  border: 1px solid #7f9db9;
+}
+
+/* Excel-like table */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+th {
+  background: #dbe5f1;
+  border: 1px solid #7f9db9;
+  padding: 4px;
+  text-align: left;
+}
+
+td {
+  border: 1px solid #c0c0c0;
+  height: 24px;
+  padding-left: 6px;
+}
+
+/* Footer */
+.footer {
+  background: #e6e6e6;
+  padding: 5px 10px;
+  font-size: 12px;
+}

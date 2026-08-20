@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Purchase Return Creation</title>
+
+<style>
+    body {
+        margin: 0;
+        background: #DCE6D0;
+        font-family: Arial, sans-serif;
+    }
+
+    /* Header */
+    .header {
+        background: #415E3E;
+        color: white;
+        padding: 12px;
+        font-size: 20px;
+        font-weight: bold;
+    }
+
+    /* Top Frame */
+    .top-frame {
+        background: #66B4E3;
+        padding: 15px;
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 20px;
+        border: 2px solid #A5B89B;
+    }
+
+    label {
+        font-weight: bold;
+    }
+
+    .input-box, textarea {
+        width: 100%;
+        padding: 6px;
+        border: 1px dotted #777;
+        border-radius: 25px;
+    }
+
+    textarea { height: 50px; resize: none; }
+
+    /* Middle Table */
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        background: white;
+        margin-top: 10px;
+		margin-Left: 5px;
+		
+    }
+
+    th {
+        background: #66B4E3;
+        padding: 8px;
+        border: 1px solid #666;
+    }
+
+    td {
+        border: 1px solid #666;
+        padding: 5px;
+    }
+
+    td input {
+        width: 100%;
+        border: none;
+        padding: 5px;
+        outline: none;
+        background: transparent;
+		
+    }
+
+    /* Middle Totals */
+    .totals-row {
+        background: #66B4E3;
+        padding: 10px;
+        margin-top: 5px;
+        font-size: 16px;
+        display: flex;
+        justify-content: space-between;
+        border: 2px solid #A5B89B;
+        font-weight: bold;
+    }
+
+    /* Bottom Frame */
+    .bottom-frame {
+        display: grid;
+        grid-template-columns: 1.2fr 0.8fr;
+        gap: 10px;
+        margin-top: 10px;
+    }
+
+    .box {
+        background: #66B4E3;
+        padding: 15px;
+        border: 2px solid #A5B89B;
+    }
+
+    .box div {
+        font-weight: bold;
+        margin-bottom: 10px;
+        font-size: 16px;
+    }
+
+    /* Grand Total */
+    .grand-total {
+        background: #234D8B;
+        color: white;
+        padding: 15px;
+        text-align: right;
+        font-size: 24px;
+        font-weight: bold;
+        margin-top: 10px;
+    }
+
+    .save-btn {
+        background: #5C8EF2;
+        border: none;
+        padding: 12px 22px;
+        color: white;
+        font-size: 18px;
+        border-radius: 6px;
+        float: right;
+        margin: 10px;
+        cursor: pointer;
+    }
+
+    .add-row-btn {
+        background: #3A6F32;
+        color: white;
+        padding: 8px 15px;
+        margin-top: 10px;
+        border-radius: 5px;
+        border: none;
+        cursor: pointer;
+        float: left;
+    }
+</style>
+</head>
+
+<body>
+
+<div class="header">Purchase Return Creation</div>
+
+<!-- TOP FRAME -->
+<div class="top-frame">
+    <div><label>S.No</label><input class="input-box" value="1"></div>
+    <div><label>Date</label><input type="date" class="input-box"></div>
+    <div><label>Return Inv No</label><input class="input-box"></div>
+    <div><label>Supplier</label><input class="input-box"></div>
+
+    <div><label>Pay Type</label><input class="input-box" value="Credit"></div>
+    <div><label>Inv Date</label><input type="date" class="input-box"></div>
+    <div><label>Type</label><input class="input-box" value="Urad"></div>
+    <div><label>Address</label><textarea></textarea></div>
+
+    <div><label>Tax Type</label><input class="input-box" value="Exclusive"></div>
+    <div><label>Godown</label><input class="input-box"></div>
+    <div><label>Remarks</label><input class="input-box"></div>
+</div>
+
+<!-- ITEMS TABLE -->
+<table id="itemTable">
+    <thead>
+    <tr>
+        <th>Lot.No</th>
+        <th>Item Name</th>
+        <th>Weight</th>
+        <th>Qty</th>
+        <th>Total Wt</th>
+        <th>Rate</th>
+        <th>Disc %</th>
+        <th>Tax %</th>
+        <th>Amount</th>
+    </tr>
+    </thead>
+
+    <tbody>
+    <!-- DEFAULT ROW -->
+    <tr>
+        <td>1</td>
+        <td><input value="enter item name"></td>
+        <td><input value=""></td>
+        <td><input value="" oninput="recalc()"></td>
+        <td class="totalWt">0</td>
+        <td><input value="" oninput="recalc()"></td>
+        <td><input value="" oninput="recalc()"></td>
+        <td><input value="" oninput="recalc()"></td>
+        <td class="amount">0</td>
+    </tr>
+    </tbody>
+</table>
+
+<button class="add-row-btn" onclick="addRow()">+ Add Item</button>
+
+<!-- MIDDLE TOTALS -->
+<div class="totals-row">
+    <span id="tQty">Total Qty: 0</span>
+    <span id="tWeight">Total Weight: 0</span>
+    <span id="tAmount">Total Amount: 0</span>
+</div>
+
+<!-- BOTTOM FRAME -->
+<div class="bottom-frame">
+
+    <!-- Left -->
+    <div class="box">
+        <div id="baseAmt">Base Amount : 0</div>
+        <div id="discAmt">Disc Amount : 0</div>
+        <div id="taxAmt">Tax Amount : 0</div>
+        <div id="netAmt">Net Amount : 0</div>
+    </div>
+
+    <!-- Right -->
+    <div class="box">
+        <table>
+            <tr><th>Deduction</th><th>%</th><th>Amount</th></tr>
+            <tr>
+                <td>AUTO WAGES</td>
+                <td>—</td>
+                <td><input id="ded1" value="" oninput="recalc()"></td>
+            </tr>
+            <tr>
+                <td>VAT</td>
+                <td><input id="dedp" value="" oninput="recalc()"></td>
+                <td><input id="ded2" value="" oninput="recalc()"></td>
+            </tr>
+        </table>
+    </div>
+
+</div>
+
+<!-- FINAL TOTAL -->
+<div class="grand-total" id="grandTotal">0.00</div>
+
+<button class="save-btn">Save</button>
+
+
+<script>
+/* ----------------------
+    ADD ROW
+-----------------------*/
+function addRow() {
+    let table = document.getElementById("itemTable").querySelector("tbody");
+    let rowCount = table.rows.length + 1;
+
+    let row = `
+        <tr>
+            <td>${rowCount}</td>
+            <td><input></td>
+            <td><input></td>
+            <td><input oninput="recalc()"></td>
+            <td class="totalWt">0</td>
+            <td><input oninput="recalc()"></td>
+            <td><input oninput="recalc()"></td>
+            <td><input oninput="recalc()"></td>
+            <td class="amount">0</td>
+        </tr>
+    `;
+
+    table.insertAdjacentHTML("beforeend", row);
+}
+
+/* ----------------------
+    RECALCULATE TOTALS
+-----------------------*/
+function recalc() {
+    let rows = document.querySelectorAll("#itemTable tbody tr");
+    let totalQty = 0, totalWeight = 0, totalAmt = 0;
+
+    rows.forEach(row => {
+        let inputs = row.querySelectorAll("input");
+        let weight = parseFloat(inputs[1].value) || 0;
+        let qty = parseFloat(inputs[2].value) || 0;
+        let rate = parseFloat(inputs[4].value) || 0;
+        let disc = parseFloat(inputs[5].value) || 0;
+        let tax = parseFloat(inputs[6].value) || 0;
+
+        let totalwt = weight * qty;
+        let amt = qty * rate;
+
+        amt -= (amt * disc) / 100;
+        amt += (amt * tax) / 100;
+
+        row.querySelector(".totalWt").innerText = totalwt.toFixed(3);
+        row.querySelector(".amount").innerText = amt.toFixed(2);
+
+        totalQty += qty;
+        totalWeight += totalwt;
+        totalAmt += amt;
+    });
+
+    document.getElementById("tQty").innerText = "Total Qty: " + totalQty.toFixed(3);
+    document.getElementById("tWeight").innerText = "Total Weight: " + totalWeight.toFixed(3);
+    document.getElementById("tAmount").innerText = "Total Amount: " + totalAmt.toFixed(2);
+
+    // BOTTOM SUMMARY
+    document.getElementById("baseAmt").innerText = "Base Amount : " + totalAmt.toFixed(2);
+
+    let ded1 = parseFloat(document.getElementById("ded1").value) || 0;
+    let dedp = parseFloat(document.getElementById("dedp").value) || 0;
+
+    let ded2 = (totalAmt * dedp) / 100;
+    document.getElementById("ded2").value = ded2.toFixed(2);
+
+    let net = totalAmt + ded1 + ded2;
+
+    document.getElementById("netAmt").innerText = "Net Amount : " + net.toFixed(2);
+    document.getElementById("grandTotal").innerText = net.toFixed(2);
+}
+
+/* INIT CALC */
+recalc();
+</script>
+
+</body>
+</html>

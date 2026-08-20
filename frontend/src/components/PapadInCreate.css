@@ -1,0 +1,416 @@
+/* PapadInCreate.css - Exact match to original HTML */
+
+:root {
+  --win-header-bg: #2d5a4c; /* Dark green from top bar */
+  --form-bg: #d4e1d1;       /* Light sage green background */
+  --grid-header: #9bb19a;   /* Header color for internal grids */
+  --border-gray: #7f8c8d;
+}
+
+.window {
+  width: 100%;
+  background-color: var(--form-bg);
+  border: 1px solid var(--border-gray);
+  margin: auto;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+  font-family: Arial, sans-serif;
+}
+
+/* Top Title Bar */
+.window-header {
+  background-color: var(--win-header-bg);
+  color: white;
+  padding: 8px 10px;
+  font-size: 13px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.close-btn {
+  background: #bdc3c7;
+  border: 1px solid #666;
+  cursor: pointer;
+  font-weight: bold;
+  padding: 2px 5px;
+}
+
+/* Info Bar - 3 Column Layout */
+.info-bar {
+  padding: 30px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  border-bottom: 1px solid var(--border-gray);
+  background-color: var(--form-bg);
+}
+
+.info-bar > div {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.field-group {
+  display: flex;
+  align-items: center;
+  margin-bottom: 5px;
+}
+
+.field-group label {
+  width: 80px;
+  font-size: 12px;
+  font-weight: bold;
+  color: #2c3e50;
+  flex-shrink: 0;
+}
+
+.field-group input,
+.field-group select {
+  flex: 1;
+  border: 2px solid #999;
+  padding: 5px;
+  background: #fff;
+  font-size: 12px;
+  min-width: 100px;
+  height: 24px;
+}
+
+/* Section Container */
+.section-container {
+  padding: 10px;
+  margin: 10px 0;
+}
+
+.section-title {
+  font-size: 18px;
+  font-weight: bold;
+  color: #2c3e50;
+  margin-bottom: 10px;
+  padding: 5px 0;
+}
+
+/* Data Grid Table */
+.data-grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  background: white;
+  margin-bottom: 30px;
+  border: 1px solid var(--border-gray);
+}
+
+.data-grid th {
+  background-color: var(--grid-header);
+  border: 1px solid var(--border-gray);
+  padding: 6px 4px;
+  text-align: left;
+  font-weight: bold;
+  color: white;
+  height: 28px;
+}
+
+.data-grid td {
+  border: 1px solid var(--border-gray);
+  height: 28px;
+  padding: 0;
+}
+
+.data-grid input {
+  width: 100%;
+  height: 100%;
+  border: none;
+  padding: 0 5px;
+  box-sizing: border-box;
+  font-size: 12px;
+}
+
+.data-grid input:focus {
+  outline: none;
+  background-color: #ffffcc;
+}
+
+.data-grid td[align="center"] {
+  text-align: center;
+  padding: 0 5px;
+}
+
+/* Footer */
+.window-footer {
+  background: #c2d1bf;
+  padding: 12px;
+  text-align: right;
+  border-top: 1px solid var(--border-gray);
+}
+
+.save-btn {
+  padding: 5px 25px;
+  background: #fff;
+  border: 1px solid var(--border-gray);
+  font-weight: bold;
+  cursor: pointer;
+  font-size: 12px;
+  color: #2c3e50;
+}
+
+.save-btn:hover {
+  background: #f5f5f5;
+}
+
+form {
+  margin: 0;
+  padding: 0;
+}
+
+/* Modal Overlay & Pop Up Window Styles */
+.papad-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.65);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+  padding: 15px;
+}
+
+.papad-modal-content {
+  background: #ffffff;
+  border-radius: 8px;
+  width: 100%;
+  max-width: 680px;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+  border: 1px solid #1f4fb2;
+  overflow: hidden;
+  animation: modalFadeIn 0.2s ease-out;
+}
+
+@keyframes modalFadeIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.papad-modal-header {
+  background: #1f4fb2;
+  color: #ffffff;
+  padding: 12px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.papad-modal-header h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.papad-modal-close-btn {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: #ffffff;
+  font-size: 18px;
+  font-weight: bold;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.papad-modal-close-btn:hover {
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.papad-modal-body {
+  padding: 16px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.papad-modal-info {
+  background-color: #f0f7ff;
+  border-left: 4px solid #1f4fb2;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #1e3a8a;
+  margin-bottom: 12px;
+  border-radius: 0 4px 4px 0;
+}
+
+.papad-modal-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.papad-modal-table th {
+  background-color: #2563eb;
+  color: white;
+  padding: 8px;
+  text-align: left;
+  border: 1px solid #93c5fd;
+  font-weight: 600;
+}
+
+.papad-modal-table td {
+  padding: 6px 8px;
+  border: 1px solid #cbd5e1;
+}
+
+.papad-modal-table input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #94a3b8;
+  border-radius: 4px;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+.papad-modal-table input:focus {
+  border-color: #2563eb;
+  outline: none;
+  background-color: #f0f9ff;
+}
+
+.papad-modal-add-btn {
+  background: #2563eb;
+  color: white;
+  border: none;
+  padding: 6px 14px;
+  border-radius: 4px;
+  font-weight: bold;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.papad-modal-add-btn:hover {
+  background: #1d4ed8;
+}
+
+.papad-modal-footer {
+  background: #f8fafc;
+  padding: 12px 16px;
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.papad-modal-totals {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.papad-modal-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.papad-modal-save-btn {
+  background: #16a34a;
+  color: white;
+  border: none;
+  padding: 8px 18px;
+  border-radius: 4px;
+  font-weight: bold;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.papad-modal-save-btn:hover {
+  background: #15803d;
+}
+
+.papad-modal-cancel-btn {
+  background: #64748b;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.papad-modal-cancel-btn:hover {
+  background: #475569;
+}
+
+/* Sub-row breakdown panel inside main table */
+.sub-row-panel {
+  background-color: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin: 6px 0;
+  font-size: 12px;
+}
+
+.sub-row-group {
+  margin-bottom: 4px;
+}
+
+.sub-row-group-title {
+  font-weight: bold;
+  color: #1e3a8a;
+  margin-bottom: 2px;
+}
+
+.sub-row-item {
+  display: inline-block;
+  background: #e0f2fe;
+  color: #0369a1;
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin-right: 6px;
+  margin-bottom: 4px;
+  font-size: 11px;
+  border: 1px solid #bae6fd;
+}
+
+.sub-row-item-empty {
+  background: #fef3c7;
+  color: #92400e;
+  border-color: #fde68a;
+}
+
+.btn-popup-trigger {
+  background: #eff6ff;
+  border: 1px solid #3b82f6;
+  color: #1d4ed8;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+}
+
+.btn-popup-trigger:hover {
+  background: #dbeafe;
+  border-color: #2563eb;
+}
+
+.data-grid input[type="number"],
+.data-grid input[type="text"] {
+  box-sizing: border-box;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 5px 6px;
+}
+
