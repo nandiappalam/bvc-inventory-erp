@@ -99,7 +99,7 @@ const purchaseReturnsRouter = require('./routes/purchaseReturns')
 
 
 
-const purchaseReturnsRouter = require('./routes/purchaseReturns')
+
 
 const grainsRouter = require('./routes/grains')
 const flourOutRouter = require('./routes/flourOut')
