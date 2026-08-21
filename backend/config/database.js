@@ -3,10 +3,7 @@ const path = require('path')
 const fs = require('fs')
 
 // Determine database path - support both development and production
-<<<<<<< HEAD
-=======
 // In production (Tauri), the app is in the resources folder
->>>>>>> origin/main
 let dbDir
 
 // Render / server environment
@@ -26,7 +23,6 @@ if (!fs.existsSync(dbDir)) {
 const dbPath = path.join(dbDir, 'bvc.db')
 console.log('Database path:', dbPath)
 
-<<<<<<< HEAD
 let db
 
 function openDatabase() {
@@ -286,7 +282,6 @@ module.exports = {
     }
     return new Promise((resolve, reject) => {
       db.run(text, params, function (err) {
-=======
 const db = new sqlite3.Database(dbPath, (err) => {
   if (err) {
     console.error('Error opening database:', err.message)
@@ -311,13 +306,11 @@ module.exports = {
   run: (text, params) => {
     return new Promise((resolve, reject) => {
       db.run(text, params, function(err) {
->>>>>>> origin/main
         if (err) reject(err)
         else resolve({ lastID: this.lastID, lastInsertRowid: this.lastID, changes: this.changes })
       })
     })
   },
-<<<<<<< HEAD
 
   // ✅ Provides transaction-aware connection wrapper for modules that expect it.
   getConnection: async () => {
@@ -331,7 +324,6 @@ module.exports = {
   },
 }
 
-=======
   pool: {
     connect: () => Promise.resolve({
       query: (text, params) => {
@@ -354,5 +346,4 @@ module.exports = {
       release: () => {}
     })
   }
-}
->>>>>>> origin/main
+      }
