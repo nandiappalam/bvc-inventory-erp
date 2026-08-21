@@ -7,12 +7,9 @@ const fs = require('fs')
 const db = require('./config/database_new')
 
 const app = express()
-<<<<<<< HEAD
 // AI Studio requires port 3000 strictly
 const PORT = 3000
-=======
 const PORT = process.env.PORT || 3000
->>>>>>> origin/main
 
 // Middleware
 app.use(cors())
@@ -22,7 +19,7 @@ app.use('/Entry', express.static(path.join(__dirname, '../Entry')))
 
 // Routes
 const purchasesRouter = require('./routes/purchases')
-const purchaseReturnsRouter = require('./routes/purchaseReturns')
+
 const grainsRouter = require('./routes/grains')
 const flourOutRouter = require('./routes/flourOut')
 const flourOutReturnsRouter = require('./routes/flourOutReturns')
