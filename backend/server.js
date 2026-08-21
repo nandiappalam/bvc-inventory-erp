@@ -8,11 +8,7 @@ const db = require('./config/database')
 
 const app = express()
 // AI Studio requires port 3000 strictly, but we allow configuration in dev
-
-
-// Render uses PORT env; default to 5000 to match Vite proxy
-const PORT = process.env.PORT || 10000
-
+const PORT = process.env.PORT || 3000
 let actualPort = PORT
 
 // Process-level crash protection (prevents 502s from uncaught errors)
@@ -50,12 +46,8 @@ app.use(cors({
 // Explicitly handle OPTIONS preflight for all routes
 app.options('*', cors());
 
-
 app.use(express.json({ limit: '50mb' }))
 app.use(express.urlencoded({ extended: true, limit: '50mb' }))
-
-app.use(express.json())
-
 const frontendPath = path.join(__dirname, '../frontend/dist')
 
 // Serve static frontend files
@@ -85,7 +77,6 @@ app.use('/Entry', express.static(path.join(__dirname, '../Entry')))
 
 // Routes
 const purchasesRouter = require('./routes/purchases_fixed')
-
 const purchaseSummaryRouter = require('./routes/purchaseSummary')
 const entriesRouter = require('./routes/entries')
 
@@ -94,11 +85,7 @@ app.use('/api/purchase-requests', require('./routes/purchaseRequests'))
 app.use('/api/purchases', purchaseSummaryRouter)
 app.use('/api/entries', entriesRouter)
 
-
-
-
-
-
+const purchaseReturnsRouter = require('./routes/purchaseReturns')
 
 
 const grainsRouter = require('./routes/grains')
@@ -119,7 +106,6 @@ const authRouter = require('./routes/auth')
 const dbRouter = require('./routes/db')
 const vehicleMovementsRouter = require('./routes/vehicle-movements')
 const papadCompaniesRouter = require('./routes/papadCompanies')
-
 const lotsRouter = require('./routes/lots')
 const dashboardRouter = require('./routes/dashboard')
 const workOrdersRouter = require('./routes/workOrders')
@@ -131,21 +117,14 @@ app.use('/api/stock-alerts', stockAlertsRouter)
 app.use('/api/stock-alert', stockAlertsRouter)
 app.use('/api/purchases', purchasesRouter)
 app.use('/api/lots', lotsRouter)
-
-app.use('/api/grains', grainsRouter)
-app.use('/api/grind', grainsRouter)
-
-
-app.use('/api/purchases', purchasesRouter)
 app.use('/api/purchase-returns', purchaseReturnsRouter)
 app.use('/api/grains', grainsRouter)
-
+app.use('/api/grind', grainsRouter)
 app.use('/api/flour-out', flourOutRouter)
 app.use('/api/flour-out-returns', flourOutReturnsRouter)
 // Alias for flour-out-return (without 's') - used by some frontend components
 app.use('/api/flour-out-return', flourOutReturnsRouter)
 app.use('/api/sales', salesRouter)
-
 app.use('/api/sales-order', salesRouter)
 app.use('/api/sales-orders', salesRouter)
 app.use('/api/sales-display', salesRouter)
@@ -153,15 +132,10 @@ app.use('/api/sales-returns', salesReturnsRouter)
 app.use('/api/masters', mastersRouter)
 app.use('/api/taxes', require('./routes/taxMaster'))
 app.use('/api/tax-master', require('./routes/taxMaster'))
-
-app.use('/api/sales-returns', salesReturnsRouter)
-app.use('/api/masters', mastersRouter)
-
 app.use('/api/advances', advancesRouter)
 // Alias for advance (without 's') - used by some frontend components
 app.use('/api/advance', advancesRouter)
 app.use('/api/papad-in', papadInRouter)
-
 app.use('/api/papad-return', require('./routes/papadReturn'))
 app.use('/api/papad-returns', require('./routes/papadReturn'))
 app.use('/api/cheque-printing', require('./routes/chequePrinting'))
@@ -177,17 +151,10 @@ app.use('/api/packing', require('./routes/packing'))
 app.use('/api/sales-export-orders', salesExportOrdersRouter)
 app.use('/api/quotations', require('./routes/quotations'))
 app.use('/api', require('./routes/purchaseOrderRoutes'))
-
-app.use('/api/stock', stockRouter)
-app.use('/api/reports', reportsRouter)
-app.use('/api/weight-conversion', weightConversionRouter)
-app.use('/api/sales-export-orders', salesExportOrdersRouter)
-
 app.use('/api/open', openRouter)
 
 // Accounts Reports API - Mounted under /api/accounts
 app.use('/api/accounts', reportsRouter)
-
 
 // Companies, Auth and Features API
 app.use('/api/companies', companiesRouter)
@@ -195,23 +162,16 @@ app.use('/api/auth', authRouter)
 app.use('/api/features', require('./routes/features'))
 app.use('/api/financial-years', require('./routes/financialYears'))
 
-// Companies and Auth API
-app.use('/api/companies', companiesRouter)
-app.use('/api/auth', authRouter)
-
-
 // Database query API (for Tauri-style queries)
 app.use('/api/vouchers', require('./routes/vouchers'))
 app.use('/api/db', dbRouter)
 app.use('/api/vehicle-movements', vehicleMovementsRouter)
 app.use('/api/papad-companies', papadCompaniesRouter)
-
 app.use('/api/recycle-bin', require('./routes/recycleBin'))
 app.use('/api/qc', require('./routes/qc'))
 app.use('/api/quality', require('./routes/qc'))
 app.use('/api/compliance', require('./routes/compliance'))
 app.use('/api/documents', require('./routes/compliance'))
-
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -229,47 +189,49 @@ app.get('/api/health', (req, res) => {
   }
 })*/
 
-
-// Ensure any unmatched /api route returns JSON 404
+// Ensure any unmatched /api route returns JSON 404 for all HTTP methods (placed before static files)
 app.all(['/api', '/api/*'], (req, res) => {
-  res.status(404).json({
-    success: false,
-    message: `API route not found: ${req.method} ${req.originalUrl}`
-  });
+  res.status(404).json({ success: false, message: `API route not found: ${req.method} ${req.originalUrl}` });
 });
 
-// Serve frontend static files
 app.use(express.static(frontendPath));
 
-// Serve React app for unmatched frontend routes
+// Serve React app for any unmatched non-API frontend routes
 app.get('*', (req, res) => {
-  // API routes should not return index.html
-  if (req.path.startsWith('/api')) {
-    return res.status(404).json({
-      success: false,
-      message: `API route not found: ${req.method} ${req.originalUrl}`
-    });
+  if (req.originalUrl.startsWith('/api')) {
+    return res.status(404).json({ success: false, message: `API route not found: ${req.method} ${req.originalUrl}` });
   }
-
   const indexPath = path.join(frontendPath, 'index.html');
 
   if (fs.existsSync(indexPath)) {
     return res.sendFile(indexPath);
   }
 
-  return res.send('Frontend not built. API is running.');
+  res.send('Frontend not built. API is running.');
 });
+  // Let static files pass through (IMPORTANT)
+ /* const filePath = path.join(frontendPath, req.path);
+  if (fs.existsSync(filePath)) {
+    return res.sendFile(filePath);
+  }
+
+  // React fallback
+  const indexPath = path.join(frontendPath, 'index.html');
+  if (fs.existsSync(indexPath)) {
+    return res.sendFile(indexPath);
+  }*/
+
+ // res.send('Frontend not built. API is running.');
 
 // Global error handling middleware (catches all unhandled route errors)
 app.use((err, req, res, next) => {
-  console.error('🔥 GLOBAL ERROR HANDLER:', err.stack || err);
-
+  console.error('🔥 GLOBAL ERROR HANDLER:', err.stack || err)
   res.status(err.status || 500).json({
     success: false,
     error: err.message || 'Internal Server Error',
     path: req.path
-  });
-});
+  })
+})
 
 // Initialize master tables on startup
 async function initializeMasterTables() {
@@ -377,12 +339,8 @@ async function initializeMasterTables() {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT UNIQUE,
         printname TEXT,
-
         weight REAL,
         status TEXT DEFAULT 'Active'
-
-        weight REAL
-
       )`
     },
     {
@@ -391,12 +349,8 @@ async function initializeMasterTables() {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT UNIQUE,
         printname TEXT,
-
         under TEXT,
         status TEXT DEFAULT 'Active'
-
-        under TEXT
-
       )`
     },
     {
@@ -464,11 +418,8 @@ async function initializeMasterTables() {
         area TEXT,
         wages_kg REAL DEFAULT 0,
         opening_balance REAL DEFAULT 0,
-
         opening_balance_type TEXT DEFAULT 'Cr',
         tin_no TEXT,
-
-
         status TEXT DEFAULT 'Active'
       )`
     },
@@ -479,9 +430,7 @@ async function initializeMasterTables() {
         name TEXT UNIQUE,
         print_name TEXT,
         contact_person TEXT,
-
         address TEXT,
-
         address1 TEXT,
         address2 TEXT,
         address3 TEXT,
@@ -489,10 +438,7 @@ async function initializeMasterTables() {
         gst_no TEXT,
         phone_off TEXT,
         phone_res TEXT,
-
         mobile TEXT,
-
-
         mobile1 TEXT,
         mobile2 TEXT,
         area TEXT,
@@ -566,18 +512,13 @@ async function initializeMasterTables() {
         item_name TEXT,
         lot_no TEXT,
         qty REAL DEFAULT 0,
-     weight REAL DEFAULT 0,
+        weight REAL DEFAULT 0,
         rate REAL DEFAULT 0,
         amount REAL DEFAULT 0,
         type TEXT DEFAULT 'Purchase',
         reference_id INTEGER,
         status TEXT DEFAULT 'Active',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-
-        rate REAL DEFAULT 0,
-        type TEXT,
-        status TEXT DEFAULT 'Active'
-
       )`
     },
     {
@@ -597,22 +538,14 @@ async function initializeMasterTables() {
       name: 'users',
       sql: `CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-
         username TEXT NOT NULL,
-
-        username TEXT UNIQUE NOT NULL,
-
         password_hash TEXT NOT NULL,
         role TEXT DEFAULT 'user',
         company_id INTEGER,
         status TEXT DEFAULT 'Active',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(username, company_id)
-
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-
       )`
     },
     {
@@ -632,7 +565,6 @@ async function initializeMasterTables() {
         tare_weight REAL DEFAULT 0,
         net_weight REAL DEFAULT 0,
         status TEXT DEFAULT 'IN',
-
         item_name TEXT,
         qty REAL DEFAULT 0,
         weight REAL DEFAULT 0,
@@ -723,7 +655,6 @@ async function initializeMasterTables() {
         sent_at DATETIME,
         failure_reason TEXT,
         retry_count INTEGER DEFAULT 0,
-
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )`
     }
@@ -748,7 +679,6 @@ async function initializeMasterTables() {
   } catch (error) {
     console.log('Error verifying tables:', error.message)
   }
-
 
   // Seed default ledgers on startup
   const defaultLedgers = [
@@ -786,54 +716,33 @@ async function initializeMasterTables() {
 
 // Start server after initialization
 const server = app.listen(PORT, '0.0.0.0', async () => {
-
   console.log(`HTTP Server is running on port ${PORT}`)
   console.log(`Health check: http://localhost:${PORT}/api/health`)
   console.log(`Network access: http://0.0.0.0:${PORT}/api/health`)
-
-  // Run full database initialization
+  
+  // Run full database initialization (including purchases, sales, etc.)
   try {
     const initDatabase = require('./init_db')
     await initDatabase()
     console.log('✓ Full database initialization complete on startup')
-
-    // Ensure voucher tables and ledger sync
-    const {
-      ensureVoucherTables,
-      syncAllLedgers
-    } = require('./utils/ledgerHelper')
-
+    
+    // Ensure voucher tables (voucher, voucher_entry, ledger_entries) exist and sync
+    const { ensureVoucherTables, syncAllLedgers } = require('./utils/ledgerHelper')
     await ensureVoucherTables()
     console.log('✓ Voucher tables initialized successfully on startup')
-
     await syncAllLedgers()
     console.log('✓ Ledger sync and rebuild successfully completed on startup')
 
-    // Rebuild stock ledger
-    const {
-      rebuildStockLedger
-    } = require('./utils/stockRebuilder')
-
+    // Rebuild and synchronize stock lots and stock ledger
+    const { rebuildStockLedger } = require('./utils/stockRebuilder')
     await rebuildStockLedger()
     console.log('✓ Stock lots & stock ledger re-synchronized on startup')
-
   } catch (err) {
-    console.error(
-      '⚠️ Database initialization error on startup:',
-      err.message
-    )
+    console.error('⚠️ Database initialization error on startup:', err.message)
   }
 
   // Initialize master tables
-  try {
-    await initializeMasterTables()
-    console.log('✓ Master tables initialized successfully')
-  } catch (err) {
-    console.error(
-      '⚠️ Master table initialization error:',
-      err.message
-    )
-  }
+  await initializeMasterTables()
 })
 
 server.on('error', (err) => {

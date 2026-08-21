@@ -1,10 +1,7 @@
 // Standalone auto-migration module
 // Usage: require('./autoMigrate')()
 const db = require('./config/database');
-
 const { syncFlourOutAndPapadInStock } = require('./utils/stockSync');
-
-
 
 const safeAddColumn = async (table, column, def) => {
   try {
@@ -21,7 +18,6 @@ const safeAddColumn = async (table, column, def) => {
 
 module.exports = async function autoMigrate() {
   console.log('🔧 Running auto-migrations...');
-
 
   // First ensure base DB tables exist
   try {
@@ -356,7 +352,6 @@ module.exports = async function autoMigrate() {
   } catch (err) {
     console.log('Notice in seeding Masala items:', err.message);
   }
-  await safeAddColumn('item_master', 'type', "TEXT DEFAULT 'Urad'");
 
   // Ensure purchase entry compatibility with ERP fields
   await safeAddColumn('purchases', 'contact_person', 'TEXT');
@@ -410,7 +405,6 @@ module.exports = async function autoMigrate() {
   await safeAddColumn('deduction_purchase', 'calculation_type', "TEXT DEFAULT 'Percentage'");
   await safeAddColumn('deduction_purchase', 'deduction_value', 'REAL DEFAULT 0');
   await safeAddColumn('deduction_purchase', 'status', "TEXT DEFAULT 'Active'");
-
   await safeAddColumn('flour_out_returns', 'papad_company', 'TEXT');
   await safeAddColumn('flour_out_return_items', 'lot_no', 'TEXT');
   await safeAddColumn('flour_out_items', 'box_papad', 'REAL DEFAULT 0');
@@ -565,7 +559,8 @@ module.exports = async function autoMigrate() {
     console.log('✓ Table purchase_request_approval_history is ready');
   } catch (err) {
     console.log('✗ Error creating purchase_request_approval_history:', err.message);
-  
+  }
+
   await safeAddColumn('customer_master', 'email', 'TEXT');
   await safeAddColumn('customer_master', 'transport', 'TEXT');
   await safeAddColumn('customer_master', 'limit_days', 'INTEGER');
@@ -581,7 +576,6 @@ module.exports = async function autoMigrate() {
 
   // Item groups status
   await safeAddColumn('item_groups', 'status', "TEXT DEFAULT 'Active'");
-
 
   // Weight conversion columns
   await safeAddColumn('weight_conversion', 'type', "TEXT");
@@ -608,7 +602,6 @@ module.exports = async function autoMigrate() {
   await safeAddColumn('flour_mill_master', 'tin_no', 'TEXT');
   await safeAddColumn('flour_mill_master', 'opening_balance_type', "TEXT DEFAULT 'Cr'");
 
-
   // Papad company entry table
   try {
     await db.run(`CREATE TABLE IF NOT EXISTS papad_company_entry (
@@ -626,7 +619,6 @@ module.exports = async function autoMigrate() {
   } catch (err) {
     console.log('✗ Error creating papad_company_entry:', err.message);
   }
-
 
   // QC Inspections and Quality Register tables & columns
   console.log('🔧 Running QC / Quality / FSMS auto-migrations...');
@@ -1191,5 +1183,3 @@ async function syncItemTransfersStock() {
     console.error('Notice in syncItemTransfersStock:', err.message);
   }
 }
-  console.log('✅ Auto-migrations complete');
-};

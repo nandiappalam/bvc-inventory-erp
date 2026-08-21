@@ -6,7 +6,6 @@ const db = require('../config/database')
 router.get('/', async (req, res) => {
   try {
     const result = await db.query(`
-<<<<<<< HEAD
       SELECT 
         for.id,
         for.s_no as s_no,
@@ -32,18 +31,6 @@ router.get('/', async (req, res) => {
       LEFT JOIN papad_company_master pcm ON (pcm.id = CAST(for.papad_company AS INTEGER) OR pcm.name = for.papad_company)
       LEFT JOIN flour_out_return_items fori ON for.id = fori.flour_out_return_id
       ORDER BY for.created_at DESC, fori.id ASC
-=======
-      SELECT for.*,
-             json_group_array(
-               json_object('id', fori.id, 'itemName', fori.item_name, 'weight', fori.weight,
-                          'qty', fori.qty, 'totalWt', fori.total_wt, 'papadKg', fori.papad_kg,
-                          'cost', fori.cost, 'wagesBag', fori.wages_bag, 'wages', fori.wages)
-             ) as items
-      FROM flour_out_returns for
-      LEFT JOIN flour_out_return_items fori ON for.id = fori.flour_out_return_id
-      GROUP BY for.id
-      ORDER BY for.created_at DESC
->>>>>>> origin/main
     `)
     res.json(result.rows)
   } catch (error) {
@@ -64,10 +51,7 @@ router.get('/:id', async (req, res) => {
 
     const flourOutReturn = {
       ...flourOutReturnResult.rows[0],
-<<<<<<< HEAD
       papadCompany: flourOutReturnResult.rows[0].papad_company,
-=======
->>>>>>> origin/main
       items: itemsResult.rows
     }
 
@@ -81,7 +65,6 @@ router.get('/:id', async (req, res) => {
 // POST create new flour out return
 router.post('/', async (req, res) => {
   try {
-<<<<<<< HEAD
     const body = req.body || {}
     const fd = body.formData || body
     const items = body.items || []
@@ -103,22 +86,11 @@ router.post('/', async (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `, [sNo, date, papadCompany, taxType, remarks,
          totals.totalQty || 0, totals.totalWeight || 0, totals.totalWages || 0])
-=======
-    const { formData, items, totals } = req.body
-
-    // Insert flour out return
-    const flourOutReturnResult = await db.run(`
-      INSERT INTO flour_out_returns (s_no, date, tax_type, remarks, total_qty, total_weight, total_wages)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `, [formData.sNo, formData.date, formData.taxType, formData.remarks,
-         totals.totalQty, totals.totalWeight, totals.totalWages])
->>>>>>> origin/main
 
     const flourOutReturnId = flourOutReturnResult.lastID
 
     // Insert flour out return items
     for (const item of items) {
-<<<<<<< HEAD
       const itemName = item.itemName || item.item_name || ''
       const lotNo = item.lotNo || item.lot_no || ''
       const weight = item.weight || 0
@@ -137,33 +109,18 @@ router.post('/', async (req, res) => {
 
     res.status(201).json({
       success: true,
-=======
-      await db.run(`
-        INSERT INTO flour_out_return_items (flour_out_return_id, item_name, weight, qty, total_wt, papad_kg, cost, wages_bag, wages)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, [flourOutReturnId, item.itemName, item.weight, item.qty, item.totalWt,
-           item.papadKg, item.cost, item.wagesBag, item.wages])
-    }
-
-    res.status(201).json({
->>>>>>> origin/main
       message: 'Flour out return saved successfully!',
       id: flourOutReturnId
     })
   } catch (error) {
     console.error('Error saving flour out return:', error)
-<<<<<<< HEAD
     res.status(500).json({ success: false, message: 'Error saving flour out return', error: error.message })
-=======
-    res.status(500).json({ message: 'Error saving flour out return', error: error.message })
->>>>>>> origin/main
   }
 })
 
 // PUT update flour out return
 router.put('/:id', async (req, res) => {
   try {
-<<<<<<< HEAD
     const body = req.body || {}
     const fd = body.formData || body
     const items = body.items || []
@@ -187,25 +144,12 @@ router.put('/:id', async (req, res) => {
       WHERE id = ?
     `, [sNo, date, papadCompany, taxType, remarks,
          totals.totalQty || 0, totals.totalWeight || 0, totals.totalWages || 0, flourOutReturnId])
-=======
-    const { formData, items, totals } = req.body
-    const flourOutReturnId = req.params.id
-
-    // Update flour out return
-    await db.run(`
-      UPDATE flour_out_returns SET s_no = ?, date = ?, tax_type = ?, remarks = ?,
-                                  total_qty = ?, total_weight = ?, total_wages = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `, [formData.sNo, formData.date, formData.taxType, formData.remarks,
-         totals.totalQty, totals.totalWeight, totals.totalWages, flourOutReturnId])
->>>>>>> origin/main
 
     // Delete existing items
     await db.run('DELETE FROM flour_out_return_items WHERE flour_out_return_id = ?', [flourOutReturnId])
 
     // Insert updated items
     for (const item of items) {
-<<<<<<< HEAD
       const itemName = item.itemName || item.item_name || ''
       const lotNo = item.lotNo || item.lot_no || ''
       const weight = item.weight || 0
@@ -226,39 +170,18 @@ router.put('/:id', async (req, res) => {
   } catch (error) {
     console.error('Error updating flour out return:', error)
     res.status(500).json({ success: false, message: 'Error updating flour out return', error: error.message })
-=======
-      await db.run(`
-        INSERT INTO flour_out_return_items (flour_out_return_id, item_name, weight, qty, total_wt, papad_kg, cost, wages_bag, wages)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, [flourOutReturnId, item.itemName, item.weight, item.qty, item.totalWt,
-           item.papadKg, item.cost, item.wagesBag, item.wages])
-    }
-
-    res.json({ message: 'Flour out return updated successfully!' })
-  } catch (error) {
-    console.error('Error updating flour out return:', error)
-    res.status(500).json({ message: 'Error updating flour out return' })
->>>>>>> origin/main
   }
 })
 
 // DELETE flour out return
 router.delete('/:id', async (req, res) => {
   try {
-<<<<<<< HEAD
     await db.run('DELETE FROM flour_out_return_items WHERE flour_out_return_id = ?', [req.params.id])
     await db.run('DELETE FROM flour_out_returns WHERE id = ?', [req.params.id])
     res.json({ success: true, message: 'Flour out return deleted successfully' })
   } catch (error) {
     console.error('Error deleting flour out return:', error)
     res.status(500).json({ success: false, message: 'Error deleting flour out return' })
-=======
-    await db.run('DELETE FROM flour_out_returns WHERE id = ?', [req.params.id])
-    res.json({ message: 'Flour out return deleted successfully' })
-  } catch (error) {
-    console.error('Error deleting flour out return:', error)
-    res.status(500).json({ message: 'Error deleting flour out return' })
->>>>>>> origin/main
   }
 })
 

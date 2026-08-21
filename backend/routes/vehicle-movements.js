@@ -2,7 +2,6 @@ const express = require('express')
 const router = express.Router()
 const db = require('../config/database')
 
-<<<<<<< HEAD
 // Ensure columns exist on startup
 const initColumns = async () => {
   const columnsToAdd = [
@@ -365,8 +364,6 @@ router.get('/track-status', async (req, res) => {
   }
 })
 
-=======
->>>>>>> origin/main
 // GET /api/vehicle-movements - List all with transporter join
 router.get('/', async (req, res) => {
   try {
@@ -377,7 +374,6 @@ router.get('/', async (req, res) => {
       LEFT JOIN transport_master tm ON vm.transporter_id = tm.id 
       ORDER BY vm.created_at DESC
     `)
-<<<<<<< HEAD
     
     // Auto-track and update status for all retrieved movements
     const trackedRows = []
@@ -387,9 +383,6 @@ router.get('/', async (req, res) => {
     }
     
     res.json(trackedRows)
-=======
-    res.json(result.rows)
->>>>>>> origin/main
   } catch (error) {
     console.error('GET vehicle-movements error:', error)
     res.status(500).json({ error: error.message })
@@ -411,12 +404,8 @@ router.get('/:id', async (req, res) => {
       return res.status(404).json({ message: 'Vehicle movement not found' })
     }
     
-<<<<<<< HEAD
     const tracked = await autoTrackMovementStatus(db, result.rows[0])
     res.json(tracked)
-=======
-    res.json(result.rows[0])
->>>>>>> origin/main
   } catch (error) {
     console.error('GET vehicle-movements/:id error:', error)
     res.status(500).json({ error: error.message })
@@ -455,7 +444,6 @@ router.post('/', async (req, res) => {
     const tareWt = parseFloat(body?.tare_weight || body?.tareWeight || 0) || 0
     const netWt = parseFloat(body?.net_weight || body?.netWeight || 0) || 0
     const stat = body?.status || 'IN'
-<<<<<<< HEAD
     const itemName = body?.item_name || body?.itemName || null
     const qty = parseFloat(body?.qty || 0) || 0
     const weight = parseFloat(body?.weight || 0) || 0
@@ -465,37 +453,23 @@ router.post('/', async (req, res) => {
     const analyzingArea = body?.analyzing_area || body?.analyzingArea || null
     
     console.log('Parsed values:', { refType, refId, movType, opType, vehicle_no, driver, transporter, grossWt, tareWt, netWt, stat, itemName, qty, weight, partyName, lotNo, analyzingTeam, analyzingArea })
-=======
-    
-    console.log('Parsed values:', { refType, refId, movType, opType, vehicle_no, driver, transporter, grossWt, tareWt, netWt, stat })
->>>>>>> origin/main
     
     const result = await db.run(`
       INSERT INTO vehicle_movements (
         reference_type, reference_id, movement_type, operation_type,
         vehicle_no, driver_name, transporter_id,
         gate_in_time, gate_out_time,
-<<<<<<< HEAD
         gross_weight, tare_weight, net_weight, status,
         item_name, qty, weight, party_name,
         lot_no, analyzing_team, analyzing_area
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-=======
-        gross_weight, tare_weight, net_weight, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
->>>>>>> origin/main
     `, [
       refType, refId, movType, opType,
       vehicle_no, driver, transporter,
       gateIn, gateOut,
-<<<<<<< HEAD
       grossWt, tareWt, netWt, stat,
       itemName, qty, weight, partyName,
       lotNo, analyzingTeam, analyzingArea
-=======
-      grossWt, tareWt, netWt,
-      stat
->>>>>>> origin/main
     ])
 
     console.log('Insert result:', result)
@@ -515,18 +489,12 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   const updates = req.body
   const allowedFields = [
-<<<<<<< HEAD
     'reference_type', 'reference_id',
     'movement_type', 'operation_type', 'vehicle_no', 'driver_name', 
     'transporter_id', 'gate_in_time', 'gate_out_time', 
     'gross_weight', 'tare_weight', 'net_weight', 'status',
     'item_name', 'qty', 'weight', 'party_name',
     'lot_no', 'analyzing_team', 'analyzing_area'
-=======
-    'movement_type', 'operation_type', 'vehicle_no', 'driver_name', 
-    'transporter_id', 'gate_in_time', 'gate_out_time', 
-    'gross_weight', 'tare_weight', 'net_weight', 'status'
->>>>>>> origin/main
   ]
   
   const setClause = Object.keys(updates)

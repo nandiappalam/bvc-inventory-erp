@@ -2,7 +2,6 @@ const express = require('express')
 const router = express.Router()
 const db = require('../config/database')
 
-<<<<<<< HEAD
 // Helper function to ensure purchase_return_deductions table exists and sync stock_lots status
 async function ensureDeductionsTable() {
   try {
@@ -56,17 +55,6 @@ router.get('/', async (req, res) => {
       LEFT JOIN supplier_master sm ON (CAST(pr.supplier AS TEXT) = CAST(sm.id AS TEXT) OR pr.supplier = sm.name)
       GROUP BY pr.id
       ORDER BY pr.id DESC
-=======
-// GET all purchase returns
-router.get('/', async (req, res) => {
-  try {
-    const result = await db.query(`
-      SELECT pr.*, GROUP_CONCAT(pri.item_name || ',' || pri.weight || ',' || pri.qty || ',' || pri.total_wt || ',' || pri.rate || ',' || pri.disc_percent || ',' || pri.tax_percent || ',' || pri.amount) as items
-      FROM purchase_returns pr
-      LEFT JOIN purchase_return_items pri ON pr.id = pri.purchase_return_id
-      GROUP BY pr.id
-      ORDER BY pr.created_at DESC
->>>>>>> origin/main
     `)
     res.json(result.rows)
   } catch (error) {
@@ -75,7 +63,6 @@ router.get('/', async (req, res) => {
   }
 })
 
-<<<<<<< HEAD
 // GET list of pending rejected lots for purchase return creation
 router.get('/pending-returns', async (req, res) => {
   try {
@@ -164,43 +151,16 @@ router.get('/:id', async (req, res) => {
     res.status(500).json({ message: 'Error fetching purchase return' });
   }
 });
-=======
-// GET purchase return by ID
-router.get('/:id', async (req, res) => {
-  try {
-    const purchaseReturnResult = await db.query('SELECT * FROM purchase_returns WHERE id = $1', [req.params.id])
-    if (purchaseReturnResult.rows.length === 0) {
-      return res.status(404).json({ message: 'Purchase return not found' })
-    }
-
-    const itemsResult = await db.query('SELECT * FROM purchase_return_items WHERE purchase_return_id = $1', [req.params.id])
-
-    const purchaseReturn = {
-      ...purchaseReturnResult.rows[0],
-      items: itemsResult.rows
-    }
-
-    res.json(purchaseReturn)
-  } catch (error) {
-    console.error('Error fetching purchase return:', error)
-    res.status(500).json({ message: 'Error fetching purchase return' })
-  }
-})
->>>>>>> origin/main
 
 // POST create new purchase return
 router.post('/', async (req, res) => {
   try {
-<<<<<<< HEAD
     await ensureDeductionsTable();
     const { formData, items, totals, deductions } = req.body
 
     const auto_wages = parseFloat(totals?.deductions?.autoWages ?? totals?.auto_wages) || 0;
     const vat_percent = parseFloat(totals?.deductions?.vatPercent ?? totals?.vat_percent) || 0;
     const vat = parseFloat(totals?.deductions?.vat ?? totals?.vat) || 0;
-=======
-    const { formData, items, totals } = req.body
->>>>>>> origin/main
 
     // Insert purchase return
     const purchaseReturnResult = await db.run(`
@@ -211,26 +171,17 @@ router.post('/', async (req, res) => {
         vat_percent, vat, grand_total
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
-<<<<<<< HEAD
       formData.sNo ?? formData.s_no, formData.date, formData.returnInvNo ?? formData.return_inv_no, formData.supplier, formData.payType ?? formData.pay_type,
       formData.invDate ?? formData.inv_date, formData.type, formData.address, formData.taxType ?? formData.tax_type, formData.godown,
       formData.remarks, totals.totalQty ?? totals.total_qty, totals.totalWeight ?? totals.total_weight, totals.totalAmount ?? totals.total_amount,
       totals.baseAmount ?? totals.base_amount, totals.discAmount ?? totals.disc_amount, totals.taxAmount ?? totals.tax_amount, totals.netAmount ?? totals.net_amount,
       auto_wages, vat_percent, vat, totals.grandTotal ?? totals.grand_total
-=======
-      formData.sNo, formData.date, formData.returnInvNo, formData.supplier, formData.payType,
-      formData.invDate, formData.type, formData.address, formData.taxType, formData.godown,
-      formData.remarks, totals.totalQty, totals.totalWeight, totals.totalAmount,
-      totals.baseAmount, totals.discAmount, totals.taxAmount, totals.netAmount,
-      totals.deductions.autoWages, totals.deductions.vatPercent, totals.deductions.vat, totals.grandTotal
->>>>>>> origin/main
     ])
 
     const purchaseReturnId = purchaseReturnResult.lastID
 
     // Insert purchase return items
     for (const item of items) {
-<<<<<<< HEAD
       const lot_no = item.lot_no ?? item.lotNo ?? '';
       const item_name = item.item_name ?? item.itemName ?? '';
       const weight = parseFloat(item.weight) || 0;
@@ -241,14 +192,11 @@ router.post('/', async (req, res) => {
       const tax_percent = parseFloat(item.tax_percent ?? item.tax ?? item.taxPercent) || 0;
       const amount = parseFloat(item.amount) || 0;
 
-=======
->>>>>>> origin/main
       await db.run(`
         INSERT INTO purchase_return_items (
           purchase_return_id, lot_no, item_name, weight, qty, total_wt, rate, disc_percent, tax_percent, amount
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
-<<<<<<< HEAD
         purchaseReturnId, lot_no, item_name, weight, qty, total_wt,
         rate, disc_percent, tax_percent, amount
       ])
@@ -288,11 +236,6 @@ router.post('/', async (req, res) => {
           console.error('Error inserting purchase_return_deduction:', e);
         }
       }
-=======
-        purchaseReturnId, item.lotNo, item.itemName, item.weight, item.qty, item.totalWt,
-        item.rate, item.disc, item.tax, item.amount
-      ])
->>>>>>> origin/main
     }
 
     res.status(201).json({
@@ -311,13 +254,10 @@ router.put('/:id', async (req, res) => {
     const { formData, items, totals } = req.body
     const purchaseReturnId = req.params.id
 
-<<<<<<< HEAD
     const auto_wages = parseFloat(totals?.deductions?.autoWages ?? totals?.auto_wages) || 0;
     const vat_percent = parseFloat(totals?.deductions?.vatPercent ?? totals?.vat_percent) || 0;
     const vat = parseFloat(totals?.deductions?.vat ?? totals?.vat) || 0;
 
-=======
->>>>>>> origin/main
     // Update purchase return
     await db.query(`
       UPDATE purchase_returns SET
@@ -329,27 +269,17 @@ router.put('/:id', async (req, res) => {
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `, [
-<<<<<<< HEAD
       formData.sNo ?? formData.s_no, formData.date, formData.returnInvNo ?? formData.return_inv_no, formData.supplier, formData.payType ?? formData.pay_type,
       formData.invDate ?? formData.inv_date, formData.type, formData.address, formData.taxType ?? formData.tax_type, formData.godown,
       formData.remarks, totals.totalQty ?? totals.total_qty, totals.totalWeight ?? totals.total_weight, totals.totalAmount ?? totals.total_amount,
       totals.baseAmount ?? totals.base_amount, totals.discAmount ?? totals.disc_amount, totals.taxAmount ?? totals.tax_amount, totals.netAmount ?? totals.net_amount,
       auto_wages, vat_percent, vat,
       totals.grandTotal ?? totals.grand_total, purchaseReturnId
-=======
-      formData.sNo, formData.date, formData.returnInvNo, formData.supplier, formData.payType,
-      formData.invDate, formData.type, formData.address, formData.taxType, formData.godown,
-      formData.remarks, totals.totalQty, totals.totalWeight, totals.totalAmount,
-      totals.baseAmount, totals.discAmount, totals.taxAmount, totals.netAmount,
-      totals.deductions.autoWages, totals.deductions.vatPercent, totals.deductions.vat,
-      totals.grandTotal, purchaseReturnId
->>>>>>> origin/main
     ])
 
     // Delete existing items
     await db.query('DELETE FROM purchase_return_items WHERE purchase_return_id = ?', [purchaseReturnId])
 
-<<<<<<< HEAD
     // Delete existing deductions
     try {
       await db.query('DELETE FROM purchase_return_deductions WHERE purchase_return_id = ?', [purchaseReturnId]);
@@ -367,16 +297,11 @@ router.put('/:id', async (req, res) => {
       const tax_percent = parseFloat(item.tax_percent ?? item.tax ?? item.taxPercent) || 0;
       const amount = parseFloat(item.amount) || 0;
 
-=======
-    // Insert updated items
-    for (const item of items) {
->>>>>>> origin/main
       await db.query(`
         INSERT INTO purchase_return_items (
           purchase_return_id, lot_no, item_name, weight, qty, total_wt, rate, disc_percent, tax_percent, amount
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
-<<<<<<< HEAD
         purchaseReturnId, lot_no, item_name, weight, qty, total_wt,
         rate, disc_percent, tax_percent, amount
       ])
@@ -416,11 +341,6 @@ router.put('/:id', async (req, res) => {
           console.error('Error re-inserting purchase_return_deduction:', e);
         }
       }
-=======
-        purchaseReturnId, item.lotNo, item.itemName, item.weight, item.qty, item.totalWt,
-        item.rate, item.disc, item.tax, item.amount
-      ])
->>>>>>> origin/main
     }
 
     res.json({ message: 'Purchase return updated successfully!' })

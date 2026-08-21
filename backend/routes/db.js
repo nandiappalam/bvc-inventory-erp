@@ -1,7 +1,6 @@
 const express = require('express')
 const router = express.Router()
 const db = require('../config/database')
-<<<<<<< HEAD
 const multer = require('multer')
 const fs = require('fs')
 const path = require('path')
@@ -72,8 +71,6 @@ router.post('/restore', upload.single('database'), async (req, res) => {
     res.status(500).json({ success: false, message: 'Failed to restore database', error: error.message })
   }
 })
-=======
->>>>>>> origin/main
 
 // Execute Query (SELECT) - returns array of results
 router.post('/query', async (req, res) => {

@@ -1,9 +1,6 @@
 const express = require('express');
 const db = require('../config/database');
-<<<<<<< HEAD
 const recycleBinService = require('../services/RecycleBinService');
-=======
->>>>>>> origin/main
 
 const router = express.Router();
 
@@ -75,11 +72,8 @@ async function initTables() {
         date DATE NOT NULL,
         reference_no TEXT,
         narration TEXT,
-<<<<<<< HEAD
         status TEXT DEFAULT 'Approved',
         posted INTEGER DEFAULT 1,
-=======
->>>>>>> origin/main
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
@@ -88,7 +82,6 @@ async function initTables() {
     console.error('voucher table error:', err);
   }
 
-<<<<<<< HEAD
   // Ensure columns exist on older tables
   try {
     await db.run("ALTER TABLE voucher ADD COLUMN status TEXT DEFAULT 'Approved'");
@@ -97,8 +90,6 @@ async function initTables() {
     await db.run("ALTER TABLE voucher ADD COLUMN posted INTEGER DEFAULT 1");
   } catch (e) {}
 
-=======
->>>>>>> origin/main
   try {
     await db.run(`
       CREATE TABLE IF NOT EXISTS voucher_entry (
@@ -117,7 +108,6 @@ async function initTables() {
   } catch (err) {
     console.error('voucher_entry table error:', err);
   }
-<<<<<<< HEAD
 
   // Heal ledger names that were saved as numeric IDs
   await healDatabaseVouchers();
@@ -471,29 +461,17 @@ router.get('/ledgers', async (req, res) => {
   }
 });
 
-=======
-}
-
-initTables().catch(console.error);
-
->>>>>>> origin/main
 // GET /vouchers
 router.get('/', async (req, res) => {
   try {
     let query = `
       SELECT v.*, 
       COALESCE(SUM(ve.debit), 0) as total_debit,
-<<<<<<< HEAD
       COALESCE(SUM(ve.credit), 0) as total_credit,
       GROUP_CONCAT(lm.name, ', ') as ledger_names
       FROM voucher v 
       LEFT JOIN voucher_entry ve ON v.id = ve.voucher_id
       LEFT JOIN ledgermaster lm ON ve.ledger_id = lm.id
-=======
-      COALESCE(SUM(ve.credit), 0) as total_credit
-      FROM voucher v 
-      LEFT JOIN voucher_entry ve ON v.id = ve.voucher_id
->>>>>>> origin/main
     `;
     let params = [];
     let conditions = [];
@@ -510,7 +488,6 @@ router.get('/', async (req, res) => {
       conditions.push('v.voucher_type = ?');
       params.push(req.query.voucher_type);
     }
-<<<<<<< HEAD
     if (req.query.status) {
       conditions.push('v.status = ?');
       params.push(req.query.status);
@@ -519,8 +496,6 @@ router.get('/', async (req, res) => {
       conditions.push('v.id IN (SELECT voucher_id FROM voucher_entry WHERE ledger_id = ?)');
       params.push(req.query.ledger_id);
     }
-=======
->>>>>>> origin/main
     if (req.query.search) {
       conditions.push('(v.voucher_no LIKE ? OR v.narration LIKE ? OR v.reference_no LIKE ?)');
       const s = `%${req.query.search}%`;
@@ -558,13 +533,8 @@ router.post('/', async (req, res) => {
 
     // Insert voucher master
     const voucherResult = await db.run(
-<<<<<<< HEAD
       'INSERT INTO voucher (voucher_type, voucher_no, date, reference_no, narration, status, posted) VALUES (?, ?, ?, ?, ?, ?, ?)',
       [data.voucher_type, voucher_no, data.date, data.reference_no || '', data.narration || '', data.status || 'Approved', data.posted !== undefined ? data.posted : 1]
-=======
-      'INSERT INTO voucher (voucher_type, voucher_no, date, reference_no, narration) VALUES (?, ?, ?, ?, ?)',
-      [data.voucher_type, voucher_no, data.date, data.reference_no || '', data.narration || '']
->>>>>>> origin/main
     );
     const voucherId = voucherResult.lastInsertRowid;
 
@@ -639,24 +609,16 @@ router.put('/:id', async (req, res) => {
     const voucher_no = data.voucher_no || await generateVoucherNo(data.voucher_type);
     
     await db.run(`
-<<<<<<< HEAD
       UPDATE voucher SET voucher_type = ?, voucher_no = ?, date = ?, reference_no = ?, narration = ?, status = ?, posted = ? WHERE id = ?
     `, [data.voucher_type, voucher_no, data.date, data.reference_no || '', data.narration || '', data.status || 'Approved', data.posted !== undefined ? data.posted : 1, req.params.id]);
 
     // Insert new entries
     const ledgerEntries = [];
-=======
-      UPDATE voucher SET voucher_type = ?, voucher_no = ?, date = ?, reference_no = ?, narration = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
-    `, [data.voucher_type, voucher_no, data.date, data.reference_no || '', data.narration || '', req.params.id]);
-
-    // Insert new entries
->>>>>>> origin/main
     for (const entry of data.entries) {
       await db.run(
         'INSERT INTO voucher_entry (voucher_id, type, ledger_id, debit, credit, remarks) VALUES (?, ?, ?, ?, ?, ?)',
         [req.params.id, entry.type, entry.ledger_id, entry.debit || 0, entry.credit || 0, entry.remarks || '']
       );
-<<<<<<< HEAD
       
       const lmResult = await db.query('SELECT name FROM ledgermaster WHERE id = ?', [entry.ledger_id]);
       const ledger_name = lmResult.rows[0]?.name || 'Unknown';
@@ -667,9 +629,6 @@ router.put('/:id', async (req, res) => {
       ));
     }
     await Promise.all(ledgerEntries);
-=======
-    }
->>>>>>> origin/main
 
     res.json({ message: 'Voucher updated successfully' });
   } catch (err) {
@@ -696,7 +655,6 @@ router.post('/preview-no', async (req, res) => {
 // DELETE /vouchers/:id
 router.delete('/:id', async (req, res) => {
   try {
-<<<<<<< HEAD
     const voucher = await db.query('SELECT * FROM voucher WHERE id = ?', [req.params.id]);
     if (voucher.rows.length === 0) return res.status(404).json({ error: 'Not found' });
 
@@ -727,13 +685,6 @@ router.delete('/:id', async (req, res) => {
     await db.run('DELETE FROM ledger_entries WHERE voucher_no = ?', [vRow.voucher_no]);
     await db.run('DELETE FROM voucher WHERE id = ?', [req.params.id]);
     res.json({ message: `Voucher ${vRow.voucher_no} deleted` });
-=======
-    const voucher = await db.query('SELECT voucher_no FROM voucher WHERE id = ?', [req.params.id]);
-    if (voucher.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-
-    await db.run('DELETE FROM voucher WHERE id = ?', [req.params.id]);
-    res.json({ message: `Voucher ${voucher.rows[0].voucher_no} deleted` });
->>>>>>> origin/main
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

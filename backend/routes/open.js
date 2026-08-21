@@ -2,7 +2,6 @@ const express = require('express')
 const router = express.Router()
 const db = require('../config/database')
 
-<<<<<<< HEAD
 // GET next S.No
 router.get('/next-sno', async (req, res) => {
   try {
@@ -27,13 +26,6 @@ router.get('/', async (req, res) => {
     }
 
     res.json(entries)
-=======
-// GET all open entries
-router.get('/', async (req, res) => {
-  try {
-    const result = await db.query('SELECT * FROM open ORDER BY id DESC')
-    res.json(result.rows)
->>>>>>> origin/main
   } catch (error) {
     console.error('Error fetching open entries:', error)
     res.status(500).json({ message: 'Error fetching open entries', error: error.message })
@@ -49,15 +41,11 @@ router.get('/:id', async (req, res) => {
       return res.status(404).json({ message: 'Open entry not found' })
     }
 
-<<<<<<< HEAD
     const entry = result.rows[0]
     const itemsResult = await db.query('SELECT * FROM open_items WHERE open_id = ? ORDER BY id ASC', [entry.id])
     entry.items = itemsResult.rows || []
 
     res.json(entry)
-=======
-    res.json(result.rows[0])
->>>>>>> origin/main
   } catch (error) {
     console.error('Error fetching open entry:', error)
     res.status(500).json({ message: 'Error fetching open entry', error: error.message })
@@ -67,18 +55,13 @@ router.get('/:id', async (req, res) => {
 // POST create new open entry
 router.post('/', async (req, res) => {
   try {
-<<<<<<< HEAD
     const { s_no, date, description, amount, remarks, type, papad_comp, items } = req.body
-=======
-    const { s_no, date, description, amount, remarks } = req.body
->>>>>>> origin/main
 
     if (!s_no || !date) {
       return res.status(400).json({ message: 'S.No and Date are required' })
     }
 
     const result = await db.run(
-<<<<<<< HEAD
       'INSERT INTO open (s_no, date, description, amount, remarks, type, papad_comp) VALUES (?, ?, ?, ?, ?, ?, ?)',
       [s_no, date, description || '', amount || 0, remarks || '', type || '', papad_comp || '']
     )
@@ -134,28 +117,13 @@ router.post('/', async (req, res) => {
       success: true,
       message: 'Open entry created successfully',
       id: open_id
-=======
-      'INSERT INTO open (s_no, date, description, amount, remarks) VALUES (?, ?, ?, ?, ?)',
-      [s_no, date, description || '', amount || 0, remarks || '']
-    )
-
-    res.status(201).json({
-      message: 'Open entry created successfully',
-      id: result.lastID
->>>>>>> origin/main
     })
   } catch (error) {
     console.error('Error creating open entry:', error)
     if (error.message.includes('UNIQUE constraint failed')) {
-<<<<<<< HEAD
       res.status(400).json({ success: false, message: 'Open entry with this S.No already exists' })
     } else {
       res.status(500).json({ success: false, message: 'Error creating open entry', error: error.message })
-=======
-      res.status(400).json({ message: 'Open entry with this S.No already exists' })
-    } else {
-      res.status(500).json({ message: 'Error creating open entry', error: error.message })
->>>>>>> origin/main
     }
   }
 })
@@ -163,7 +131,6 @@ router.post('/', async (req, res) => {
 // PUT update open entry
 router.put('/:id', async (req, res) => {
   try {
-<<<<<<< HEAD
     const { s_no, date, description, amount, remarks, type, papad_comp, items } = req.body
     const open_id = req.params.id
 
@@ -229,30 +196,12 @@ router.put('/:id', async (req, res) => {
   } catch (error) {
     console.error('Error updating open entry:', error)
     res.status(500).json({ success: false, message: 'Error updating open entry', error: error.message })
-=======
-    const { s_no, date, description, amount, remarks } = req.body
-
-    const result = await db.run(
-      'UPDATE open SET s_no = ?, date = ?, description = ?, amount = ?, remarks = ? WHERE id = ?',
-      [s_no, date, description || '', amount || 0, remarks || '', req.params.id]
-    )
-
-    if (result.changes > 0) {
-      res.json({ message: 'Open entry updated successfully' })
-    } else {
-      res.status(404).json({ message: 'Open entry not found' })
-    }
-  } catch (error) {
-    console.error('Error updating open entry:', error)
-    res.status(500).json({ message: 'Error updating open entry', error: error.message })
->>>>>>> origin/main
   }
 })
 
 // DELETE open entry
 router.delete('/:id', async (req, res) => {
   try {
-<<<<<<< HEAD
     const open_id = req.params.id
 
     await db.run("DELETE FROM stock WHERE reference_id = ? AND type = 'Opening Stock'", [open_id])
@@ -269,18 +218,6 @@ router.delete('/:id', async (req, res) => {
   } catch (error) {
     console.error('Error deleting open entry:', error)
     res.status(500).json({ success: false, message: 'Error deleting open entry', error: error.message })
-=======
-    const result = await db.run('DELETE FROM open WHERE id = ?', [req.params.id])
-
-    if (result.changes > 0) {
-      res.json({ message: 'Open entry deleted successfully' })
-    } else {
-      res.status(404).json({ message: 'Open entry not found' })
-    }
-  } catch (error) {
-    console.error('Error deleting open entry:', error)
-    res.status(500).json({ message: 'Error deleting open entry', error: error.message })
->>>>>>> origin/main
   }
 })
 

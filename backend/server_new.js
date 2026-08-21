@@ -9,7 +9,6 @@ const db = require('./config/database_new')
 const app = express()
 // AI Studio requires port 3000 strictly
 const PORT = 3000
-const PORT = process.env.PORT || 3000
 
 // Middleware
 app.use(cors())
@@ -19,7 +18,7 @@ app.use('/Entry', express.static(path.join(__dirname, '../Entry')))
 
 // Routes
 const purchasesRouter = require('./routes/purchases')
-
+const purchaseReturnsRouter = require('./routes/purchaseReturns')
 const grainsRouter = require('./routes/grains')
 const flourOutRouter = require('./routes/flourOut')
 const flourOutReturnsRouter = require('./routes/flourOutReturns')
@@ -271,10 +270,7 @@ async function initializeMasterTables() {
         name TEXT UNIQUE,
         print_name TEXT,
         contact_person TEXT,
-<<<<<<< HEAD
         address TEXT,
-=======
->>>>>>> origin/main
         address1 TEXT,
         address2 TEXT,
         address3 TEXT,
@@ -341,7 +337,6 @@ async function initializeMasterTables() {
         item_name TEXT,
         lot_no TEXT,
         qty REAL DEFAULT 0,
-<<<<<<< HEAD
         weight REAL DEFAULT 0,
         rate REAL DEFAULT 0,
         amount REAL DEFAULT 0,
@@ -349,11 +344,6 @@ async function initializeMasterTables() {
         reference_id INTEGER,
         status TEXT DEFAULT 'Active',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-=======
-        rate REAL DEFAULT 0,
-        type TEXT,
-        status TEXT DEFAULT 'Active'
->>>>>>> origin/main
       )`
     }
   ]

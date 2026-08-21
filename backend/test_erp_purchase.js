@@ -1,11 +1,7 @@
 const db = require('./config/database');
 const axios = require('axios');
 
-<<<<<<< HEAD
 const BASE_URL = process.env.BVC_BASE_URL || 'http://localhost:10000/api';
-=======
-const BASE_URL = 'http://localhost:5000/api';
->>>>>>> origin/main
 
 (async () => {
   try {
@@ -76,7 +72,6 @@ const BASE_URL = 'http://localhost:5000/api';
     const items = [
       {
         itemName,
-<<<<<<< HEAD
         item_name: itemName,
         lotNo: '',
         lot_no: '',
@@ -89,15 +84,6 @@ const BASE_URL = 'http://localhost:5000/api';
         disc_percent: discPercent,
         tax: taxPercent,
         tax_percent: taxPercent,
-=======
-        lotNo: '',
-        qty,
-        weight: perUnitWeight,
-        totalWt: totalWeight,
-        rate,
-        disc: discPercent,
-        tax: taxPercent,
->>>>>>> origin/main
         amount: Number(taxableAmount.toFixed(2))
       }
     ];
@@ -230,7 +216,6 @@ const BASE_URL = 'http://localhost:5000/api';
 
     process.exit(0);
   } catch (error) {
-<<<<<<< HEAD
     console.error('ERROR:', error?.message || error);
     console.error('ERROR NAME:', error?.name);
     console.error('ERROR CODE:', error?.code);
@@ -244,12 +229,3 @@ const BASE_URL = 'http://localhost:5000/api';
   }
 })();
 
-=======
-    console.error('ERROR:', error.message);
-    if (error.response?.data) {
-      console.error('Response data:', error.response.data);
-    }
-    process.exit(1);
-  }
-})();
->>>>>>> origin/main

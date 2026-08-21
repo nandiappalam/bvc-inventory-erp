@@ -119,10 +119,7 @@ CREATE TABLE IF NOT EXISTS papad_company_master (
     name TEXT UNIQUE,
     print_name TEXT,
     contact_person TEXT,
-<<<<<<< HEAD
     address TEXT,
-=======
->>>>>>> origin/main
     address1 TEXT,
     address2 TEXT,
     address3 TEXT,

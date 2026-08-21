@@ -2,7 +2,6 @@ const express = require('express')
 const router = express.Router()
 const db = require('../config/database')
 
-<<<<<<< HEAD
 // Ensure deduction columns exist in sales_return
 async function ensureReturnColumns() {
   const returnCols = [
@@ -19,11 +18,6 @@ async function ensureReturnColumns() {
 router.get('/', async (req, res) => {
   try {
     await ensureReturnColumns();
-=======
-// Get all sales returns
-router.get('/', async (req, res) => {
-  try {
->>>>>>> origin/main
     const sql = `
       SELECT sr.*, sri.item_name, sri.lot_no, sri.qty, sri.rate, sri.disc_perc, sri.tax_perc, sri.total_amt
       FROM sales_return sr
@@ -51,13 +45,10 @@ router.get('/', async (req, res) => {
           pay_type: row.pay_type,
           tax_type: row.tax_type,
           address: row.address,
-<<<<<<< HEAD
           deduction: row.deduction,
           deduction_remarks: row.deduction_remarks,
           deduction_amount: row.deduction_amount,
           grand_total: row.grand_total,
-=======
->>>>>>> origin/main
           items: []
         })
       }
@@ -86,10 +77,7 @@ router.get('/', async (req, res) => {
 // Get single sales return
 router.get('/:id', async (req, res) => {
   try {
-<<<<<<< HEAD
     await ensureReturnColumns();
-=======
->>>>>>> origin/main
     const { id } = req.params
 
     const sql = `
@@ -128,7 +116,6 @@ router.get('/:id', async (req, res) => {
 // Create new sales return
 router.post('/', async (req, res) => {
   try {
-<<<<<<< HEAD
     await ensureReturnColumns();
     const { 
       s_no, date, customer, pay_type, tax_type, address, remarks, 
@@ -173,26 +160,11 @@ router.post('/', async (req, res) => {
         return res.status(400).json({ success: false, error: 'At least one item with a valid name is required.' });
       }
 
-=======
-    const { s_no, date, customer, pay_type, tax_type, address, remarks, total_qty, total_wt, total_amt, items } = req.body
-
-    const sql = `
-      INSERT INTO sales_return (s_no, date, customer, pay_type, tax_type, address, remarks, total_qty, total_wt, total_amt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `
-
-    const result = await db.run(sql, [s_no, date, customer, pay_type, tax_type, address, remarks, total_qty, total_wt, total_amt])
-    const salesReturnId = result.lastID || result.lastInsertRowid
-
-    // Insert items if provided
-    if (items && items.length > 0) {
->>>>>>> origin/main
       const itemSql = `
         INSERT INTO sales_return_items (sales_return_id, item_name, lot_no, qty, rate, disc_perc, tax_perc, total_amt)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `
 
-<<<<<<< HEAD
       for (const item of validItems) {
         const qtyVal = parseFloat(item.qty) || 0;
         const rateVal = parseFloat(item.rate) || 0;
@@ -240,33 +212,12 @@ router.post('/', async (req, res) => {
   } catch (err) {
     console.error('Error creating sales return:', err)
     res.status(500).json({ success: false, error: 'Failed to create sales return' })
-=======
-      for (const item of items) {
-        await db.run(itemSql, [
-          salesReturnId,
-          item.item_name,
-          item.lot_no,
-          item.qty,
-          item.rate,
-          item.disc_perc,
-          item.tax_perc,
-          item.amount || item.total_amt
-        ])
-      }
-    }
-
-    res.status(201).json({ id: salesReturnId, message: 'Sales return created successfully' })
-  } catch (err) {
-    console.error('Error creating sales return:', err)
-    res.status(500).json({ error: 'Failed to create sales return' })
->>>>>>> origin/main
   }
 })
 
 // Update sales return
 router.put('/:id', async (req, res) => {
   try {
-<<<<<<< HEAD
     await ensureReturnColumns();
     const { id } = req.params
     const { 
@@ -288,34 +239,15 @@ router.put('/:id', async (req, res) => {
       total_qty, total_wt, total_amt, deduction, deduction_remarks, 
       deduction_amount, grand_total, id
     ])
-=======
-    const { id } = req.params
-    const { s_no, date, customer, pay_type, tax_type, address, remarks, total_qty, total_wt, total_amt } = req.body
-
-    const sql = `
-      UPDATE sales_return
-      SET s_no = ?, date = ?, customer = ?, pay_type = ?, tax_type = ?, address = ?, remarks = ?, total_qty = ?, total_wt = ?, total_amt = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `
-
-    const result = await db.run(sql, [s_no, date, customer, pay_type, tax_type, address, remarks, total_qty, total_wt, total_amt, id])
->>>>>>> origin/main
 
     if (result.changes === 0) {
       return res.status(404).json({ error: 'Sales return not found' })
     }
 
-<<<<<<< HEAD
     res.json({ success: true, message: 'Sales return updated successfully' })
   } catch (err) {
     console.error('Error updating sales return:', err)
     res.status(500).json({ success: false, error: 'Failed to update sales return' })
-=======
-    res.json({ message: 'Sales return updated successfully' })
-  } catch (err) {
-    console.error('Error updating sales return:', err)
-    res.status(500).json({ error: 'Failed to update sales return' })
->>>>>>> origin/main
   }
 })
 
@@ -334,17 +266,10 @@ router.delete('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Sales return not found' })
     }
 
-<<<<<<< HEAD
     res.json({ success: true, message: 'Sales return deleted successfully' })
   } catch (err) {
     console.error('Error deleting sales return:', err)
     res.status(500).json({ success: false, error: 'Failed to delete sales return' })
-=======
-    res.json({ message: 'Sales return deleted successfully' })
-  } catch (err) {
-    console.error('Error deleting sales return:', err)
-    res.status(500).json({ error: 'Failed to delete sales return' })
->>>>>>> origin/main
   }
 })
 

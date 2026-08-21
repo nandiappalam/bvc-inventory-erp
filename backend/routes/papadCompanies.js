@@ -69,19 +69,11 @@ router.post('/', asyncHandler(async (req, res) => {
   // Insert company
   const companyResult = await db.run(
     `INSERT INTO papad_company_master
-<<<<<<< HEAD
      (name, print_name, contact_person, address, address1, area, phone_res, phone_off, mobile, mobile1, email, opening_advance, opening_balance, status)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       name, print_name || null, contact_person || null, address || null, address || null, area || null,
       phone_res || null, phone_off || null, mobile || null, mobile || null, email || null,
-=======
-     (name, print_name, contact_person, address, area, phone_res, phone_off, mobile, email, opening_advance, opening_balance, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      name, print_name || null, contact_person || null, address || null, area || null,
-      phone_res || null, phone_off || null, mobile || null, email || null,
->>>>>>> origin/main
       opening_advance || 0, opening_balance || 0, status || 'Active'
     ]
   )
@@ -127,7 +119,6 @@ router.put('/:id', asyncHandler(async (req, res) => {
   // Update company
   await db.run(
     `UPDATE papad_company_master SET
-<<<<<<< HEAD
      name = ?, print_name = ?, contact_person = ?, address = ?, address1 = ?, area = ?,
      phone_res = ?, phone_off = ?, mobile = ?, mobile1 = ?, email = ?,
      opening_advance = ?, opening_balance = ?, status = ?
@@ -135,15 +126,6 @@ router.put('/:id', asyncHandler(async (req, res) => {
     [
       name, print_name || null, contact_person || null, address || null, address || null, area || null,
       phone_res || null, phone_off || null, mobile || null, mobile || null, email || null,
-=======
-     name = ?, print_name = ?, contact_person = ?, address = ?, area = ?,
-     phone_res = ?, phone_off = ?, mobile = ?, email = ?,
-     opening_advance = ?, opening_balance = ?, status = ?
-     WHERE id = ?`,
-    [
-      name, print_name || null, contact_person || null, address || null, area || null,
-      phone_res || null, phone_off || null, mobile || null, email || null,
->>>>>>> origin/main
       opening_advance || 0, opening_balance || 0, status || 'Active', id
     ]
   )
