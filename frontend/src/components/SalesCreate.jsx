@@ -190,12 +190,21 @@ const SalesCreate = () => {
       }
       // Fetch next sequential s_no for Bill No / Order No
       api(`/sales/next-sno?is_order=${isOrder ? 1 : 0}`)
-        .then(res => {
-          if (res && res.success && res.next_sno) {
-            setFormData(prev => ({ ...prev, s_no: String(res.next_sno) }));
+        .then(async res => {
+          const sno = res?.next_sno ?? res?.next_s_no ?? res?.s_no ?? res?.data?.s_no;
+          if (sno) {
+            setFormData(prev => ({ ...prev, s_no: String(sno) }));
+          } else {
+            const fallback = await api.getNextSNo(`/sales?is_order=${isOrder ? 1 : 0}`);
+            setFormData(prev => ({ ...prev, s_no: String(fallback) }));
           }
         })
-        .catch(err => console.error('Error fetching next s_no:', err));
+        .catch(async () => {
+          try {
+            const fallback = await api.getNextSNo(`/sales?is_order=${isOrder ? 1 : 0}`);
+            setFormData(prev => ({ ...prev, s_no: String(fallback) }));
+          } catch (e) {}
+        });
     }
   }, [editId, isOrder]);
 

@@ -25,21 +25,40 @@ router.get('/', async (req, res) => {
 // IMPORTANT: must be registered BEFORE router.get('/:id')
 router.get('/next-sno', async (req, res) => {
   try {
-    const result = await db.query('SELECT MAX(s_no) as maxSno FROM purchases')
-    const nextSno = (result.rows[0]?.maxSno || 0) + 1
-    res.json({ success: true, data: { s_no: nextSno } })
+    const pResult = await db.query('SELECT MAX(s_no) as maxSno, MAX(id) as maxId, COUNT(*) as count FROM purchases');
+    const piResult = await db.query('SELECT COUNT(*) as itemCount, MAX(id) as maxItemId FROM purchase_items');
+    
+    // Check total records listed on purchase display UI
+    const listRes = await db.query(`
+      SELECT COUNT(*) as totalListRecords 
+      FROM purchases p
+      LEFT JOIN purchase_items pi ON pi.purchase_id = p.id
+    `);
+    const totalListRecords = parseInt(listRes.rows[0]?.totalListRecords) || 0;
+    
+    const maxVal = Math.max(
+      parseInt(pResult.rows[0]?.maxSno) || 0,
+      parseInt(pResult.rows[0]?.maxId) || 0,
+      parseInt(pResult.rows[0]?.count) || 0,
+      parseInt(piResult.rows[0]?.itemCount) || 0,
+      totalListRecords
+    );
+    const nextSno = maxVal + 1;
+    res.json({ success: true, data: { s_no: nextSno }, next_sno: nextSno, s_no: nextSno });
   } catch (error) {
-    console.error('Error getting next s_no:', error.message)
-    res.status(500).json({ success: false, message: 'Error getting next s_no', error: error.message })
+    console.error('Error getting next s_no:', error.message);
+    res.status(500).json({ success: false, message: 'Error getting next s_no', error: error.message });
   }
-})
+});
  
 // GET purchase list for UI (ERP-grade join)
 router.get('/purchase-list', async (req, res) => {
   try {
     const sql = `SELECT
       p.id,
+      COALESCE(p.s_no, p.id) AS s_no,
       p.inv_no AS invoice_no,
+      COALESCE(p.source_order_no, p.po_no, '') AS po_no,
       p.date AS invoice_date,
       s.name AS supplier_name,
       COALESCE(s.address1, p.address, '') AS address,

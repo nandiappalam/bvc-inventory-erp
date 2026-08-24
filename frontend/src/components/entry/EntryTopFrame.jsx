@@ -52,7 +52,9 @@ export const EntryTopFrame = ({ fields = [], data = {}, onChange = () => {}, col
         let endpoint = nextSnoEndpoint;
         if (!endpoint) {
           const path = window.location.pathname.toLowerCase();
-          if (path.includes('flour-out')) {
+          if (path.includes('purchase-order') || path.includes('purchase_order')) {
+            endpoint = '/purchase-orders/next-sno';
+          } else if (path.includes('flour-out')) {
             endpoint = '/flour-out/next-sno';
           } else if (path.includes('sales-export')) {
             endpoint = '/sales-export-orders/next-sno';
@@ -323,15 +325,23 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
       const record = await api(`/masters/record/${tableName}/${id}`);
 
       if (record) {
-        if (field.masterType === 'suppliers' || field.masterType === 'customers' || field.masterType === 'senders' || field.masterType === 'consignees') {
-          const contactPerson = record.contact_person || '';
+        // Only autofill 'address' for customers, suppliers, and papad companies.
+        // Senders and Consignees must NOT overwrite the customer's address.
+        const isCustomer = field.masterType === 'customers' || field.name === 'customer_id' || field.name === 'customer' || field.name === 'customerId' || field.name === 'customerName';
+        const isSupplier = field.masterType === 'suppliers' || field.name === 'supplier_id' || field.name === 'supplier' || field.name === 'supplierId' || field.name === 'supplierName';
+        const isPapadComp = field.masterType === 'papad_companies' || field.name === 'papad_company' || field.name === 'papadCompany' || field.name === 'papadComp';
+
+        if (isCustomer || isSupplier) {
+          const partyName = record.name || record.supplier_name || record.customer_name || '';
+          const contactPerson = record.contact_person || record.contactPerson || '';
           const addressLine = record.address || record.address1 || '';
           const area = record.area || '';
           const phone = record.phone || record.phone_res || record.mobile || record.phone_off || '';
           const email = record.email || '';
-          const gstNo = record.gst_no || record.tin_no || '';
+          const gstNo = record.gst_no || record.tin_no || record.gstNo || '';
 
           const details = [
+            partyName && `Name : ${partyName}`,
             contactPerson && `Contact Person : ${contactPerson}`,
             addressLine && `Address : ${addressLine}`,
             area && `Area : ${area}`,
@@ -343,7 +353,15 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
           if (details) {
             onChange('address', details);
           }
-        } else if (field.masterType === 'papad_companies') {
+          if (isSupplier && partyName) {
+            onChange('supplierName', partyName);
+            onChange('supplier_name', partyName);
+          }
+          if (isCustomer && partyName) {
+            onChange('customerName', partyName);
+            onChange('customer_name', partyName);
+          }
+        } else if (isPapadComp) {
           const name = record.name || '';
           const contactPerson = record.contact_person || '';
           const addressLine = [record.address, record.address1, record.address2, record.address3, record.address4]
@@ -366,7 +384,12 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
   const handleChange = async (e) => {
     const value = e.target.value;
     onChange(field.name, value);
-    if (value && (field.masterType === 'suppliers' || field.masterType === 'customers' || field.masterType === 'senders' || field.masterType === 'consignees' || field.masterType === 'papad_companies')) {
+    const isAutofillMaster = 
+      field.masterType === 'customers' || field.name === 'customer_id' || field.name === 'customer' || field.name === 'customerId' || field.name === 'customerName' ||
+      field.masterType === 'suppliers' || field.name === 'supplier_id' || field.name === 'supplier' || field.name === 'supplierId' || field.name === 'supplierName' ||
+      field.masterType === 'papad_companies' || field.name === 'papad_company' || field.name === 'papadCompany' || field.name === 'papadComp';
+
+    if (value && isAutofillMaster) {
       await handleMasterSelect(value, field);
     }
   };

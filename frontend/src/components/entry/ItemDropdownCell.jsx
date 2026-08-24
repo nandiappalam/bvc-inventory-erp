@@ -213,20 +213,61 @@ const ItemDropdownCell = ({
     });
   }, [items, searchTerm]);
 
-  // Group items by Item Group for display
+  // Group items by category: 1. RAW MATERIALS (RM), 2. FINISHED GOODS (FG), 3. OTHER
   const groupedItems = useMemo(() => {
-    const map = new Map();
+    const rmItems = [];
+    const fgItems = [];
+    const otherItems = [];
+
     filteredItems.forEach((item) => {
-      const grp = (item.item_group || 'OTHER ITEMS').trim().toUpperCase();
-      if (!map.has(grp)) {
-        map.set(grp, []);
+      const type = String(item.type || '').toUpperCase();
+      const group = String(item.item_group || '').toUpperCase();
+      const name = String(item.item_name || item.name || '').toUpperCase();
+
+      const isFG = type.includes('FINISH') || type.includes('FG') || group.includes('FINISH') || group.includes('FG') || name.includes('-FG-') || name.includes(' FG') || name.includes('(FG)');
+      const isRM = type.includes('RAW') || type.includes('RM') || group.includes('RAW') || group.includes('RM') || name.includes('-RM-') || name.includes(' RM') || name.includes('(RM)') || !isFG;
+
+      if (isFG) {
+        fgItems.push(item);
+      } else if (isRM) {
+        rmItems.push(item);
+      } else {
+        otherItems.push(item);
       }
-      map.get(grp).push(item);
     });
-    return Array.from(map.entries()).map(([groupName, groupList]) => ({
-      groupName,
-      items: groupList,
-    }));
+
+    const groups = [];
+    if (rmItems.length > 0) {
+      groups.push({
+        groupName: '1. RAW MATERIALS (RM)',
+        categoryType: 'RM',
+        badgeBg: '#dcfce7',
+        badgeColor: '#15803d',
+        icon: '🌾',
+        items: rmItems,
+      });
+    }
+    if (fgItems.length > 0) {
+      groups.push({
+        groupName: '2. FINISHED GOODS (FG)',
+        categoryType: 'FG',
+        badgeBg: '#dbeafe',
+        badgeColor: '#1d4ed8',
+        icon: '📦',
+        items: fgItems,
+      });
+    }
+    if (otherItems.length > 0) {
+      groups.push({
+        groupName: '3. OTHER MATERIALS & SUPPLIES',
+        categoryType: 'OTHER',
+        badgeBg: '#f3e8ff',
+        badgeColor: '#7e22ce',
+        icon: '🏷️',
+        items: otherItems,
+      });
+    }
+    return groups;
   }, [filteredItems]);
 
   // Flattened list for keyboard index navigation
@@ -299,8 +340,30 @@ const ItemDropdownCell = ({
     setIsOpen(false);
     setSearchTerm('');
 
+    const extractNumericWeight = (it) => {
+      if (!it) return '';
+      const candidateFields = [it.weight, it.per_unit_wt, it.perUnitWt, it.unit_wt, it.bag_weight, it.wt, it.weight_kg, it.bag_size];
+      for (const val of candidateFields) {
+        if (val !== undefined && val !== null && val !== '') {
+          const num = typeof val === 'number' ? val : parseFloat(String(val).replace(/[^\d.]/g, ''));
+          if (!isNaN(num) && num > 0) return num;
+        }
+      }
+      const label = it.item_name || it.name || it.print_name || '';
+      const match = String(label).match(/(\d+(?:\.\d+)?)\s*(?:kg|g|kgs|gm|bag)/i);
+      if (match) {
+        const num = parseFloat(match[1]);
+        if (!isNaN(num) && num > 0) return num;
+      }
+      return '';
+    };
+
+    const resolvedWeight = extractNumericWeight(item);
+
     // If lotMode is 'select' (consumption)
     if (lotMode === 'select') {
+      const rowQty = row.qty !== undefined && row.qty !== null && row.qty !== '' ? row.qty : '';
+      const totalW = (parseFloat(rowQty) || 0) * (parseFloat(resolvedWeight) || 0);
       onChange(rowIndex, '__batch__', {
         ...row,
         item_id: selectedItemId,
@@ -314,11 +377,11 @@ const ItemDropdownCell = ({
         tax_rate: resolvedTaxRate,
         available_lots_loaded: false,
         available_lots: [],
-        weight: item.weight || '',
-        per_unit_wt: item.weight || '',
-        qty: '',
-        total_wt: '',
-        total_weight: '',
+        weight: resolvedWeight !== '' ? resolvedWeight : (row.weight || ''),
+        per_unit_wt: resolvedWeight !== '' ? resolvedWeight : (row.per_unit_wt || ''),
+        qty: rowQty,
+        total_wt: totalW > 0 ? totalW : '',
+        total_weight: totalW > 0 ? totalW : '',
         amount: '',
       });
       return;
@@ -334,6 +397,8 @@ const ItemDropdownCell = ({
         item_group: item.item_group || '',
         type: item.type || '',
         lot_no: row.lot_no,
+        weight: resolvedWeight !== '' ? resolvedWeight : (row.weight || ''),
+        per_unit_wt: resolvedWeight !== '' ? resolvedWeight : (row.per_unit_wt || ''),
         hsn_code: resolvedHsn,
         tax_type: resolvedTaxType,
         tax_rate: resolvedTaxRate,
@@ -341,22 +406,44 @@ const ItemDropdownCell = ({
       return;
     }
 
-    if (!ItemDropdownCell._previewStart) {
-      try {
-        const previewRes = await api('/lots/preview', { method: 'GET' });
-        ItemDropdownCell._previewStart =
-          previewRes?.lot_no || previewRes?.data?.lot_no || 'LOT0001';
-      } catch (err) {
-        console.error('Failed to get lot preview start:', err);
-        ItemDropdownCell._previewStart = 'LOT0001';
+    const isWastageLot = lotMode === 'auto-wastage' || lotMode === 'wastage';
+
+    if (isWastageLot) {
+      if (!ItemDropdownCell._previewWastageStart) {
+        try {
+          const previewRes = await api('/lots/preview-wastage', { method: 'GET' });
+          ItemDropdownCell._previewWastageStart =
+            previewRes?.lot_no || previewRes?.data?.lot_no || 'WST0001';
+        } catch (err) {
+          console.error('Failed to get wastage lot preview start:', err);
+          ItemDropdownCell._previewWastageStart = 'WST0001';
+        }
+      }
+    } else {
+      if (!ItemDropdownCell._previewStart) {
+        try {
+          const previewRes = await api('/lots/preview', { method: 'GET' });
+          ItemDropdownCell._previewStart =
+            previewRes?.lot_no || previewRes?.data?.lot_no || 'LOT0001';
+        } catch (err) {
+          console.error('Failed to get lot preview start:', err);
+          ItemDropdownCell._previewStart = 'LOT0001';
+        }
       }
     }
 
     const computeNextLot = (startLotNo, offset) => {
-      const match = String(startLotNo || '').match(/LOT(\d+)/i);
-      const start = match ? parseInt(match[1], 10) : 1;
-      const next = start + offset;
-      return `LOT${String(next).padStart(4, '0')}`;
+      if (isWastageLot) {
+        const match = String(startLotNo || '').match(/WST(\d+)/i);
+        const start = match ? parseInt(match[1], 10) : 1;
+        const next = start + offset;
+        return `WST${String(next).padStart(4, '0')}`;
+      } else {
+        const match = String(startLotNo || '').match(/LOT(\d+)/i);
+        const start = match ? parseInt(match[1], 10) : 1;
+        const next = start + offset;
+        return `LOT${String(next).padStart(4, '0')}`;
+      }
     };
 
     const activeLots = new Set(
@@ -371,8 +458,9 @@ const ItemDropdownCell = ({
     let offset = 0;
     try {
       let found = false;
+      const startLot = isWastageLot ? (ItemDropdownCell._previewWastageStart || 'WST0001') : (ItemDropdownCell._previewStart || 'LOT0001');
       while (!found) {
-        const candidate = computeNextLot(ItemDropdownCell._previewStart, offset);
+        const candidate = computeNextLot(startLot, offset);
         if (!activeLots.has(candidate)) {
           lotNo = candidate;
           found = true;
@@ -389,6 +477,8 @@ const ItemDropdownCell = ({
         item_group: item.item_group || '',
         type: item.type || '',
         lot_no: lotNo,
+        weight: resolvedWeight !== '' ? resolvedWeight : (row.weight || ''),
+        per_unit_wt: resolvedWeight !== '' ? resolvedWeight : (row.per_unit_wt || ''),
         hsn_code: resolvedHsn,
         tax_type: resolvedTaxType,
         tax_rate: resolvedTaxRate,
@@ -403,6 +493,8 @@ const ItemDropdownCell = ({
         item_group: item.item_group || '',
         type: item.type || '',
         lot_no: '',
+        weight: resolvedWeight !== '' ? resolvedWeight : (row.weight || ''),
+        per_unit_wt: resolvedWeight !== '' ? resolvedWeight : (row.per_unit_wt || ''),
         hsn_code: resolvedHsn,
         tax_type: resolvedTaxType,
         tax_rate: resolvedTaxRate,
@@ -718,10 +810,10 @@ const ItemDropdownCell = ({
                     {/* Item Group Header Bar */}
                     <div
                       style={{
-                        padding: '4px 10px',
-                        backgroundColor: '#e2e8f0',
-                        color: '#1e293b',
-                        fontWeight: '700',
+                        padding: '6px 10px',
+                        backgroundColor: group.badgeBg || '#e2e8f0',
+                        color: group.badgeColor || '#1e293b',
+                        fontWeight: '800',
                         fontSize: '11px',
                         letterSpacing: '0.4px',
                         borderTop: '1px solid #cbd5e1',
@@ -731,8 +823,8 @@ const ItemDropdownCell = ({
                         justifyContent: 'space-between',
                       }}
                     >
-                      <span>📁 {group.groupName}</span>
-                      <span style={{ fontSize: '10px', color: '#64748b', fontWeight: 'normal' }}>
+                      <span>{group.icon || '📁'} {group.groupName}</span>
+                      <span style={{ fontSize: '10px', color: group.badgeColor || '#64748b', fontWeight: 'bold' }}>
                         {group.items.length} {group.items.length === 1 ? 'item' : 'items'}
                       </span>
                     </div>

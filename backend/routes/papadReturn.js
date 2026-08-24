@@ -34,12 +34,17 @@ router.get('/', async (req, res) => {
 // GET next S.No
 router.get('/next-sno', async (req, res) => {
   try {
-    const result = await db.query('SELECT MAX(CAST(s_no AS INTEGER)) as max_sno FROM papad_return');
-    const maxVal = (result.rows && result.rows[0] && result.rows[0].max_sno) ? parseInt(result.rows[0].max_sno) : 0;
-    res.json({ next_s_no: String(maxVal + 1) });
+    const result = await db.query('SELECT MAX(CAST(s_no AS INTEGER)) as max_sno, MAX(id) as max_id, COUNT(*) as total_count FROM papad_return');
+    const maxVal = Math.max(
+      parseInt(result.rows[0]?.max_sno) || 0,
+      parseInt(result.rows[0]?.max_id) || 0,
+      parseInt(result.rows[0]?.total_count) || 0
+    );
+    const nextSNo = maxVal + 1;
+    res.json({ success: true, next_s_no: String(nextSNo), next_sno: nextSNo, s_no: nextSNo, data: { s_no: nextSNo } });
   } catch (error) {
     console.error('Error getting next S.No for papad return:', error);
-    res.json({ next_s_no: '1' });
+    res.json({ success: true, next_s_no: '1', next_sno: 1, s_no: 1 });
   }
 });
 

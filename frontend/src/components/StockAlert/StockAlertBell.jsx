@@ -37,14 +37,37 @@ const StockAlertBell = () => {
   });
 
   const fetchActiveAlerts = async () => {
+    // Only poll when window/document is active
+    if (typeof document !== 'undefined' && document.hidden) {
+      return;
+    }
+
     try {
       const res = await fetch('/api/stock-alerts/active-count');
-      const data = await res.json();
-      if (data.success) {
-        setAlertData(data);
+      if (!res.ok) {
+        // Silently skip on 429 rate limit or server busy
+        return;
+      }
+      const text = await res.text();
+      let data = null;
+      try {
+        data = text ? JSON.parse(text) : null;
+      } catch (parseErr) {
+        // Non-JSON response (e.g. rate limit html/text from proxy)
+        return;
+      }
+
+      if (data && data.success) {
+        setAlertData({
+          count: data.count || 0,
+          criticalCount: data.criticalCount || 0,
+          lowCount: data.lowCount || 0,
+          reorderCount: data.reorderCount || 0,
+          alerts: Array.isArray(data.alerts) ? data.alerts : []
+        });
       }
     } catch (err) {
-      console.error('Error fetching stock alert count:', err);
+      // Quietly handle network disconnects or aborts
     }
   };
 
@@ -54,12 +77,23 @@ const StockAlertBell = () => {
     const handleStockUpdate = () => {
       fetchActiveAlerts();
     };
-    window.addEventListener('stock-alerts-updated', handleStockUpdate);
 
-    // Poll every 20 seconds
-    const interval = setInterval(fetchActiveAlerts, 20000);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchActiveAlerts();
+      }
+    };
+
+    window.addEventListener('stock-alerts-updated', handleStockUpdate);
+    window.addEventListener('focus', handleStockUpdate);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Poll every 60 seconds when active
+    const interval = setInterval(fetchActiveAlerts, 60000);
     return () => {
       window.removeEventListener('stock-alerts-updated', handleStockUpdate);
+      window.removeEventListener('focus', handleStockUpdate);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       clearInterval(interval);
     };
   }, []);

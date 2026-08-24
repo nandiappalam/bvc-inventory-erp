@@ -501,6 +501,8 @@ async function initializeDatabase() {
         flour_mill TEXT,
         date DATE NOT NULL,
         remarks TEXT,
+        work_order_id INTEGER,
+        work_order_no TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )`

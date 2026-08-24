@@ -5,9 +5,14 @@ const db = require('../config/database')
 // GET next S.No
 router.get('/next-sno', async (req, res) => {
   try {
-    const result = await db.query('SELECT COALESCE(MAX(CAST(s_no AS INTEGER)), 0) + 1 AS next_sno FROM open')
-    const next_sno = result.rows[0]?.next_sno || 1
-    res.json({ success: true, next_sno, data: { s_no: next_sno } })
+    const result = await db.query('SELECT MAX(CAST(s_no AS INTEGER)) as max_sno, MAX(id) as max_id, COUNT(*) as total_count FROM open')
+    const maxVal = Math.max(
+      parseInt(result.rows[0]?.max_sno) || 0,
+      parseInt(result.rows[0]?.max_id) || 0,
+      parseInt(result.rows[0]?.total_count) || 0
+    );
+    const next_sno = maxVal + 1;
+    res.json({ success: true, next_sno, next_s_no: String(next_sno), s_no: next_sno, data: { s_no: next_sno } })
   } catch (error) {
     console.error('Error getting next s_no:', error.message)
     res.status(500).json({ success: false, message: 'Error getting next s_no', error: error.message })

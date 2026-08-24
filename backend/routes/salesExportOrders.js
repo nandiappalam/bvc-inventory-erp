@@ -60,9 +60,20 @@ router.get('/', async (req, res) => {
 // GET next sequential bill_no for sales export orders
 router.get('/next-sno', async (req, res) => {
   try {
-    const maxRes = await db.query("SELECT COALESCE(MAX(CAST(bill_no AS INTEGER)), 0) + 1 AS next_sno FROM sales_export_orders");
-    const nextSno = maxRes.rows[0]?.next_sno || 1;
-    res.json({ success: true, next_sno: String(nextSno) });
+    const maxRes = await db.query(`
+      SELECT 
+        MAX(CAST(bill_no AS INTEGER)) as max_bill_no,
+        MAX(id) as max_id,
+        COUNT(*) as total_count 
+      FROM sales_export_orders
+    `);
+    const maxVal = Math.max(
+      parseInt(maxRes.rows[0]?.max_bill_no) || 0,
+      parseInt(maxRes.rows[0]?.max_id) || 0,
+      parseInt(maxRes.rows[0]?.total_count) || 0
+    );
+    const nextSno = maxVal + 1;
+    res.json({ success: true, next_sno: String(nextSno), s_no: nextSno, next_s_no: String(nextSno), data: { s_no: nextSno } });
   } catch (error) {
     console.error('Error fetching next sales export s_no:', error);
     res.status(500).json({ success: false, message: 'Error fetching next sales export s_no', error: error.message });

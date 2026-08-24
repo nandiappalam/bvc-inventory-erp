@@ -44,21 +44,23 @@ import ERPTable from '../../../components/erp/ERPTable';
 import api from '../../../services/api';
 
 const pendingColumns = [
+  { key: 's_no', label: 'S.No', sx: { width: '8%', textAlign: 'center' } },
   { key: 'lot_no', label: 'Lot Number', sx: { width: '15%' } },
-  { key: 'item_name', label: 'Item / Product', sx: { width: '25%' } },
-  { key: 'supplier_name', label: 'Supplier Name', sx: { width: '25%' } },
+  { key: 'item_name', label: 'Item / Product', sx: { width: '23%' } },
+  { key: 'supplier_name', label: 'Supplier Name', sx: { width: '24%' } },
   { key: 'received_qty', label: 'Arrived Qty', sx: { width: '15%' } },
-  { key: 'actions', label: 'Actions', sx: { width: '20%', textAlign: 'right' } }
+  { key: 'actions', label: 'Actions', sx: { width: '15%', textAlign: 'right' } }
 ];
 
 const completedColumns = [
-  { key: 'qc_no', label: 'QC No', sx: { width: '15%' } },
-  { key: 'rm_lot_no', label: 'Lot Number', sx: { width: '15%' } },
-  { key: 'item_name', label: 'Item / Product', sx: { width: '20%' } },
-  { key: 'supplier_name', label: 'Supplier', sx: { width: '20%' } },
+  { key: 's_no', label: 'S.No', sx: { width: '6%', textAlign: 'center' } },
+  { key: 'qc_no', label: 'QC No', sx: { width: '14%' } },
+  { key: 'rm_lot_no', label: 'Lot Number', sx: { width: '14%' } },
+  { key: 'item_name', label: 'Item / Product', sx: { width: '18%' } },
+  { key: 'supplier_name', label: 'Supplier', sx: { width: '18%' } },
   { key: 'inspection_date', label: 'Date', sx: { width: '10%' } },
   { key: 'overall_result', label: 'Status', sx: { width: '10%' } },
-  { key: 'actions', label: 'Actions', sx: { width: '20%', textAlign: 'right' } }
+  { key: 'actions', label: 'Actions', sx: { width: '10%', textAlign: 'right' } }
 ];
 
 export default function QualityControlList() {
@@ -352,7 +354,7 @@ export default function QualityControlList() {
                       size="small"
                       variant="contained"
                       color="primary"
-                      onClick={() => navigate('/entry/quality-control-create', { state: { vehicleNo: vm.vehicle_no, itemName: vm.item_name, supplier: vm.party_name } })}
+                      onClick={() => navigate('/entry/quality-control-create', { state: { vehicleNo: vm.vehicle_no || vm.vehicleNo, itemName: vm.item_name || vm.itemName, supplier: vm.party_name || vm.partyName, lotNo: vm.lot_no || vm.lotNo } })}
                       sx={{ mt: 1, textTransform: 'none', fontSize: '11px', fontWeight: 'bold' }}
                     >
                       Check Item Sample
@@ -461,6 +463,7 @@ export default function QualityControlList() {
                 rows={filteredPending}
                 renderRow={(row, idx) => (
                   <TableRow key={row.stock_lot_id ? `${row.stock_lot_id}-${idx}` : idx}>
+                    <TableCell style={{ textAlign: 'center', fontWeight: 700, padding: '12px', color: '#64748b' }}>{idx + 1}</TableCell>
                     <TableCell style={{ fontWeight: 800, padding: '12px' }}>{row.lot_no}</TableCell>
                     <TableCell style={{ padding: '12px' }}>{row.item_name}</TableCell>
                     <TableCell style={{ padding: '12px' }}>{row.supplier_name || '-'}</TableCell>
@@ -513,6 +516,7 @@ export default function QualityControlList() {
 
                    return (
                     <TableRow key={row.id ? `${row.id}-${idx}` : idx}>
+                      <TableCell style={{ textAlign: 'center', fontWeight: 700, padding: '12px', color: '#64748b' }}>{idx + 1}</TableCell>
                       <TableCell style={{ fontWeight: 800, padding: '12px' }}>{row.qc_no}</TableCell>
                       <TableCell style={{ fontWeight: 700, padding: '12px' }}>{row.rm_lot_no}</TableCell>
                       <TableCell style={{ padding: '12px' }}>{row.item_name}</TableCell>

@@ -1,15 +1,15 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useLocation, useParams, useNavigate } from 'react-router-dom';
-import { api, getMasters } from '../utils/api'
+import { api, getMasters } from '../utils/api';
 import purchaseOrderService from '../modules/purchaseOrder/services/purchaseOrderService';
 import { buildReceiptDraftFromPurchaseOrder } from '../modules/purchaseOrder/utils/poToReceipt.mjs';
+import { saveModuleDraft, loadModuleDraft, clearModuleDraft } from '../utils/draftHelper';
 
-
-import EntryTopFrame from './entry/EntryTopFrame'
-import EntryItemsTable from './entry/EntryItemsTable'
-import EntryBottomSummary from './entry/EntryBottomSummary'
-import EntryActions from './entry/EntryActions'
-import './SalesCreate.css'
+import EntryTopFrame from './entry/EntryTopFrame';
+import EntryItemsTable from './entry/EntryItemsTable';
+import EntryBottomSummary from './entry/EntryBottomSummary';
+import EntryActions from './entry/EntryActions';
+import './SalesCreate.css';
 
 /**
  * PurchaseCreation
@@ -40,8 +40,14 @@ const PurchaseCreation = () => {
     type: 'Urad',
     remarks: '',
     source_order_no: '',
-    source_order_id: ''
+    source_order_id: '',
+    purchase_order_id: '',
+    po_no: ''
   })
+
+  const [poPickerOpen, setPoPickerOpen] = useState(false);
+  const [poList, setPoList] = useState([]);
+  const [loadingPoList, setLoadingPoList] = useState(false);
 
   // Backend (/routes/purchases.js) expects legacy shape inside req.body: { formData, items, totals }
   // IMPORTANT: purchase handler reads: formData.date, formData.supplier, formData.payType, formData.invNo,
@@ -61,8 +67,10 @@ const PurchaseCreation = () => {
       type: formData.type, // purchase_type
       sno: formData.s_no || 1,
       remarks: formData.remarks,
-      source_order_no: formData.source_order_no,
-      source_order_id: formData.source_order_id,
+      source_order_no: formData.source_order_no || formData.po_no,
+      source_order_id: formData.source_order_id || formData.purchase_order_id,
+      purchase_order_id: formData.purchase_order_id || formData.source_order_id,
+      po_no: formData.po_no || formData.source_order_no,
       // Keep fields that may be used by ledger helper
       supplier_id: formData.supplier_id
     }
@@ -188,38 +196,204 @@ const PurchaseCreation = () => {
       finally { setLoading(false); }
     };
 
-    const preloadFromPurchaseOrder = () => {
-      const params = new URLSearchParams(location.search);
-      const sourceOrderId = params.get('sourcePurchaseOrderId');
-      if (!sourceOrderId || id) {
-        return;
-      }
-
-      const order = purchaseOrderService.get(sourceOrderId);
-      if (!order) {
-        return;
-      }
-
+    const applyPurchaseOrder = async (order) => {
+      if (!order) return;
       const draft = buildReceiptDraftFromPurchaseOrder(order);
+
+      // Fetch fresh next S.No
+      let nextSNo = formData.s_no;
+      try {
+        const snoRes = await api('/purchases/next-sno');
+        if (snoRes?.next_sno || snoRes?.data?.s_no) {
+          nextSNo = String(snoRes.next_sno || snoRes.data.s_no);
+        }
+      } catch (e) {}
 
       setFormData((prev) => ({
         ...prev,
         ...draft.formData,
-        supplier_id: draft.formData.supplier_id || prev.supplier_id,
-        supplier_details: draft.formData.supplier_details || prev.supplier_details,
-        remarks: draft.formData.remarks || prev.remarks,
-        source_order_no: draft.formData.source_order_no || prev.source_order_no,
-        source_order_id: draft.formData.source_order_id || prev.source_order_id,
+        s_no: nextSNo || prev.s_no,
+        supplier_id: draft.formData.supplier_id || order.supplier_id || order.supplierId || prev.supplier_id,
+        supplier_details: draft.formData.supplier_details || order.address || prev.supplier_details,
+        remarks: draft.formData.remarks || (order.remarks ? `PO: ${order.inv_no || order.invNo} - ${order.remarks}` : `Inwarded from PO #${order.inv_no || order.invNo}`),
+        source_order_no: draft.formData.source_order_no || order.inv_no || order.invNo || '',
+        source_order_id: draft.formData.source_order_id || order.id || '',
+        purchase_order_id: order.id || '',
+        po_no: order.inv_no || order.invNo || ''
       }));
 
-      setTableData(draft.tableData);
-      setSelectedDeductions([]);
+      // Get next lot number preview
+      let startLotNum = 1;
+      try {
+        const lotPrev = await api('/lots/preview', { method: 'GET' });
+        const match = String(lotPrev?.lot_no || lotPrev?.data?.lot_no || 'LOT0001').match(/LOT(\d+)/i);
+        if (match) startLotNum = parseInt(match[1], 10);
+      } catch (e) {}
+
+      const baseItems = (draft.tableData && draft.tableData.length > 0) ? draft.tableData : (order.items || []);
+      const mappedItems = baseItems.map((it, idx) => {
+        const qty = Number(it.qty || 0);
+        const rate = Number(it.rate || it.purc_rate || 0);
+        const weight = Number(it.weight || it.per_unit_weight || it.perUnitWeight || 0);
+        const totWt = Number(it.tot_wt || it.total_weight || (qty * (weight || 1)));
+        const disc = Number(it.discount_percent || it.disc_percent || 0);
+        const tax = Number(it.tax_percent ?? order.tax_percent ?? order.tax_rate ?? 5);
+        const baseAmt = qty * rate;
+        const discAmt = baseAmt * (disc / 100);
+        const taxAmt = ((baseAmt - discAmt) * tax) / 100;
+        const finalAmt = Number(it.amount) || (baseAmt + taxAmt);
+        const autoLot = it.lot_no || `LOT${String(startLotNum + idx).padStart(4, '0')}`;
+
+        return {
+          item_id: it.item_id || it.itemId || it.item_name || it.itemName || '',
+          item_name: it.item_name || it.itemName || '',
+          item_label: it.item_name || it.itemName || '',
+          qty,
+          weight,
+          weight_id: it.weight_id || '',
+          per_unit_wt: weight,
+          per_unit_weight: weight,
+          total_wt: totWt,
+          total_weight: totWt,
+          rate,
+          purc_rate: rate,
+          disc,
+          disc_percent: disc,
+          tax_rate: tax,
+          tax_percent: tax,
+          amount: finalAmt,
+          lot_no: autoLot,
+          lot_status: 'reserved'
+        };
+      });
+
+      setTableData(mappedItems);
+
+      if (order.deductions && order.deductions.length > 0) {
+        setSelectedDeductions(order.deductions.map(d => ({
+          id: d.id,
+          name: d.deduction || d.deduction_name || d.name,
+          amount: parseFloat(d.amount) || 0,
+          type: (d.type || 'less').toUpperCase(),
+          calculation_type: 'Percentage',
+          percentage: parseFloat(d.percent || d.value) || 0,
+          remarks: d.remarks || ''
+        })));
+      }
+    };
+
+    const preloadFromPurchaseOrder = async () => {
+      const params = new URLSearchParams(location.search);
+      const sourceOrderId = params.get('sourcePurchaseOrderId') || params.get('po_id') || params.get('purchase_order_id') || params.get('po');
+      if (!sourceOrderId || id) {
+        // Check for saved draft if not loading from PO and not editing existing ID
+        if (!id) {
+          const draft = loadModuleDraft('purchase_create');
+          if (draft && draft.data) {
+            if (draft.data.formData) setFormData(prev => ({ ...prev, ...draft.data.formData }));
+            if (Array.isArray(draft.data.tableData) && draft.data.tableData.length > 0) setTableData(draft.data.tableData);
+            if (Array.isArray(draft.data.selectedDeductions)) setSelectedDeductions(draft.data.selectedDeductions);
+          }
+        }
+        return;
+      }
+
+      try {
+        let order = null;
+        try {
+          order = await purchaseOrderService.get(sourceOrderId);
+        } catch (e) {
+          console.log('purchaseOrderService get fallback');
+        }
+        if (!order) {
+          const res = await api(`/purchase-orders/${sourceOrderId}`).catch(() => null);
+          order = res?.data || res;
+        }
+
+        if (order) {
+          await applyPurchaseOrder(order);
+        }
+      } catch (err) {
+        console.error('Error preloading PO:', err);
+      }
     };
 
     loadDeductions();
     fetchPurchase();
     preloadFromPurchaseOrder();
   }, [id, location.search]);
+
+  // Auto-save draft when form changes (for new entries only)
+  useEffect(() => {
+    if (!id && (formData.supplier_id || (tableData && tableData.some(r => r.item_name || r.qty)))) {
+      saveModuleDraft('purchase_create', { formData, tableData, selectedDeductions });
+    }
+  }, [id, formData, tableData, selectedDeductions]);
+
+  const handleOpenPoPicker = async () => {
+    setPoPickerOpen(true);
+    setLoadingPoList(true);
+    try {
+      const res = await api('/purchase-orders').catch(() => null) || await fetch('/api/purchase-orders').then(r => r.json()).catch(() => []);
+      const list = Array.isArray(res) ? res : (res?.rows || res?.data || []);
+      setPoList(list);
+    } catch (e) {
+      console.error('Error fetching PO list:', e);
+    } finally {
+      setLoadingPoList(false);
+    }
+  };
+
+  const handleSelectPo = async (po) => {
+    try {
+      let fullPo = null;
+      try {
+        fullPo = await purchaseOrderService.get(po.id);
+      } catch (e) {}
+      if (!fullPo) {
+        const res = await api(`/purchase-orders/${po.id}`).catch(() => null);
+        fullPo = res?.data || res || po;
+      }
+      
+      const draft = buildReceiptDraftFromPurchaseOrder(fullPo);
+      setFormData((prev) => ({
+        ...prev,
+        ...draft.formData,
+        supplier_id: draft.formData.supplier_id || fullPo.supplier_id || fullPo.supplierId || prev.supplier_id,
+        supplier_details: draft.formData.supplier_details || fullPo.address || prev.supplier_details,
+        remarks: draft.formData.remarks || `Inwarded from PO #${fullPo.inv_no || fullPo.invNo || fullPo.orderNo}`,
+        source_order_no: draft.formData.source_order_no || fullPo.inv_no || fullPo.invNo || fullPo.orderNo || '',
+        source_order_id: String(fullPo.id || ''),
+        purchase_order_id: String(fullPo.id || ''),
+        po_no: fullPo.inv_no || fullPo.invNo || fullPo.orderNo || ''
+      }));
+
+      if (draft.tableData && draft.tableData.length > 0) {
+        setTableData(draft.tableData);
+      } else if (fullPo.items && fullPo.items.length > 0) {
+        setTableData(fullPo.items.map((it) => ({
+          item_id: it.item_id || it.itemId || it.item_name || it.itemName,
+          item_name: it.item_name || it.itemName,
+          qty: Number(it.qty || 0),
+          weight: Number(it.weight || 0),
+          weight_id: it.weight_id || '',
+          per_unit_wt: Number(it.weight || 0),
+          total_wt: Number(it.tot_wt || it.totWt || (Number(it.qty || 0) * Number(it.weight || 0))),
+          total_weight: Number(it.tot_wt || it.totWt || (Number(it.qty || 0) * Number(it.weight || 0))),
+          rate: Number(it.rate || it.purc_rate || 0),
+          disc: Number(it.discount_percent || it.disc_percent || 0),
+          disc_percent: Number(it.discount_percent || it.disc_percent || 0),
+          tax_rate: Number(it.tax_percent || 5),
+          tax_percent: Number(it.tax_percent || 5),
+          amount: Number(it.amount || 0)
+        })));
+      }
+
+      setPoPickerOpen(false);
+    } catch (err) {
+      console.error('Error importing PO:', err);
+    }
+  };
 
   const handleTopFrameChange = useCallback((e) => {
     const { name, value } = e.target
@@ -511,6 +685,7 @@ const PurchaseCreation = () => {
       }
 
       if (result.success) {
+        clearModuleDraft('purchase_create');
         alert(`Purchase ${id ? 'updated' : 'saved'} successfully!`);
         navigate('/entry/purchase-display');
       } else {
@@ -625,7 +800,75 @@ const columns = [
 
   return (
     <div className="window">
-      <div className="screen-title">Purchase Creation</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+        <div className="screen-title" style={{ margin: 0 }}>Purchase Creation</div>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button
+            type="button"
+            onClick={handleOpenPoPicker}
+            style={{
+              padding: '6px 14px',
+              backgroundColor: '#0284c7',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '4px',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              fontSize: '13px',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.12)'
+            }}
+          >
+            🔗 Link Purchase Order
+          </button>
+        </div>
+      </div>
+
+      {(formData.po_no || formData.source_order_no) && (
+        <div
+          style={{
+            marginBottom: '15px',
+            padding: '10px 16px',
+            backgroundColor: '#f0fdf4',
+            border: '1px solid #86efac',
+            borderRadius: '6px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            color: '#166534',
+            fontSize: '13px'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '18px' }}>📦</span>
+            <span>
+              <strong>Linked with Purchase Order:</strong> {formData.po_no || formData.source_order_no}
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              type="button"
+              onClick={() => {
+                setFormData(prev => ({ ...prev, purchase_order_id: '', po_no: '', source_order_id: '', source_order_no: '' }));
+              }}
+              style={{
+                padding: '3px 8px',
+                backgroundColor: '#fee2e2',
+                color: '#991b1b',
+                border: '1px solid #fca5a5',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '11px',
+                fontWeight: 'bold'
+              }}
+            >
+              Unlink PO
+            </button>
+          </div>
+        </div>
+      )}
 
       {error && <div className="alert error">{error}</div>}
       {success && <div className="alert success">{success}</div>}
@@ -835,6 +1078,167 @@ const columns = [
           saveText="Save"
         />
       </form>
+
+      {/* PO Picker Modal Dialog */}
+      {poPickerOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '20px'
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: '#fff',
+              borderRadius: '8px',
+              width: '100%',
+              maxWidth: '850px',
+              maxHeight: '85vh',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '0 10px 25px rgba(0,0,0,0.2)'
+            }}
+          >
+            <div
+              style={{
+                padding: '14px 20px',
+                backgroundColor: '#1f4fb2',
+                color: '#fff',
+                borderTopLeftRadius: '8px',
+                borderTopRightRadius: '8px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center'
+              }}
+            >
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 'bold' }}>
+                Select Purchase Order to Inward / Convert
+              </h3>
+              <button
+                onClick={() => setPoPickerOpen(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#fff',
+                  fontSize: '20px',
+                  cursor: 'pointer'
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ padding: '16px', overflowY: 'auto', flex: 1 }}>
+              {loadingPoList ? (
+                <div style={{ textAlign: 'center', padding: '30px', color: '#64748b' }}>
+                  Loading Purchase Orders...
+                </div>
+              ) : poList.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '30px', color: '#64748b' }}>
+                  No purchase orders found.
+                </div>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                  <thead>
+                    <tr style={{ backgroundColor: '#f1f5f9', borderBottom: '2px solid #cbd5e1' }}>
+                      <th style={{ padding: '8px', textAlign: 'left' }}>PO No</th>
+                      <th style={{ padding: '8px', textAlign: 'left' }}>Date</th>
+                      <th style={{ padding: '8px', textAlign: 'left' }}>Supplier</th>
+                      <th style={{ padding: '8px', textAlign: 'left' }}>Item / Details</th>
+                      <th style={{ padding: '8px', textAlign: 'right' }}>Total (₹)</th>
+                      <th style={{ padding: '8px', textAlign: 'center' }}>Status</th>
+                      <th style={{ padding: '8px', textAlign: 'center' }}>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {poList.map((po) => (
+                      <tr key={po.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                        <td style={{ padding: '8px', fontWeight: 'bold', color: '#1f4fb2' }}>
+                          {po.inv_no || po.invNo || po.orderNo || `PO-${po.s_no}`}
+                        </td>
+                        <td style={{ padding: '8px' }}>{po.date}</td>
+                        <td style={{ padding: '8px', fontWeight: '500' }}>{po.supplier_name || po.supplierName || '—'}</td>
+                        <td style={{ padding: '8px' }}>
+                          {po.item_name || (po.items && po.items.map(i => i.item_name || i.itemName).join(', ')) || po.type || '—'}
+                        </td>
+                        <td style={{ padding: '8px', textAlign: 'right', fontWeight: 'bold' }}>
+                          ₹{parseFloat(po.total_amt || po.totAmt || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        </td>
+                        <td style={{ padding: '8px', textAlign: 'center' }}>
+                          <span style={{
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                            fontSize: '11px',
+                            fontWeight: 'bold',
+                            backgroundColor: (po.inward_purchase_id || po.status === 'Received') ? '#dcfce7' : '#fef9c3',
+                            color: (po.inward_purchase_id || po.status === 'Received') ? '#15803d' : '#854d0e'
+                          }}>
+                            {po.inward_purchase_id || po.status === 'Received' ? 'Received' : 'Ordered'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '8px', textAlign: 'center' }}>
+                          <button
+                            type="button"
+                            onClick={() => handleSelectPo(po)}
+                            style={{
+                              padding: '5px 12px',
+                              backgroundColor: '#16a34a',
+                              color: '#fff',
+                              border: 'none',
+                              borderRadius: '4px',
+                              fontWeight: 'bold',
+                              fontSize: '12px',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            Inward ➔
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            <div
+              style={{
+                padding: '12px 20px',
+                backgroundColor: '#f8fafc',
+                borderBottomLeftRadius: '8px',
+                borderBottomRightRadius: '8px',
+                display: 'flex',
+                justifyContent: 'flex-end'
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setPoPickerOpen(false)}
+                style={{
+                  padding: '6px 14px',
+                  backgroundColor: '#e2e8f0',
+                  color: '#334155',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold'
+                }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

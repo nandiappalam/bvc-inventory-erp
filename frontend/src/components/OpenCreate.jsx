@@ -67,9 +67,18 @@ const OpenCreate = () => {
           }
         } else {
           // Fetch next S.No for creation mode
-          const snoRes = await api('/open/next-sno');
-          if (snoRes && snoRes.success) {
-            setFormData(prev => ({ ...prev, s_no: String(snoRes.next_sno) }));
+          try {
+            const snoRes = await api('/open/next-sno');
+            const sno = snoRes?.next_sno ?? snoRes?.next_s_no ?? snoRes?.s_no ?? snoRes?.data?.s_no;
+            if (sno) {
+              setFormData(prev => ({ ...prev, s_no: String(sno) }));
+            } else {
+              const fallback = await api.getNextSNo('/open');
+              setFormData(prev => ({ ...prev, s_no: String(fallback) }));
+            }
+          } catch (e) {
+            const fallback = await api.getNextSNo('/open');
+            setFormData(prev => ({ ...prev, s_no: String(fallback) }));
           }
         }
       } catch (err) {

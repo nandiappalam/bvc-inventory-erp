@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../services/api.js';
 import { calculateTotals } from '../utils/taxCalc';
 import './SalesReturnCreate.css';
@@ -17,6 +17,8 @@ import {
  */
 const SalesReturnCreate = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const editId = searchParams.get('id');
 
   const [formData, setFormData] = useState({
     s_no: '',
@@ -64,6 +66,62 @@ const SalesReturnCreate = () => {
     };
     fetchDeductions();
   }, []);
+
+  // Fetch next S.No or load existing record
+  useEffect(() => {
+    if (editId) {
+      const loadRecord = async () => {
+        try {
+          const data = await api(`/sales-returns/${editId}`);
+          if (data) {
+            setFormData({
+              s_no: data.s_no || '',
+              date: data.date ? data.date.substring(0, 10) : new Date().toISOString().split('T')[0],
+              pay_type: data.pay_type || 'Credit',
+              tax_type: data.tax_type || 'Exclusive',
+              tax_percent: data.tax_percent || 0,
+              customer_id: data.customer_id || data.customer || '',
+              address: data.address || '',
+              phone: data.phone || '',
+              godown_from_id: data.godown_from_id || '',
+              remarks: data.remarks || '',
+              bill_amt: data.bill_amt || 0,
+              tax_amt: data.tax_amt || 0,
+              total_amt: data.total_amt || 0,
+              deduction: data.deduction || '',
+              deduction_remarks: data.deduction_remarks || '',
+              deduction_amount: data.deduction_amount || 0,
+              grand_total: data.grand_total || 0
+            });
+            if (data.items && data.items.length > 0) {
+              setItems(data.items);
+            }
+          }
+        } catch (err) {
+          console.error('Error loading sales return record:', err);
+        }
+      };
+      loadRecord();
+    } else {
+      // Auto-fetch next S.No for new record
+      const fetchNextSno = async () => {
+        try {
+          const res = await api('/sales-returns/next-sno');
+          const sno = res?.next_s_no ?? res?.next_sno ?? res?.s_no ?? res?.data?.s_no;
+          if (sno) {
+            setFormData(prev => ({ ...prev, s_no: String(sno) }));
+          } else {
+            const fallback = await api.getNextSNo('/sales-returns');
+            setFormData(prev => ({ ...prev, s_no: String(fallback) }));
+          }
+        } catch (e) {
+          const fallback = await api.getNextSNo('/sales-returns');
+          setFormData(prev => ({ ...prev, s_no: String(fallback) }));
+        }
+      };
+      fetchNextSno();
+    }
+  }, [editId]);
 
   useEffect(() => {
     if (items.length === 0) {

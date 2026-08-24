@@ -37,11 +37,14 @@ const initTables = async () => {
         item_id INTEGER,
         item_code TEXT,
         item_name TEXT NOT NULL,
+        weight TEXT,
         description TEXT,
         requested_qty REAL DEFAULT 0,
         approved_qty REAL DEFAULT 0,
         unit TEXT DEFAULT 'kg',
         current_stock REAL DEFAULT 0,
+        current_stock_rm REAL DEFAULT 0,
+        current_stock_fg REAL DEFAULT 0,
         minimum_stock REAL DEFAULT 0,
         suggested_qty REAL DEFAULT 0,
         estimated_rate REAL DEFAULT 0,
@@ -50,6 +53,11 @@ const initTables = async () => {
         FOREIGN KEY (purchase_request_id) REFERENCES purchase_requests(id) ON DELETE CASCADE
       )
     `);
+
+    // Column migrations for backward compatibility
+    try { await db.run("ALTER TABLE purchase_request_items ADD COLUMN weight TEXT"); } catch (e) {}
+    try { await db.run("ALTER TABLE purchase_request_items ADD COLUMN current_stock_rm REAL DEFAULT 0"); } catch (e) {}
+    try { await db.run("ALTER TABLE purchase_request_items ADD COLUMN current_stock_fg REAL DEFAULT 0"); } catch (e) {}
 
     await db.run(`
       CREATE TABLE IF NOT EXISTS purchase_request_approval_history (
@@ -90,18 +98,23 @@ router.use(async (req, res, next) => {
 const getNextPrNo = async () => {
   try {
     const res = await db.query(`
-      SELECT pr_no FROM purchase_requests 
-      WHERE pr_no LIKE 'PR%' 
-      ORDER BY id DESC LIMIT 1
+      SELECT pr_no, id FROM purchase_requests
     `);
+    let maxNum = res.rows ? res.rows.length : 0;
     if (res.rows && res.rows.length > 0) {
-      const lastNo = res.rows[0].pr_no;
-      const numPart = parseInt(lastNo.replace('PR', ''), 10);
-      if (!isNaN(numPart)) {
-        return `PR${String(numPart + 1).padStart(6, '0')}`;
+      for (const row of res.rows) {
+        if (row.pr_no) {
+          const numPart = parseInt(row.pr_no.replace(/[^0-9]/g, ''), 10);
+          if (!isNaN(numPart) && numPart > maxNum) {
+            maxNum = numPart;
+          }
+        }
+        if (row.id && row.id > maxNum) {
+          maxNum = row.id;
+        }
       }
     }
-    return 'PR000001';
+    return `PR${String(maxNum + 1).padStart(6, '0')}`;
   } catch (e) {
     return 'PR000001';
   }
@@ -113,6 +126,118 @@ router.get('/next-pr-no', async (req, res) => {
     const prNo = await getNextPrNo();
     res.json({ next_pr_no: prNo });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET Item RM & FG stock
+router.get('/item-stock/:itemId', async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    let itemName = '';
+    let stockFromMaster = 0;
+    const itemRes = await db.query('SELECT id, item_name, name, stock_qty, item_group FROM item_master WHERE id = ? OR LOWER(item_name) = LOWER(?)', [itemId, itemId]);
+    if (itemRes.rows && itemRes.rows.length > 0) {
+      itemName = itemRes.rows[0].item_name || itemRes.rows[0].name;
+      stockFromMaster = parseFloat(itemRes.rows[0].stock_qty || 0);
+    } else {
+      itemName = itemId;
+    }
+    
+    // Sum stock from stock_lots for RM and FG
+    const lotRes = await db.query(`
+      SELECT sl.remaining_quantity, sl.lot_no, sl.item_name, im.item_group
+      FROM stock_lots sl
+      LEFT JOIN item_master im ON (sl.item_id = im.id OR LOWER(sl.item_name) = LOWER(im.item_name))
+      WHERE (sl.item_id = ? OR LOWER(TRIM(sl.item_name)) = LOWER(TRIM(?)) OR sl.item_name LIKE ?) AND sl.remaining_quantity > 0
+    `, [itemId, itemName, `%${itemName}%`]);
+
+    let rmStock = 0;
+    let fgStock = 0;
+
+    for (const lot of (lotRes.rows || [])) {
+      const rem = parseFloat(lot.remaining_quantity) || 0;
+      const lotLower = (lot.lot_no || '').toLowerCase();
+      const isFg = lotLower.startsWith('fg') || lotLower.includes('fg-');
+      const isRm = lotLower.startsWith('rm') || lotLower.includes('rm-');
+      
+      if (isFg) {
+        fgStock += rem;
+      } else if (isRm) {
+        rmStock += rem;
+      } else {
+        // Check group / name
+        const grp = (lot.item_group || '').toLowerCase();
+        const name = (lot.item_name || '').toLowerCase();
+        if (grp.includes('finished') || grp.includes('fg') || name.includes('papad') || name.includes('atta') || name.includes('flour') || name.includes('bgf') || name.includes('brf')) {
+          fgStock += rem;
+        } else {
+          rmStock += rem;
+        }
+      }
+    }
+
+    if (rmStock === 0 && fgStock === 0 && stockFromMaster > 0) {
+      rmStock = stockFromMaster;
+    }
+
+    res.json({
+      success: true,
+      current_stock: rmStock,
+      current_stock_rm: rmStock,
+      current_stock_fg: fgStock,
+      item_name: itemName
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET Approved PRs for PO creation/linking
+router.get('/approved-list', async (req, res) => {
+  try {
+    const prs = await db.query(`
+      SELECT 
+        pr.*,
+        COALESCE(sm.name, pr.supplier_name) as supplier_name,
+        sm.address1 as supplier_address,
+        COALESCE(sm.mobile1, sm.phone_off) as supplier_phone,
+        sm.gst_number as supplier_gst,
+        COALESCE(pri_agg.total_items, 0) as total_items,
+        COALESCE(pri_agg.total_qty, 0) as total_qty,
+        COALESCE(pri_agg.total_amount, 0) as total_amount,
+        pri_agg.item_names
+      FROM purchase_requests pr
+      LEFT JOIN supplier_master sm ON pr.supplier_id = sm.id
+      LEFT JOIN (
+        SELECT purchase_request_id, COUNT(*) as total_items, SUM(requested_qty) as total_qty, SUM(estimated_amount) as total_amount, GROUP_CONCAT(item_name, ', ') as item_names
+        FROM purchase_request_items GROUP BY purchase_request_id
+      ) pri_agg ON pr.id = pri_agg.purchase_request_id
+      WHERE LOWER(COALESCE(pr.status, 'approved')) IN ('approved', 'partially converted', 'converted', 'pending po', 'submitted', 'active')
+      ORDER BY pr.id DESC
+    `);
+    
+    // Also attach items to each PR for instant client-side autofill
+    for (const pr of (prs.rows || [])) {
+      const itemsRes = await db.query(`
+        SELECT 
+          pri.*,
+          COALESCE(im.item_name, pri.item_name) as resolved_item_name,
+          im.hsn_code,
+          im.tax_type,
+          COALESCE(im.tax, im.gst_rate) as tax_rate,
+          im.weight as master_weight
+        FROM purchase_request_items pri
+        LEFT JOIN item_master im ON pri.item_id = im.id
+        WHERE pri.purchase_request_id = ?
+        ORDER BY pri.id ASC
+      `, [pr.id]);
+      pr.items = itemsRes.rows || [];
+    }
+
+    res.json(prs.rows || []);
+  } catch (err) {
+    console.error('Error fetching approved PR list:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -336,10 +461,11 @@ router.get('/', async (req, res) => {
         COALESCE(pri_agg.total_items, 0) as total_items,
         COALESCE(pri_agg.total_qty, 0) as total_qty,
         COALESCE(pri_agg.total_amount, 0) as total_amount,
-        pri_agg.item_names as item_names
+        pri_agg.item_names as item_names,
+        pri_agg.descriptions as descriptions
       FROM purchase_requests pr
       LEFT JOIN (
-        SELECT purchase_request_id, COUNT(*) as total_items, SUM(requested_qty) as total_qty, SUM(estimated_amount) as total_amount, GROUP_CONCAT(item_name, ', ') as item_names
+        SELECT purchase_request_id, COUNT(*) as total_items, SUM(requested_qty) as total_qty, SUM(estimated_amount) as total_amount, GROUP_CONCAT(item_name, ', ') as item_names, GROUP_CONCAT(NULLIF(description, ''), ', ') as descriptions
         FROM purchase_request_items GROUP BY purchase_request_id
       ) pri_agg ON pr.id = pri_agg.purchase_request_id
       WHERE 1=1
@@ -390,11 +516,22 @@ router.get('/', async (req, res) => {
   }
 });
 
-// GET Single Purchase Request by ID
+// GET Single Purchase Request by ID or PR Number
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const prRes = await db.query(`SELECT * FROM purchase_requests WHERE id = ?`, [id]);
+    const prRes = await db.query(`
+      SELECT 
+        pr.*,
+        COALESCE(sm.name, pr.supplier_name) as supplier_name,
+        sm.address1 as supplier_address,
+        COALESCE(sm.mobile1, sm.phone_off) as supplier_phone,
+        sm.gst_number as supplier_gst
+      FROM purchase_requests pr
+      LEFT JOIN supplier_master sm ON pr.supplier_id = sm.id
+      WHERE pr.id = ? OR pr.pr_no = ?
+    `, [id, id]);
+
     if (!prRes.rows || prRes.rows.length === 0) {
       return res.status(404).json({ error: 'Purchase Request not found' });
     }
@@ -404,6 +541,10 @@ router.get('/:id', async (req, res) => {
     const itemsRes = await db.query(`
       SELECT 
         pri.*,
+        im1.hsn_code,
+        im1.tax_type,
+        COALESCE(im1.tax, im1.gst_rate) as tax_rate,
+        im1.weight as master_weight,
         COALESCE(
           NULLIF(im1.item_name, ''),
           NULLIF(im2.item_name, ''),
@@ -414,7 +555,7 @@ router.get('/:id', async (req, res) => {
       LEFT JOIN item_master im2 ON (pri.item_name GLOB '*[0-9]*' AND CAST(pri.item_name AS INTEGER) = im2.id)
       WHERE pri.purchase_request_id = ? 
       ORDER BY pri.id ASC
-    `, [id]);
+    `, [pr.id]);
 
     const formattedItems = (itemsRes.rows || []).map(it => {
       let displayName = it.resolved_item_name || it.item_name;
@@ -431,7 +572,7 @@ router.get('/:id', async (req, res) => {
       SELECT * FROM purchase_request_approval_history 
       WHERE purchase_request_id = ? 
       ORDER BY id DESC
-    `, [id]);
+    `, [pr.id]);
 
     res.json({
       ...pr,
@@ -511,23 +652,28 @@ router.post('/', async (req, res) => {
         const appQty = item.approved_qty !== undefined ? parseFloat(item.approved_qty) : reqQty;
         const estRate = parseFloat(item.estimated_rate) || 0;
         const estAmount = parseFloat(item.estimated_amount) || (reqQty * estRate);
+        const curStockRm = parseFloat(item.current_stock_rm !== undefined ? item.current_stock_rm : item.current_stock) || 0;
+        const curStockFg = parseFloat(item.current_stock_fg) || 0;
 
         await db.run(`
           INSERT INTO purchase_request_items (
-            purchase_request_id, item_id, item_code, item_name, description,
-            requested_qty, approved_qty, unit, current_stock, minimum_stock,
+            purchase_request_id, item_id, item_code, item_name, weight, description,
+            requested_qty, approved_qty, unit, current_stock, current_stock_rm, current_stock_fg, minimum_stock,
             suggested_qty, estimated_rate, estimated_amount, remarks
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
           prId,
           item.item_id,
           item.item_code,
           finalItemName || 'Item',
+          item.weight || '',
           item.description,
           reqQty,
           appQty,
           item.unit || 'kg',
-          parseFloat(item.current_stock) || 0,
+          curStockRm,
+          curStockRm,
+          curStockFg,
           parseFloat(item.minimum_stock) || 0,
           parseFloat(item.suggested_qty) || 0,
           estRate,
@@ -643,23 +789,28 @@ router.put('/:id', async (req, res) => {
         const appQty = item.approved_qty !== undefined ? parseFloat(item.approved_qty) : reqQty;
         const estRate = parseFloat(item.estimated_rate) || 0;
         const estAmount = parseFloat(item.estimated_amount) || (reqQty * estRate);
+        const curStockRm = parseFloat(item.current_stock_rm !== undefined ? item.current_stock_rm : item.current_stock) || 0;
+        const curStockFg = parseFloat(item.current_stock_fg) || 0;
 
         await db.run(`
           INSERT INTO purchase_request_items (
-            purchase_request_id, item_id, item_code, item_name, description,
-            requested_qty, approved_qty, unit, current_stock, minimum_stock,
+            purchase_request_id, item_id, item_code, item_name, weight, description,
+            requested_qty, approved_qty, unit, current_stock, current_stock_rm, current_stock_fg, minimum_stock,
             suggested_qty, estimated_rate, estimated_amount, remarks
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
           id,
           item.item_id,
           item.item_code,
           finalItemName || 'Item',
+          item.weight || '',
           item.description,
           reqQty,
           appQty,
           item.unit || 'kg',
-          parseFloat(item.current_stock) || 0,
+          curStockRm,
+          curStockRm,
+          curStockFg,
           parseFloat(item.minimum_stock) || 0,
           parseFloat(item.suggested_qty) || 0,
           estRate,

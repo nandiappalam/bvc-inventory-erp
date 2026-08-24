@@ -168,6 +168,7 @@ const MasterSelectCell = ({
           weight_id: weightId,
           weight: wt,
           per_unit_wt: wt,
+          tot_wt: totalW > 0 ? totalW.toFixed(2) : (row.tot_wt || ''),
           total_wt: totalW,
           total_weight: totalW,
         });
@@ -234,21 +235,42 @@ const MasterSelectCell = ({
     }
 
     // Determine next preview lot for this row without consuming backend sequence.
-    if (!MasterSelectCell._previewStart) {
-      try {
-        const previewRes = await api('/lots/preview', { method: 'GET' });
-        MasterSelectCell._previewStart = previewRes?.lot_no || previewRes?.data?.lot_no || 'LOT0001';
-      } catch (err) {
-        console.error('Failed to get lot preview start:', err);
-        MasterSelectCell._previewStart = 'LOT0001';
+    const isWastageLot = lotMode === 'auto-wastage' || lotMode === 'wastage';
+
+    if (isWastageLot) {
+      if (!MasterSelectCell._previewWastageStart) {
+        try {
+          const previewRes = await api('/lots/preview-wastage', { method: 'GET' });
+          MasterSelectCell._previewWastageStart = previewRes?.lot_no || previewRes?.data?.lot_no || 'WST0001';
+        } catch (err) {
+          console.error('Failed to get wastage lot preview start:', err);
+          MasterSelectCell._previewWastageStart = 'WST0001';
+        }
+      }
+    } else {
+      if (!MasterSelectCell._previewStart) {
+        try {
+          const previewRes = await api('/lots/preview', { method: 'GET' });
+          MasterSelectCell._previewStart = previewRes?.lot_no || previewRes?.data?.lot_no || 'LOT0001';
+        } catch (err) {
+          console.error('Failed to get lot preview start:', err);
+          MasterSelectCell._previewStart = 'LOT0001';
+        }
       }
     }
 
     const computeNextLot = (startLotNo, offset) => {
-      const match = String(startLotNo || '').match(/LOT(\d+)/i);
-      const start = match ? parseInt(match[1], 10) : 1;
-      const next = start + offset;
-      return `LOT${String(next).padStart(4, '0')}`;
+      if (isWastageLot) {
+        const match = String(startLotNo || '').match(/WST(\d+)/i);
+        const start = match ? parseInt(match[1], 10) : 1;
+        const next = start + offset;
+        return `WST${String(next).padStart(4, '0')}`;
+      } else {
+        const match = String(startLotNo || '').match(/LOT(\d+)/i);
+        const start = match ? parseInt(match[1], 10) : 1;
+        const next = start + offset;
+        return `LOT${String(next).padStart(4, '0')}`;
+      }
     };
 
     // Find all lot numbers currently occupied in other rows of the form
@@ -263,8 +285,9 @@ const MasterSelectCell = ({
     let offset = 0;
     try {
       let found = false;
+      const startLot = isWastageLot ? (MasterSelectCell._previewWastageStart || 'WST0001') : (MasterSelectCell._previewStart || 'LOT0001');
       while (!found) {
-        const candidate = computeNextLot(MasterSelectCell._previewStart, offset);
+        const candidate = computeNextLot(startLot, offset);
         if (!activeLots.has(candidate)) {
           lotNo = candidate;
           found = true;
@@ -316,9 +339,18 @@ const MasterSelectCell = ({
   }
 
   if (!selectValue && cellVal && safeOptions.length > 0) {
-    const found = safeOptions.find(opt => 
+    let found = safeOptions.find(opt => 
       String(opt.item_name || opt.name || opt.printname || opt.print_name || opt.weight_name || '').toLowerCase() === String(cellVal).toLowerCase()
     );
+    if (!found && (masterType === 'weights' || cellKey === 'weight')) {
+      const numCell = parseFloat(String(cellVal).replace(/[^\d.]/g, ''));
+      if (!isNaN(numCell) && numCell > 0) {
+        found = safeOptions.find(opt => {
+          const optNum = parseFloat(String(opt.name || opt.item_name || opt.weight_name || opt.kg || opt.weight || opt.value || '').replace(/[^\d.]/g, ''));
+          return !isNaN(optNum) && Math.abs(optNum - numCell) < 0.001;
+        });
+      }
+    }
     if (found) {
       selectValue = String(found.id);
     }
@@ -399,8 +431,9 @@ const EntryItemsTable = ({
               available_lots_loaded: true
             };
 
-            // If only 1 lot available and no lot selected yet, auto select it and fill details!
-            if (availableLots.length === 1 && !row.lot_no) {
+            // If only 1 lot available and no lot selected yet, and row.qty is empty, auto select it and fill details!
+            const currentQty = safeNumber(row?.qty);
+            if (availableLots.length === 1 && !row.lot_no && currentQty === 0) {
               const singleLot = availableLots[0];
               const qty = singleLot.available_qty || singleLot.balance_qty || singleLot.remaining_quantity || 0;
               const weight = singleLot.per_unit_weight || singleLot.weight || 0;
@@ -507,8 +540,8 @@ const EntryItemsTable = ({
       };
 
       const safeQty = normalizeNumber(currentRow.qty);
-      const rate = safeNumber(currentRow.rate);
-      const disc = safeNumber(currentRow.disc);
+      const rate = safeNumber(currentRow.purc_rate !== undefined && currentRow.purc_rate !== '' ? currentRow.purc_rate : currentRow.rate);
+      const disc = safeNumber(currentRow.disc_percent !== undefined && currentRow.disc_percent !== '' ? currentRow.disc_percent : currentRow.disc);
 
       const rawWeight =
         currentRow.weight ??
@@ -530,7 +563,7 @@ const EntryItemsTable = ({
       const base = safeQty * rate;
       const discAmt = base * (disc / 100);
       const taxable = base - discAmt;
-      const rowTaxRate = currentRow.tax_rate !== undefined ? safeNumber(currentRow.tax_rate) : (currentRow.tax !== undefined ? safeNumber(currentRow.tax) : taxRate);
+      const rowTaxRate = currentRow.tax_rate !== undefined ? safeNumber(currentRow.tax_rate) : (currentRow.tax !== undefined ? safeNumber(currentRow.tax) : (currentRow.tax_percent !== undefined ? safeNumber(currentRow.tax_percent) : taxRate));
       const effectiveTaxRate = (taxType === 'Without Tax') ? 0 : rowTaxRate;
       const taxAmt = (taxable * effectiveTaxRate) / 100;
 
@@ -539,14 +572,18 @@ const EntryItemsTable = ({
       Object.assign(updates, {
         qty: safeQty,
         rate: rate,
+        purc_rate: currentRow.purc_rate !== undefined ? (updates.purc_rate !== undefined ? updates.purc_rate : rate) : rate,
+        disc: disc,
+        disc_percent: currentRow.disc_percent !== undefined ? (updates.disc_percent !== undefined ? updates.disc_percent : disc) : disc,
         weight: safeWeight,
         per_unit_wt: safeWeight,
+        tot_wt: totalWt > 0 ? totalWt.toFixed(2) : (totalWt === 0 && safeQty > 0 ? '0.00' : ''),
         total_wt: totalWt,
         total_weight: totalWt,
         base_amount: base,
         disc_amount: discAmt,
         tax_amount: taxAmt,
-        amount: taxable + taxAmt,
+        amount: (taxable + taxAmt).toFixed(2),
       });
 
       onRowChange(rowIndex, '__batch__', updates);
@@ -619,7 +656,7 @@ const EntryItemsTable = ({
                   <td key={col.key}>
                     {col.type === 'select' && Array.isArray(col.options) ? (
                       <select
-                        value={row[col.key] || col.options[0]?.value || ''}
+                        value={row[col.key] !== undefined && row[col.key] !== null && row[col.key] !== '' ? row[col.key] : ((typeof col.options[0] === 'object' ? col.options[0]?.value : col.options[0]) || '')}
                         onChange={(e) =>
                           handleCellChange(rowIndex, col.key, e.target.value)
                         }

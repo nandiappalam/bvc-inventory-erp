@@ -140,6 +140,10 @@ const CATEGORY_CONFIGS = {
     defaultSub: 'daily',
     subReports: [
       { id: 'daily', label: 'Daily Production Record' },
+      { id: 'iqr', label: 'Incoming Quality Report (IQR / RM Quality)' },
+      { id: 'in-process', label: 'In-Process Checklist / Milling Report' },
+      { id: 'coa', label: 'Certificate of Analysis (COA / FG Quality)' },
+      { id: 'fumigation', label: 'Fumigation & Pest Control Report' },
       { id: 'yield', label: 'Yield & Material Balance Report' },
       { id: 'wastage', label: 'Wastage & Rejection Report' },
       { id: 'summary', label: 'Production Summary' },
@@ -448,6 +452,70 @@ const getCategoryColumns = (categoryKey, subReportId) => {
   }
 
   if (categoryKey === 'production') {
+    if (subReportId === 'iqr') {
+      return [
+        { id: 'date', label: 'Inward Date' },
+        { id: 'iqr_no', label: 'IQR / S.No' },
+        { id: 'lot_no', label: 'RM Lot No' },
+        { id: 'supplier_name', label: 'Supplier Name' },
+        { id: 'item_name', label: 'Raw Material' },
+        { id: 'inward_bags', label: 'Inward Bags', align: 'right', isNumber: true },
+        { id: 'total_weight', label: 'Total Wt (kg)', align: 'right', isNumber: true },
+        { id: 'moisture', label: 'Moisture' },
+        { id: 'foreign_matter', label: 'Foreign Matter' },
+        { id: 'broken_grain', label: 'Broken Grain' },
+        { id: 'status', label: 'QC Decision' },
+        { id: 'checked_by', label: 'QC Officer' }
+      ];
+    }
+    if (subReportId === 'in-process') {
+      return [
+        { id: 'date', label: 'Date' },
+        { id: 'voucher_no', label: 'Grind No' },
+        { id: 'flour_mill', label: 'Flour Mill' },
+        { id: 'input_item', label: 'Input RM' },
+        { id: 'input_lot', label: 'Input Lot' },
+        { id: 'input_bags', label: 'Input Bags', align: 'right', isNumber: true },
+        { id: 'input_weight', label: 'Input Wt (kg)', align: 'right', isNumber: true },
+        { id: 'output_item', label: 'Output FG' },
+        { id: 'output_lot', label: 'Output Lot' },
+        { id: 'output_bags', label: 'Output Bags', align: 'right', isNumber: true },
+        { id: 'output_weight', label: 'Output Wt (kg)', align: 'right', isNumber: true },
+        { id: 'yield_pct', label: 'Yield %', align: 'right' },
+        { id: 'sieve_check', label: 'Sieve Integrity' },
+        { id: 'status', label: 'Status' }
+      ];
+    }
+    if (subReportId === 'coa') {
+      return [
+        { id: 'date', label: 'Inspection Date' },
+        { id: 'coa_no', label: 'COA Cert No' },
+        { id: 'item_name', label: 'Finished Product' },
+        { id: 'lot_no', label: 'FG Lot No' },
+        { id: 'batch_bags', label: 'Batch Bags', align: 'right', isNumber: true },
+        { id: 'total_weight', label: 'Batch Wt (kg)', align: 'right', isNumber: true },
+        { id: 'moisture', label: 'Moisture %' },
+        { id: 'protein_gluten', label: 'Protein / Gluten' },
+        { id: 'ash_content', label: 'Ash %' },
+        { id: 'fineness', label: 'Particle Fineness' },
+        { id: 'disposition', label: 'Disposition' },
+        { id: 'certified_by', label: 'Authorized By' }
+      ];
+    }
+    if (subReportId === 'fumigation') {
+      return [
+        { id: 'date', label: 'Treatment Date' },
+        { id: 'lot_no', label: 'Lot No' },
+        { id: 'commodity', label: 'Commodity' },
+        { id: 'fumigant_used', label: 'Fumigant Chemical' },
+        { id: 'exposure_period', label: 'Exposure Time' },
+        { id: 'aeration_time', label: 'Aeration Hours' },
+        { id: 'gas_residual', label: 'Residual Gas' },
+        { id: 'efficacy_status', label: 'Efficacy %' },
+        { id: 'clearance_status', label: 'Status' },
+        { id: 'inspector', label: 'Fumigator / Lead' }
+      ];
+    }
     return [
       { id: 'date', label: 'Date' },
       { id: 'batch_no', label: 'Batch/Lot No' },
@@ -810,13 +878,13 @@ const CategoryReportPage = () => {
         </Box>
       </Paper>
 
-      {categoryKey === 'production' ? (
+      {categoryKey === 'production' && ['ccp', 'oprp', 'terminal-inspection', 'vehicle-inspection', 'daily', 'yield', 'wastage', 'summary'].includes(currentSubReport) ? (
         <Box sx={{ mt: 1 }}>
           {currentSubReport === 'ccp' && <CcpMonitoringReport hideHeader />}
           {currentSubReport === 'oprp' && <OprpMonitoringReport hideHeader />}
           {currentSubReport === 'terminal-inspection' && <TerminalInspectionReport hideHeader />}
           {currentSubReport === 'vehicle-inspection' && <VehicleInspectionReport hideHeader />}
-          {(currentSubReport === 'daily' || currentSubReport === 'yield' || currentSubReport === 'wastage' || currentSubReport === 'summary' || !['ccp', 'oprp', 'terminal-inspection', 'vehicle-inspection'].includes(currentSubReport)) && (
+          {['daily', 'yield', 'wastage', 'summary'].includes(currentSubReport) && (
             <DailyProductionReport hideHeader reportType={currentSubReport} />
           )}
         </Box>

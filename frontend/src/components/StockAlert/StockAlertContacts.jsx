@@ -62,12 +62,21 @@ const StockAlertContacts = () => {
     setLoading(true);
     try {
       const res = await fetch('/api/stock-alerts/contacts');
-      const json = await res.json();
-      if (json.success) {
+      if (!res.ok) {
+        setLoading(false);
+        return;
+      }
+      const text = await res.text();
+      let json = null;
+      try {
+        json = text ? JSON.parse(text) : null;
+      } catch (parseErr) {}
+
+      if (json && json.success) {
         setContacts(json.contacts || []);
       }
     } catch (err) {
-      console.error('Error fetching contacts:', err);
+      // Handle network error quietly
     } finally {
       setLoading(false);
     }

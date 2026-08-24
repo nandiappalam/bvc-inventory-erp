@@ -31,11 +31,15 @@ exports.createPurchaseOrder = async (formData, items = [], deductions = []) => {
             } catch (e) {}
         }
 
+        const purchase_request_id = formData.purchase_request_id || formData.purchaseRequestId || formData.pr_id || null;
+        const pr_no = formData.pr_no || formData.prNo || null;
+
         const purchaseOrderResult = await client.run(
             `INSERT INTO purchase_orders (
                 s_no, supplier_id, supplier_name, date, inv_no, inv_date, po_date, godown_id, pay_type, tax_type, tax_rate, type, 
-                terms, fob, ship_via, sign, address, sender, remarks, tax_percent, amount, bill_amt, tax_amt, total_amt
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                terms, fob, ship_via, sign, address, sender, remarks, tax_percent, amount, bill_amt, tax_amt, total_amt,
+                purchase_request_id, pr_no
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 s_no,
                 supplier_id,
@@ -60,10 +64,26 @@ exports.createPurchaseOrder = async (formData, items = [], deductions = []) => {
                 parseFloat(formData.amount || 0),
                 parseFloat(formData.bill_amt || formData.billAmt || 0),
                 parseFloat(formData.tax_amt || formData.taxAmt || 0),
-                parseFloat(formData.total_amt || formData.totAmt || 0)
+                parseFloat(formData.total_amt || formData.totAmt || 0),
+                purchase_request_id,
+                pr_no
             ]
         );
         const purchaseOrderId = purchaseOrderResult.lastID;
+
+        // If linked to a purchase request, mark the PR as converted
+        if (purchase_request_id) {
+            try {
+                await client.run(
+                    `UPDATE purchase_requests 
+                     SET converted_to_po_id = ?, po_no = ?, status = 'Converted', updated_at = CURRENT_TIMESTAMP 
+                     WHERE id = ?`,
+                    [purchaseOrderId, inv_no, purchase_request_id]
+                );
+            } catch (err) {
+                console.error('Error updating purchase request status on PO creation:', err);
+            }
+        }
 
         for (const item of items) {
             let item_id = item.item_id || item.itemId || null;
@@ -131,10 +151,12 @@ exports.createPurchaseOrder = async (formData, items = [], deductions = []) => {
 exports.getAllPurchaseOrders = async () => {
     try {
         const purchaseOrdersRes = await db.query(`
-            SELECT po.*, COALESCE(s.name, po.supplier_name) as supplier_name, g.godown_name
+            SELECT po.*, COALESCE(s.name, po.supplier_name) as supplier_name, g.godown_name,
+                   COALESCE(po.pr_no, pr.pr_no) as pr_no
             FROM purchase_orders po
             LEFT JOIN supplier_master s ON po.supplier_id = s.id
             LEFT JOIN godown_master g ON po.godown_id = g.id
+            LEFT JOIN purchase_requests pr ON po.purchase_request_id = pr.id
             ORDER BY po.date DESC, po.s_no DESC
         `);
 
@@ -236,11 +258,15 @@ exports.updatePurchaseOrder = async (id, formData, items = [], deductions = []) 
             } catch (e) {}
         }
 
+        const purchase_request_id = formData.purchase_request_id || formData.purchaseRequestId || formData.pr_id || null;
+        const pr_no = formData.pr_no || formData.prNo || null;
+
         const updateResult = await client.run(
             `UPDATE purchase_orders SET
                 s_no = ?, supplier_id = ?, supplier_name = ?, date = ?, inv_no = ?, inv_date = ?, po_date = ?, godown_id = ?, pay_type = ?,
                 tax_type = ?, tax_rate = ?, type = ?, terms = ?, fob = ?, ship_via = ?, sign = ?, address = ?, sender = ?, 
-                remarks = ?, tax_percent = ?, amount = ?, bill_amt = ?, tax_amt = ?, total_amt = ?, updated_at = CURRENT_TIMESTAMP
+                remarks = ?, tax_percent = ?, amount = ?, bill_amt = ?, tax_amt = ?, total_amt = ?,
+                purchase_request_id = ?, pr_no = ?, updated_at = CURRENT_TIMESTAMP
              WHERE id = ?`,
             [
                 s_no, 
@@ -267,6 +293,8 @@ exports.updatePurchaseOrder = async (id, formData, items = [], deductions = []) 
                 parseFloat(formData.bill_amt || formData.billAmt || 0),
                 parseFloat(formData.tax_amt || formData.taxAmt || 0),
                 parseFloat(formData.total_amt || formData.totAmt || 0),
+                purchase_request_id,
+                pr_no,
                 id,
             ]
         );

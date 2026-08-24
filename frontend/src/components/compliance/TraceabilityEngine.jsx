@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Box,
   Card,
@@ -39,13 +40,17 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 
 export default function TraceabilityEngine({ targetLot = 'LOT0014', onLotChange }) {
-  const [lotInput, setLotInput] = useState(targetLot || 'LOT0014');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlLot = searchParams.get('lot') || searchParams.get('lot_no');
+  const initialLot = urlLot || targetLot || 'LOT0014';
+
+  const [lotInput, setLotInput] = useState(initialLot);
   const [traceData, setTraceData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   const handleTrace = async (target = lotInput) => {
-    const lotToQuery = (target || lotInput || targetLot || '').trim();
+    const lotToQuery = (target || lotInput || urlLot || targetLot || '').trim();
     if (!lotToQuery) return;
     setLoading(true);
     setError(null);
@@ -70,10 +75,10 @@ export default function TraceabilityEngine({ targetLot = 'LOT0014', onLotChange 
   };
 
   useEffect(() => {
-    const lot = targetLot || 'LOT0014';
+    const lot = urlLot || targetLot || 'LOT0014';
     setLotInput(lot);
     handleTrace(lot);
-  }, [targetLot]);
+  }, [targetLot, urlLot]);
 
   const handlePrint = () => {
     window.print();

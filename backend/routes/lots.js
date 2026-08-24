@@ -59,6 +59,55 @@ async function getAbsoluteMaxLotNo() {
   return maxNum;
 }
 
+// Helper function to scan potential wastage lot-no columns across tables to get maximum WST lot number
+async function getAbsoluteMaxWastageLotNo() {
+  let maxNum = 0;
+  const tables = [
+    { name: 'grain_wastage_items', col: 'lot_no' },
+    { name: 'stock_lots', col: 'lot_no' }
+  ];
+
+  for (const t of tables) {
+    try {
+      const check = await db.query(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, [t.name]);
+      if (check.rows.length > 0) {
+        const res = await db.query(`SELECT ${t.col} FROM ${t.name} WHERE ${t.col} LIKE 'WST%'`);
+        for (const row of res.rows) {
+          if (row[t.col]) {
+            const match = String(row[t.col]).match(/WST(?:-LOT)?(\d+)/i);
+            if (match) {
+              const num = parseInt(match[1], 10);
+              if (num > maxNum) maxNum = num;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error(`Error querying max wastage lot from ${t.name}:`, e);
+    }
+  }
+
+  return maxNum;
+}
+
+// Preview next wastage lot number WITHOUT consuming sequence
+router.get('/preview-wastage', async (req, res) => {
+  try {
+    const absoluteMax = await getAbsoluteMaxWastageLotNo();
+    const next = absoluteMax + 1;
+    res.json({
+      success: true,
+      lot_no: `WST${String(next).padStart(4, '0')}`
+    });
+  } catch (err) {
+    console.error('Error previewing next wastage lot number:', err);
+    res.status(500).json({
+      success: false,
+      message: err.message
+    });
+  }
+});
+
 // Generate sequential LOT numbers for STOCK CREATION modules.
 // SQLite-compatible (no MySQL transactions).
 // Response: { success: true, lot_no: "LOT0001" }

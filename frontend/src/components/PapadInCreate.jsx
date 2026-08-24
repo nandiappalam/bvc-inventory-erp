@@ -87,14 +87,16 @@ const PapadInCreate = () => {
     if (!editId) {
       const initNew = async () => {
         try {
-          const res = await api('/papad-in');
-          const list = res || [];
-          let max = 0;
-          list.forEach(item => {
-            const val = parseInt(item.s_no || item.sNo || item.sno) || 0;
-            if (val > max) max = val;
-          });
-          setFormData(prev => ({ ...prev, sNo: String(max + 1) }));
+          let nextSno = 1;
+          try {
+            const snoRes = await api('/papad-in/next-sno');
+            const sno = snoRes?.next_s_no ?? snoRes?.next_sno ?? snoRes?.s_no ?? snoRes?.data?.s_no;
+            if (sno) nextSno = parseInt(sno, 10);
+            else nextSno = await api.getNextSNo('/papad-in');
+          } catch (e) {
+            nextSno = await api.getNextSNo('/papad-in');
+          }
+          setFormData(prev => ({ ...prev, sNo: String(nextSno) }));
 
           const lotRes = await api('/stock/next-lot-no').catch(() => null);
           const startLot = (lotRes && lotRes.lot_no) ? lotRes.lot_no : 'LOT0001';

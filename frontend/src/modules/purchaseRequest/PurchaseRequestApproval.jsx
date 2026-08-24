@@ -37,8 +37,10 @@ import {
   FilterList as FilterIcon,
   RateReview as ReviewIcon,
   Close as CloseIcon,
-  Verified as ManagerIcon
+  Verified as ManagerIcon,
+  ShoppingCart as PoIcon
 } from '@mui/icons-material';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 
 const DEPARTMENTS = [
@@ -55,6 +57,7 @@ const DEPARTMENTS = [
 
 const PurchaseRequestApproval = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
 
   // Filters
   const [dateFrom, setDateFrom] = useState('');
@@ -413,15 +416,29 @@ const PurchaseRequestApproval = () => {
                         <Chip label={r.status} color={r.status === 'Submitted' ? 'warning' : 'default'} size="small" />
                       </TableCell>
                       <TableCell align="center">
-                        <Button
-                          variant="contained"
-                          size="small"
-                          startIcon={<ReviewIcon />}
-                          onClick={() => handleOpenReview(r.id)}
-                          sx={{ backgroundColor: '#1f4fb2' }}
-                        >
-                          Review & Act
-                        </Button>
+                        <Stack direction="row" spacing={1} justifyContent="center">
+                          <Button
+                            variant="contained"
+                            size="small"
+                            startIcon={<ReviewIcon />}
+                            onClick={() => handleOpenReview(r.id)}
+                            sx={{ backgroundColor: '#1f4fb2', textTransform: 'none' }}
+                          >
+                            Review & Act
+                          </Button>
+                          {(r.status === 'Approved' || r.status === 'Converted') && (
+                            <Button
+                              variant="contained"
+                              color="success"
+                              size="small"
+                              startIcon={<PoIcon />}
+                              onClick={() => navigate(`/entry/purchase-order-create?pr_id=${r.id}`)}
+                              sx={{ textTransform: 'none', fontWeight: 'bold' }}
+                            >
+                              Create PO
+                            </Button>
+                          )}
+                        </Stack>
                       </TableCell>
                     </TableRow>
                   ))
@@ -556,7 +573,22 @@ const PurchaseRequestApproval = () => {
             Return to Requester
           </Button>
 
-          <Box sx={{ display: 'flex', gap: 1.5 }}>
+          <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center' }}>
+            {(selectedPr?.status === 'Approved' || selectedPr?.status === 'Converted') && (
+              <Button
+                variant="contained"
+                color="primary"
+                startIcon={<PoIcon />}
+                onClick={() => {
+                  setReviewDialogOpen(false);
+                  navigate(`/entry/purchase-order-create?pr_id=${selectedPr.id}`);
+                }}
+                sx={{ px: 2, fontWeight: 'bold', backgroundColor: '#0284c7' }}
+              >
+                Create Purchase Order ➔
+              </Button>
+            )}
+
             <Button
               variant="contained"
               color="error"

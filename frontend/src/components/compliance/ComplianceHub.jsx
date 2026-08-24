@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Box,
   Card,
@@ -54,6 +54,8 @@ const TAB_ROUTES = [
 export default function ComplianceHub() {
   const location = useLocation();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const queryLot = searchParams.get('lot') || searchParams.get('lot_no');
 
   // Determine active tab based on pathname
   const getInitialTab = () => {
@@ -72,10 +74,17 @@ export default function ComplianceHub() {
   };
 
   const [activeTab, setActiveTab] = useState(getInitialTab);
-  const [activeTraceLot, setActiveTraceLot] = useState('LOT0014');
+  const [activeTraceLot, setActiveTraceLot] = useState(() => queryLot || 'LOT0014');
   const [dashboardData, setDashboardData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // Sync activeTraceLot when URL query param changes
+  useEffect(() => {
+    if (queryLot && queryLot !== activeTraceLot) {
+      setActiveTraceLot(queryLot);
+    }
+  }, [queryLot]);
 
   // Modals
   const [createDocModalOpen, setCreateDocModalOpen] = useState(false);
@@ -92,7 +101,11 @@ export default function ComplianceHub() {
   const handleTabChange = (event, newValue) => {
     setActiveTab(newValue);
     if (TAB_ROUTES[newValue]) {
-      navigate(TAB_ROUTES[newValue]);
+      if (newValue === 9 && activeTraceLot) {
+        navigate(`${TAB_ROUTES[newValue]}?lot=${encodeURIComponent(activeTraceLot)}`);
+      } else {
+        navigate(TAB_ROUTES[newValue]);
+      }
     }
   };
 
@@ -187,8 +200,12 @@ export default function ComplianceHub() {
             <ProductionRecordsList
               onRefresh={fetchDashboard}
               onNavigateToTrace={(lotNo) => {
-                if (lotNo) setActiveTraceLot(lotNo);
-                handleTabChange(null, 9);
+                if (lotNo) {
+                  setActiveTraceLot(lotNo);
+                  navigate(`/documents/traceability?lot=${encodeURIComponent(lotNo)}`);
+                } else {
+                  handleTabChange(null, 9);
+                }
               }}
               onOpenTraceability={() => handleTabChange(null, 9)}
             />

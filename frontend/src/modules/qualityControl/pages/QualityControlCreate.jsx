@@ -155,12 +155,26 @@ export default function QualityControlCreate() {
           const lotsData = pendingRes.data;
           setAllLots(lotsData);
           
-          // Check if there are query parameters to pre-populate
-          const qLotNo = qs.get('lotNo');
+          // Check if there are query parameters or router state to pre-populate
+          const qLotNo = qs.get('lotNo') || location.state?.lotNo || location.state?.lot_no;
+          const stateVehicleNo = location.state?.vehicleNo || location.state?.vehicle_no;
+          const stateItemName = location.state?.itemName || location.state?.item_name;
+          const stateSupplier = location.state?.supplier || location.state?.party_name;
+
           if (qLotNo) {
             const matched = lotsData.find(l => l.lot_no === qLotNo);
             if (matched) {
               handleSelectPendingLotWithItems(matched, itemsArr);
+            }
+          } else if (stateItemName || stateSupplier) {
+            const matched = lotsData.find(l => 
+              (stateItemName && (l.item_name?.toLowerCase() === stateItemName.toLowerCase())) ||
+              (stateSupplier && (l.supplier_name?.toLowerCase() === stateSupplier.toLowerCase()))
+            );
+            if (matched) {
+              handleSelectPendingLotWithItems(matched, itemsArr);
+            } else if (lotsData.length > 0) {
+              handleSelectPendingLotWithItems(lotsData[0], itemsArr);
             }
           } else if (lotsData.length > 0) {
             // Try to find first pending lot
@@ -190,9 +204,13 @@ export default function QualityControlCreate() {
         .then((res) => {
           if (res?.success && res?.data) {
             const data = res.data;
+            const displayPurchaseId = data.receipt_no 
+              ? (String(data.receipt_no).startsWith('PUR-') ? data.receipt_no : `PUR-${data.receipt_no}`)
+              : (data.s_no ? `PUR-${data.s_no}` : (data.purchaseId ? (String(data.purchaseId).startsWith('PUR-') ? data.purchaseId : `PUR-${data.purchaseId}`) : ''));
+
             setQcHeader({
               qcId: data.qcId || data.id || '',
-              purchaseId: data.purchaseId || '',
+              purchaseId: displayPurchaseId,
               lotNo: data.lotNo || '',
               supplier: data.supplier || '',
               item: data.item || '',
@@ -204,9 +222,64 @@ export default function QualityControlCreate() {
               totalWeight: data.total_weight || '',
               receiptDate: data.receipt_date || '',
               invoiceDate: data.invoice_date || '',
+              status: data.overallResult || data.overall_result || data.status || 'ACCEPTED',
               unloadingStatus: data.unloadingStatus || data.unloading_status || '',
             });
-            setQcResults(data.qcResults || []);
+
+            // Ensure specs / parameters are fully populated with specifications
+            let loadedResults = data.qcResults || [];
+            let matchedProductKey = 'Rice';
+            const itemNameLower = String(data.item || '').toLowerCase();
+            if (itemNameLower.includes('wheat')) matchedProductKey = 'Wheat';
+            else if (itemNameLower.includes('bengal') || itemNameLower.includes('gram') || itemNameLower.includes('chana')) matchedProductKey = 'BengalGram';
+            else if (itemNameLower.includes('urad')) matchedProductKey = 'Urad';
+
+            const templateObj = parameterTemplates[matchedProductKey] || parameterTemplates.Rice || {};
+
+            // Flatten template into an array of parameter definitions
+            const flattenedTemplate = Object.entries(templateObj).flatMap(([category, params]) =>
+              (Array.isArray(params) ? params : []).map(p => ({
+                parameterKey: p.id,
+                parameter: p.parameter,
+                category,
+                min: p.min,
+                max: p.max,
+                specification: p.specification || '',
+                unit: p.unit || '',
+                method: p.method || ''
+              }))
+            );
+
+            if (loadedResults.length === 0) {
+              loadedResults = flattenedTemplate.map(t => ({
+                ...t,
+                actualResult: '',
+                status: 'PASS',
+                remarks: ''
+              }));
+            } else {
+              loadedResults = loadedResults.map(r => {
+                const matchInTemplate = flattenedTemplate.find(t => 
+                  (r.parameterKey && t.parameterKey === r.parameterKey) || 
+                  (r.parameter && t.parameter && t.parameter.toLowerCase() === r.parameter.toLowerCase())
+                );
+                return {
+                  parameterKey: r.parameterKey || matchInTemplate?.parameterKey || 'param',
+                  parameter: r.parameter || matchInTemplate?.parameter || r.parameterKey || 'Parameter',
+                  category: r.category || matchInTemplate?.category || 'Physical',
+                  min: r.min !== undefined ? r.min : matchInTemplate?.min,
+                  max: r.max !== undefined ? r.max : matchInTemplate?.max,
+                  specification: r.specification || matchInTemplate?.specification || '',
+                  unit: r.unit || matchInTemplate?.unit || '',
+                  method: r.method || matchInTemplate?.method || '',
+                  actualResult: r.actualResult !== undefined ? r.actualResult : (r.value !== undefined ? r.value : (r.actual !== undefined ? r.actual : '')),
+                  status: r.status || 'PASS',
+                  remarks: r.remarks || ''
+                };
+              });
+            }
+
+            setQcResults(loadedResults);
             setLabRemarks(data.remarks || '');
           } else {
             setError(res?.message || 'Inspection record not found.');
@@ -251,9 +324,13 @@ export default function QualityControlCreate() {
       }
     }
 
+    const displayPurchaseId = lot.receipt_no 
+      ? (String(lot.receipt_no).startsWith('PUR-') ? lot.receipt_no : `PUR-${lot.receipt_no}`)
+      : (lot.s_no ? `PUR-${lot.s_no}` : (lot.purchase_id ? (String(lot.purchase_id).startsWith('PUR-') ? lot.purchase_id : `PUR-${lot.purchase_id}`) : ''));
+
     setQcHeader({
       qcId: '',
-      purchaseId: lot.purchase_id || '',
+      purchaseId: displayPurchaseId,
       lotNo: lot.lot_no || '',
       supplier: lot.supplier_name || '',
       item: lot.item_name || '',
@@ -265,6 +342,7 @@ export default function QualityControlCreate() {
       totalWeight: lot.total_weight || '',
       receiptDate: lot.receipt_date || '',
       invoiceDate: lot.invoice_date || '',
+      unloadingStatus: lot.unloading_status || 'PENDING_DECISION',
     });
 
     const initialResults = [];
@@ -796,7 +874,7 @@ export default function QualityControlCreate() {
               Retest / Edit
             </Button>
           )}
-          {!!id && qcHeader.status !== 'ACCEPTED' && qcHeader.status !== 'PASS' && (
+          {!!id && qcHeader.status !== 'ACCEPTED' && qcHeader.status !== 'PASS' && qcHeader.unloadingStatus !== 'UNLOADED' && (
             <Button variant="contained" color="success" onClick={onOverrideApprove} disabled={loading}>
               Approve to Unload
             </Button>

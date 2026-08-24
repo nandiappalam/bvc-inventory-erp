@@ -62,6 +62,30 @@ router.get('/', async (req, res) => {
   }
 })
 
+// GET next sequential S.No for Papad In
+router.get('/next-sno', async (req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT 
+        MAX(CAST(s_no AS INTEGER)) as max_sno,
+        MAX(id) as max_id,
+        COUNT(*) as total_count 
+      FROM flour_out 
+      WHERE papad_company IS NOT NULL AND papad_company != ''
+    `);
+    const maxVal = Math.max(
+      parseInt(result.rows[0]?.max_sno) || 0,
+      parseInt(result.rows[0]?.max_id) || 0,
+      parseInt(result.rows[0]?.total_count) || 0
+    );
+    const nextSNo = maxVal + 1;
+    res.json({ success: true, next_s_no: String(nextSNo), next_sno: nextSNo, s_no: nextSNo, data: { s_no: nextSNo } });
+  } catch (error) {
+    console.error('Error fetching next papad in S.No:', error);
+    res.status(500).json({ success: false, message: 'Error fetching next S.No', error: error.message });
+  }
+});
+
 // GET papad in by ID
 router.get('/:id', async (req, res) => {
   try {

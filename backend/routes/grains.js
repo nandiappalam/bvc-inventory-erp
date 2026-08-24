@@ -20,6 +20,19 @@ const initSchema = async () => {
       )
     `);
     
+    // Ensure work_order_id and work_order_no exist in grains table
+    try {
+      await db.run("ALTER TABLE grains ADD COLUMN work_order_id INTEGER");
+    } catch (e) {
+      // already exists
+    }
+
+    try {
+      await db.run("ALTER TABLE grains ADD COLUMN work_order_no TEXT");
+    } catch (e) {
+      // already exists
+    }
+
     // Add lot_no column to grain_output_items if not exists
     try {
       await db.run("ALTER TABLE grain_output_items ADD COLUMN lot_no TEXT");
@@ -131,8 +144,74 @@ async function generateNextLotNo(allocatedLots = []) {
   return `LOT${String(nextNum).padStart(4, '0')}`;
 }
 
+// Auto-generate sequential wastage lot number (WST0001, WST0002, etc.) distinct from Finished Goods
+async function generateNextWastageLotNo(allocatedLots = []) {
+  let maxLotNum = 0;
+  const tables = [
+    { name: 'grain_wastage_items', col: 'lot_no' },
+    { name: 'stock_lots', col: 'lot_no' }
+  ];
+
+  for (const t of tables) {
+    try {
+      const check = await db.query(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, [t.name]);
+      if (check.rows.length > 0) {
+        const res = await db.query(`SELECT ${t.col} FROM ${t.name} WHERE ${t.col} LIKE 'WST%'`);
+        for (const row of res.rows) {
+          if (row[t.col]) {
+            const match = String(row[t.col]).match(/WST(?:-LOT)?(\d+)/i);
+            if (match) {
+              const num = parseInt(match[1], 10);
+              if (num > maxLotNum) maxLotNum = num;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error(`Error querying max wastage lot in generateNextWastageLotNo from ${t.name}:`, e);
+    }
+  }
+
+  // Also scan already allocated lots in current batch
+  for (const lot of allocatedLots) {
+    if (typeof lot === 'string' && lot.startsWith('WST')) {
+      const match = lot.match(/WST(?:-LOT)?(\d+)/i);
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (num > maxLotNum) maxLotNum = num;
+      }
+    }
+  }
+
+  const nextNum = maxLotNum + 1;
+  return `WST${String(nextNum).padStart(4, '0')}`;
+}
+
+// GET next S.No for grains creation
+router.get('/next-sno', async (req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT 
+        MAX(CAST(s_no AS INTEGER)) as max_sno,
+        MAX(id) as max_id,
+        COUNT(*) as total_count 
+      FROM grains
+    `);
+    const maxVal = Math.max(
+      parseInt(result.rows[0]?.max_sno) || 0,
+      parseInt(result.rows[0]?.max_id) || 0,
+      parseInt(result.rows[0]?.total_count) || 0
+    );
+    const nextSNo = maxVal + 1;
+    res.json({ success: true, next_sno: nextSNo, next_s_no: String(nextSNo), s_no: nextSNo, data: { s_no: nextSNo } });
+  } catch (error) {
+    console.error('Error fetching next grains S.No:', error);
+    res.status(500).json({ success: false, message: 'Error fetching next S.No', error: error.message });
+  }
+});
+
 // GET all grains records
-router.get('/', async (req, res) => {
+router.get(['/', '/list'], async (req, res) => {
   try {
     const grainsResult = await db.query(`
       SELECT g.*, fmm.flourmill AS flour_mill_name
@@ -197,7 +276,8 @@ router.get('/', async (req, res) => {
         lotNo: item.lot_no,
         weight: item.weight,
         qty: item.qty,
-        totalWt: item.total_wt
+        totalWt: item.total_wt,
+        category: item.category || ''
       }));
 
       // Fetch FSMS CCP, OPRP, and Verification Records
@@ -316,7 +396,8 @@ router.get('/:id', async (req, res) => {
       lotNo: item.lot_no,
       weight: item.weight,
       qty: item.qty,
-      totalWt: item.total_wt
+      totalWt: item.total_wt,
+      category: item.category || ''
     }));
 
     // Fetch FSMS CCP, OPRP, and Verification Records
@@ -720,11 +801,11 @@ router.post('/', async (req, res) => {
       ])
     }
 
-    // Insert wastage items with auto-generated lot numbers
+    // Insert wastage items with auto-generated WST lot numbers
     for (const item of activeWastageItems) {
       let lotNo = item.lotNo || item.lot_no || '';
-      if (!lotNo || lotNo.trim() === '') {
-        lotNo = await generateNextLotNo(allocatedLots);
+      if (!lotNo || lotNo.trim() === '' || lotNo.startsWith('LOT')) {
+        lotNo = await generateNextWastageLotNo(allocatedLots);
       }
       item.lotNo = lotNo;
       item.lot_no = lotNo;
@@ -950,11 +1031,11 @@ router.put('/:id', async (req, res) => {
       ])
     }
 
-    // Insert updated wastage items with auto-generated lot numbers
+    // Insert updated wastage items with auto-generated WST lot numbers
     for (const item of activeWastageItems) {
       let lotNo = item.lotNo || item.lot_no || '';
-      if (!lotNo || lotNo.trim() === '') {
-        lotNo = await generateNextLotNo(allocatedLots);
+      if (!lotNo || lotNo.trim() === '' || lotNo.startsWith('LOT')) {
+        lotNo = await generateNextWastageLotNo(allocatedLots);
       }
       item.lotNo = lotNo;
       item.lot_no = lotNo;

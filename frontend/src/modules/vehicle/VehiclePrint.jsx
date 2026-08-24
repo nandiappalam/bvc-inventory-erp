@@ -127,6 +127,7 @@ const VehiclePrint = ({ movementId, onClose }) => {
           <span style="font-weight: bold;">Lot No:</span>
           <span style="font-weight: bold; color: #111;">${updatedMovement.lot_no || '-'}</span>
         </div>
+        ${(updatedMovement.movement_type === 'OUT' || updatedMovement.status === 'OUT' || Boolean(updatedMovement.gate_out_time) || String(updatedMovement.operation_type || '').toUpperCase().includes('OUT')) ? `
         <div style="display: flex; justify-content: space-between; margin: 4px 0;">
           <span style="font-weight: bold;">Analyzing Team:</span>
           <span>${updatedMovement.analyzing_team || '-'}</span>
@@ -135,6 +136,7 @@ const VehiclePrint = ({ movementId, onClose }) => {
           <span style="font-weight: bold;">Analyzing Area:</span>
           <span>${updatedMovement.analyzing_area || '-'}</span>
         </div>
+        ` : ''}
         <div style="display: flex; justify-content: space-between; margin: 4px 0;">
           <span style="font-weight: bold;">Item Name:</span>
           <span>${updatedMovement.item_name || updatedMovement.itemName || '-'}</span>
@@ -265,6 +267,12 @@ const VehiclePrint = ({ movementId, onClose }) => {
             (movement.operation_type && String(movement.operation_type).toUpperCase().includes('RETURN')) ||
             (movement.status_details && String(movement.status_details).toUpperCase().includes('RETURN'))
           );
+          const isOutPassOnly = (
+            movement.movement_type === 'OUT' ||
+            movement.status === 'OUT' ||
+            Boolean(movement.gate_out_time) ||
+            String(movement.operation_type || '').toUpperCase().includes('OUT')
+          );
           return (
             <>
               <div className="row">
@@ -289,15 +297,19 @@ const VehiclePrint = ({ movementId, onClose }) => {
                 <span className="value" style={{ fontWeight: 'bold' }}>{movement.lot_no || '-'}</span>
               </div>
 
-              <div className="row">
-                <span className="label">Analyzing Team:</span>
-                <span className="value">{movement.analyzing_team || '-'}</span>
-              </div>
+              {(!isOutPassOnly ? null : (
+                <>
+                  <div className="row">
+                    <span className="label">Analyzing Team:</span>
+                    <span className="value">{movement.analyzing_team || '-'}</span>
+                  </div>
 
-              <div className="row">
-                <span className="label">Analyzing Area:</span>
-                <span className="value">{movement.analyzing_area || '-'}</span>
-              </div>
+                  <div className="row">
+                    <span className="label">Analyzing Area:</span>
+                    <span className="value">{movement.analyzing_area || '-'}</span>
+                  </div>
+                </>
+              ))}
 
               <div className="row">
                 <span className="label">Item:</span>

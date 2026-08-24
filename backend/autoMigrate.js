@@ -562,17 +562,38 @@ module.exports = async function autoMigrate() {
   }
 
   await safeAddColumn('customer_master', 'email', 'TEXT');
+  await safeAddColumn('customer_master', 'name', 'TEXT');
+  await safeAddColumn('customer_master', 'print_name', 'TEXT');
+  await safeAddColumn('customer_master', 'address1', 'TEXT');
+  await safeAddColumn('customer_master', 'phone_off', 'TEXT');
+  await safeAddColumn('customer_master', 'phone_res', 'TEXT');
+  await safeAddColumn('customer_master', 'mobile1', 'TEXT');
+  await safeAddColumn('customer_master', 'gst_number', 'TEXT');
   await safeAddColumn('customer_master', 'transport', 'TEXT');
   await safeAddColumn('customer_master', 'limit_days', 'INTEGER');
   await safeAddColumn('customer_master', 'limit_amount', 'REAL');
   await safeAddColumn('customer_master', 'balance_type', "TEXT DEFAULT 'Dr'");
   await safeAddColumn('customer_master', 'status', "TEXT DEFAULT 'Active'");
   await safeAddColumn('supplier_master', 'email', 'TEXT');
+  await safeAddColumn('supplier_master', 'name', 'TEXT');
+  await safeAddColumn('supplier_master', 'print_name', 'TEXT');
+  await safeAddColumn('supplier_master', 'address1', 'TEXT');
+  await safeAddColumn('supplier_master', 'phone_off', 'TEXT');
+  await safeAddColumn('supplier_master', 'phone_res', 'TEXT');
+  await safeAddColumn('supplier_master', 'mobile1', 'TEXT');
+  await safeAddColumn('supplier_master', 'gst_number', 'TEXT');
   await safeAddColumn('supplier_master', 'transport', 'TEXT');
   await safeAddColumn('supplier_master', 'limit_days', 'INTEGER');
   await safeAddColumn('supplier_master', 'limit_amount', 'REAL');
   await safeAddColumn('supplier_master', 'balance_type', "TEXT DEFAULT 'Dr'");
   await safeAddColumn('supplier_master', 'status', "TEXT DEFAULT 'Active'");
+  await db.run(`
+    UPDATE supplier_master
+    SET name = COALESCE(NULLIF(name, ''), supplier_name),
+        print_name = COALESCE(NULLIF(print_name, ''), supplier_name),
+        address1 = COALESCE(NULLIF(address1, ''), address)
+    WHERE supplier_name IS NOT NULL
+  `).catch(err => console.log('Notice syncing supplier compatibility fields:', err.message));
 
   // Item groups status
   await safeAddColumn('item_groups', 'status', "TEXT DEFAULT 'Active'");
@@ -620,6 +641,25 @@ module.exports = async function autoMigrate() {
     console.log('✗ Error creating papad_company_entry:', err.message);
   }
 
+  // Grains table columns
+  await safeAddColumn('grains', 'work_order_id', 'INTEGER');
+  await safeAddColumn('grains', 'work_order_no', 'TEXT');
+  await safeAddColumn('grain_input_items', 'rate', 'REAL DEFAULT 0');
+  await safeAddColumn('grain_input_items', 'supplier_name', 'TEXT');
+  await safeAddColumn('grain_output_items', 'lot_no', 'TEXT');
+  await safeAddColumn('grain_wastage_items', 'category', 'TEXT');
+
+  // Purchase Request <-> Purchase Order <-> Purchase linkage columns
+  await safeAddColumn('purchase_requests', 'converted_to_po_id', 'INTEGER');
+  await safeAddColumn('purchase_requests', 'po_no', 'TEXT');
+  await safeAddColumn('purchase_orders', 'purchase_request_id', 'INTEGER');
+  await safeAddColumn('purchase_orders', 'pr_no', 'TEXT');
+  await safeAddColumn('purchase_orders', 'inward_purchase_id', 'INTEGER');
+  await safeAddColumn('purchases', 'purchase_order_id', 'INTEGER');
+  await safeAddColumn('purchases', 'po_no', 'TEXT');
+  await safeAddColumn('purchases', 'source_order_id', 'INTEGER');
+  await safeAddColumn('purchases', 'source_order_no', 'TEXT');
+
   // QC Inspections and Quality Register tables & columns
   console.log('🔧 Running QC / Quality / FSMS auto-migrations...');
 
@@ -663,6 +703,7 @@ module.exports = async function autoMigrate() {
         quantity REAL DEFAULT 0,
         alp INTEGER DEFAULT 0,
         g INTEGER DEFAULT 0,
+        alp_gram REAL DEFAULT 0,
         checked_by TEXT,
         remarks TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -674,6 +715,8 @@ module.exports = async function autoMigrate() {
   } catch (err) {
     console.log('✗ Error creating grind_oprp_monitoring:', err.message);
   }
+
+  await safeAddColumn('grind_oprp_monitoring', 'alp_gram', 'REAL DEFAULT 0');
 
   try {
     await db.run(`
@@ -886,6 +929,10 @@ module.exports = async function autoMigrate() {
   // Ensure sales compatibility with deductions and ERP fields
   await safeAddColumn('sales', 'deductions_json', 'TEXT');
   await safeAddColumn('sales', 'deduction_amount', 'REAL DEFAULT 0');
+  await safeAddColumn('sales', 'bill_amt', 'REAL DEFAULT 0');
+  await safeAddColumn('sales', 'tax_amt', 'REAL DEFAULT 0');
+  await safeAddColumn('sales', 'deduction', 'TEXT');
+  await safeAddColumn('sales', 'grand_total', 'REAL DEFAULT 0');
 
   // Seed default godowns if godown_master is empty
   try {

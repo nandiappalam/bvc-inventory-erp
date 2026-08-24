@@ -265,13 +265,16 @@ router.post('/', async (req, res) => {
       });
     }
 
+    const purchase_order_id = formData.purchase_order_id || formData.purchaseOrderId || formData.po_id || formData.source_order_id || null;
+    const po_no = formData.po_no || formData.poNo || formData.source_order_no || null;
+
     const insertValues = [
-      parseInt(formData.sno) || 1,
+      parseInt(formData.sno || formData.s_no) || 1,
       formData.date || new Date().toISOString().slice(0, 10),
-      formData.invNo || '',
+      formData.invNo || formData.inv_no || '',
       formData.supplier || '',
-      formData.payType || 'Credit',
-      formData.invDate || null,
+      formData.payType || formData.pay_type || 'Credit',
+      formData.invDate || formData.inv_date || null,
       formData.type || 'Urad',
       formData.contact_person || '',
       formData.address || '',
@@ -279,7 +282,7 @@ router.post('/', async (req, res) => {
       formData.phone || '',
       formData.gst_no || '',
       formData.email || '',
-      formData.taxType || 'Exclusive',
+      formData.taxType || formData.tax_type || 'Exclusive',
       formData.tax_percent || 0,
       formData.godown || '',
       formData.remarks || '',
@@ -291,17 +294,35 @@ router.post('/', async (req, res) => {
       parseFloat(totals.taxAmount) || 0,
       parseFloat(totals.netAmount) || 0,
       parseFloat(totals.deductionAmount || totals.deduction_amount) || 0,
-      parseFloat(totals.grandTotal) || 0
+      parseFloat(totals.grandTotal) || 0,
+      purchase_order_id,
+      po_no,
+      purchase_order_id,
+      po_no
     ]
 
     const purchaseResult = await db.run(`
       INSERT INTO purchases (
         s_no, date, inv_no, supplier, pay_type, inv_date, type, contact_person, address, area, phone, gst_no, email, tax_type, tax_percent, godown, remarks,
-        total_qty, total_weight, total_amount, base_amount, disc_amount, tax_amount, net_amount, deduction_amount, grand_total
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        total_qty, total_weight, total_amount, base_amount, disc_amount, tax_amount, net_amount, deduction_amount, grand_total,
+        purchase_order_id, po_no, source_order_id, source_order_no
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, insertValues)
 
     const purchaseId = purchaseResult.lastID
+
+    // If linked to a Purchase Order, update the PO status to 'Received'
+    if (purchase_order_id) {
+      try {
+        await db.run(`
+          UPDATE purchase_orders
+          SET status = 'Received', inward_purchase_id = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `, [purchaseId, purchase_order_id]);
+      } catch (err) {
+        console.error('Error updating purchase order status on inward:', err);
+      }
+    }
 
     const maxItemIdResult = await db.query('SELECT MAX(id) AS maxId FROM purchase_items')
     let nextLotSeq = (maxItemIdResult.rows[0]?.maxId || 0) + 1
@@ -421,6 +442,9 @@ router.put('/:id', async (req, res) => {
     const { formData, items, totals, deductions } = req.body
     const purchaseId = req.params.id
 
+    const purchase_order_id = formData.purchase_order_id || formData.purchaseOrderId || formData.po_id || formData.source_order_id || null;
+    const po_no = formData.po_no || formData.poNo || formData.source_order_no || null;
+
     await db.run(`
       UPDATE purchases SET
         s_no = ?, date = ?, inv_no = ?, supplier = ?, pay_type = ?,
@@ -429,6 +453,7 @@ router.put('/:id', async (req, res) => {
         remarks = ?, total_qty = ?, total_weight = ?, total_amount = ?,
         base_amount = ?, disc_amount = ?, tax_amount = ?, net_amount = ?,
         deduction_amount = ?, grand_total = ?,
+        purchase_order_id = ?, po_no = ?, source_order_id = ?, source_order_no = ?,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `, [
@@ -445,7 +470,7 @@ router.put('/:id', async (req, res) => {
       formData.phone,
       formData.gst_no,
       formData.email,
-      formData.taxType,
+      formData.taxType || formData.tax_type,
       formData.tax_percent || 0,
       formData.godown,
       formData.remarks,
@@ -458,6 +483,10 @@ router.put('/:id', async (req, res) => {
       totals.netAmount,
       totals.deductionAmount || totals.deduction_amount,
       totals.grandTotal,
+      purchase_order_id,
+      po_no,
+      purchase_order_id,
+      po_no,
       purchaseId
     ])
 

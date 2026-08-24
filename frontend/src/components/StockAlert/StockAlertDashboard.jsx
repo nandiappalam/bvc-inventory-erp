@@ -107,8 +107,19 @@ const StockAlertDashboard = () => {
     setLoading(true);
     try {
       const res = await fetch('/api/stock-alerts/dashboard');
-      const json = await res.json();
-      if (json.success) {
+      if (!res.ok) {
+        setLoading(false);
+        return;
+      }
+      const text = await res.text();
+      let json = null;
+      try {
+        json = text ? JSON.parse(text) : null;
+      } catch (parseErr) {
+        // Non-json response
+      }
+
+      if (json && json.success) {
         setData({
           summary: json.summary || {},
           items: json.items || [],
@@ -117,7 +128,7 @@ const StockAlertDashboard = () => {
         });
       }
     } catch (err) {
-      console.error('Error fetching stock alert dashboard:', err);
+      // Handle network error quietly
     } finally {
       setLoading(false);
     }
@@ -126,11 +137,11 @@ const StockAlertDashboard = () => {
   // Fetch Godowns & initial data
   useEffect(() => {
     fetch('/api/godowns')
-      .then(res => res.json())
+      .then(res => res.ok ? res.json() : [])
       .then(list => {
         if (Array.isArray(list)) setGodowns(list);
       })
-      .catch(err => console.error('Error loading godowns:', err));
+      .catch(() => {});
 
     fetchDashboardData();
 

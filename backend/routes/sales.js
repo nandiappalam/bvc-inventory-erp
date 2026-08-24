@@ -9,7 +9,7 @@ const { rebuildStockLedger } = require('../utils/stockRebuilder')
 db.run("ALTER TABLE sales ADD COLUMN is_order INTEGER DEFAULT 0").catch(() => {});
 
 // GET all sales
-router.get('/', async (req, res) => {
+router.get(['/', '/list'], async (req, res) => {
   try {
     const isOrderQuery = req.query.is_order;
     let query = `
@@ -83,15 +83,27 @@ router.get('/', async (req, res) => {
 router.get('/next-sno', async (req, res) => {
   try {
     const isOrderQuery = req.query.is_order;
-    let query = "SELECT COALESCE(MAX(CAST(s_no AS INTEGER)), 0) + 1 AS next_sno FROM sales";
+    let whereClause = "";
     const params = [];
     if (isOrderQuery !== undefined) {
-      query += " WHERE COALESCE(is_order, 0) = ?";
+      whereClause = " WHERE COALESCE(is_order, 0) = ?";
       params.push(parseInt(isOrderQuery) || 0);
     }
-    const maxRes = await db.query(query, params);
-    const nextSno = maxRes.rows[0]?.next_sno || 1;
-    res.json({ success: true, next_sno: String(nextSno) });
+    const maxRes = await db.query(`
+      SELECT 
+        MAX(CAST(s_no AS INTEGER)) as max_sno,
+        MAX(id) as max_id,
+        COUNT(*) as total_count 
+      FROM sales${whereClause}
+    `, params);
+
+    const maxVal = Math.max(
+      parseInt(maxRes.rows[0]?.max_sno) || 0,
+      parseInt(maxRes.rows[0]?.max_id) || 0,
+      parseInt(maxRes.rows[0]?.total_count) || 0
+    );
+    const nextSno = maxVal + 1;
+    res.json({ success: true, next_sno: String(nextSno), s_no: nextSno, next_s_no: String(nextSno), data: { s_no: nextSno } });
   } catch (error) {
     console.error('Error fetching next sales s_no:', error);
     res.status(500).json({ success: false, message: 'Error fetching next sales s_no', error: error.message });

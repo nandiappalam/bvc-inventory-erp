@@ -160,7 +160,8 @@ const GrainsCreation = () => {
                 lot_no: item.lotNo,
                 weight: String(item.weight || ''),
                 qty: String(item.qty || ''),
-                total_wt: parseFloat(item.totalWt) || 0
+                total_wt: parseFloat(item.totalWt) || 0,
+                category: item.category || 'Select CCP / Equipment Category'
               })));
             }
 
@@ -262,7 +263,25 @@ const GrainsCreation = () => {
       });
       setInputItems([{ item_name: '', lot_no: '', weight: '', qty: '', total_wt: 0 }]);
       setOutputItems([{ item_name: '', lot_no: '', weight: '', qty: '', total_wt: 0 }]);
-      setWastageItems([{ item_name: '', lot_no: '', weight: '', qty: '', total_wt: 0 }]);
+      setWastageItems([{ item_name: '', lot_no: '', weight: '', qty: '', total_wt: 0, category: 'Select CCP / Equipment Category' }]);
+      
+      // Auto-fetch next S.No when creating a new record
+      api('/grains/next-sno')
+        .then(async (res) => {
+          const sno = res?.next_sno ?? res?.s_no ?? res?.data?.s_no ?? res?.next_s_no;
+          if (sno) {
+            setFormData(prev => ({ ...prev, s_no: String(sno) }));
+          } else {
+            const fallbackSno = await api.getNextSNo('/grains');
+            setFormData(prev => ({ ...prev, s_no: String(fallbackSno) }));
+          }
+        })
+        .catch(async () => {
+          try {
+            const fallbackSno = await api.getNextSNo('/grains');
+            setFormData(prev => ({ ...prev, s_no: String(fallbackSno) }));
+          } catch (e) {}
+        });
     }
   }, [id]);
 
@@ -574,7 +593,8 @@ const GrainsCreation = () => {
             lotNo: item.lot_no,
             weight: parseFloat(item.weight) || 0,
             qty: parseFloat(item.qty) || 0,
-            totalWt: parseFloat(item.total_wt) || 0
+            totalWt: parseFloat(item.total_wt) || 0,
+            category: item.category || ''
           })),
           ccp: ccpData,
           oprp: oprpData,
@@ -589,7 +609,14 @@ const GrainsCreation = () => {
           setFormData({ s_no: '1', flour_mill: '', date: today, remarks: '' });
           setInputItems([{ item_name: '', lot_no: '', weight: '', qty: '', total_wt: 0 }]);
           setOutputItems([{ item_name: '', lot_no: '', weight: '', qty: '', total_wt: 0 }]);
-          setWastageItems([{ item_name: '', lot_no: '', weight: '', qty: '', total_wt: 0 }]);
+          setWastageItems([{ item_name: '', lot_no: '', weight: '', qty: '', total_wt: 0, category: 'Select CCP / Equipment Category' }]);
+          api('/grains/next-sno')
+            .then(res => {
+              if (res?.next_sno) {
+                setFormData(prev => ({ ...prev, s_no: String(res.next_sno) }));
+              }
+            })
+            .catch(err => console.error('Failed to load next grains S.No:', err));
         }
         setTimeout(() => {
           setMessage('');
@@ -930,7 +957,7 @@ const GrainsCreation = () => {
           onAddRow={addWastageRow}
           onDeleteRow={deleteWastageRow}
           showActions={true}
-          lotMode="auto"
+          lotMode="auto-wastage"
         />
       </EntrySection>
 
@@ -962,9 +989,9 @@ const GrainsCreation = () => {
         const wastagePct = totalInputWt > 0 ? (totalWastageWt / totalInputWt) * 100 : 0;
         const shortcomingPct = totalInputWt > 0 ? (shortcomingWt / totalInputWt) * 100 : 0;
 
-        // Calculate RM Cost Losses
-        const wastageLossAmount = totalWastageBags > 0 ? (totalWastageBags * avgRmCostPerQty) : (totalWastageWt * avgRmCostPerKg);
-        const shortcomingLossAmount = shortcomingWt * avgRmCostPerKg;
+        // Calculate RM Cost Losses KG-wise as requested by user
+        const wastageLossAmount = totalWastageWt * avgRmCostPerKg;
+        const shortcomingLossAmount = (shortcomingWt > 0 ? shortcomingWt : 0) * avgRmCostPerKg;
         const totalRmLossAmount = wastageLossAmount + shortcomingLossAmount;
 
         return (

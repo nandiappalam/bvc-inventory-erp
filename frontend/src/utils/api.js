@@ -120,8 +120,15 @@ export async function getNextLot() {
 export async function getNextSNo(endpoint) {
   try {
     const res = await api(endpoint);
+    // If endpoint returned direct next_sno object
+    if (res && typeof res === 'object' && !Array.isArray(res)) {
+      const directSno = res.next_sno ?? res.s_no ?? res.sNo ?? res.data?.s_no ?? res.data?.next_sno ?? res.data?.sNo;
+      if (directSno !== undefined && directSno !== null && !isNaN(parseInt(directSno)) && parseInt(directSno) > 0) {
+        return parseInt(directSno);
+      }
+    }
     const list = res && (Array.isArray(res.data) ? res.data : (Array.isArray(res) ? res : []));
-    let max = 0;
+    let max = list.length; // Max is at least the total record count (1 to N)
     list.forEach(item => {
       const val = parseInt(item.s_no || item.sNo || item.sno || item.id || item.bill_no || item.voucher_no || item.inv_no) || 0;
       if (val > max) max = val;

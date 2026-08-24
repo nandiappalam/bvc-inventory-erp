@@ -7,7 +7,6 @@ const fs = require('fs')
 const db = require('./config/database_new')
 
 const app = express()
-// AI Studio requires port 3000 strictly
 const PORT = 3000
 
 // Middleware

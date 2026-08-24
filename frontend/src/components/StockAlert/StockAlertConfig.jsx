@@ -77,12 +77,21 @@ const StockAlertConfig = () => {
     setLoading(true);
     try {
       const res = await fetch('/api/stock-alerts/config');
-      const json = await res.json();
-      if (json.success) {
+      if (!res.ok) {
+        setLoading(false);
+        return;
+      }
+      const text = await res.text();
+      let json = null;
+      try {
+        json = text ? JSON.parse(text) : null;
+      } catch (parseErr) {}
+
+      if (json && json.success) {
         setConfigs(json.configs || []);
       }
     } catch (err) {
-      console.error('Error loading stock alert configs:', err);
+      // Handle network error quietly
     } finally {
       setLoading(false);
     }
@@ -94,7 +103,7 @@ const StockAlertConfig = () => {
 
     // Fetch items from master
     fetch('/api/masters/items')
-      .then(res => res.json())
+      .then(res => res.ok ? res.json() : [])
       .then(data => {
         let list = [];
         if (Array.isArray(data)) {
@@ -106,23 +115,23 @@ const StockAlertConfig = () => {
         }
         setItemsList(list);
       })
-      .catch(err => console.error('Error fetching items:', err));
+      .catch(() => {});
 
     // Fetch godowns
     fetch('/api/godowns')
-      .then(res => res.json())
+      .then(res => res.ok ? res.json() : [])
       .then(data => {
         if (Array.isArray(data)) setGodownsList(data);
       })
-      .catch(err => console.error('Error fetching godowns:', err));
+      .catch(() => {});
 
     // Fetch contacts
     fetch('/api/stock-alerts/contacts')
-      .then(res => res.json())
+      .then(res => res.ok ? res.json() : {})
       .then(data => {
-        if (data.success) setContactsList(data.contacts || []);
+        if (data && data.success) setContactsList(data.contacts || []);
       })
-      .catch(err => console.error('Error fetching contacts:', err));
+      .catch(() => {});
 
     const handleStockUpdate = () => {
       fetchConfigs();

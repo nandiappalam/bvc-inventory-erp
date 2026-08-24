@@ -145,6 +145,10 @@ const REPORT_CATEGORIES = [
     path: '/reports/category/production',
     subReports: [
       { label: 'Daily Production Report', type: 'daily' },
+      { label: 'Incoming Quality Report (IQR / RM Quality)', type: 'iqr' },
+      { label: 'In-Process Checklist / Milling Report', type: 'in-process' },
+      { label: 'Certificate of Analysis (COA / FG Quality)', type: 'coa' },
+      { label: 'Fumigation & Pest Control Report', type: 'fumigation' },
       { label: 'CCP Monitoring Report', type: 'ccp' },
       { label: 'OPRP Monitoring Report', type: 'oprp' },
       { label: 'Terminal Inspection Report', type: 'terminal-inspection' },

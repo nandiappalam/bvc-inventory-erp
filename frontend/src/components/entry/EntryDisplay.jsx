@@ -4,7 +4,7 @@ import api from "../../services/api";
 import { safeArray } from "../../utils/safeArray";
 import { printHtml } from "../../utils/printHelper";
 import { useAuth } from "../../context/AuthContext";
-import { exportToExcel, printTableList } from "../../utils/exportHelper";
+import { exportToExcel, printTableList, reactNodeToHtml } from "../../utils/exportHelper";
 
 /**
  * EntryDisplay - Uniform display component for Entry pages
@@ -225,25 +225,23 @@ const EntryDisplay = ({
     let tableHtml = "<table style='border-collapse:collapse;width:100%'>";
     tableHtml += "<thead><tr>";
     columns.forEach(col => {
-      tableHtml += `<th style='border:1px solid #ccc;padding:8px;background:#1f4fb2;color:#fff'>${col.title}</th>`;
+      tableHtml += `<th style='border:1px solid #1f4fb2;padding:8px;background:#1f4fb2;color:#fff'>${col.title || col.key}</th>`;
     });
     tableHtml += "</tr></thead><tbody><tr>";
     columns.forEach(col => {
-      // Handle custom render if defined, otherwise raw key
       let val = row[col.key] || "";
       if (col.render) {
         val = col.render(val, row);
-        // Strip react elements if rendered as elements
-        if (React.isValidElement(val)) {
-          val = row[col.key] || "";
+        if (typeof val !== 'string' && typeof val !== 'number') {
+          val = reactNodeToHtml(val) || row[col.key] || "";
         }
       }
-      tableHtml += `<td style='border:1px solid #ccc;padding:8px'>${val}</td>`;
+      tableHtml += `<td style='border:1px solid #cbd5e1;padding:8px'>${val}</td>`;
     });
     tableHtml += "</tr></tbody></table>";
     
     const html = `
-      <div style="font-family:Arial, sans-serif;padding:10px;">
+      <div style="font-family:Arial, sans-serif;padding:15px;">
         <h2 style="color:#1f4fb2;border-bottom:2px solid #1f4fb2;padding-bottom:10px;">${title} Details</h2>
         ${tableHtml}
       </div>

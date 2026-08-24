@@ -2,8 +2,8 @@
  * printHelper.js - Reliable printing for iframe / sandbox environments
  * 
  * Instead of using window.open('', '_blank') which is blocked by default in iframes,
- * this utility injects a temporary print-only container directly into the document body
- * and triggers window.print() on the existing window.
+ * this utility injects a styled print preview modal directly into the document body
+ * and triggers window.print() with comprehensive print styles.
  */
 
 export function printHtml(html, title = "Print Document") {
@@ -101,15 +101,15 @@ export function printHtml(html, title = "Print Document") {
       .print-modal-box {
         background: #ffffff !important;
         width: 100% !important;
-        max-width: 900px !important;
+        max-width: 950px !important;
         height: auto !important;
         max-height: 90vh !important;
-        border-radius: 12px !important;
-        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.04) !important;
+        border-radius: 10px !important;
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.1) !important;
         display: flex !important;
         flex-direction: column !important;
         overflow: hidden !important;
-        border: 1px solid #e2e8f0 !important;
+        border: 1px solid #cbd5e1 !important;
       }
       .print-toolbar {
         display: flex !important;
@@ -117,7 +117,7 @@ export function printHtml(html, title = "Print Document") {
         align-items: center !important;
         background: #1e3a8a !important;
         color: white !important;
-        padding: 14px 24px !important;
+        padding: 14px 20px !important;
         font-family: inherit !important;
         user-select: none !important;
       }
@@ -129,7 +129,7 @@ export function printHtml(html, title = "Print Document") {
       }
       .print-content {
         background: #ffffff !important;
-        padding: 40px !important;
+        padding: 30px !important;
         overflow-y: auto !important;
         flex: 1 !important;
         box-sizing: border-box !important;
@@ -137,55 +137,102 @@ export function printHtml(html, title = "Print Document") {
       }
     }
     @media print {
-      body > * {
+      @page {
+        size: auto;
+        margin: 10mm 12mm;
+      }
+      html, body {
+        margin: 0 !important;
+        padding: 0 !important;
+        height: auto !important;
+        min-height: auto !important;
+        overflow: visible !important;
+        background: #ffffff !important;
+        color: #000000 !important;
+      }
+      /* Hide all elements except the print container */
+      body > *:not(#iframe-print-container) {
         display: none !important;
       }
-      body > #iframe-print-container {
+      #iframe-print-container {
         display: block !important;
-        position: absolute !important;
-        left: 0 !important;
-        top: 0 !important;
+        position: static !important;
         width: 100% !important;
         height: auto !important;
-        background: transparent !important;
+        min-height: auto !important;
+        background: #ffffff !important;
         padding: 0 !important;
         margin: 0 !important;
+        overflow: visible !important;
+        box-shadow: none !important;
+        border: none !important;
+        backdrop-filter: none !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+      }
+      #iframe-print-container * {
+        visibility: visible !important;
       }
       .print-modal-box {
+        display: block !important;
         box-shadow: none !important;
         border-radius: 0 !important;
         border: none !important;
         width: 100% !important;
         max-width: 100% !important;
-        display: block !important;
         height: auto !important;
         max-height: none !important;
+        background: #ffffff !important;
+        overflow: visible !important;
+        padding: 0 !important;
+        margin: 0 !important;
       }
       .print-toolbar {
         display: none !important;
       }
       .print-content {
+        display: block !important;
+        width: 100% !important;
+        height: auto !important;
         max-height: none !important;
         overflow: visible !important;
         padding: 0 !important;
-        background: transparent !important;
+        margin: 0 !important;
+        background: #ffffff !important;
+        color: #000000 !important;
       }
-      /* Ensure tables look neat in print */
+      /* Ensure crisp table borders and colors in print */
       table {
         width: 100% !important;
         border-collapse: collapse !important;
-        margin-top: 15px !important;
-        margin-bottom: 15px !important;
+        page-break-inside: auto !important;
+        margin-top: 10px !important;
+        margin-bottom: 10px !important;
+      }
+      tr {
+        page-break-inside: avoid !important;
+        page-break-after: auto !important;
+      }
+      thead {
+        display: table-header-group !important;
+      }
+      tfoot {
+        display: table-footer-group !important;
       }
       th, td {
-        border: 1px solid #000000 !important;
-        padding: 8px !important;
-        text-align: left !important;
+        border: 1px solid #cbd5e1 !important;
+        padding: 6px 8px !important;
+        font-size: 11px !important;
         color: #000000 !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
       }
       th {
-        background-color: #f2f2f2 !important;
+        background-color: #1f4fb2 !important;
+        color: #ffffff !important;
         font-weight: bold !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
       }
     }
   `;
@@ -223,3 +270,4 @@ export function printHtml(html, title = "Print Document") {
   // 5. Auto-trigger print dialog using the robust iframe mechanism on load
   setTimeout(handlePrintTrigger, 300);
 }
+

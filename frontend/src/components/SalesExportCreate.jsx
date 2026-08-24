@@ -121,11 +121,20 @@ const SalesExportCreate = () => {
       } else {
         try {
           const nextRes = await api('/sales-export-orders/next-sno');
-          if (nextRes && nextRes.success) {
-            setFormData(prev => ({ ...prev, billNo: String(nextRes.next_sno) }));
+          const sno = nextRes?.next_sno ?? nextRes?.next_s_no ?? nextRes?.s_no ?? nextRes?.data?.s_no;
+          if (sno) {
+            setFormData(prev => ({ ...prev, billNo: String(sno) }));
+          } else {
+            const fallback = await api.getNextSNo('/sales-export-orders');
+            setFormData(prev => ({ ...prev, billNo: String(fallback) }));
           }
         } catch (err) {
-          console.error('Error fetching next bill_no:', err);
+          try {
+            const fallback = await api.getNextSNo('/sales-export-orders');
+            setFormData(prev => ({ ...prev, billNo: String(fallback) }));
+          } catch (e) {
+            console.error('Error fetching next bill_no:', err);
+          }
         }
       }
     };

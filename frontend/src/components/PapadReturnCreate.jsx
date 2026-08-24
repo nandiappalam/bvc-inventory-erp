@@ -44,9 +44,18 @@ const PapadReturnCreate = () => {
             });
           }
         } else {
-          const res = await api('/papad-returns/next-sno');
-          if (res && res.next_s_no) {
-            setFormData(prev => ({ ...prev, sNo: res.next_s_no }));
+          try {
+            const res = await api('/papad-returns/next-sno');
+            const sno = res?.next_s_no ?? res?.next_sno ?? res?.s_no ?? res?.data?.s_no;
+            if (sno) {
+              setFormData(prev => ({ ...prev, sNo: String(sno) }));
+            } else {
+              const fallback = await api.getNextSNo('/papad-returns');
+              setFormData(prev => ({ ...prev, sNo: String(fallback) }));
+            }
+          } catch (e) {
+            const fallback = await api.getNextSNo('/papad-returns');
+            setFormData(prev => ({ ...prev, sNo: String(fallback) }));
           }
         }
       } catch (err) {

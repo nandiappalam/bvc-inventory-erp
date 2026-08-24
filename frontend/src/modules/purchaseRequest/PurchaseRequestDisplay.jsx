@@ -538,43 +538,47 @@ const PurchaseRequestDisplay = () => {
 
           <TableContainer component={Paper} variant="outlined">
             <Table size="small">
-              <TableHead sx={{ backgroundColor: '#1f4fb2' }}>
+              <TableHead sx={{ backgroundColor: '#0f172a' }}>
                 <TableRow>
-                  <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>PR No</TableCell>
-                  <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Item Name(s)</TableCell>
-                  <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Req Date</TableCell>
-                  <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Department</TableCell>
-                  <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Requested By</TableCell>
-                  <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Priority</TableCell>
-                  <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Items</TableCell>
-                  <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Total Qty</TableCell>
-                  <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Est. Value (₹)</TableCell>
-                  <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Status</TableCell>
-                  <TableCell sx={{ color: '#fff', fontWeight: 'bold', textAlign: 'center' }}>Actions</TableCell>
+                  <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', textAlign: 'center', width: '55px', borderRight: '1px solid #334155' }}>S.No</TableCell>
+                  <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>PR No</TableCell>
+                  <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Item Name(s)</TableCell>
+                  <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Description / Details</TableCell>
+                  <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Req Date</TableCell>
+                  <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Department</TableCell>
+                  <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Requested By</TableCell>
+                  <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Priority</TableCell>
+                  <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Items</TableCell>
+                  <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Total Qty</TableCell>
+                  <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Est. Value (₹)</TableCell>
+                  <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Status</TableCell>
+                  <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', textAlign: 'center' }}>Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={11} align="center" sx={{ py: 3 }}>
+                    <TableCell colSpan={13} align="center" sx={{ py: 3 }}>
                       <CircularProgress size={30} />
                       <Typography variant="body2" sx={{ mt: 1 }}>Loading purchase requests...</Typography>
                     </TableCell>
                   </TableRow>
                 ) : requests.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={11} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                    <TableCell colSpan={13} align="center" sx={{ py: 4, color: 'text.secondary' }}>
                       No purchase requests found matching the criteria.
                     </TableCell>
                   </TableRow>
                 ) : (
-                  requests.map(r => (
-                    <TableRow key={r.id} hover>
-                      <TableCell sx={{ fontWeight: 'bold', color: '#1f4fb2' }}>{r.pr_no}</TableCell>
-                      <TableCell sx={{ fontWeight: '500', color: '#1e293b' }}>{r.item_names || r.item_name || '—'}</TableCell>
-                      <TableCell>{r.request_date}</TableCell>
-                      <TableCell>{r.department || 'General'}</TableCell>
-                      <TableCell>{r.requested_by || 'Admin'}</TableCell>
+                  requests.map((r, rIdx) => (
+                    <TableRow key={r.id} hover sx={{ '&:nth-of-type(even)': { backgroundColor: '#f8fafc' } }}>
+                      <TableCell sx={{ textAlign: 'center', fontWeight: '700', color: '#475569', fontSize: '13px' }}>{rIdx + 1}</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', color: '#0284c7', fontSize: '13px' }}>{r.pr_no}</TableCell>
+                      <TableCell sx={{ fontWeight: '600', color: '#0f172a', fontSize: '13px' }}>{r.item_names || r.item_name || '—'}</TableCell>
+                      <TableCell sx={{ color: '#475569', fontSize: '13px' }}>{r.descriptions || r.description || '—'}</TableCell>
+                      <TableCell sx={{ fontSize: '13px', color: '#334155' }}>{r.request_date}</TableCell>
+                      <TableCell sx={{ fontSize: '13px', color: '#334155' }}>{r.department || 'General'}</TableCell>
+                      <TableCell sx={{ fontSize: '13px', color: '#334155' }}>{r.requested_by || 'Admin'}</TableCell>
                       <TableCell>
                         <Chip
                           label={r.priority}
@@ -588,14 +592,27 @@ const PurchaseRequestDisplay = () => {
                           }}
                         />
                       </TableCell>
-                      <TableCell>{r.total_items || 0}</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold' }}>{(r.total_qty || 0).toLocaleString('en-IN')}</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold', color: '#1f4fb2' }}>
+                      <TableCell sx={{ fontSize: '13px', color: '#334155' }}>{r.total_items || 0}</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', fontSize: '13px', color: '#0f172a' }}>{(r.total_qty || 0).toLocaleString('en-IN')}</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', color: '#0284c7', fontSize: '13px' }}>
                         ₹{(r.total_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                       </TableCell>
                       <TableCell>{getStatusChip(r.status)}</TableCell>
                       <TableCell align="center">
-                        <Stack direction="row" spacing={0.5} justifyContent="center">
+                        <Stack direction="row" spacing={0.5} justifyContent="center" alignItems="center">
+                          {r.status === 'Approved' && (
+                            <Tooltip title="Create Purchase Order for this Request">
+                              <Button
+                                variant="contained"
+                                color="success"
+                                size="small"
+                                onClick={() => navigate(`/entry/purchase-order-create?pr_id=${r.id}`)}
+                                sx={{ fontSize: '11px', px: 1, py: 0.2, minWidth: 'auto', textTransform: 'none', fontWeight: 'bold' }}
+                              >
+                                + PO
+                              </Button>
+                            </Tooltip>
+                          )}
                           <Tooltip title="View Details">
                             <IconButton size="small" color="primary" onClick={() => handleViewPr(r.id)}>
                               <ViewIcon fontSize="small" />
@@ -699,32 +716,36 @@ const PurchaseRequestDisplay = () => {
               </Grid>
 
               {/* Items List */}
-              <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1, color: '#1f4fb2' }}>
-                Requested Items
+              <Typography variant="subtitle1" sx={{ fontWeight: '800', mb: 1, color: '#0f2942', display: 'flex', alignItems: 'center', gap: 1 }}>
+                📦 Requested Items Breakdown
               </Typography>
-              <TableContainer component={Paper} variant="outlined" sx={{ mb: 3 }}>
+              <TableContainer component={Paper} variant="outlined" sx={{ mb: 3, borderRadius: 1.5, overflow: 'hidden' }}>
                 <Table size="small">
-                  <TableHead sx={{ backgroundColor: '#f0f4fa' }}>
+                  <TableHead sx={{ backgroundColor: '#0f172a' }}>
                     <TableRow>
-                      <TableCell sx={{ fontWeight: 'bold' }}>#</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold' }}>Item Name</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold' }}>Req Qty</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold' }}>App Qty</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold' }}>Unit</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold' }}>Est Rate (₹)</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold' }}>Est Amount (₹)</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', textAlign: 'center', width: '55px', borderRight: '1px solid #334155' }}>S.No</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Item Name</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Weight</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Description / Specs</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Req Qty</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>App Qty</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Unit</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Est Rate (₹)</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px' }}>Est Amount (₹)</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     {(selectedPr.items || []).map((it, idx) => (
-                      <TableRow key={idx}>
-                        <TableCell>{idx + 1}</TableCell>
-                        <TableCell sx={{ fontWeight: 'bold' }}>{it.item_name}</TableCell>
-                        <TableCell>{it.requested_qty}</TableCell>
-                        <TableCell sx={{ fontWeight: 'bold', color: 'success.main' }}>{it.approved_qty}</TableCell>
-                        <TableCell>{it.unit}</TableCell>
-                        <TableCell>₹{(it.estimated_rate || 0).toFixed(2)}</TableCell>
-                        <TableCell sx={{ fontWeight: 'bold' }}>₹{(it.estimated_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</TableCell>
+                      <TableRow key={idx} hover sx={{ '&:nth-of-type(even)': { backgroundColor: '#f8fafc' } }}>
+                        <TableCell sx={{ textAlign: 'center', fontWeight: '700', color: '#475569', fontSize: '13px' }}>{idx + 1}</TableCell>
+                        <TableCell sx={{ fontWeight: '700', color: '#0f172a', fontSize: '13px' }}>{it.item_name}</TableCell>
+                        <TableCell sx={{ fontSize: '13px', color: '#334155' }}>{it.weight || '—'}</TableCell>
+                        <TableCell sx={{ fontSize: '13px', color: '#475569' }}>{it.description || '—'}</TableCell>
+                        <TableCell sx={{ fontWeight: '600', color: '#0284c7', fontSize: '13px' }}>{it.requested_qty}</TableCell>
+                        <TableCell sx={{ fontWeight: 'bold', color: '#16a34a', fontSize: '13px' }}>{it.approved_qty || it.requested_qty}</TableCell>
+                        <TableCell sx={{ fontSize: '13px', color: '#334155' }}>{it.unit || 'kg'}</TableCell>
+                        <TableCell sx={{ fontSize: '13px', color: '#334155' }}>₹{(it.estimated_rate || 0).toFixed(2)}</TableCell>
+                        <TableCell sx={{ fontWeight: 'bold', color: '#0284c7', fontSize: '13px' }}>₹{(it.estimated_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -732,31 +753,31 @@ const PurchaseRequestDisplay = () => {
               </TableContainer>
 
               {/* Approval History */}
-              <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1, color: '#1f4fb2' }}>
-                Approval Audit Trail
+              <Typography variant="subtitle1" sx={{ fontWeight: '800', mb: 1, color: '#0f2942', display: 'flex', alignItems: 'center', gap: 1 }}>
+                🕒 Approval Audit Trail
               </Typography>
-              <TableContainer component={Paper} variant="outlined">
+              <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 1.5, overflow: 'hidden' }}>
                 <Table size="small">
-                  <TableHead sx={{ backgroundColor: '#f0f4fa' }}>
+                  <TableHead sx={{ backgroundColor: '#0f172a' }}>
                     <TableRow>
-                      <TableCell sx={{ fontWeight: 'bold' }}>Date & Time</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold' }}>Action</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold' }}>Performed By</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold' }}>Remarks</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Date & Time</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Action</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Performed By</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px' }}>Remarks</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     {(selectedPr.approval_history || []).length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={4} align="center">No history recorded.</TableCell>
+                        <TableCell colSpan={4} align="center" sx={{ py: 2, color: '#64748b' }}>No history recorded.</TableCell>
                       </TableRow>
                     ) : (
                       selectedPr.approval_history.map((h, idx) => (
-                        <TableRow key={idx}>
-                          <TableCell>{h.performed_at}</TableCell>
-                          <TableCell sx={{ fontWeight: 'bold' }}>{h.action}</TableCell>
-                          <TableCell>{h.performed_by}</TableCell>
-                          <TableCell>{h.remarks}</TableCell>
+                        <TableRow key={idx} hover sx={{ '&:nth-of-type(even)': { backgroundColor: '#f8fafc' } }}>
+                          <TableCell sx={{ fontSize: '13px', color: '#334155' }}>{h.performed_at}</TableCell>
+                          <TableCell sx={{ fontWeight: 'bold', color: '#0284c7', fontSize: '13px' }}>{h.action}</TableCell>
+                          <TableCell sx={{ fontSize: '13px', color: '#334155' }}>{h.performed_by}</TableCell>
+                          <TableCell sx={{ fontSize: '13px', color: '#475569' }}>{h.remarks}</TableCell>
                         </TableRow>
                       ))
                     )}
@@ -768,9 +789,24 @@ const PurchaseRequestDisplay = () => {
         </DialogContent>
 
         <DialogActions sx={{ p: 2, justifyContent: 'space-between' }}>
-          <Button startIcon={<PrintIcon />} variant="outlined" onClick={() => handlePrintPr(selectedPr)}>
-            Print PR
-          </Button>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Button startIcon={<PrintIcon />} variant="outlined" onClick={() => handlePrintPr(selectedPr)}>
+              Print PR
+            </Button>
+            {(selectedPr?.status === 'Approved' || selectedPr?.status === 'Converted') && (
+              <Button
+                variant="contained"
+                color="success"
+                onClick={() => {
+                  setViewDialogOpen(false);
+                  navigate(`/entry/purchase-order-create?pr_id=${selectedPr.id}`);
+                }}
+                sx={{ fontWeight: 'bold' }}
+              >
+                Create Purchase Order ➔
+              </Button>
+            )}
+          </Box>
           <Button variant="contained" onClick={() => setViewDialogOpen(false)}>
             Close
           </Button>

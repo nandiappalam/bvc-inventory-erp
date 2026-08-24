@@ -4,7 +4,7 @@ const db = require('../config/database')
 const { deductFlourOutStock, revertFlourOutStock } = require('../utils/stockSync')
 
 // GET all flour out records
-router.get('/', async (req, res) => {
+router.get(['/', '/list'], async (req, res) => {
   try {
     // Dynamic sequence auto-repair if any s_no is null or empty
     try {
@@ -136,9 +136,20 @@ router.get('/', async (req, res) => {
 // GET next s_no for flour-out creation
 router.get('/next-sno', async (req, res) => {
   try {
-    const result = await db.query('SELECT COALESCE(MAX(CAST(s_no AS INTEGER)), 0) + 1 AS next_sno FROM flour_out')
-    const nextSno = result.rows[0]?.next_sno || 1
-    res.json({ success: true, sNo: nextSno, next_sno: nextSno })
+    const result = await db.query(`
+      SELECT 
+        MAX(CAST(s_no AS INTEGER)) as max_sno,
+        MAX(id) as max_id,
+        COUNT(*) as total_count 
+      FROM flour_out
+    `);
+    const maxVal = Math.max(
+      parseInt(result.rows[0]?.max_sno) || 0,
+      parseInt(result.rows[0]?.max_id) || 0,
+      parseInt(result.rows[0]?.total_count) || 0
+    );
+    const nextSno = maxVal + 1;
+    res.json({ success: true, sNo: nextSno, next_sno: nextSno, next_s_no: String(nextSno), s_no: nextSno, data: { s_no: nextSno } })
   } catch (error) {
     console.error('Error getting next s_no for flour-out:', error)
     res.status(500).json({ success: false, message: 'Error getting next s_no', error: error.message })

@@ -6,9 +6,14 @@ const { createAdvanceLedgerEntries, deleteLedgerEntries } = require('../utils/le
 // GET next S.No for advances
 router.get('/next-sno', async (req, res) => {
   try {
-    const maxSNo = await db.query('SELECT MAX(CAST(s_no AS INTEGER)) as max_s_no FROM advances')
-    const next_s_no = (maxSNo.rows[0].max_s_no || 0) + 1;
-    res.json({ success: true, next_s_no })
+    const maxSNo = await db.query('SELECT MAX(CAST(s_no AS INTEGER)) as max_s_no, MAX(id) as max_id, COUNT(*) as total_count FROM advances')
+    const maxVal = Math.max(
+      parseInt(maxSNo.rows[0]?.max_s_no) || 0,
+      parseInt(maxSNo.rows[0]?.max_id) || 0,
+      parseInt(maxSNo.rows[0]?.total_count) || 0
+    );
+    const next_s_no = maxVal + 1;
+    res.json({ success: true, next_s_no: String(next_s_no), next_sno: next_s_no, s_no: next_s_no, data: { s_no: next_s_no } })
   } catch (error) {
     console.error('Error fetching next S.No for advance:', error)
     res.status(500).json({ success: false, message: 'Failed to fetch next S.No' })

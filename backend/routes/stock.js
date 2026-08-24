@@ -1082,37 +1082,145 @@ router.get('/available-item-name/:itemName', async (req, res) => {
 })
 
 // ============================================================================
-// GET ALL STOCK RECORDS
+// GET ITEM STOCK BALANCE (Single item live RM & FG stock breakdown)
+// ============================================================================
+router.get('/item-balance/:itemName', async (req, res) => {
+  try {
+    const { itemName } = req.params;
+    if (!itemName) {
+      return res.json({ success: true, item_name: '', stock_qty: 0, rm_stock_qty: 0, fg_stock_qty: 0, stock_weight: 0, remaining_quantity: 0 });
+    }
+
+    // 1. Check stock_lots active balance and separate into RM and FG
+    const lotsRes = await db.query(`
+      SELECT 
+        sl.id,
+        sl.item_name,
+        sl.lot_no,
+        sl.remaining_quantity,
+        im.item_group
+      FROM stock_lots sl
+      LEFT JOIN item_master im ON (sl.item_id = im.id OR LOWER(TRIM(sl.item_name)) = LOWER(TRIM(im.item_name)))
+      WHERE (
+        LOWER(TRIM(sl.item_name)) = LOWER(TRIM(?))
+        OR sl.item_name LIKE ?
+        OR sl.item_id IN (SELECT id FROM item_master WHERE LOWER(TRIM(item_name)) = LOWER(TRIM(?)))
+      )
+      AND COALESCE(sl.remaining_quantity, 0) > 0
+      AND (sl.unloading_status IS NULL OR sl.unloading_status != 'RETURNED')
+    `, [itemName, `%${itemName}%`, itemName]);
+
+    let rmStock = 0;
+    let fgStock = 0;
+    let totalLotsQty = 0;
+
+    for (const lot of (lotsRes.rows || [])) {
+      const rem = parseFloat(lot.remaining_quantity) || 0;
+      totalLotsQty += rem;
+      const cat = await determineLotCategory(db, lot.item_name, lot.item_group, lot.lot_no);
+      if (cat === 'RM') {
+        rmStock += rem;
+      } else if (cat === 'FG') {
+        fgStock += rem;
+      } else {
+        // If not explicitly RM/FG, classify based on lot naming
+        const lotLower = (lot.lot_no || '').toLowerCase();
+        if (lotLower.startsWith('fg') || lotLower.includes('fg-')) fgStock += rem;
+        else rmStock += rem;
+      }
+    }
+
+    // 2. Check stock ledger balance (sum of all + and - entries)
+    const stockRes = await db.query(`
+      SELECT 
+        COALESCE(SUM(qty), 0) AS total_stock_qty,
+        COALESCE(SUM(weight), 0) AS total_stock_weight
+      FROM stock
+      WHERE (
+        LOWER(TRIM(item_name)) = LOWER(TRIM(?))
+        OR item_name LIKE ?
+      )
+    `, [itemName, `%${itemName}%`]);
+
+    const ledgerQty = parseFloat(stockRes.rows[0]?.total_stock_qty) || 0;
+    const ledgerWeight = parseFloat(stockRes.rows[0]?.total_stock_weight) || 0;
+
+    // Fallback if lots are 0 but ledger has entries
+    if (rmStock === 0 && fgStock === 0 && ledgerQty > 0) {
+      const itemMasterCheck = await db.query(`SELECT item_group FROM item_master WHERE LOWER(TRIM(item_name)) = LOWER(TRIM(?)) LIMIT 1`, [itemName]);
+      const grp = itemMasterCheck.rows[0]?.item_group || '';
+      const defaultCat = await determineLotCategory(db, itemName, grp, null);
+      if (defaultCat === 'FG') {
+        fgStock = ledgerQty;
+      } else {
+        rmStock = ledgerQty;
+      }
+    }
+
+    const finalQty = totalLotsQty > 0 ? totalLotsQty : (ledgerQty > 0 ? ledgerQty : 0);
+
+    res.json({
+      success: true,
+      item_name: itemName,
+      stock_qty: finalQty,
+      rm_stock_qty: rmStock,
+      fg_stock_qty: fgStock,
+      remaining_quantity: finalQty,
+      available_qty: finalQty,
+      stock_weight: ledgerWeight > 0 ? ledgerWeight : (finalQty * 50),
+      lots_count: lotsRes.rows?.length || 0
+    });
+  } catch (error) {
+    console.error('Error fetching item balance:', error);
+    res.status(500).json({ success: false, message: 'Error fetching item stock balance', error: error.message });
+  }
+});
+
+// ============================================================================
+// GET ALL STOCK RECORDS (with optional item_name and item_id query filtering)
 // ============================================================================
 router.get('/', async (req, res) => {
   try {
-    const result = await db.query(`
-      SELECT * FROM stock 
-      ORDER BY created_at DESC
-    `)
-    res.json(result.rows)
+    const { item_name, item_id } = req.query;
+    let query = `SELECT * FROM stock WHERE 1=1`;
+    const params = [];
+
+    if (item_id) {
+      query += ` AND (item_id = ? OR item_name = (SELECT item_name FROM item_master WHERE id = ? LIMIT 1))`;
+      params.push(item_id, item_id);
+    }
+
+    if (item_name) {
+      query += ` AND (LOWER(TRIM(item_name)) = LOWER(TRIM(?)) OR item_name LIKE ?)`;
+      params.push(item_name, `%${item_name}%`);
+    }
+
+    query += ` ORDER BY created_at DESC`;
+    const result = await db.query(query, params);
+    res.json(result.rows);
   } catch (error) {
-    console.error('Error fetching stock:', error)
-    res.status(500).json({ message: 'Error fetching stock records', error: error.message })
+    console.error('Error fetching stock:', error);
+    res.status(500).json({ message: 'Error fetching stock records', error: error.message });
   }
-})
+});
 
 // ============================================================================
 // GET STOCK BY ITEM NAME
 // ============================================================================
 router.get('/item/:itemName', async (req, res) => {
   try {
+    const { itemName } = req.params;
     const result = await db.query(`
       SELECT * FROM stock 
-      WHERE item_name = ?
+      WHERE LOWER(TRIM(item_name)) = LOWER(TRIM(?)) OR item_name LIKE ?
       ORDER BY created_at DESC
-    `, [req.params.itemName])
-    res.json(result.rows)
+    `, [itemName, `%${itemName}%`]);
+    res.json(result.rows);
   } catch (error) {
-    console.error('Error fetching stock:', error)
-    res.status(500).json({ message: 'Error fetching stock records' })
+    console.error('Error fetching stock:', error);
+    res.status(500).json({ message: 'Error fetching stock records' });
   }
-})
+});
 
 // ============================================================================
 // GET LOT-WISE STOCK SUMMARY
