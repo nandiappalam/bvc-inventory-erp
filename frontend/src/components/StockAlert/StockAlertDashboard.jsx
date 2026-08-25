@@ -54,6 +54,7 @@ import {
 import { useNavigate, Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { printHtml } from '../../utils/printHelper';
+import api from '../../services/api.js';
 
 const themeColors = {
   primary: '#1f4fb2',
@@ -106,18 +107,7 @@ const StockAlertDashboard = () => {
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/stock-alerts/dashboard');
-      if (!res.ok) {
-        setLoading(false);
-        return;
-      }
-      const text = await res.text();
-      let json = null;
-      try {
-        json = text ? JSON.parse(text) : null;
-      } catch (parseErr) {
-        // Non-json response
-      }
+      const json = await api('/stock-alerts/dashboard');
 
       if (json && json.success) {
         setData({
@@ -136,8 +126,7 @@ const StockAlertDashboard = () => {
 
   // Fetch Godowns & initial data
   useEffect(() => {
-    fetch('/api/godowns')
-      .then(res => res.ok ? res.json() : [])
+    api('/godowns')
       .then(list => {
         if (Array.isArray(list)) setGodowns(list);
       })
@@ -164,7 +153,7 @@ const StockAlertDashboard = () => {
   const handleReevaluate = async () => {
     setLoading(true);
     try {
-      await fetch('/api/stock-alerts/evaluate', { method: 'POST' });
+      await api('/stock-alerts/evaluate', { method: 'POST' });
       await fetchDashboardData();
       window.dispatchEvent(new CustomEvent('stock-alerts-updated'));
     } catch (e) {
@@ -177,10 +166,9 @@ const StockAlertDashboard = () => {
   // Manual Resolve
   const handleResolveAlert = async (alertId) => {
     try {
-      await fetch(`/api/stock-alerts/resolve/${alertId}`, {
+      await api(`/stock-alerts/resolve/${alertId}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: 'Manually verified and marked as reviewed' })
+        body: { reason: 'Manually verified and marked as reviewed' }
       });
       fetchDashboardData();
       window.dispatchEvent(new CustomEvent('stock-alerts-updated'));

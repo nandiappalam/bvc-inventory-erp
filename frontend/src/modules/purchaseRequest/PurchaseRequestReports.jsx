@@ -31,6 +31,7 @@ import {
   PieChart as ChartIcon
 } from '@mui/icons-material';
 import { printHtml } from '../../utils/printHelper';
+import api from '../../services/api.js';
 
 const REPORT_TYPES = [
   { id: 'summary', label: 'Purchase Request Summary' },
@@ -89,14 +90,13 @@ const PurchaseRequestReports = () => {
         queryParams.append('status', 'Submitted');
       }
 
-      const res = await fetch(`/api/purchase-requests/reports?${queryParams.toString()}`);
-      const data = await res.json();
+      const data = await api(`/purchase-requests/reports?${queryParams.toString()}`);
       if (data.rows && Array.isArray(data.rows)) {
         if (activeTab === 'item') {
           let masterItems = [];
           try {
-            const mRes = await fetch('/api/masters/item');
-            if (mRes.ok) masterItems = await mRes.json();
+            const mData = await api('/masters/item');
+            masterItems = Array.isArray(mData) ? mData : (mData?.data || []);
           } catch (e) {
             console.log('Notice master fetch:', e);
           }

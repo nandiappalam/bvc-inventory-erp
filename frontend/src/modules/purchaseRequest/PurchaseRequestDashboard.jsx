@@ -31,6 +31,7 @@ import {
   Visibility as ViewIcon
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
+import api from '../../services/api.js';
 
 const PurchaseRequestDashboard = () => {
   const navigate = useNavigate();
@@ -56,8 +57,7 @@ const PurchaseRequestDashboard = () => {
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/purchase-requests/dashboard/metrics');
-      const data = await res.json();
+      const data = await api('/purchase-requests/dashboard/metrics');
       if (data.metrics) setMetrics(data.metrics);
       if (Array.isArray(data.recent_requests)) setRecentRequests(data.recent_requests);
       if (Array.isArray(data.department_stats)) setDepartmentStats(data.department_stats);

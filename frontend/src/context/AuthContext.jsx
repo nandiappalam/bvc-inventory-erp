@@ -251,11 +251,7 @@ const [financialYear, setFinancialYear] = useState('2024-2025');
             console.warn('Tauri logout failed:', e);
           }
         } else {
-          await fetch('/api/auth/logout', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ login_history_id: loginHistoryId })
-          });
+          await api('/auth/logout', { method: 'POST', body: { login_history_id: loginHistoryId } });
         }
       }
     } catch (error) {

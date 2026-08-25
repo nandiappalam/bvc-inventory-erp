@@ -43,6 +43,7 @@ import CcpMonitoringReport from './CcpMonitoringReport';
 import OprpMonitoringReport from './OprpMonitoringReport';
 import TerminalInspectionReport from './TerminalInspectionReport';
 import VehicleInspectionReport from './VehicleInspectionReport';
+import api from '../../services/api.js';
 
 const CATEGORY_CONFIGS = {
   stock: {
@@ -595,18 +596,12 @@ const CategoryReportPage = () => {
 
   const fetchFilterMasters = async () => {
     try {
-      const [gRes, iRes] = await Promise.all([
-        fetch('/api/masters/all/godowns'),
-        fetch('/api/masters/item')
+      const [gData, iData] = await Promise.all([
+        api('/masters/all/godowns'),
+        api('/masters/item')
       ]);
-      if (gRes.ok) {
-        const gData = await gRes.json();
-        setGodownsList(Array.isArray(gData) ? gData : []);
-      }
-      if (iRes.ok) {
-        const iData = await iRes.json();
-        setItemsList(Array.isArray(iData) ? iData : []);
-      }
+      setGodownsList(Array.isArray(gData) ? gData : (gData?.data || []));
+      setItemsList(Array.isArray(iData) ? iData : (iData?.data || []));
     } catch (e) {
       console.log('Error fetching masters:', e);
     }
@@ -712,13 +707,12 @@ const CategoryReportPage = () => {
       });
 
       // Try category endpoint or direct categoryKey route
-      let res = await fetch(`/api/reports/category/${categoryKey}?${qParams.toString()}`);
-      if (!res.ok) {
-        res = await fetch(`/api/reports/${categoryKey}?${qParams.toString()}`);
+      let data = await api(`/reports/category/${categoryKey}?${qParams.toString()}`);
+      if (!data || data.success === false) {
+        data = await api(`/reports/${categoryKey}?${qParams.toString()}`);
       }
 
-      if (res.ok) {
-        const data = await res.json();
+      if (data && data.success !== false) {
         const fetched = Array.isArray(data) ? data : (data.rows || []);
         setRows(fetched);
       } else {

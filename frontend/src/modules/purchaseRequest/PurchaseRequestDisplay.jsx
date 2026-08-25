@@ -48,6 +48,7 @@ import {
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { printHtml } from '../../utils/printHelper';
+import api from '../../services/api.js';
 import { exportToExcel as exportExcelUtil, printTableList } from '../../utils/exportHelper';
 
 const DEPARTMENTS = [
@@ -98,9 +99,8 @@ const PurchaseRequestDisplay = () => {
 
   const fetchSuppliers = async () => {
     try {
-      const res = await fetch('/api/masters/all/suppliers');
-      const data = await res.json();
-      setSuppliersList(Array.isArray(data) ? data : (data.data || []));
+      const data = await api('/masters/all/suppliers');
+      setSuppliersList(Array.isArray(data) ? data : (data?.data || []));
     } catch (e) {
       console.log('Error loading suppliers:', e);
     }
@@ -119,8 +119,7 @@ const PurchaseRequestDisplay = () => {
       if (supplierId) queryParams.append('supplier_id', supplierId);
       if (search) queryParams.append('search', search);
 
-      const res = await fetch(`/api/purchase-requests?${queryParams.toString()}`);
-      const data = await res.json();
+      const data = await api(`/purchase-requests?${queryParams.toString()}`);
       if (Array.isArray(data)) {
         setRequests(data);
       } else {
@@ -152,16 +151,13 @@ const PurchaseRequestDisplay = () => {
     setViewDialogOpen(true);
     setLoadingDetails(true);
     try {
-      const res = await fetch(`/api/purchase-requests/${id}`);
-      const data = await res.json();
-      if (res.ok) {
+      const data = await api(`/purchase-requests/${id}`);
+      if (data && data.success !== false) {
         // Fetch item master for fallback item name resolution
         let masterItems = [];
         try {
-          const mRes = await fetch('/api/masters/item');
-          if (mRes.ok) {
-            masterItems = await mRes.json();
-          }
+          const mData = await api('/masters/item');
+          masterItems = Array.isArray(mData) ? mData : (mData?.data || []);
         } catch (e) {
           console.log('Notice master item fetch:', e.message);
         }
@@ -202,9 +198,8 @@ const PurchaseRequestDisplay = () => {
     if (!window.confirm(`Are you sure you want to delete Purchase Request ${prNo}?`)) return;
 
     try {
-      const res = await fetch(`/api/purchase-requests/${id}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (res.ok) {
+      const data = await api(`/purchase-requests/${id}`, { method: 'DELETE' });
+      if (data && data.success !== false) {
         setSnackbar({ open: true, message: data.message || 'Deleted successfully', severity: 'success' });
         fetchRequests();
       } else {
@@ -217,13 +212,8 @@ const PurchaseRequestDisplay = () => {
 
   const handleCopyPr = async (id) => {
     try {
-      const res = await fetch(`/api/purchase-requests/${id}/copy`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({})
-      });
-      const data = await res.json();
-      if (res.ok) {
+      const data = await api(`/purchase-requests/${id}/copy`, { method: 'POST', body: {} });
+      if (data && data.success !== false) {
         setSnackbar({ open: true, message: `Copied successfully as ${data.pr_no}`, severity: 'success' });
         fetchRequests();
       } else {

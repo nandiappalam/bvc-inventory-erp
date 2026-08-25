@@ -42,6 +42,7 @@ import {
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import api from '../../services/api.js';
 
 const DEPARTMENTS = [
   'Raw Materials',
@@ -96,8 +97,7 @@ const PurchaseRequestApproval = () => {
       if (priority) queryParams.append('priority', priority);
       if (statusFilter) queryParams.append('status', statusFilter);
 
-      const res = await fetch(`/api/purchase-requests?${queryParams.toString()}`);
-      const data = await res.json();
+      const data = await api(`/purchase-requests?${queryParams.toString()}`);
       if (Array.isArray(data)) {
         setRequests(data);
       } else {
@@ -115,18 +115,15 @@ const PurchaseRequestApproval = () => {
     setReviewDialogOpen(true);
     setManagerRemarks('');
     try {
-      const res = await fetch(`/api/purchase-requests/${id}`);
-      const data = await res.json();
-      if (res.ok) {
+      const data = await api(`/purchase-requests/${id}`);
+      if (data && data.success !== false) {
         setSelectedPr(data);
         
         // Fetch item master for fallback item name resolution
         let masterItems = [];
         try {
-          const mRes = await fetch('/api/masters/item');
-          if (mRes.ok) {
-            masterItems = await mRes.json();
-          }
+          const mData = await api('/masters/item');
+          masterItems = Array.isArray(mData) ? mData : (mData?.data || []);
         } catch (e) {
           console.log('Notice master item fetch:', e.message);
         }
@@ -177,7 +174,7 @@ const PurchaseRequestApproval = () => {
 
     setProcessingAction(true);
     try {
-      const endpoint = `/api/purchase-requests/${selectedPr.id}/${actionType}`;
+      const endpoint = `/purchase-requests/${selectedPr.id}/${actionType}`;
       const payload = {
         approved_by: user?.username || 'Manager',
         rejected_by: user?.username || 'Manager',
@@ -187,14 +184,8 @@ const PurchaseRequestApproval = () => {
         item_approvals: itemApprovals
       };
 
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
+      const data = await api(endpoint, { method: 'POST', body: payload });
+      if (!data || data.success === false) {
         throw new Error(data.error || 'Operation failed');
       }
 

@@ -17,6 +17,7 @@ import {
   ArrowBack as ArrowBackIcon,
   Scale as ScaleIcon
 } from '@mui/icons-material';
+import api from '../services/api.js';
 import { useAuth } from '../context/AuthContext';
 
 const themeColors = {
@@ -45,9 +46,8 @@ const WeightMachineSetup = () => {
   const fetchSetup = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/features/weight-machine-setup?company_id=${selectedCompany?.id || 1}`);
-      if (res.ok) {
-        const data = await res.json();
+      const data = await api('/features/weight-machine-setup', { params: { company_id: selectedCompany?.id || 1 } });
+      if (data && data.success !== false) {
         setPortNo(data.port_no ?? '0');
         setBaudRate(data.baud_rate ?? '0');
       }
@@ -63,17 +63,15 @@ const WeightMachineSetup = () => {
     setSaving(true);
     setMessage('');
     try {
-      const res = await fetch('/api/features/weight-machine-setup', {
+      const data = await api('/features/weight-machine-setup', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: {
           company_id: selectedCompany?.id || 1,
           port_no: portNo,
           baud_rate: baudRate
-        })
+        }
       });
-      const data = await res.json();
-      if (res.ok) {
+      if (data && data.success !== false) {
         setSeverity('success');
         setMessage('Weight Machine Setup configuration saved successfully!');
       } else {
