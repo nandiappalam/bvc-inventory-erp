@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../utils/api.js'
+import { printHtml } from '../utils/printHelper'
 import './WeightConversionDisplay.css'
 
 const WeightConversionDisplay = () => {
@@ -71,9 +72,7 @@ const WeightConversionDisplay = () => {
     const inputItems = groupItems.filter(r => r.item_type === 'input');
     const outputItems = groupItems.filter(r => r.item_type === 'output');
 
-    const printWin = window.open('', '_blank', 'width=800,height=600');
-    if (!printWin) return;
-    printWin.document.write(`
+    const html = `
       <html>
         <head>
           <title>Weight Conversion #${record.s_no || record.id}</title>
@@ -147,13 +146,8 @@ const WeightConversionDisplay = () => {
           </table>
         </body>
       </html>
-    `);
-    printWin.document.close();
-    printWin.focus();
-    setTimeout(() => {
-      printWin.print();
-      printWin.close();
-    }, 250);
+    `
+    printHtml(html, `Weight Conversion #${record.s_no || record.id}`)
   };
 
   const handleEdit = (record) => {

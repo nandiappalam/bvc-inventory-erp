@@ -253,8 +253,8 @@ export const INVENTORY_PRESETS = [
     name: 'Monthly Rodent Bait Monitoring — RTS-1 to RTS-8 & RBS-1..2',
     data: {
       area_location: 'Internal Factory Perimeter & Outside Stations',
-      inspector_name: 'Vasu (Pest Officer)',
-      supervisor_name: 'Mr. Sasikumar (FSTL / QA Manager)'
+      inspector_name: 'Mr. Y (Pest Officer)',
+      supervisor_name: 'Mr. X (FSTL / QA Manager)'
     }
   }
 ];
@@ -597,8 +597,8 @@ export function getInitialChecklistForCode(code) {
         rev_no: '01',
         rev_date: '01.01.2023',
         month: currentMonth,
-        prepared_by_name: 'Vasu',
-        approved_by_name: 'Mr. Sasikumar (FSTL)',
+        prepared_by_name: 'Mr. Y',
+        approved_by_name: 'Mr. X (FSTL)',
         internal_stations: [
           { station_no: 'RTS-1', status_summary: 'OK (Internal Snap Trap Active / No Intrusion)' },
           { station_no: 'RTS-2', status_summary: 'OK (Internal Snap Trap Active / No Intrusion)' },

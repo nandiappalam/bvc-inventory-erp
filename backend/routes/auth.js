@@ -1,6 +1,8 @@
 const express = require('express')
 const router = express.Router()
-const db = require('../config/database')
+const db = require('../config/masterDatabase')
+const jwt = require('jsonwebtoken')
+const JWT_SECRET = process.env.JWT_SECRET || 'bvc-development-secret-change-me'
 
 // ============================================================================
 // AUTH TABLES MANAGEMENT - Simplified initialization with logging
@@ -234,8 +236,10 @@ router.post('/login', async (req, res) => {
       console.error('Error recording login_history:', lhErr.message)
     }
 
+    const token = jwt.sign({ userId: userCandidate.id, companyId: activeCompanyId, role: userCandidate.role }, JWT_SECRET, { expiresIn: '12h' })
     res.json({
       message: 'Login successful',
+      token,
       user: { id: userCandidate.id, username: userCandidate.username, role: userCandidate.role, company_id: activeCompanyId, company_name: company.name },
       company: company,
       permissions: permissions,

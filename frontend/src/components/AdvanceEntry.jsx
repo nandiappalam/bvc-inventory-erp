@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { getAdvances, deleteAdvance } from '../utils/api'
+import { printHtml } from '../utils/printHelper'
 import './AdvanceEntry.css'
 
 const AdvanceEntry = () => {
@@ -62,9 +63,7 @@ const AdvanceEntry = () => {
   }
 
   const handlePrint = (row) => {
-    const w = window.open('', '', 'width=800,height=600')
-    w.document.write(`<html><body><h3>Advance</h3><p>Papad Company: ${row.papad_company_name || row.company || row.papad_company}</p><p>Amount: ${row.amount}</p></body></html>`)
-    w.print()
+    printHtml(`<h3>Advance</h3><p><strong>Papad Company:</strong> ${row.papad_company_name || row.company || row.papad_company || ''}</p><p><strong>Amount:</strong> ${row.amount || 0}</p>`, `Advance_${row.s_no || row.id}`)
   }
 
   if (loading) return <div className="loading-state">Loading...</div>

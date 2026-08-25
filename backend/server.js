@@ -5,10 +5,15 @@ const https = require('https')
 const crypto = require('crypto')
 const fs = require('fs')
 const db = require('./config/database')
+const jwt = require('jsonwebtoken')
+const tenantContext = require('./config/tenantContext')
+const masterDb = require('./config/masterDatabase')
+const { getCompanyDatabase } = require('./config/companyDatabase')
+const JWT_SECRET = process.env.JWT_SECRET || 'bvc-development-secret-change-me'
 
 const app = express()
 // AI Studio requires port 3000 strictly, but we allow configuration in dev
-const PORT = process.env.PORT || 3000
+const PORT = process.env.PORT || 3001
 let actualPort = PORT
 
 // Process-level crash protection (prevents 502s from uncaught errors)
@@ -48,6 +53,21 @@ app.options('*', cors());
 
 app.use(express.json({ limit: '50mb' }))
 app.use(express.urlencoded({ extended: true, limit: '50mb' }))
+app.use('/api', async (req, res, next) => {
+  if (req.path === '/health' || (req.path.startsWith('/companies') && req.method === 'GET') || req.path === '/auth/login') return next()
+  const authorization = req.get('Authorization') || ''
+  if (!authorization.startsWith('Bearer ')) return res.status(401).json({ message: 'Authentication required' })
+  try {
+    const claims = jwt.verify(authorization.slice(7), JWT_SECRET)
+    const result = await masterDb.query('SELECT * FROM companies WHERE id = ? AND LOWER(status) = \'active\'', [claims.companyId])
+    if (!result.rows[0]) return res.status(401).json({ message: 'Company is inactive or not found' })
+    const companyDb = await getCompanyDatabase(result.rows[0])
+    req.user = claims
+    tenantContext.run(companyDb, () => next())
+  } catch (error) {
+    return res.status(401).json({ message: 'Invalid or expired authentication token' })
+  }
+})
 const frontendPath = path.join(__dirname, '../frontend/dist')
 
 // Serve static frontend files

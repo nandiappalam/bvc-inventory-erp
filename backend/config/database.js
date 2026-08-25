@@ -1,6 +1,7 @@
 const sqlite3 = require('sqlite3').verbose()
 const path = require('path')
 const fs = require('fs')
+const tenantContext = require('./tenantContext')
 
 // Determine database path - support both development and production
 let dbDir
@@ -75,6 +76,10 @@ function openDatabase() {
       })
     }
   })
+}
+
+function activeDatabase() {
+  return tenantContext.getDatabase() || db
 }
 
 function handleCorruptedDatabase(reason) {
@@ -267,7 +272,7 @@ module.exports = {
   restoreDatabase,
   query: (text, params = []) => {
     return new Promise((resolve, reject) => {
-      db.all(text, params, (err, rows) => {
+      activeDatabase().all(text, params, (err, rows) => {
         if (err) reject(err)
         else resolve({ rows: rows || [] })
       })
@@ -280,7 +285,7 @@ module.exports = {
       console.log('[SQL-RUN]', '<unprintable-sql>')
     }
     return new Promise((resolve, reject) => {
-      db.run(text, params, function (err) {
+      activeDatabase().run(text, params, function (err) {
         if (err) reject(err)
         else resolve({ lastID: this.lastID, lastInsertRowid: this.lastID, changes: this.changes })
       })
@@ -289,12 +294,12 @@ module.exports = {
 
   // ✅ Provides transaction-aware connection wrapper for modules that expect it.
   getConnection: async () => {
-    return new DbConnection(db)
+    return new DbConnection(activeDatabase())
   },
 
   pool: {
     connect: async () => {
-      return new DbConnection(db)
+      return new DbConnection(activeDatabase())
     }
   },
 }

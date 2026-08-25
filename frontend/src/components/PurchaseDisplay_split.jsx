@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { EntryDisplay } from './entry';
 import { deletePurchase } from '../utils/api';
+import { printHtml } from '../utils/printHelper';
 
 // NOTE:
 // This is an optional replacement component for PurchaseDisplay.jsx.
@@ -59,7 +60,6 @@ const handleDelete = async (id, onSuccess) => {
 };
 
 const handlePrint = (row) => {
-  const win = window.open('', '_blank');
   const html = `
     <html>
       <head>
@@ -92,12 +92,7 @@ const handlePrint = (row) => {
     </html>
   `;
 
-  if (win) {
-    win.document.write(html);
-    win.document.close();
-    win.focus();
-    win.print();
-  }
+  printHtml(html, `Purchase - ${row.inv_no || ''}`)
 };
 
 const PurchaseDisplay_split = () => {

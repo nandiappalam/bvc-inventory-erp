@@ -271,3 +271,17 @@ export function printHtml(html, title = "Print Document") {
   setTimeout(handlePrintTrigger, 300);
 }
 
+export function printElement(elementOrSelector, title = "Print Document") {
+  const element = typeof elementOrSelector === "string"
+    ? document.querySelector(elementOrSelector)
+    : elementOrSelector;
+
+  if (!element) {
+    console.warn("Print target not found:", elementOrSelector);
+    return false;
+  }
+
+  printHtml(element.outerHTML, title);
+  return true;
+}
+

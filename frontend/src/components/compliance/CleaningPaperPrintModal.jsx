@@ -11,6 +11,7 @@ import {
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import PrintIcon from '@mui/icons-material/Print';
+import { printElement } from '../../utils/printHelper';
 
 export default function CleaningPaperPrintModal({ open, onClose, record, isBlank = false }) {
   if (!record && !isBlank) return null;
@@ -32,7 +33,7 @@ export default function CleaningPaperPrintModal({ open, onClose, record, isBlank
   const code = r.record_code || 'C1';
 
   const handlePrint = () => {
-    window.print();
+    printElement('#official-cleaning-paper-record', `Cleaning Record - ${r.record_no || code}`);
   };
 
   return (
@@ -1089,10 +1090,10 @@ function C13Paper({ record, isBlank }) {
               <strong>Month-</strong> {isBlank ? '' : (chk.month || 'Current Month')}
             </td>
             <td style={{ border: '2px solid #000', padding: '6px 12px', width: '33%' }}>
-              <strong>Prepared By:</strong> Vasu
+              <strong>Prepared By:</strong> Mr. Y
             </td>
             <td style={{ border: '2px solid #000', padding: '6px 12px', width: '34%' }}>
-              <strong>Approved By (FSTL):</strong> Mr. Sasikumar
+              <strong>Approved By (FSTL):</strong> Mr. X
             </td>
           </tr>
         </tbody>
@@ -1157,8 +1158,8 @@ function C13Paper({ record, isBlank }) {
       </Box>
 
       <Box sx={{ border: '1px solid #000', p: 1, display: 'flex', justifyContent: 'space-between' }}>
-        <div><strong>Verified By :</strong> Vasu (Pest Officer)</div>
-        <div><strong>QA Manager :</strong> Mr. Sasikumar</div>
+        <div><strong>Verified By :</strong> Mr. Y (Pest Officer)</div>
+        <div><strong>QA Manager :</strong> Mr. X</div>
       </Box>
     </Box>
   );

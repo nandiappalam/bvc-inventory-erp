@@ -24,6 +24,7 @@ import {
   CheckCircle as OkIcon
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
+import api from '../../services/api.js';
 
 const StockAlertBell = () => {
   const navigate = useNavigate();
@@ -43,19 +44,7 @@ const StockAlertBell = () => {
     }
 
     try {
-      const res = await fetch('/api/stock-alerts/active-count');
-      if (!res.ok) {
-        // Silently skip on 429 rate limit or server busy
-        return;
-      }
-      const text = await res.text();
-      let data = null;
-      try {
-        data = text ? JSON.parse(text) : null;
-      } catch (parseErr) {
-        // Non-JSON response (e.g. rate limit html/text from proxy)
-        return;
-      }
+      const data = await api('/stock-alerts/active-count');
 
       if (data && data.success) {
         setAlertData({

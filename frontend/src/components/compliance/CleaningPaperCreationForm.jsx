@@ -269,7 +269,7 @@ export default function CleaningPaperCreationForm({
                 else if (newCode === 'C9') { defaultInspector = 'QMR'; defaultSupervisor = 'Managing Director'; }
                 else if (newCode === 'C10') { defaultInspector = 'QC Inspector'; defaultSupervisor = 'QA Head'; }
                 else if (newCode === 'C11' || newCode === 'C12') { defaultInspector = 'QA Officer'; defaultSupervisor = 'QA Manager'; }
-                else if (newCode === 'C13') { defaultInspector = 'Vasu (Pest Officer)'; defaultSupervisor = 'Mr. Sasikumar (FSTL)'; }
+                else if (newCode === 'C13') { defaultInspector = 'Mr. Y (Pest Officer)'; defaultSupervisor = 'Mr. X (FSTL)'; }
                 else if (newCode === 'C14') { defaultInspector = 'Operator'; defaultSupervisor = 'Plant Incharge'; }
 
                 setFormState(prev => ({
@@ -2233,10 +2233,10 @@ function C13Editor({ formState, updateForm, updateChecklist }) {
               />
             </td>
             <td style={{ border: '2px solid #000', padding: '6px 12px', width: '33%' }}>
-              <strong>Prepared By:</strong> Vasu
+              <strong>Prepared By:</strong> Mr.Y
             </td>
             <td style={{ border: '2px solid #000', padding: '6px 12px', width: '34%' }}>
-              <strong>Approved By (FSTL):</strong> Mr. Sasikumar
+              <strong>Approved By (FSTL):</strong> Mr. X
             </td>
           </tr>
         </tbody>
@@ -2303,8 +2303,8 @@ function C13Editor({ formState, updateForm, updateChecklist }) {
       </Box>
 
       <Box sx={{ border: '1px solid #000', p: 1, display: 'flex', justifyContent: 'space-between', bgcolor: '#fafafa' }}>
-        <div><strong>Verified By :</strong> Vasu (Pest Officer)</div>
-        <div><strong>QA Manager :</strong> Mr. Sasikumar</div>
+        <div><strong>Verified By :</strong> Mr. Y (Pest Officer)</div>
+        <div><strong>QA Manager :</strong> Mr. X</div>
       </Box>
     </Box>
   );

@@ -38,11 +38,21 @@ export async function api(endpoint, options = {}) {
 
   console.log("🌐 FINAL URL:", url);
 
+  let token = localStorage.getItem('erp_token');
+  if (!token) {
+    try {
+      token = JSON.parse(localStorage.getItem('erp_user') || '{}').token || '';
+    } catch (error) {
+      token = '';
+    }
+  }
+
   try {
     const res = await fetch(url, {
       method: options.method || 'GET',
       headers: {
         'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(options.headers || {})
       },
       body: options.body ? JSON.stringify(options.body) : undefined
@@ -52,6 +62,14 @@ export async function api(endpoint, options = {}) {
 
     // ✅ Null-safe JSON parse
     if (!res.ok) {
+      if (res.status === 401 && !endpoint.includes('/auth/login')) {
+        localStorage.removeItem('erp_token');
+        localStorage.removeItem('erp_user');
+        localStorage.removeItem('erp_company');
+        localStorage.removeItem('erp_selected_company');
+        window.dispatchEvent(new Event('erp:unauthorized'));
+        return { success: false, data: null, message: 'Authentication required' };
+      }
       console.error("❌ API HTTP error:", res.status, res.statusText);
       console.error("❌ Response body:", text);
       let errorMsg = `HTTP ${res.status}: ${res.statusText}`;

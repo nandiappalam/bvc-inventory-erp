@@ -4,9 +4,9 @@ const path = require('path')
 const dbPath = path.join(__dirname, '../database/bvc.db')
 let db
 
-async function initializeDatabase() {
+async function initializeDatabase(databasePath = dbPath) {
   console.log('Initializing database schema...\n')
-  db = new sqlite3.Database(dbPath)
+  db = new sqlite3.Database(databasePath)
 
   // Master tables with their schemas
   const masterTables = [

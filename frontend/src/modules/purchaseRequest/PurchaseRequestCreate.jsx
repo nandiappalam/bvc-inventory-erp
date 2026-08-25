@@ -36,6 +36,7 @@ import {
 } from '@mui/icons-material';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import api from '../../services/api.js';
 import { saveModuleDraft, loadModuleDraft, clearModuleDraft } from '../../utils/draftHelper';
 
 const DEPARTMENTS = [
@@ -148,8 +149,7 @@ const PurchaseRequestCreate = () => {
 
   const fetchNextPrNo = async () => {
     try {
-      const res = await fetch('/api/purchase-requests/next-pr-no');
-      const data = await res.json();
+      const data = await api('/purchase-requests/next-pr-no');
       if (data.next_pr_no) {
         setPrNo(data.next_pr_no);
       }
@@ -162,28 +162,24 @@ const PurchaseRequestCreate = () => {
     setLoadingMasters(true);
     try {
       // Items Master
-      const itemsRes = await fetch('/api/masters/all/items');
-      const itemsData = await itemsRes.json();
-      const loadedItems = Array.isArray(itemsData) ? itemsData : (itemsData.data || []);
+      const itemsData = await api('/masters/all/items');
+      const loadedItems = Array.isArray(itemsData) ? itemsData : (itemsData?.data || []);
       setItemsList(loadedItems);
 
       // Suppliers Master
-      const suppRes = await fetch('/api/masters/all/suppliers');
-      const suppData = await suppRes.json();
-      const loadedSuppliers = Array.isArray(suppData) ? suppData : (suppData.data || []);
+      const suppData = await api('/masters/all/suppliers');
+      const loadedSuppliers = Array.isArray(suppData) ? suppData : (suppData?.data || []);
       setSuppliersList(loadedSuppliers);
 
       // Godowns Master
-      const godownRes = await fetch('/api/godowns');
-      const godownData = await godownRes.json();
-      const loadedGodowns = Array.isArray(godownData) ? godownData : (godownData.data || []);
+      const godownData = await api('/godowns');
+      const loadedGodowns = Array.isArray(godownData) ? godownData : (godownData?.data || []);
       setGodownsList(loadedGodowns);
 
       // Weights Master
       try {
-        const weightRes = await fetch('/api/masters/all/weights');
-        const weightData = await weightRes.json();
-        const loadedWeights = Array.isArray(weightData) ? weightData : (weightData.data || []);
+        const weightData = await api('/masters/all/weights');
+        const loadedWeights = Array.isArray(weightData) ? weightData : (weightData?.data || []);
         setWeightsList(loadedWeights);
       } catch (e) {
         console.error('Error fetching weights:', e);
@@ -198,9 +194,8 @@ const PurchaseRequestCreate = () => {
 
   const loadPurchaseRequest = async (id) => {
     try {
-      const res = await fetch(`/api/purchase-requests/${id}`);
-      if (!res.ok) throw new Error('Purchase Request not found');
-      const data = await res.json();
+      const data = await api(`/purchase-requests/${id}`);
+      if (!data || data.success === false) throw new Error(data?.message || 'Purchase Request not found');
 
       setPrNo(data.pr_no);
       setRequestDate(data.request_date || new Date().toISOString().split('T')[0]);
@@ -251,9 +246,8 @@ const PurchaseRequestCreate = () => {
 
     try {
       // 1. Try dedicated item balance endpoint
-      const balanceRes = await fetch(`/api/stock/item-balance/${encodeURIComponent(itemName)}`);
-      if (balanceRes.ok) {
-        const balanceData = await balanceRes.json();
+      const balanceData = await api(`/stock/item-balance/${encodeURIComponent(itemName)}`);
+      if (balanceData && balanceData.success !== false) {
         if (balanceData) {
           currentStockRm = parseFloat(balanceData.rm_stock_qty) || 0;
           currentStockFg = parseFloat(balanceData.fg_stock_qty) || 0;
@@ -263,9 +257,8 @@ const PurchaseRequestCreate = () => {
         }
       } else {
         // 2. Try purchase-requests item-stock endpoint
-        const prStockRes = await fetch(`/api/purchase-requests/item-stock/${encodeURIComponent(selectedObj.id || itemName)}`);
-        if (prStockRes.ok) {
-          const prStockData = await prStockRes.json();
+        const prStockData = await api(`/purchase-requests/item-stock/${encodeURIComponent(selectedObj.id || itemName)}`);
+        if (prStockData && prStockData.success !== false) {
           currentStockRm = parseFloat(prStockData.current_stock_rm !== undefined ? prStockData.current_stock_rm : prStockData.current_stock) || 0;
           currentStockFg = parseFloat(prStockData.current_stock_fg) || 0;
         }
@@ -430,14 +423,8 @@ const PurchaseRequestCreate = () => {
       const url = editId ? `/api/purchase-requests/${editId}` : '/api/purchase-requests';
       const method = editId ? 'PUT' : 'POST';
 
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || data.error || 'Failed to save purchase request');
+      const data = await api(url, { method, body: payload });
+      if (!data || data.success === false) throw new Error(data?.message || data?.error || 'Failed to save purchase request');
 
       clearModuleDraft('pr_create');
       setSnackbar({

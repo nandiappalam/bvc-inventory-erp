@@ -1,6 +1,8 @@
 const express = require('express')
 const router = express.Router()
-const db = require('../config/database')
+const db = require('../config/masterDatabase')
+const { getCompanyDatabase, createFreshCompanyDatabase } = require('../config/companyDatabase')
+const path = require('path')
 
 // ============================================================================
 // COMPANIES TABLE MANAGEMENT
@@ -71,10 +73,20 @@ router.post('/', async (req, res) => {
 
     console.log('Inserting company:', { name, address, gst_number, contact, email });
     
+    const nextId = await db.query('SELECT COALESCE(MAX(id), 0) + 1 AS id FROM companies')
+    const companyId = nextId.rows[0].id
+    const databaseName = `company_${companyId}.db`
     const result = await db.run(`
-      INSERT INTO companies (name, address, gst_number, contact, email)
-      VALUES (?, ?, ?, ?, ?)
-    `, [name, address || null, gst_number || null, contact || null, email || null])
+      INSERT INTO companies (id, company_code, name, address, gst_number, contact, email, database_name, database_path)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [companyId, `BVC${String(companyId).padStart(3, '0')}`, name, address || null,
+      gst_number || null, contact || null, email || null, databaseName,
+      path.join(__dirname, '../../database', databaseName)])
+
+    const company = (await db.query('SELECT * FROM companies WHERE id = ?', [companyId])).rows[0]
+    await createFreshCompanyDatabase(company.database_path)
+    const companyDb = await getCompanyDatabase(company)
+    const runOnCompany = (sql, params) => new Promise((resolve, reject) => companyDb.run(sql, params, function (err) { err ? reject(err) : resolve(this) }))
 
     console.log('Insert result:', result);
 
@@ -91,16 +103,16 @@ router.post('/', async (req, res) => {
 
     for (const led of defaultLedgers) {
       try {
-        const existing = await db.query('SELECT id FROM ledgermaster WHERE TRIM(name) = ?', [led.name.trim()]);
+        const existing = await new Promise((resolve, reject) => companyDb.all('SELECT id FROM ledgermaster WHERE TRIM(name) = ?', [led.name.trim()], (err, rows) => err ? reject(err) : resolve({ rows })))
         if (existing.rows.length === 0) {
-          await db.run(
+          await runOnCompany(
             'INSERT INTO ledgermaster (name, printname, under, ledger_type, openingbalance, status) VALUES (?, ?, ?, ?, ?, ?)',
             [led.name, led.name, led.under, led.type, 0, 'Active']
           );
           console.log(`Auto-created default ledger: ${led.name}`);
         } else {
           // Update the existing ledger type/under to match the recommendation
-          await db.run(
+          await runOnCompany(
             'UPDATE ledgermaster SET ledger_type = ?, under = ? WHERE id = ?',
             [led.type, led.under, existing.rows[0].id]
           );
