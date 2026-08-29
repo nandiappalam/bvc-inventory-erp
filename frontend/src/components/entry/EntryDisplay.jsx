@@ -436,7 +436,7 @@ const EntryDisplay = ({
           Total Records: {filteredData.length}
         </div>
         <div style={styles.footerRight}>
-          <button style={styles.printBtn} onClick={() => window.print()}>Print</button>
+          <button style={styles.printBtn} onClick={handlePrintList}>Print List</button>
         </div>
       </div>
 

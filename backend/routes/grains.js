@@ -329,12 +329,17 @@ router.get(['/', '/list'], async (req, res) => {
 // GET grains by ID
 router.get('/:id', async (req, res) => {
   try {
+    const id = req.params.id;
+    if (!id || id === 'undefined' || id === 'null' || isNaN(Number(id))) {
+      return res.status(404).json({ message: 'Grains record not found' });
+    }
+
     const grainResult = await db.query(`
       SELECT g.*, fmm.flourmill AS flour_mill_name
       FROM grains g
       LEFT JOIN flour_mill_master fmm ON (CAST(g.flour_mill AS TEXT) = CAST(fmm.id AS TEXT) OR g.flour_mill = fmm.flourmill)
       WHERE g.id = ?
-    `, [req.params.id])
+    `, [id])
     
     if (grainResult.rows.length === 0) {
       return res.status(404).json({ message: 'Grains record not found' })
@@ -342,26 +347,36 @@ router.get('/:id', async (req, res) => {
 
     const grain = grainResult.rows[0];
 
-    const inputItemsResult = await db.query(`
-      SELECT gi.*, im.id AS item_id
-      FROM grain_input_items gi
-      LEFT JOIN (SELECT item_name, MIN(id) AS id FROM item_master GROUP BY item_name) im ON gi.item_name = im.item_name
-      WHERE gi.grain_id = ?
-    `, [req.params.id])
+    let inputItemsResult = { rows: [] };
+    let outputItemsResult = { rows: [] };
+    let wastageItemsResult = { rows: [] };
+
+    try {
+      inputItemsResult = await db.query(`
+        SELECT gi.*, im.id AS item_id
+        FROM grain_input_items gi
+        LEFT JOIN (SELECT item_name, MIN(id) AS id FROM item_master GROUP BY item_name) im ON gi.item_name = im.item_name
+        WHERE gi.grain_id = ?
+      `, [id]);
+    } catch (e) {}
     
-    const outputItemsResult = await db.query(`
-      SELECT go.*, im.id AS item_id
-      FROM grain_output_items go
-      LEFT JOIN (SELECT item_name, MIN(id) AS id FROM item_master GROUP BY item_name) im ON go.item_name = im.item_name
-      WHERE go.grain_id = ?
-    `, [req.params.id])
+    try {
+      outputItemsResult = await db.query(`
+        SELECT go.*, im.id AS item_id
+        FROM grain_output_items go
+        LEFT JOIN (SELECT item_name, MIN(id) AS id FROM item_master GROUP BY item_name) im ON go.item_name = im.item_name
+        WHERE go.grain_id = ?
+      `, [id]);
+    } catch (e) {}
     
-    const wastageItemsResult = await db.query(`
-      SELECT gw.*, im.id AS item_id
-      FROM grain_wastage_items gw
-      LEFT JOIN (SELECT item_name, MIN(id) AS id FROM item_master GROUP BY item_name) im ON gw.item_name = im.item_name
-      WHERE gw.grain_id = ?
-    `, [req.params.id])
+    try {
+      wastageItemsResult = await db.query(`
+        SELECT gw.*, im.id AS item_id
+        FROM grain_wastage_items gw
+        LEFT JOIN (SELECT item_name, MIN(id) AS id FROM item_master GROUP BY item_name) im ON gw.item_name = im.item_name
+        WHERE gw.grain_id = ?
+      `, [id]);
+    } catch (e) {}
 
     grain.inputItems = inputItemsResult.rows.map(item => ({
       id: item.id,
@@ -400,11 +415,16 @@ router.get('/:id', async (req, res) => {
       category: item.category || ''
     }));
 
-    // Fetch FSMS CCP, OPRP, and Verification Records
-    const ccpRes = await db.query(`SELECT * FROM grind_ccp_monitoring WHERE grind_id = ?`, [req.params.id]);
-    const oprpRes = await db.query(`SELECT * FROM grind_oprp_monitoring WHERE grind_id = ?`, [req.params.id]);
-    const verifRes = await db.query(`SELECT * FROM grind_production_verification WHERE grind_id = ?`, [req.params.id]);
-    const opLogsRes = await db.query(`SELECT * FROM grind_operator_log WHERE grind_id = ? ORDER BY id DESC`, [req.params.id]);
+    // Fetch FSMS CCP, OPRP, and Verification Records safely
+    let ccpRes = { rows: [] };
+    let oprpRes = { rows: [] };
+    let verifRes = { rows: [] };
+    let opLogsRes = { rows: [] };
+
+    try { ccpRes = await db.query(`SELECT * FROM grind_ccp_monitoring WHERE grind_id = ?`, [id]); } catch (e) {}
+    try { oprpRes = await db.query(`SELECT * FROM grind_oprp_monitoring WHERE grind_id = ?`, [id]); } catch (e) {}
+    try { verifRes = await db.query(`SELECT * FROM grind_production_verification WHERE grind_id = ?`, [id]); } catch (e) {}
+    try { opLogsRes = await db.query(`SELECT * FROM grind_operator_log WHERE grind_id = ? ORDER BY id DESC`, [id]); } catch (e) {}
 
     grain.ccp = ccpRes.rows.length > 0 ? ccpRes.rows[0] : null;
     grain.oprp = oprpRes.rows;
@@ -414,7 +434,7 @@ router.get('/:id', async (req, res) => {
     res.json(grain)
   } catch (error) {
     console.error('Error fetching grain:', error)
-    res.status(500).json({ message: 'Error fetching grain' })
+    res.status(500).json({ message: 'Error fetching grain', error: error.message })
   }
 })
 

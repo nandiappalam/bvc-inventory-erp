@@ -10,11 +10,14 @@ import './PurchaseDisplay.css';
 const columns = [
   { key: 'sno', title: 'S.No', render: (_val, row, idx) => idx !== undefined ? idx + 1 : (row.s_no || '') },
   { key: 'invoice_no', title: 'Invoice' },
-  { key: 'po_no', title: 'P.O. No', render: (val, row) => (val || row.po_no || row.source_order_no) ? (
-    <span style={{ backgroundColor: '#e0f2fe', color: '#0369a1', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold', fontSize: '11px' }}>
-      {val || row.po_no || row.source_order_no}
-    </span>
-  ) : <span style={{ color: '#94a3b8' }}>—</span> },
+  { key: 'po_no', title: 'P.O. No', render: (val, row) => {
+    const poDisplay = val || row.po_no || row.source_order_no || (row.purchase_order_id ? `PO-${row.purchase_order_id}` : '');
+    return poDisplay ? (
+      <span style={{ backgroundColor: '#e0f2fe', color: '#0369a1', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold', fontSize: '11px' }}>
+        {poDisplay}
+      </span>
+    ) : <span style={{ color: '#94a3b8' }}>—</span>;
+  } },
   { key: 'invoice_date', title: 'Date' },
   { key: 'supplier_name', title: 'Supplier' },
 

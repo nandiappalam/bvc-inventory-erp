@@ -1,24 +1,10 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import axios from 'axios'
 
 import App from './App.jsx'
 import './index.css'
 import './components/global-styles.css'
 import './components/SalesCreate.css'
-
-axios.interceptors.request.use((config) => {
-  let token = localStorage.getItem('erp_token')
-  if (!token) {
-    try {
-      token = JSON.parse(localStorage.getItem('erp_user') || '{}').token || ''
-    } catch (error) {
-      token = ''
-    }
-  }
-  if (token) config.headers.Authorization = `Bearer ${token}`
-  return config
-})
 
 // Central alert override to prevent iframe DOMExceptions from blocking execution and show styled toast instead
 if (typeof window !== 'undefined') {

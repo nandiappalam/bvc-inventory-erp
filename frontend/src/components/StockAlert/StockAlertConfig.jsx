@@ -41,6 +41,7 @@ import {
   People as ContactsIcon
 } from '@mui/icons-material';
 import { Link, useNavigate } from 'react-router-dom';
+import api from '../../services/api.js';
 
 const StockAlertConfig = () => {
   const navigate = useNavigate();
@@ -76,17 +77,7 @@ const StockAlertConfig = () => {
   const fetchConfigs = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/stock-alerts/config');
-      if (!res.ok) {
-        setLoading(false);
-        return;
-      }
-      const text = await res.text();
-      let json = null;
-      try {
-        json = text ? JSON.parse(text) : null;
-      } catch (parseErr) {}
-
+      const json = await api('/stock-alerts/config');
       if (json && json.success) {
         setConfigs(json.configs || []);
       }
@@ -102,8 +93,7 @@ const StockAlertConfig = () => {
     fetchConfigs();
 
     // Fetch items from master
-    fetch('/api/masters/items')
-      .then(res => res.ok ? res.json() : [])
+    api('/masters/items')
       .then(data => {
         let list = [];
         if (Array.isArray(data)) {
@@ -118,16 +108,14 @@ const StockAlertConfig = () => {
       .catch(() => {});
 
     // Fetch godowns
-    fetch('/api/godowns')
-      .then(res => res.ok ? res.json() : [])
+    api('/godowns')
       .then(data => {
         if (Array.isArray(data)) setGodownsList(data);
       })
       .catch(() => {});
 
     // Fetch contacts
-    fetch('/api/stock-alerts/contacts')
-      .then(res => res.ok ? res.json() : {})
+    api('/stock-alerts/contacts')
       .then(data => {
         if (data && data.success) setContactsList(data.contacts || []);
       })
@@ -186,9 +174,8 @@ const StockAlertConfig = () => {
   const handleDelete = async (id) => {
     if (!window.confirm('Are you sure you want to delete this stock alert threshold configuration?')) return;
     try {
-      const res = await fetch(`/api/stock-alerts/config/${id}`, { method: 'DELETE' });
-      const json = await res.json();
-      if (json.success) {
+      const json = await api(`/stock-alerts/config/${id}`, { method: 'DELETE' });
+      if (json && json.success) {
         setMessage({ type: 'success', text: 'Configuration deleted successfully' });
         fetchConfigs();
         window.dispatchEvent(new CustomEvent('stock-alerts-updated'));
@@ -231,23 +218,21 @@ const StockAlertConfig = () => {
     }
 
     try {
-      const url = editId ? `/api/stock-alerts/config/${editId}` : '/api/stock-alerts/config';
+      const endpoint = editId ? `/stock-alerts/config/${editId}` : '/stock-alerts/config';
       const method = editId ? 'PUT' : 'POST';
 
-      const res = await fetch(url, {
+      const json = await api(endpoint, {
         method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
+        body: formData
       });
-      const json = await res.json();
 
-      if (json.success) {
+      if (json && json.success) {
         setMessage({ type: 'success', text: 'Stock alert threshold saved successfully!' });
         setOpenModal(false);
         fetchConfigs();
         window.dispatchEvent(new CustomEvent('stock-alerts-updated'));
       } else {
-        setMessage({ type: 'error', text: json.message || 'Failed to save configuration' });
+        setMessage({ type: 'error', text: json?.message || 'Failed to save configuration' });
       }
     } catch (err) {
       console.error('Error saving configuration:', err);

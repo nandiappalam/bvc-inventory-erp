@@ -36,6 +36,7 @@ import ExpiringDocumentsView from './ExpiringDocumentsView';
 import DocumentTemplatesView from './DocumentTemplatesView';
 import DocumentFormModal from './DocumentFormModal';
 import DocumentViewerModal from './DocumentViewerModal';
+import api from '../../services/api.js';
 
 const TAB_ROUTES = [
   '/documents/dashboard', // 0
@@ -112,13 +113,12 @@ export default function ComplianceHub() {
   const fetchDashboard = async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/compliance/dashboard');
-      const data = await res.json();
-      if (data.success) {
+      const data = await api('/compliance/dashboard');
+      if (data && data.success) {
         setDashboardData(data);
         setError(null);
       } else {
-        setError(data.message || 'Failed to load compliance data');
+        setError(data?.message || 'Failed to load compliance data');
       }
     } catch (err) {
       console.error('Error loading compliance dashboard:', err);

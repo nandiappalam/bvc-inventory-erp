@@ -88,8 +88,6 @@ const LoginPage = () => {
         return;
       }
 
-      if (response.token) localStorage.setItem('erp_token', response.token);
-
       // Update auth context with login data
       const res = await setAuthLogin(response);
       if (res && res.success === false) {

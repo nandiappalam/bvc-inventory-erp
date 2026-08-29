@@ -1,5 +1,5 @@
 // Use relative URLs so that the application handles API calls locally
-const BASE_URL = "";
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
 
 console.log("🚀 BASE URL:", BASE_URL || "(relative — using Vite proxy)");
 
@@ -38,21 +38,35 @@ export async function api(endpoint, options = {}) {
 
   console.log("🌐 FINAL URL:", url);
 
-  let token = localStorage.getItem('erp_token');
-  if (!token) {
-    try {
-      token = JSON.parse(localStorage.getItem('erp_user') || '{}').token || '';
-    } catch (error) {
-      token = '';
+  // Resolve authentication & company headers from storage
+  const authHeaders = {};
+  try {
+    const token = localStorage.getItem('erp_token');
+    if (token) {
+      authHeaders['Authorization'] = `Bearer ${token}`;
     }
-  }
+    const selComp = localStorage.getItem('erp_selected_company') || localStorage.getItem('erp_company');
+    if (selComp) {
+      const parsedComp = JSON.parse(selComp);
+      if (parsedComp && parsedComp.id) {
+        authHeaders['X-Company-Id'] = String(parsedComp.id);
+      }
+    }
+    const storedUser = localStorage.getItem('erp_user');
+    if (storedUser) {
+      const parsedUser = JSON.parse(storedUser);
+      if (parsedUser && parsedUser.id) {
+        authHeaders['X-User-Id'] = String(parsedUser.id);
+      }
+    }
+  } catch (e) {}
 
   try {
     const res = await fetch(url, {
       method: options.method || 'GET',
       headers: {
         'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...authHeaders,
         ...(options.headers || {})
       },
       body: options.body ? JSON.stringify(options.body) : undefined
@@ -62,14 +76,6 @@ export async function api(endpoint, options = {}) {
 
     // ✅ Null-safe JSON parse
     if (!res.ok) {
-      if (res.status === 401 && !endpoint.includes('/auth/login')) {
-        localStorage.removeItem('erp_token');
-        localStorage.removeItem('erp_user');
-        localStorage.removeItem('erp_company');
-        localStorage.removeItem('erp_selected_company');
-        window.dispatchEvent(new Event('erp:unauthorized'));
-        return { success: false, data: null, message: 'Authentication required' };
-      }
       console.error("❌ API HTTP error:", res.status, res.statusText);
       console.error("❌ Response body:", text);
       let errorMsg = `HTTP ${res.status}: ${res.statusText}`;

@@ -2,6 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { EntryDisplay } from './entry';
 import { printHtml } from '../utils/printHelper';
+import api from '../services/api.js';
 
 // Column definitions for Sales Return Display
 const columns = [
@@ -20,8 +21,8 @@ const handleDelete = async (id, refresh) => {
   }
   if (!window.confirm('Delete this record?')) return;
   try {
-    const res = await fetch(`/api/sales-returns/${id}`, { method: 'DELETE' });
-    if (res.ok) {
+    const res = await api(`/sales-returns/${id}`, { method: 'DELETE' });
+    if (res && res.success !== false) {
       alert('Record deleted successfully');
       if (refresh) {
         refresh();
@@ -29,11 +30,11 @@ const handleDelete = async (id, refresh) => {
         window.location.reload();
       }
     } else {
-      alert('Delete failed');
+      alert('Delete failed: ' + (res?.message || 'Unknown error'));
     }
   } catch (err) {
     console.error(err);
-    alert('Delete failed');
+    alert('Delete failed: ' + err.message);
   }
 };
 

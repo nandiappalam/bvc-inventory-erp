@@ -123,8 +123,7 @@ module.exports = async function autoMigrate() {
         updated_by TEXT,
         updated_at DATETIME,
         closed_by TEXT,
-        closed_at DATETIME,
-        FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE
+        closed_at DATETIME
       )
     `);
     const countRes = await db.query('SELECT COUNT(*) as count FROM financial_years');
@@ -359,6 +358,113 @@ module.exports = async function autoMigrate() {
   await safeAddColumn('purchases', 'area', 'TEXT');
   await safeAddColumn('purchases', 'gst_no', 'TEXT');
   await safeAddColumn('purchases', 'email', 'TEXT');
+  await safeAddColumn('purchases', 'type', "TEXT DEFAULT 'Urad'");
+  await safeAddColumn('purchases', 'total_amount', 'REAL DEFAULT 0');
+  await safeAddColumn('purchases', 'grand_total', 'REAL DEFAULT 0');
+  await safeAddColumn('purchases', 'total_qty', 'REAL DEFAULT 0');
+  await safeAddColumn('purchases', 'total_weight', 'REAL DEFAULT 0');
+  await safeAddColumn('purchases', 'base_amount', 'REAL DEFAULT 0');
+  await safeAddColumn('purchases', 'disc_amount', 'REAL DEFAULT 0');
+  await safeAddColumn('purchases', 'tax_amount', 'REAL DEFAULT 0');
+  await safeAddColumn('purchases', 'net_amount', 'REAL DEFAULT 0');
+  await safeAddColumn('purchases', 'po_no', 'TEXT');
+  await safeAddColumn('purchases', 'purchase_order_id', 'INTEGER');
+  await safeAddColumn('purchases', 'source_order_id', 'INTEGER');
+  await safeAddColumn('purchases', 'source_order_no', 'TEXT');
+  await safeAddColumn('purchases', 'inv_date', 'TEXT');
+  await safeAddColumn('purchases', 'pay_type', "TEXT DEFAULT 'Credit'");
+
+  await safeAddColumn('sales', 'total_amt', 'REAL DEFAULT 0');
+  await safeAddColumn('sales', 'total_wt', 'REAL DEFAULT 0');
+  await safeAddColumn('sales', 'total_amount', 'REAL DEFAULT 0');
+  await safeAddColumn('sales', 'total_weight', 'REAL DEFAULT 0');
+  await safeAddColumn('sales', 'grand_total', 'REAL DEFAULT 0');
+  await safeAddColumn('sales', 'total_qty', 'REAL DEFAULT 0');
+  await safeAddColumn('sales', 'po_no', 'TEXT');
+
+  await safeAddColumn('purchase_returns', 'total_amount', 'REAL DEFAULT 0');
+  await safeAddColumn('purchase_returns', 'grand_total', 'REAL DEFAULT 0');
+  await safeAddColumn('purchase_returns', 'total_qty', 'REAL DEFAULT 0');
+  await safeAddColumn('purchase_returns', 'total_weight', 'REAL DEFAULT 0');
+
+  await safeAddColumn('purchase_deductions', 'type', "TEXT DEFAULT 'LESS'");
+  await safeAddColumn('purchase_deductions', 'ded_type', "TEXT DEFAULT 'LESS'");
+  await safeAddColumn('purchase_deductions', 'calc_type', "TEXT DEFAULT 'Fixed'");
+  await safeAddColumn('purchase_deductions', 'value', 'REAL DEFAULT 0');
+  await safeAddColumn('purchase_deductions', 'rate', 'REAL DEFAULT 0');
+  await safeAddColumn('purchase_deductions', 'deduction_id', 'INTEGER');
+  await safeAddColumn('purchase_deductions', 'deduction_purchase_id', 'INTEGER');
+  await safeAddColumn('purchase_deductions', 'deduction_name', 'TEXT');
+  await safeAddColumn('purchase_deductions', 'affect_cost_of_goods', 'INTEGER DEFAULT 0');
+  await safeAddColumn('purchase_deductions', 'debit_side_adjust', 'INTEGER DEFAULT 0');
+  await safeAddColumn('purchase_deductions', 'account_head_id', 'INTEGER');
+
+  await safeAddColumn('flour_out', 'papad_company', 'TEXT');
+  await safeAddColumn('flour_out', 'mill_id', 'INTEGER');
+  await safeAddColumn('flour_out', 'mill_name', 'TEXT');
+  await safeAddColumn('flour_out', 'vehicle_no', 'TEXT');
+  await safeAddColumn('flour_out', 'total_wages', 'REAL DEFAULT 0');
+  await safeAddColumn('flour_out', 'total_qty', 'REAL DEFAULT 0');
+  await safeAddColumn('flour_out', 'total_weight', 'REAL DEFAULT 0');
+  await safeAddColumn('flour_out', 'address', 'TEXT');
+
+  await safeAddColumn('grains', 'total_input_kg', 'REAL DEFAULT 0');
+  await safeAddColumn('grains', 'total_output_kg', 'REAL DEFAULT 0');
+  await safeAddColumn('grains', 'total_wastage_kg', 'REAL DEFAULT 0');
+  await safeAddColumn('grains', 'recovery_percent', 'REAL DEFAULT 0');
+  await safeAddColumn('grains', 'operator', 'TEXT');
+  await safeAddColumn('grains', 'machine_no', 'TEXT');
+  await safeAddColumn('grains', 'shift', 'TEXT');
+
+  await safeAddColumn('purchases', 'sub_total', 'REAL DEFAULT 0');
+  await safeAddColumn('purchases', 'total_deductions', 'REAL DEFAULT 0');
+  await safeAddColumn('purchases', 'round_off', 'REAL DEFAULT 0');
+  await safeAddColumn('purchases', 'gross_weight', 'REAL DEFAULT 0');
+  await safeAddColumn('purchases', 'tare_weight', 'REAL DEFAULT 0');
+  await safeAddColumn('purchases', 'net_weight', 'REAL DEFAULT 0');
+
+  await safeAddColumn('sales', 'sub_total', 'REAL DEFAULT 0');
+  await safeAddColumn('sales', 'tax_amount', 'REAL DEFAULT 0');
+  await safeAddColumn('sales', 'round_off', 'REAL DEFAULT 0');
+  await safeAddColumn('sales', 'pay_type', "TEXT DEFAULT 'Credit'");
+  await safeAddColumn('sales', 'tax_type', "TEXT DEFAULT 'GST'");
+  await safeAddColumn('sales', 'lorry_no', 'TEXT');
+  await safeAddColumn('sales', 'p_o_no', 'TEXT');
+  await safeAddColumn('sales', 'driver', 'TEXT');
+  await safeAddColumn('sales', 'pur_trans', 'TEXT');
+  await safeAddColumn('sales', 'customer_id', 'INTEGER');
+  await safeAddColumn('sales', 'address', 'TEXT');
+  await safeAddColumn('sales', 'phone', 'TEXT');
+  await safeAddColumn('sales', 'sender_id', 'INTEGER');
+  await safeAddColumn('sales', 'consignee_id', 'INTEGER');
+  await safeAddColumn('sales', 'godown_from_id', 'INTEGER');
+  await safeAddColumn('sales', 'bill_amt', 'REAL DEFAULT 0');
+  await safeAddColumn('sales', 'tax_amt', 'REAL DEFAULT 0');
+  await safeAddColumn('sales', 'base_amt', 'REAL DEFAULT 0');
+  await safeAddColumn('sales', 'deduction', 'REAL DEFAULT 0');
+  await safeAddColumn('sales', 'deduction_remarks', 'TEXT');
+  await safeAddColumn('sales', 'deductions_json', 'TEXT');
+  await safeAddColumn('sales', 'deduction_amount', 'REAL DEFAULT 0');
+
+  await safeAddColumn('sales_return', 'total_amt', 'REAL DEFAULT 0');
+  await safeAddColumn('sales_return', 'total_wt', 'REAL DEFAULT 0');
+  await safeAddColumn('sales_return', 'total_amount', 'REAL DEFAULT 0');
+  await safeAddColumn('sales_return', 'total_weight', 'REAL DEFAULT 0');
+  await safeAddColumn('sales_return', 'grand_total', 'REAL DEFAULT 0');
+  await safeAddColumn('sales_return', 'total_qty', 'REAL DEFAULT 0');
+
+  await safeAddColumn('grains', 'flour_mill', 'TEXT');
+  await safeAddColumn('grain_input_items', 'wages_kg', 'REAL DEFAULT 0');
+  await safeAddColumn('grain_input_items', 'total_wages', 'REAL DEFAULT 0');
+
+  await safeAddColumn('godown_master', 'godown_name', 'TEXT');
+  await safeAddColumn('godown_master', 'name', 'TEXT');
+  await safeAddColumn('financial_years', 'is_current', 'INTEGER DEFAULT 0');
+  await safeAddColumn('financial_years', 'is_active', 'INTEGER DEFAULT 0');
+  await safeAddColumn('financial_years', 'financial_year', 'TEXT');
+  await safeAddColumn('financial_years', 'year_name', 'TEXT');
+  await safeAddColumn('financial_years', 'status', "TEXT DEFAULT 'Active'");
+  await safeAddColumn('financial_years', 'is_locked', 'INTEGER DEFAULT 0');
 
   // Ensure purchase_orders compatibility
   await safeAddColumn('purchase_orders', 'supplier_name', 'TEXT');
@@ -478,13 +584,32 @@ module.exports = async function autoMigrate() {
         debit_side_adjust TEXT,
         account_head_id INTEGER,
         remarks TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (purchase_id) REFERENCES purchases(id) ON DELETE CASCADE
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
     console.log('✓ Table purchase_deductions is ready');
   } catch (err) {
     console.log('✗ Error creating purchase_deductions:', err.message);
+  }
+
+  // Purchase Order Deductions table
+  try {
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS purchase_order_deductions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        purchase_order_id INTEGER NOT NULL,
+        deduction_name TEXT,
+        type TEXT DEFAULT 'less',
+        value REAL DEFAULT 0,
+        amount REAL DEFAULT 0,
+        remarks TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (purchase_order_id) REFERENCES purchase_orders(id) ON DELETE CASCADE
+      )
+    `);
+    console.log('✓ Table purchase_order_deductions is ready');
+  } catch (err) {
+    console.log('✗ Error creating purchase_order_deductions:', err.message);
   }
 
   // Purchase Requests tables
@@ -562,38 +687,17 @@ module.exports = async function autoMigrate() {
   }
 
   await safeAddColumn('customer_master', 'email', 'TEXT');
-  await safeAddColumn('customer_master', 'name', 'TEXT');
-  await safeAddColumn('customer_master', 'print_name', 'TEXT');
-  await safeAddColumn('customer_master', 'address1', 'TEXT');
-  await safeAddColumn('customer_master', 'phone_off', 'TEXT');
-  await safeAddColumn('customer_master', 'phone_res', 'TEXT');
-  await safeAddColumn('customer_master', 'mobile1', 'TEXT');
-  await safeAddColumn('customer_master', 'gst_number', 'TEXT');
   await safeAddColumn('customer_master', 'transport', 'TEXT');
   await safeAddColumn('customer_master', 'limit_days', 'INTEGER');
   await safeAddColumn('customer_master', 'limit_amount', 'REAL');
   await safeAddColumn('customer_master', 'balance_type', "TEXT DEFAULT 'Dr'");
   await safeAddColumn('customer_master', 'status', "TEXT DEFAULT 'Active'");
   await safeAddColumn('supplier_master', 'email', 'TEXT');
-  await safeAddColumn('supplier_master', 'name', 'TEXT');
-  await safeAddColumn('supplier_master', 'print_name', 'TEXT');
-  await safeAddColumn('supplier_master', 'address1', 'TEXT');
-  await safeAddColumn('supplier_master', 'phone_off', 'TEXT');
-  await safeAddColumn('supplier_master', 'phone_res', 'TEXT');
-  await safeAddColumn('supplier_master', 'mobile1', 'TEXT');
-  await safeAddColumn('supplier_master', 'gst_number', 'TEXT');
   await safeAddColumn('supplier_master', 'transport', 'TEXT');
   await safeAddColumn('supplier_master', 'limit_days', 'INTEGER');
   await safeAddColumn('supplier_master', 'limit_amount', 'REAL');
   await safeAddColumn('supplier_master', 'balance_type', "TEXT DEFAULT 'Dr'");
   await safeAddColumn('supplier_master', 'status', "TEXT DEFAULT 'Active'");
-  await db.run(`
-    UPDATE supplier_master
-    SET name = COALESCE(NULLIF(name, ''), supplier_name),
-        print_name = COALESCE(NULLIF(print_name, ''), supplier_name),
-        address1 = COALESCE(NULLIF(address1, ''), address)
-    WHERE supplier_name IS NOT NULL
-  `).catch(err => console.log('Notice syncing supplier compatibility fields:', err.message));
 
   // Item groups status
   await safeAddColumn('item_groups', 'status', "TEXT DEFAULT 'Active'");
@@ -929,10 +1033,6 @@ module.exports = async function autoMigrate() {
   // Ensure sales compatibility with deductions and ERP fields
   await safeAddColumn('sales', 'deductions_json', 'TEXT');
   await safeAddColumn('sales', 'deduction_amount', 'REAL DEFAULT 0');
-  await safeAddColumn('sales', 'bill_amt', 'REAL DEFAULT 0');
-  await safeAddColumn('sales', 'tax_amt', 'REAL DEFAULT 0');
-  await safeAddColumn('sales', 'deduction', 'TEXT');
-  await safeAddColumn('sales', 'grand_total', 'REAL DEFAULT 0');
 
   // Seed default godowns if godown_master is empty
   try {

@@ -136,6 +136,10 @@ router.get('/next-sno', async (req, res) => {
 // GET purchase return by ID
 router.get('/:id', async (req, res) => {
   try {
+    const id = req.params.id;
+    if (!id || id === 'undefined' || id === 'null' || isNaN(Number(id))) {
+      return res.status(404).json({ message: 'Purchase return not found' });
+    }
     const purchaseReturnResult = await db.query(`
       SELECT 
         pr.*,
@@ -148,7 +152,7 @@ router.get('/:id', async (req, res) => {
       FROM purchase_returns pr
       LEFT JOIN supplier_master sm ON (CAST(pr.supplier AS TEXT) = CAST(sm.id AS TEXT) OR pr.supplier = sm.name)
       WHERE pr.id = ?
-    `, [req.params.id]);
+    `, [id]);
 
     if (purchaseReturnResult.rows.length === 0) {
       return res.status(404).json({ message: 'Purchase return not found' });

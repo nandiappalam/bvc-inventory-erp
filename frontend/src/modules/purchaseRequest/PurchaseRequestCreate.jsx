@@ -36,8 +36,8 @@ import {
 } from '@mui/icons-material';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import api from '../../services/api.js';
 import { saveModuleDraft, loadModuleDraft, clearModuleDraft } from '../../utils/draftHelper';
+import api from '../../services/api.js';
 
 const DEPARTMENTS = [
   'Raw Materials',
@@ -150,7 +150,7 @@ const PurchaseRequestCreate = () => {
   const fetchNextPrNo = async () => {
     try {
       const data = await api('/purchase-requests/next-pr-no');
-      if (data.next_pr_no) {
+      if (data && data.next_pr_no) {
         setPrNo(data.next_pr_no);
       }
     } catch (err) {
@@ -195,7 +195,7 @@ const PurchaseRequestCreate = () => {
   const loadPurchaseRequest = async (id) => {
     try {
       const data = await api(`/purchase-requests/${id}`);
-      if (!data || data.success === false) throw new Error(data?.message || 'Purchase Request not found');
+      if (!data || data.error) throw new Error(data?.message || 'Purchase Request not found');
 
       setPrNo(data.pr_no);
       setRequestDate(data.request_date || new Date().toISOString().split('T')[0]);
@@ -247,18 +247,16 @@ const PurchaseRequestCreate = () => {
     try {
       // 1. Try dedicated item balance endpoint
       const balanceData = await api(`/stock/item-balance/${encodeURIComponent(itemName)}`);
-      if (balanceData && balanceData.success !== false) {
-        if (balanceData) {
-          currentStockRm = parseFloat(balanceData.rm_stock_qty) || 0;
-          currentStockFg = parseFloat(balanceData.fg_stock_qty) || 0;
-          if (currentStockRm === 0 && currentStockFg === 0 && balanceData.stock_qty) {
-            currentStockRm = parseFloat(balanceData.stock_qty) || 0;
-          }
+      if (balanceData && !balanceData.error) {
+        currentStockRm = parseFloat(balanceData.rm_stock_qty) || 0;
+        currentStockFg = parseFloat(balanceData.fg_stock_qty) || 0;
+        if (currentStockRm === 0 && currentStockFg === 0 && balanceData.stock_qty) {
+          currentStockRm = parseFloat(balanceData.stock_qty) || 0;
         }
       } else {
         // 2. Try purchase-requests item-stock endpoint
         const prStockData = await api(`/purchase-requests/item-stock/${encodeURIComponent(selectedObj.id || itemName)}`);
-        if (prStockData && prStockData.success !== false) {
+        if (prStockData && !prStockData.error) {
           currentStockRm = parseFloat(prStockData.current_stock_rm !== undefined ? prStockData.current_stock_rm : prStockData.current_stock) || 0;
           currentStockFg = parseFloat(prStockData.current_stock_fg) || 0;
         }
@@ -420,11 +418,15 @@ const PurchaseRequestCreate = () => {
         }))
       };
 
-      const url = editId ? `/api/purchase-requests/${editId}` : '/api/purchase-requests';
+      const endpoint = editId ? `/purchase-requests/${editId}` : '/purchase-requests';
       const method = editId ? 'PUT' : 'POST';
 
-      const data = await api(url, { method, body: payload });
-      if (!data || data.success === false) throw new Error(data?.message || data?.error || 'Failed to save purchase request');
+      const data = await api(endpoint, {
+        method,
+        body: payload
+      });
+
+      if (!data || data.error) throw new Error(data?.message || data?.error || 'Failed to save purchase request');
 
       clearModuleDraft('pr_create');
       setSnackbar({

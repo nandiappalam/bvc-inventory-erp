@@ -34,6 +34,7 @@ import PrecisionManufacturingIcon from '@mui/icons-material/PrecisionManufacturi
 import AltRouteIcon from '@mui/icons-material/AltRoute';
 import EmergencyShareIcon from '@mui/icons-material/EmergencyShare';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import api from '../../services/api.js';
 
 const CATEGORY_COLORS = {
   PRODUCTION_RECORD: { bg: '#eff6ff', border: '#3b82f6', text: '#1d4ed8', label: 'Production (P1–P8)' },
@@ -70,13 +71,12 @@ export default function DocumentRegister({
   const fetchRegister = async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/compliance/master-register');
-      const json = await res.json();
-      if (json.success) {
+      const json = await api('/compliance/master-register');
+      if (json && json.success) {
         setData(json.documents || []);
         setError(null);
       } else {
-        setError(json.error || 'Failed to load master register');
+        setError(json?.error || json?.message || 'Failed to load master register');
       }
     } catch (err) {
       console.error('Error loading master register:', err);

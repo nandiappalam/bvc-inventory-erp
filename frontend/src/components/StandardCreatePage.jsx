@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import api from '../services/api.js';
 import './StandardCreatePage.css';
 
 /**
@@ -46,15 +47,12 @@ const StandardCreatePage = ({ pageTitle = 'Create Page', apiEndpoint = '/api/mas
     setMessage('');
 
     try {
-      const response = await fetch(`${apiEndpoint}`, {
+      const response = await api(`${apiEndpoint}`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(formData)
+        body: formData
       });
 
-      if (response.ok) {
+      if (response && response.success !== false) {
         setMessage('Record saved successfully!');
         setMessageType('success');
         // Reset form
@@ -62,7 +60,7 @@ const StandardCreatePage = ({ pageTitle = 'Create Page', apiEndpoint = '/api/mas
         // Auto-clear message after 3 seconds
         setTimeout(() => setMessage(''), 3000);
       } else {
-        setMessage('Error saving record. Please try again.');
+        setMessage('Error saving record: ' + (response?.message || 'Please try again.'));
         setMessageType('error');
       }
     } catch (error) {

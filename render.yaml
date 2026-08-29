@@ -1,0 +1,29 @@
+# BVC Inventory ERP — Render Deployment Configuration
+#
+# This file defines the Render deployment for the BVC Inventory ERP.
+# Production data is stored in Render PostgreSQL (persistent managed database).
+# The application filesystem is ephemeral — no business data is stored there.
+
+services:
+  - type: web
+    name: bvc-inventory-erp
+    runtime: node
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DB_ENGINE
+        value: postgres
+      - key: PORT
+        value: 3001
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: RENDER
+        value: "true"
+    autoDeploy: true
+    plan: starter
+

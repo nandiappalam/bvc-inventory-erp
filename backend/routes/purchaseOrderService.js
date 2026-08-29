@@ -120,12 +120,29 @@ exports.createPurchaseOrder = async (formData, items = [], deductions = []) => {
             );
         }
 
+        // Ensure purchase_order_deductions table exists
+        try {
+            await client.run(`
+                CREATE TABLE IF NOT EXISTS purchase_order_deductions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    purchase_order_id INTEGER NOT NULL,
+                    deduction_name TEXT,
+                    type TEXT DEFAULT 'less',
+                    value REAL DEFAULT 0,
+                    amount REAL DEFAULT 0,
+                    remarks TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (purchase_order_id) REFERENCES purchase_orders(id) ON DELETE CASCADE
+                )
+            `);
+        } catch (e) {}
+
         if (Array.isArray(deductions)) {
             for (const ded of deductions) {
                 if (!ded.deduction && !ded.deduction_name) continue;
                 await client.run(
-                    `INSERT INTO purchase_deductions (
-                        purchase_id, deduction_name, type, value, amount, remarks
+                    `INSERT INTO purchase_order_deductions (
+                        purchase_order_id, deduction_name, type, value, amount, remarks
                      ) VALUES (?, ?, ?, ?, ?, ?)`,
                     [
                         purchaseOrderId,
@@ -169,12 +186,25 @@ exports.getAllPurchaseOrders = async () => {
                 WHERE poi.purchase_order_id = ?
             `, [po.id]);
 
-            const dedRes = await db.query(`
-                SELECT * FROM purchase_deductions WHERE purchase_id = ?
-            `, [po.id]);
+            let dedRes;
+            try {
+                dedRes = await db.query(`
+                    SELECT * FROM purchase_order_deductions WHERE purchase_order_id = ?
+                `, [po.id]);
+            } catch (e) {
+                dedRes = { rows: [] };
+            }
+
+            if (!dedRes || !dedRes.rows || dedRes.rows.length === 0) {
+                try {
+                    dedRes = await db.query(`
+                        SELECT * FROM purchase_deductions WHERE purchase_id = ?
+                    `, [po.id]);
+                } catch (e) {}
+            }
 
             const items = itemsRes.rows || [];
-            const deductions = dedRes.rows || [];
+            const deductions = dedRes?.rows || [];
 
             const totalQty = items.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0);
             const totalAmount = items.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
@@ -223,14 +253,27 @@ exports.getPurchaseOrderById = async (id) => {
             WHERE poi.purchase_order_id = ?
         `, [id]);
 
-        const dedResult = await db.query(`
-            SELECT * FROM purchase_deductions WHERE purchase_id = ?
-        `, [id]);
+        let dedResult;
+        try {
+            dedResult = await db.query(`
+                SELECT * FROM purchase_order_deductions WHERE purchase_order_id = ?
+            `, [id]);
+        } catch (e) {
+            dedResult = { rows: [] };
+        }
+
+        if (!dedResult || !dedResult.rows || dedResult.rows.length === 0) {
+            try {
+                dedResult = await db.query(`
+                    SELECT * FROM purchase_deductions WHERE purchase_id = ?
+                `, [id]);
+            } catch (e) {}
+        }
 
         return { 
             ...purchaseOrder, 
             items: itemsResult.rows || [],
-            deductions: dedResult.rows || []
+            deductions: dedResult?.rows || []
         };
     } catch (error) {
         console.error('Error fetching Purchase Order by ID:', error);
@@ -341,14 +384,35 @@ exports.updatePurchaseOrder = async (id, formData, items = [], deductions = []) 
             );
         }
 
-        await client.run('DELETE FROM purchase_deductions WHERE purchase_id = ?', [id]);
+        try {
+            await client.run(`
+                CREATE TABLE IF NOT EXISTS purchase_order_deductions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    purchase_order_id INTEGER NOT NULL,
+                    deduction_name TEXT,
+                    type TEXT DEFAULT 'less',
+                    value REAL DEFAULT 0,
+                    amount REAL DEFAULT 0,
+                    remarks TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (purchase_order_id) REFERENCES purchase_orders(id) ON DELETE CASCADE
+                )
+            `);
+        } catch (e) {}
+
+        try {
+            await client.run('DELETE FROM purchase_order_deductions WHERE purchase_order_id = ?', [id]);
+        } catch (e) {}
+        try {
+            await client.run('DELETE FROM purchase_deductions WHERE purchase_id = ?', [id]);
+        } catch (e) {}
 
         if (Array.isArray(deductions)) {
             for (const ded of deductions) {
                 if (!ded.deduction && !ded.deduction_name) continue;
                 await client.run(
-                    `INSERT INTO purchase_deductions (
-                        purchase_id, deduction_name, type, value, amount, remarks
+                    `INSERT INTO purchase_order_deductions (
+                        purchase_order_id, deduction_name, type, value, amount, remarks
                      ) VALUES (?, ?, ?, ?, ?, ?)`,
                     [
                         id,
@@ -374,7 +438,12 @@ exports.updatePurchaseOrder = async (id, formData, items = [], deductions = []) 
 exports.deletePurchaseOrder = async (id) => {
     try {
         await db.run('DELETE FROM purchase_order_items WHERE purchase_order_id = ?', [id]);
-        await db.run('DELETE FROM purchase_deductions WHERE purchase_id = ?', [id]);
+        try {
+            await db.run('DELETE FROM purchase_order_deductions WHERE purchase_order_id = ?', [id]);
+        } catch (e) {}
+        try {
+            await db.run('DELETE FROM purchase_deductions WHERE purchase_id = ?', [id]);
+        } catch (e) {}
         const result = await db.run('DELETE FROM purchase_orders WHERE id = ?', [id]);
         return result.changes > 0;
     } catch (error) {

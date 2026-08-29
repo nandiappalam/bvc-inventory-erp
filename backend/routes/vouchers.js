@@ -109,11 +109,7 @@ async function initTables() {
     console.error('voucher_entry table error:', err);
   }
 
-  // Heal ledger names that were saved as numeric IDs
-  await healDatabaseVouchers();
-  
-  // Heal all transactions (purchases, sales, advances) to ensure they have corresponding double-entry vouchers & ledger_entries
-  await healAllTransactions();
+  // Data healing is an explicit operator action, never an import-time startup mutation.
 }
 
 async function healAllTransactions() {
@@ -369,8 +365,6 @@ async function healDatabaseVouchers() {
 }
 
 const { resolveLedgerId } = require('../utils/ledgerHelper');
-
-initTables().catch(console.error);
 
 // GET /vouchers/ledgers - Get standard ledgers + parties
 router.get('/ledgers', async (req, res) => {

@@ -30,6 +30,7 @@ import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import SearchIcon from '@mui/icons-material/Search';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import RecyclingIcon from '@mui/icons-material/Recycling';
+import api from '../services/api.js';
 
 const themeColors = {
   primary: '#1f4fb2',
@@ -53,12 +54,11 @@ const RecycleBinPage = () => {
   const fetchItems = async () => {
     setLoading(true);
     try {
-      const response = await fetch('/api/recycle-bin');
-      const data = await response.json();
-      if (data.success) {
+      const data = await api('/recycle-bin');
+      if (data && data.success) {
         setItems(data.items || []);
       } else {
-        showNotification(data.message || 'Failed to load recycle bin', 'error');
+        showNotification(data?.message || 'Failed to load recycle bin', 'error');
       }
     } catch (err) {
       console.error('Error fetching recycle bin:', err);
@@ -80,13 +80,12 @@ const RecycleBinPage = () => {
     if (!window.confirm(`Are you sure you want to restore "${title}"?`)) return;
     setRestoringId(id);
     try {
-      const res = await fetch(`/api/recycle-bin/restore/${id}`, { method: 'POST' });
-      const data = await res.json();
-      if (data.success) {
+      const data = await api(`/recycle-bin/restore/${id}`, { method: 'POST' });
+      if (data && data.success) {
         showNotification(data.message || `Restored "${title}" successfully`, 'success');
         fetchItems();
       } else {
-        showNotification(data.message || 'Failed to restore item', 'error');
+        showNotification(data?.message || 'Failed to restore item', 'error');
       }
     } catch (err) {
       showNotification('Error restoring item', 'error');
@@ -99,13 +98,12 @@ const RecycleBinPage = () => {
     if (!window.confirm(`Are you sure you want to PERMANENTLY delete "${title}"? This cannot be undone.`)) return;
     setDeletingId(id);
     try {
-      const res = await fetch(`/api/recycle-bin/${id}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (data.success) {
+      const data = await api(`/recycle-bin/${id}`, { method: 'DELETE' });
+      if (data && data.success) {
         showNotification(`Permanently deleted "${title}"`, 'info');
         fetchItems();
       } else {
-        showNotification(data.message || 'Failed to delete item', 'error');
+        showNotification(data?.message || 'Failed to delete item', 'error');
       }
     } catch (err) {
       showNotification('Error deleting item', 'error');
@@ -119,13 +117,12 @@ const RecycleBinPage = () => {
     if (!window.confirm(`Are you sure you want to EMPTY the Recycle Bin? All ${items.length} deleted items will be permanently erased.`)) return;
     setEmptying(true);
     try {
-      const res = await fetch('/api/recycle-bin/empty', { method: 'POST' });
-      const data = await res.json();
-      if (data.success) {
+      const data = await api('/recycle-bin/empty', { method: 'POST' });
+      if (data && data.success) {
         showNotification('Recycle bin emptied successfully', 'info');
         fetchItems();
       } else {
-        showNotification(data.message || 'Failed to empty recycle bin', 'error');
+        showNotification(data?.message || 'Failed to empty recycle bin', 'error');
       }
     } catch (err) {
       showNotification('Error emptying recycle bin', 'error');

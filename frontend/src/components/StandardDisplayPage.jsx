@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { printHtml } from '../utils/printHelper';
 import { useAuth } from '../context/AuthContext';
 import { exportToExcel, printTableList } from '../utils/exportHelper';
+import api from '../services/api.js';
 import './StandardDisplayPage.css';
 
 /**
@@ -72,9 +73,8 @@ const StandardDisplayPage = ({
   const fetchRecords = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${apiEndpoint}`);
-      if (response.ok) {
-        const data = await response.json();
+      const data = await api(apiEndpoint);
+      if (data && !data.error) {
         setRecords(Array.isArray(data) ? data : []);
         setFilteredRecords(Array.isArray(data) ? data : []);
       } else {
@@ -104,16 +104,16 @@ const StandardDisplayPage = ({
   const handleDelete = async (id) => {
     if (window.confirm('Are you sure you want to delete this record?')) {
       try {
-        const response = await fetch(`${apiEndpoint}/${id}`, {
+        const response = await api(`${apiEndpoint}/${id}`, {
           method: 'DELETE'
         });
-        if (response.ok) {
+        if (response && response.success !== false) {
           setMessage('Record deleted successfully!');
           setMessageType('success');
           setTimeout(() => setMessage(''), 3000);
           fetchRecords();
         } else {
-          setMessage('Error deleting record');
+          setMessage('Error deleting record: ' + (response?.message || 'Unknown error'));
           setMessageType('error');
         }
       } catch (error) {
@@ -140,15 +140,12 @@ const StandardDisplayPage = ({
 
     const recordId = editData.id || editData._id;
     try {
-      const response = await fetch(`${apiEndpoint}/${recordId}`, {
+      const response = await api(`${apiEndpoint}/${recordId}`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(editData)
+        body: editData
       });
 
-      if (response.ok) {
+      if (response && response.success !== false) {
         setMessage('Record updated successfully!');
         setMessageType('success');
         setTimeout(() => setMessage(''), 3000);
@@ -156,7 +153,8 @@ const StandardDisplayPage = ({
         setEditData(null);
         fetchRecords();
       } else {
-        setMessage('Error updating record');
+        setMessage('Error updating record: ' + (response?.message || 'Unknown error'));
+        setMessageType('error');
         setMessageType('error');
       }
     } catch (error) {

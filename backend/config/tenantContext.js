@@ -2,12 +2,20 @@ const { AsyncLocalStorage } = require('async_hooks')
 
 const storage = new AsyncLocalStorage()
 
-function run(companyDb, callback) {
-  return storage.run({ companyDb }, callback)
+function run(companyId, callback) {
+  return storage.run({ companyId }, callback)
 }
 
+function getCompanyId() {
+  return storage.getStore()?.companyId || null
+}
+// Temporary compatibility function
 function getDatabase() {
-  return storage.getStore()?.companyDb || null
+  return null
 }
 
-module.exports = { run, getDatabase }
+module.exports = {
+  run,
+  getCompanyId,
+  getDatabase,
+}

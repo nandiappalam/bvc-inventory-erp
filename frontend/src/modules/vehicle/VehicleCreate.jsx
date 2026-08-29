@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import SmartField from '../../components/master/SmartField';
 import { safeArray } from '../../utils/safeArray.js';
+import api from '../../services/api.js';
 import './VehicleCreate.css';
 
 const VehicleCreate = () => {
@@ -44,8 +45,7 @@ const VehicleCreate = () => {
     if (movementId) {
       const fetchMovement = async () => {
         try {
-          const res = await fetch(`/api/vehicle-movements/${movementId}`);
-          const data = await res.json();
+          const data = await api(`/vehicle-movements/${movementId}`);
           if (data) {
             setFormData({
               id: data.id || '',
@@ -101,8 +101,7 @@ const VehicleCreate = () => {
     }
     const fetchRefOptions = async () => {
       try {
-        const res = await fetch(`/api/vehicle-movements/reference-options/${formData.reference_type}`);
-        const data = await res.json();
+        const data = await api(`/vehicle-movements/reference-options/${formData.reference_type}`);
         const options = safeArray(data);
         setRefOptions(options);
 
@@ -150,11 +149,11 @@ const VehicleCreate = () => {
           reference_id: formData.reference_id,
           lot_no: formData.lot_no || ''
         });
-        const res = await fetch(`/api/vehicle-movements/track-status?${qp.toString()}`);
-        const data = await res.json();
+        const data = await api(`/vehicle-movements/track-status?${qp.toString()}`);
         if (data && data.success) {
           setFormData(prev => {
-            let finalStatus = data.status || prev.status;
+            // When creating a new movement, status MUST stay 'IN'
+            let finalStatus = movementId ? (data.status || prev.status || 'IN') : 'IN';
             
             // Check if both weights are non-zero, auto transition to OUT
             const gross = parseFloat(prev.gross_weight) || 0;
@@ -254,8 +253,7 @@ const VehicleCreate = () => {
     if (movementId) {
       setLoading(true);
       try {
-        const res = await fetch(`/api/vehicle-movements/${movementId}`);
-        const data = await res.json();
+        const data = await api(`/vehicle-movements/${movementId}`);
         if (data) {
           setFormData(prev => ({
             ...prev,
@@ -273,8 +271,7 @@ const VehicleCreate = () => {
       // Reload reference options
       if (formData.reference_type) {
         try {
-          const res = await fetch(`/api/vehicle-movements/reference-options/${formData.reference_type}`);
-          const data = await res.json();
+          const data = await api(`/vehicle-movements/reference-options/${formData.reference_type}`);
           setRefOptions(safeArray(data));
         } catch (err) {
           console.error('Refresh ref options failed:', err);
@@ -299,26 +296,23 @@ const VehicleCreate = () => {
     setLoading(true);
     setMessage('');
 
-    const url = movementId ? `/api/vehicle-movements/${movementId}` : '/api/vehicle-movements';
+    const endpoint = movementId ? `/vehicle-movements/${movementId}` : '/vehicle-movements';
     const method = movementId ? 'PUT' : 'POST';
 
     try {
-      const response = await fetch(url, {
+      const result = await api(endpoint, {
         method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
+        body: formData
       });
 
-      const result = await response.json();
-
-      if (result.success) {
+      if (result && result.success) {
         setMessage(movementId ? 'Vehicle Movement updated successfully! Redirecting...' : 'Vehicle Movement saved successfully! Redirecting...');
         setMessageType('success');
         setTimeout(() => {
           navigate('/entry/vehicle-movement-display');
         }, 1500);
       } else {
-        setMessage('Error: ' + (result.message || 'Unknown error'));
+        setMessage('Error: ' + (result?.message || 'Unknown error'));
         setMessageType('error');
       }
     } catch (error) {
@@ -672,18 +666,16 @@ const VehicleCreate = () => {
                     onClick={async () => {
                       if (window.confirm('Mark this vehicle movement as REJECTED / RETURNED (ICR Not Accepted) and navigate to Purchase Return?')) {
                         setLoading(true);
-                        const url = movementId ? `/api/vehicle-movements/${movementId}` : '/api/vehicle-movements';
+                        const endpoint = movementId ? `/vehicle-movements/${movementId}` : '/vehicle-movements';
                         const method = movementId ? 'PUT' : 'POST';
                         const finalFormData = { ...formData, status: 'RETURNED' };
                         
                         try {
-                          const response = await fetch(url, {
+                          const result = await api(endpoint, {
                             method,
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(finalFormData)
+                            body: finalFormData
                           });
-                          const result = await response.json();
-                          if (result.success) {
+                          if (result && result.success) {
                             const qp = new URLSearchParams({
                               partyName: formData.party_name || '',
                               itemName: formData.item_name || '',
@@ -694,7 +686,7 @@ const VehicleCreate = () => {
                             });
                             navigate(`/entry/purchase-return-create?${qp.toString()}`);
                           } else {
-                            alert('Error: ' + (result.message || 'Unknown error'));
+                            alert('Error: ' + (result?.message || 'Unknown error'));
                           }
                         } catch (err) {
                           console.error('Error auto saving return:', err);

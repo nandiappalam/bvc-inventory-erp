@@ -220,10 +220,10 @@ async function autoTrackMovementStatus(db, movement) {
       computedStatus = 'UNLOADED';
       computedOperationType = 'UNLOAD';
       statusDetails = 'UNLOADED (In Stock)';
-    } else if (isQcPassed || String(movement.status || '').toUpperCase() === 'UNLOAD') {
+    } else if (String(movement.status || '').toUpperCase() === 'UNLOAD') {
       computedStatus = 'UNLOAD';
       computedOperationType = 'UNLOAD';
-      statusDetails = 'QC Passed - Approved for Unloading';
+      statusDetails = isQcPassed ? 'QC Passed - Approved for Unloading' : 'Approved for Unloading';
     } else if ((gross > 0 && tare > 0) || (movement.gate_out_time && String(movement.gate_out_time).trim() !== '') || String(movement.status || '').toUpperCase() === 'OUT') {
       computedStatus = 'OUT';
       computedOperationType = movement.operation_type || 'UNLOAD';
@@ -231,7 +231,7 @@ async function autoTrackMovementStatus(db, movement) {
     } else {
       computedStatus = movement.status || 'IN';
       computedOperationType = movement.operation_type || 'UNLOAD';
-      statusDetails = 'Vehicle Gate In';
+      statusDetails = isQcPassed ? 'QC Passed (Vehicle Gate In)' : 'Vehicle Gate In';
     }
   } else if (movement.reference_type === 'SALES' && movement.reference_id) {
     // Check sales details
@@ -262,14 +262,22 @@ async function autoTrackMovementStatus(db, movement) {
         salesRes = await db.query(`SELECT id FROM sales_items WHERE lot_no = ?`, [activeLotNo]);
       } catch (e) {}
 
-      if (salesRes.rows.length > 0) {
+      if (String(movement.status || '').toUpperCase() === 'LOADED') {
         computedStatus = 'LOADED';
         computedOperationType = 'LOAD';
         statusDetails = 'LOADED';
-      } else {
+      } else if (String(movement.status || '').toUpperCase() === 'LOAD') {
         computedStatus = 'LOAD';
         computedOperationType = 'LOAD';
-        statusDetails = 'LOAD';
+        statusDetails = 'Approved for Loading';
+      } else if ((gross > 0 && tare > 0) || (movement.gate_out_time && String(movement.gate_out_time).trim() !== '') || String(movement.status || '').toUpperCase() === 'OUT') {
+        computedStatus = 'OUT';
+        computedOperationType = movement.operation_type || 'LOAD';
+        statusDetails = 'Vehicle Exited';
+      } else {
+        computedStatus = movement.status || 'IN';
+        computedOperationType = movement.operation_type || 'LOAD';
+        statusDetails = 'Vehicle Gate In';
       }
     }
   } else {

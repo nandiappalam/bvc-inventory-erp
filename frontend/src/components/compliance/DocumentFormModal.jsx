@@ -27,6 +27,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import api from '../../services/api.js';
 
 const DOC_CONFIGS = {
   D1: { title: 'Work Instruction File', defaultPrefix: 'WI', defaultDept: 'Production' },
@@ -116,11 +117,13 @@ export default function DocumentFormModal({ open, docCode = 'D1', initialData = 
       setLoadingMasters(true);
       try {
         const [itemsRes, suppliersRes] = await Promise.all([
-          fetch('/api/masters/items').then(r => r.json()),
-          fetch('/api/masters/suppliers').then(r => r.json()),
+          api('/masters/items').catch(() => ({})),
+          api('/masters/suppliers').catch(() => ({})),
         ]);
-        if (itemsRes.data) setItemsList(itemsRes.data);
-        if (suppliersRes.data) setSuppliersList(suppliersRes.data);
+        if (itemsRes?.data) setItemsList(itemsRes.data);
+        else if (Array.isArray(itemsRes)) setItemsList(itemsRes);
+        if (suppliersRes?.data) setSuppliersList(suppliersRes.data);
+        else if (Array.isArray(suppliersRes)) setSuppliersList(suppliersRes);
       } catch (err) {
         console.error('Error loading masters:', err);
       } finally {
@@ -237,20 +240,18 @@ export default function DocumentFormModal({ open, docCode = 'D1', initialData = 
     };
 
     try {
-      const url = isEditing ? `/api/compliance/documents/${initialData.id}` : '/api/compliance/documents';
+      const endpoint = isEditing ? `/compliance/documents/${initialData.id}` : '/compliance/documents';
       const method = isEditing ? 'PUT' : 'POST';
 
-      const res = await fetch(url, {
+      const data = await api(endpoint, {
         method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: payload,
       });
 
-      const data = await res.json();
-      if (data.success) {
+      if (data && data.success) {
         if (onSaved) onSaved();
       } else {
-        alert(data.message || 'Error saving document');
+        alert(data?.message || 'Error saving document');
       }
     } catch (err) {
       console.error('Error saving compliance document:', err);

@@ -25,13 +25,12 @@ import CloseIcon from '@mui/icons-material/Close';
 import PrintIcon from '@mui/icons-material/Print';
 import EditIcon from '@mui/icons-material/Edit';
 import VerifiedIcon from '@mui/icons-material/Verified';
-import { printElement } from '../../utils/printHelper';
 
 export default function DocumentViewerModal({ open, document: doc, onClose, onEdit }) {
   if (!doc) return null;
 
   const handlePrint = () => {
-    printElement('#controlled-document-view', `Controlled Document - ${doc.doc_number || doc.doc_code}`);
+    window.print();
   };
 
   const details = doc.details || {};
@@ -71,7 +70,7 @@ export default function DocumentViewerModal({ open, document: doc, onClose, onEd
         </Box>
       </DialogTitle>
 
-      <DialogContent id="controlled-document-view" sx={{ p: { xs: 2, md: 4 }, backgroundColor: '#ffffff' }}>
+      <DialogContent sx={{ p: { xs: 2, md: 4 }, backgroundColor: '#ffffff' }}>
         {/* Formal Controlled Document Header */}
         <Box sx={{ border: '2px solid #0f172a', p: 2, mb: 3 }}>
           <Grid container alignItems="center" spacing={2}>

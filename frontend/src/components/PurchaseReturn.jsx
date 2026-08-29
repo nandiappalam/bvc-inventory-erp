@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './PurchaseReturn.css';
 import { getMasters } from '../services/masterservice.js';
+import api from '../services/api.js';
 
 // Import modular entry components
 import { EntryTopFrame, EntryItemsTable, EntryTotalsRow, EntryBottomSummary, EntryActions, EntrySection } from './entry';
@@ -71,8 +72,7 @@ const PurchaseReturn = () => {
         }).catch(() => {});
       });
 
-    fetch('/api/purchase-returns/pending-returns')
-      .then(res => res.json())
+    api('/purchase-returns/pending-returns')
       .then(data => {
         if (Array.isArray(data)) setPendingReturns(data);
       })
@@ -168,9 +168,8 @@ const PurchaseReturn = () => {
       // Load existing purchase return record for editing
       const fetchRecord = async () => {
         try {
-          const res = await fetch(`/api/purchase-returns/${editId}`);
-          if (res.ok) {
-            const data = await res.json();
+          const data = await api(`/purchase-returns/${editId}`);
+          if (data && !data.error) {
             setFormData({
               sNo: data.s_no || data.sNo || editId,
               date: data.date ? data.date.substring(0, 10) : new Date().toISOString().substring(0, 10),
@@ -244,11 +243,9 @@ const PurchaseReturn = () => {
 
           if (referenceId) {
             try {
-              const purRes = await fetch(`/api/purchases/${referenceId}`);
-              if (purRes.ok) {
-                const purData = await purRes.json();
-                if (purData) {
-                  fetchedInvNo = purData.inv_no || purData.invNo || urlInvNo || referenceId;
+              const purData = await api(`/purchases/${referenceId}`);
+              if (purData && !purData.error) {
+                fetchedInvNo = purData.inv_no || purData.invNo || urlInvNo || referenceId;
 
                   setFormData(prev => ({
                     ...prev,
@@ -286,7 +283,6 @@ const PurchaseReturn = () => {
                     setSelectedDeductions(loadedDeds);
                   }
                 }
-              }
             } catch (e) {
               console.error('Error fetching linked purchase details:', e);
             }

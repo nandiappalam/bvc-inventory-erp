@@ -91,12 +91,12 @@ const PurchaseRequestReports = () => {
       }
 
       const data = await api(`/purchase-requests/reports?${queryParams.toString()}`);
-      if (data.rows && Array.isArray(data.rows)) {
+      if (data && data.rows && Array.isArray(data.rows)) {
         if (activeTab === 'item') {
           let masterItems = [];
           try {
-            const mData = await api('/masters/item');
-            masterItems = Array.isArray(mData) ? mData : (mData?.data || []);
+            const mData = await api('/masters/items');
+            if (Array.isArray(mData)) masterItems = mData;
           } catch (e) {
             console.log('Notice master fetch:', e);
           }

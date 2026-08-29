@@ -23,6 +23,7 @@ import {
   FolderOpen as FolderIcon
 } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
+import api from '../services/api.js';
 
 const themeColors = {
   primary: '#1f4fb2',
@@ -65,9 +66,8 @@ const GeneralSetup = () => {
   const fetchSetup = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/features/general-setup?company_id=${selectedCompany?.id || 1}`);
-      if (res.ok) {
-        const data = await res.json();
+      const data = await api(`/features/general-setup?company_id=${selectedCompany?.id || 1}`);
+      if (data) {
         setFormData(prev => ({
           ...prev,
           ...data,
@@ -90,21 +90,19 @@ const GeneralSetup = () => {
     setSaving(true);
     setMessage('');
     try {
-      const res = await fetch('/api/features/general-setup', {
+      const data = await api('/features/general-setup', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: {
           company_id: selectedCompany?.id || 1,
           ...formData
-        })
+        }
       });
-      const data = await res.json();
-      if (res.ok) {
+      if (data && (data.success || !data.error)) {
         setSeverity('success');
         setMessage('General system configuration saved successfully!');
       } else {
         setSeverity('error');
-        setMessage(data.message || 'Failed to save configuration');
+        setMessage(data?.message || 'Failed to save configuration');
       }
     } catch (e) {
       setSeverity('error');

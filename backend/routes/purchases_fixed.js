@@ -44,8 +44,7 @@ const ensurePurchaseDeductionsTable = async () => {
         debit_side_adjust TEXT,
         account_head_id INTEGER,
         remarks TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (purchase_id) REFERENCES purchases(id) ON DELETE CASCADE
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `)
   } catch (err) {
@@ -100,7 +99,7 @@ router.get('/next-sno', async (req, res) => {
 })
 
 // GET purchase list for UI (ERP-grade join)
-router.get('/purchase-list', async (req, res) => {
+router.get(['/', '/list', '/purchase-list'], async (req, res) => {
   console.log('[debug] USING purchases_fixed.js /purchase-list')
   console.log('[/api/purchases/purchase-list] query running')
 
@@ -110,11 +109,13 @@ router.get('/purchase-list', async (req, res) => {
       p.s_no AS s_no,
       p.inv_no AS inv_no,
       p.inv_no AS invoice_no,
+      COALESCE(NULLIF(p.po_no, ''), NULLIF(p.source_order_no, ''), NULLIF(po.inv_no, ''), NULLIF(CAST(po.s_no AS TEXT), ''), CASE WHEN p.purchase_order_id IS NOT NULL AND p.purchase_order_id != '' THEN 'PO-' || p.purchase_order_id ELSE '' END, '') AS po_no,
+      COALESCE(p.purchase_order_id, p.source_order_id, po.id) AS purchase_order_id,
       p.date AS purchase_date,
       p.date,
       p.date AS invoice_date,
 
-      s.print_name AS supplier_name,
+      COALESCE(s.print_name, s.name, p.supplier, '') AS supplier_name,
       COALESCE(s.address1, p.address, '') AS address,
 
       COALESCE(im.item_name, pi.item_name, '') AS item_name,
@@ -142,18 +143,19 @@ router.get('/purchase-list', async (req, res) => {
       p.grand_total AS grand_total,
       qci.id AS qc_id
     FROM purchases p
-    LEFT JOIN supplier_master s ON s.id = p.supplier
+    LEFT JOIN purchase_orders po ON (po.id = p.purchase_order_id OR po.id = p.source_order_id OR (p.po_no IS NOT NULL AND p.po_no != '' AND (po.inv_no = p.po_no OR CAST(po.s_no AS TEXT) = p.po_no)))
+    LEFT JOIN supplier_master s ON (s.id = p.supplier OR s.name = p.supplier OR s.print_name = p.supplier)
     LEFT JOIN purchase_items pi ON pi.purchase_id = p.id
     LEFT JOIN item_master im ON im.id = pi.item_id
     LEFT JOIN (
       SELECT
         purchase_id,
-        SUM(CASE WHEN UPPER(type) = 'ADD' THEN amount ELSE 0 END) AS add_deduction_amount,
-        SUM(CASE WHEN UPPER(type) = 'LESS' THEN amount ELSE 0 END) AS less_deduction_amount
+        SUM(CASE WHEN UPPER(COALESCE(type, 'LESS')) = 'ADD' THEN amount ELSE 0 END) AS add_deduction_amount,
+        SUM(CASE WHEN UPPER(COALESCE(type, 'LESS')) = 'LESS' THEN amount ELSE 0 END) AS less_deduction_amount
       FROM purchase_deductions
       GROUP BY purchase_id
     ) pad ON pad.purchase_id = p.id
-    LEFT JOIN qc_inspections qci ON qci.purchase_id = p.id AND qci.rm_lot_no = pi.lot_no
+    LEFT JOIN qc_inspections qci ON (qci.purchase_id = p.id OR ('PUR-' || p.id) = qci.purchase_id OR ('PUR-' || p.s_no) = qci.purchase_id) AND qci.rm_lot_no = pi.lot_no
     ORDER BY p.date DESC, p.id DESC`
 
     const rows = await db.query(sql)
@@ -167,7 +169,11 @@ router.get('/purchase-list', async (req, res) => {
 // GET purchase by ID
 router.get('/:id', async (req, res) => {
   try {
-    const purchaseResult = await db.query('SELECT * FROM purchases WHERE id = ?', [req.params.id])
+    const id = req.params.id;
+    if (!id || id === 'undefined' || id === 'null' || isNaN(Number(id))) {
+      return res.status(404).json({ message: 'Purchase not found' });
+    }
+    const purchaseResult = await db.query('SELECT * FROM purchases WHERE id = ?', [id])
     if (purchaseResult.rows.length === 0) {
       return res.status(404).json({ message: 'Purchase not found' })
     }

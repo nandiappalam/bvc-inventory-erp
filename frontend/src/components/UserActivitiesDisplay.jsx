@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import api from '../services/api.js';
 import { useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -67,8 +66,9 @@ const UserActivitiesDisplay = () => {
       if (userFilter) {
         url += `&user=${encodeURIComponent(userFilter)}`;
       }
-      const data = await api(url);
-      if (data && data.success !== false) {
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
         setActivities(data || []);
       } else {
         throw new Error('Failed to load user activities');
@@ -86,7 +86,8 @@ const UserActivitiesDisplay = () => {
     setEndDate('');
     setUserFilter('');
     setTimeout(() => {
-      api('/features/activities')
+      fetch('/api/features/activities')
+        .then(res => res.json())
         .then(data => setActivities(data || []))
         .catch(err => console.error(err));
     }, 50);

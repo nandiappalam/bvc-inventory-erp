@@ -5,7 +5,7 @@ import path from 'path'
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
-  base: '/',
+  base: './',
   resolve: {
     alias: {
       '@templates': path.resolve(__dirname, '../../templates'),
@@ -24,7 +24,7 @@ export default defineConfig({
     },
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:3001',
+        target: 'http://127.0.0.1:3000',
         changeOrigin: true,
         secure: false,
         timeout: 60000,

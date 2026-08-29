@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { EntryDisplay } from './entry';
 import { printHtml } from '../utils/printHelper';
 import { useAuth } from '../context/AuthContext';
+import api from '../services/api.js';
 
 // Column definitions for Sales Display
 const columns = [
@@ -30,7 +31,7 @@ const columns = [
   },
 ];
 
-// Handle delete - using standard fetch API
+// Handle delete - using centralized api client
 const handleDelete = async (id, onSuccess) => {
   if (!id) {
     alert('Cannot delete: missing record id');
@@ -38,8 +39,7 @@ const handleDelete = async (id, onSuccess) => {
   }
   if (!window.confirm('Delete this record?')) return;
   try {
-    const response = await fetch(`/api/sales/${id}`, { method: 'DELETE' });
-    const result = await response.json();
+    const result = await api(`/sales/${id}`, { method: 'DELETE' });
     if (result && (result.success || result.message)) {
       alert('Record deleted successfully');
       if (onSuccess) onSuccess();
@@ -106,8 +106,7 @@ const SalesDisplayPage = () => {
 
     const doDelete = async () => {
       try {
-        const response = await fetch(`/api/sales/${row.id}`, { method: 'DELETE' });
-        const result = await response.json();
+        const result = await api(`/sales/${row.id}`, { method: 'DELETE' });
         if (result && (result.success || result.message)) {
           if (showAlert) showAlert('Success', 'Record deleted successfully');
           else alert('Record deleted successfully');

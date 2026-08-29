@@ -209,12 +209,39 @@ const PurchaseCreation = () => {
         }
       } catch (e) {}
 
+      let suppAddress = order.address || order.supplierAddress || '';
+      const suppId = draft.formData.supplier_id || order.supplier_id || order.supplierId || '';
+      if ((!suppAddress || suppAddress.length < 5) && suppId) {
+        try {
+          const suppRes = await api(`/masters/record/suppliers/${suppId}`);
+          if (suppRes) {
+            const partyName = suppRes.name || suppRes.supplier_name || '';
+            const contactPerson = suppRes.contact_person || '';
+            const addressLine = suppRes.address || suppRes.address1 || '';
+            const area = suppRes.area || '';
+            const phone = suppRes.phone || suppRes.mobile || '';
+            const email = suppRes.email || '';
+            const gstNo = suppRes.gst_no || suppRes.tin_no || '';
+            suppAddress = [
+              partyName && `Name : ${partyName}`,
+              contactPerson && `Contact Person : ${contactPerson}`,
+              addressLine && `Address : ${addressLine}`,
+              area && `Area : ${area}`,
+              phone && `Phone : ${phone}`,
+              email && `Email : ${email}`,
+              gstNo && `GST/TIN No : ${gstNo}`
+            ].filter(Boolean).join('\n');
+          }
+        } catch (e) {}
+      }
+
       setFormData((prev) => ({
         ...prev,
         ...draft.formData,
         s_no: nextSNo || prev.s_no,
-        supplier_id: draft.formData.supplier_id || order.supplier_id || order.supplierId || prev.supplier_id,
-        supplier_details: draft.formData.supplier_details || order.address || prev.supplier_details,
+        supplier_id: suppId || prev.supplier_id,
+        address: suppAddress || draft.formData.address || prev.address || '',
+        supplier_details: suppAddress || draft.formData.supplier_details || prev.supplier_details || '',
         remarks: draft.formData.remarks || (order.remarks ? `PO: ${order.inv_no || order.invNo} - ${order.remarks}` : `Inwarded from PO #${order.inv_no || order.invNo}`),
         source_order_no: draft.formData.source_order_no || order.inv_no || order.invNo || '',
         source_order_id: draft.formData.source_order_id || order.id || '',
@@ -235,13 +262,14 @@ const PurchaseCreation = () => {
         const qty = Number(it.qty || 0);
         const rate = Number(it.rate || it.purc_rate || 0);
         const weight = Number(it.weight || it.per_unit_weight || it.perUnitWeight || 0);
-        const totWt = Number(it.tot_wt || it.total_weight || (qty * (weight || 1)));
-        const disc = Number(it.discount_percent || it.disc_percent || 0);
-        const tax = Number(it.tax_percent ?? order.tax_percent ?? order.tax_rate ?? 5);
+        const totWt = Number(it.tot_wt || it.total_wt || it.total_weight || (qty * (weight || 1)));
+        const disc = Number(it.discount_percent || it.disc_percent || it.disc || 0);
+        const tax = Number(it.tax_percent ?? it.tax_rate ?? order.tax_percent ?? order.tax_rate ?? 5);
         const baseAmt = qty * rate;
         const discAmt = baseAmt * (disc / 100);
-        const taxAmt = ((baseAmt - discAmt) * tax) / 100;
-        const finalAmt = Number(it.amount) || (baseAmt + taxAmt);
+        const taxable = baseAmt - discAmt;
+        const taxAmt = (taxable * tax) / 100;
+        const finalAmt = Number(it.amount) || (taxable + taxAmt);
         const autoLot = it.lot_no || `LOT${String(startLotNum + idx).padStart(4, '0')}`;
 
         return {
@@ -253,6 +281,7 @@ const PurchaseCreation = () => {
           weight_id: it.weight_id || '',
           per_unit_wt: weight,
           per_unit_weight: weight,
+          tot_wt: totWt,
           total_wt: totWt,
           total_weight: totWt,
           rate,
@@ -261,7 +290,10 @@ const PurchaseCreation = () => {
           disc_percent: disc,
           tax_rate: tax,
           tax_percent: tax,
-          amount: finalAmt,
+          base_amount: baseAmt,
+          disc_amount: discAmt,
+          tax_amount: taxAmt,
+          amount: finalAmt.toFixed(2),
           lot_no: autoLot,
           lot_status: 'reserved'
         };
@@ -269,16 +301,26 @@ const PurchaseCreation = () => {
 
       setTableData(mappedItems);
 
-      if (order.deductions && order.deductions.length > 0) {
-        setSelectedDeductions(order.deductions.map(d => ({
-          id: d.id,
-          name: d.deduction || d.deduction_name || d.name,
-          amount: parseFloat(d.amount) || 0,
-          type: (d.type || 'less').toUpperCase(),
-          calculation_type: 'Percentage',
-          percentage: parseFloat(d.percent || d.value) || 0,
-          remarks: d.remarks || ''
-        })));
+      const orderDeductions = (order.deductions && order.deductions.length > 0) ? order.deductions : (draft.selectedDeductions || []);
+      if (orderDeductions.length > 0) {
+        setSelectedDeductions(orderDeductions.map(d => {
+          const matchedDed = deductions.find(master => 
+            String(master.id) === String(d.id || d.deduction_id) || 
+            (master.ded_name && (d.deduction || d.deduction_name || d.name) && master.ded_name.toLowerCase() === (d.deduction || d.deduction_name || d.name).toLowerCase())
+          );
+          return {
+            id: matchedDed ? matchedDed.id : (d.deduction_id || d.id || ''),
+            deduction_id: matchedDed ? matchedDed.id : (d.deduction_id || d.id || ''),
+            name: matchedDed ? (matchedDed.ded_name || matchedDed.name) : (d.deduction || d.deduction_name || d.name || ''),
+            deduction: matchedDed ? (matchedDed.ded_name || matchedDed.name) : (d.deduction || d.deduction_name || d.name || ''),
+            amount: parseFloat(d.amount) || 0,
+            type: (d.type || matchedDed?.type || 'LESS').toUpperCase(),
+            calculation_type: d.calculation_type || matchedDed?.calculation_type || 'Percentage',
+            percentage: parseFloat(d.percent || d.percentage || d.value || 0),
+            percent: parseFloat(d.percent || d.percentage || d.value || 0),
+            remarks: d.remarks || ''
+          };
+        }));
       }
     };
 
@@ -355,40 +397,9 @@ const PurchaseCreation = () => {
         fullPo = res?.data || res || po;
       }
       
-      const draft = buildReceiptDraftFromPurchaseOrder(fullPo);
-      setFormData((prev) => ({
-        ...prev,
-        ...draft.formData,
-        supplier_id: draft.formData.supplier_id || fullPo.supplier_id || fullPo.supplierId || prev.supplier_id,
-        supplier_details: draft.formData.supplier_details || fullPo.address || prev.supplier_details,
-        remarks: draft.formData.remarks || `Inwarded from PO #${fullPo.inv_no || fullPo.invNo || fullPo.orderNo}`,
-        source_order_no: draft.formData.source_order_no || fullPo.inv_no || fullPo.invNo || fullPo.orderNo || '',
-        source_order_id: String(fullPo.id || ''),
-        purchase_order_id: String(fullPo.id || ''),
-        po_no: fullPo.inv_no || fullPo.invNo || fullPo.orderNo || ''
-      }));
-
-      if (draft.tableData && draft.tableData.length > 0) {
-        setTableData(draft.tableData);
-      } else if (fullPo.items && fullPo.items.length > 0) {
-        setTableData(fullPo.items.map((it) => ({
-          item_id: it.item_id || it.itemId || it.item_name || it.itemName,
-          item_name: it.item_name || it.itemName,
-          qty: Number(it.qty || 0),
-          weight: Number(it.weight || 0),
-          weight_id: it.weight_id || '',
-          per_unit_wt: Number(it.weight || 0),
-          total_wt: Number(it.tot_wt || it.totWt || (Number(it.qty || 0) * Number(it.weight || 0))),
-          total_weight: Number(it.tot_wt || it.totWt || (Number(it.qty || 0) * Number(it.weight || 0))),
-          rate: Number(it.rate || it.purc_rate || 0),
-          disc: Number(it.discount_percent || it.disc_percent || 0),
-          disc_percent: Number(it.discount_percent || it.disc_percent || 0),
-          tax_rate: Number(it.tax_percent || 5),
-          tax_percent: Number(it.tax_percent || 5),
-          amount: Number(it.amount || 0)
-        })));
+      if (fullPo) {
+        await applyPurchaseOrder(fullPo);
       }
-
       setPoPickerOpen(false);
     } catch (err) {
       console.error('Error importing PO:', err);
@@ -433,12 +444,10 @@ const PurchaseCreation = () => {
     setSelectedDeductions(prev => prev.filter((_, i) => i !== index));
   }, []);
 
-  const validItems = useMemo(() => { // Use tableData here
-    // For Qty/Weight totals we should not require Rate.
-    // Rate is optional in the UI flow (can be filled later), but Qty and Per Unit Wt/Total Wt must still contribute.
+  const validItems = useMemo(() => {
     return (tableData || []).filter((r) => {
       return (
-        r?.item_name &&
+        (r?.item_name || r?.item_id) &&
         Number(r?.qty) > 0
       );
     });
@@ -454,53 +463,46 @@ const PurchaseCreation = () => {
   // Grand Total  = Net Total + ADD deductions − LESS deductions
   const erpTotals = useMemo(() => {
     const rows = validItems || [];
-    console.log('ROWS FOR TOTALS', rows);
-    console.log('ROWS FOR TOTALS (weight fields)', (rows || []).map(r => ({
-      item_name: r.item_name,
-      qty: r.qty,
-      weight: r.weight,
-      per_unit_wt: r.per_unit_wt,
 
-      total_wt: r.total_wt,
-      total_weight: r.total_weight,
-      totalWt: r.totalWt,
-      totalWeight: r.totalWeight,
-
-      base_amount: r.base_amount,
-      rate: r.rate,
-      total: r.total,
-    })));
-
-    // Determine which field actually contains the computed KG total in tableData
-    // so UI totals can read the same key.
-    const dbgWeightKeys = (rows || []).map(r => ({
-      qty: r.qty,
-      weight: r.weight,
-      per_unit_wt: r.per_unit_wt,
-      total_wt: r.total_wt,
-      total_weight: r.total_weight,
-      totalWt: r.totalWt,
-      totalWeight: r.totalWeight,
-    }));
-    console.log('ROWS FOR TOTALS DBG WEIGHT KEYS', dbgWeightKeys);
-
-
-    // Totals from canonical item fields already calculated in EntryItemsTable
     const totalQty = rows.reduce((s, r) => s + Number(r.qty || 0), 0);
     const totalWeight = rows.reduce(
-      (s, r) => s + Number(r.total_wt || r.total_weight || 0),
+      (s, r) => s + Number(r.total_wt || r.total_weight || (Number(r.qty || 0) * Number(r.weight || r.per_unit_wt || 0))),
       0
     );
 
+    const baseAmount = rows.reduce((s, r) => {
+      const b = Number(r.base_amount);
+      if (!isNaN(b) && b > 0) return s + b;
+      const q = Number(r.qty || 0);
+      const rt = Number(r.rate || r.purc_rate || 0);
+      return s + (q * rt);
+    }, 0);
 
-
-    const baseAmount = rows.reduce((s, r) => s + Number(r.base_amount || 0), 0);
-    const discountAmount = rows.reduce((s, r) => s + Number(r.disc_amount || 0), 0);
+    const discountAmount = rows.reduce((s, r) => {
+      const d = Number(r.disc_amount);
+      if (!isNaN(d) && d > 0) return s + d;
+      const q = Number(r.qty || 0);
+      const rt = Number(r.rate || r.purc_rate || 0);
+      const dp = Number(r.disc || r.disc_percent || r.discount_percent || 0);
+      return s + (q * rt * (dp / 100));
+    }, 0);
 
     const taxableAmount = Number((baseAmount - discountAmount).toFixed(2));
 
-    const taxAmount = Number(rows.reduce((s, r) => s + Number(r.tax_amount || 0), 0).toFixed(2));
-    const netAmount = Number((taxableAmount + taxAmount).toFixed(2)); // Apply rounding
+    const taxAmount = Number(rows.reduce((s, r) => {
+      const t = Number(r.tax_amount);
+      if (!isNaN(t) && t > 0) return s + t;
+      const q = Number(r.qty || 0);
+      const rt = Number(r.rate || r.purc_rate || 0);
+      const dp = Number(r.disc || r.disc_percent || r.discount_percent || 0);
+      const tp = Number(r.tax_rate ?? r.tax_percent ?? (formData.tax_type === 'Without Tax' ? 0 : (formData.tax_rate || 5)));
+      const base = q * rt;
+      const disc = base * (dp / 100);
+      const taxable = base - disc;
+      return s + ((taxable * tp) / 100);
+    }, 0).toFixed(2));
+
+    const netAmount = Number((taxableAmount + taxAmount).toFixed(2));
 
     const addDeductions = selectedDeductions
       .filter(d => String(d.type || '').toUpperCase() === 'ADD')
@@ -524,7 +526,7 @@ const PurchaseCreation = () => {
       totalDeductions,
       grandTotal
     };
-  }, [validItems, formData.tax_rate, selectedDeductions]);
+  }, [validItems, formData.tax_type, formData.tax_rate, selectedDeductions]);
 
 
   const totals = useMemo(() => {
@@ -939,9 +941,10 @@ const columns = [
               <thead>
                 <tr>
                   <th>Deduction</th>
-                  <th>%</th>
-                  <th>Amt</th>
-                  <th>Calculation</th>
+                  <th style={{ width: '70px' }}>%</th>
+                  <th style={{ width: '100px' }}>Amt</th>
+                  <th style={{ width: '90px' }}>Calculation</th>
+                  <th style={{ width: '40px', textAlign: 'center' }}>Action</th>
                 </tr>
               </thead>
 
@@ -951,21 +954,39 @@ const columns = [
 
                     <td>
                       <select
-                        value={row.deduction_id || row.id || ''}
+                        style={{ width: '100%' }}
+                        value={
+                          deductions.find(d => String(d.id) === String(row.deduction_id || row.id))?.id ||
+                          deductions.find(d => (d.ded_name || d.name) === (row.name || row.deduction))?.id ||
+                          (row.deduction_id || row.id || row.name || '')
+                        }
                         onChange={(e) => {
                           const updated = [...selectedDeductions];
                           const nextId = e.target.value;
                           const master = deductions.find(d => String(d.id) === String(nextId));
-                          if (!master) return;
-                          updated[index] = {
-                            ...updated[index],
-                            deduction_id: master.id,
-                            id: master.id,
-                            name: master.ded_name || master.name || master.deduction_name,
-                            calculation_type: master.calculation_type || master.calc_type,
-                            percentage: Number(master.deduction_value || master.ded_value || 0) || 0,
-                            type: String(master.type || master.deduction_type || updated[index].type || 'LESS').toUpperCase(),
-                          };
+                          if (master) {
+                            const calcType = master.calculation_type || master.calc_type || 'Percentage';
+                            const dedValue = parseFloat(master.deduction_value || master.ded_value || 0) || 0;
+                            const isPct = String(calcType).toLowerCase().includes('percent');
+                            const base = Number(erpTotals.taxable || 0);
+                            updated[index] = {
+                              ...updated[index],
+                              deduction_id: master.id,
+                              id: master.id,
+                              name: master.ded_name || master.name || master.deduction_name,
+                              calculation_type: calcType,
+                              percentage: isPct ? dedValue : 0,
+                              percent: isPct ? dedValue : 0,
+                              amount: isPct ? (base * (dedValue / 100)) : dedValue,
+                              type: String(master.type || master.deduction_type || updated[index].type || 'LESS').toUpperCase(),
+                            };
+                          } else {
+                            updated[index] = {
+                              ...updated[index],
+                              name: nextId,
+                              deduction_id: nextId
+                            };
+                          }
                           setSelectedDeductions(updated);
                         }}
                       >
@@ -975,12 +996,16 @@ const columns = [
                             {d.ded_name || d.name}
                           </option>
                         ))}
+                        {row.name && !deductions.some(d => String(d.id) === String(row.deduction_id || row.id) || (d.ded_name || d.name) === row.name) && (
+                          <option value={row.deduction_id || row.id || row.name}>{row.name}</option>
+                        )}
                       </select>
                     </td>
 
                     <td>
                       <input
                         type="number"
+                        style={{ width: '100%' }}
                         value={Number(row.percent ?? row.percentage ?? 0)}
                         onChange={(e) => {
                           const updated = [...selectedDeductions];
@@ -997,6 +1022,7 @@ const columns = [
                     <td>
                       <input
                         type="number"
+                        style={{ width: '100%' }}
                         value={Number(row.amount || 0)}
                         onChange={(e) => {
                           const updated = [...selectedDeductions];
@@ -1008,6 +1034,7 @@ const columns = [
 
                     <td>
                       <select
+                        style={{ width: '100%' }}
                         value={row.calculation || row.type || 'LESS'}
                         onChange={(e) => {
                           const updated = [...selectedDeductions];
@@ -1019,6 +1046,26 @@ const columns = [
                         <option value="ADD">ADD</option>
                         <option value="LESS">LESS</option>
                       </select>
+                    </td>
+
+                    <td style={{ textAlign: 'center' }}>
+                      <button
+                        type="button"
+                        onClick={() => deleteDeduction(index)}
+                        style={{
+                          background: '#fee2e2',
+                          color: '#dc2626',
+                          border: '1px solid #fca5a5',
+                          borderRadius: '3px',
+                          cursor: 'pointer',
+                          fontWeight: 'bold',
+                          padding: '2px 6px',
+                          fontSize: '12px'
+                        }}
+                        title="Remove Deduction"
+                      >
+                        ✕
+                      </button>
                     </td>
 
                   </tr>

@@ -17,8 +17,8 @@ import {
   ArrowBack as ArrowBackIcon,
   Scale as ScaleIcon
 } from '@mui/icons-material';
-import api from '../services/api.js';
 import { useAuth } from '../context/AuthContext';
+import api from '../services/api.js';
 
 const themeColors = {
   primary: '#1f4fb2',
@@ -46,8 +46,8 @@ const WeightMachineSetup = () => {
   const fetchSetup = async () => {
     setLoading(true);
     try {
-      const data = await api('/features/weight-machine-setup', { params: { company_id: selectedCompany?.id || 1 } });
-      if (data && data.success !== false) {
+      const data = await api(`/features/weight-machine-setup?company_id=${selectedCompany?.id || 1}`);
+      if (data) {
         setPortNo(data.port_no ?? '0');
         setBaudRate(data.baud_rate ?? '0');
       }
@@ -71,12 +71,12 @@ const WeightMachineSetup = () => {
           baud_rate: baudRate
         }
       });
-      if (data && data.success !== false) {
+      if (data && (data.success || !data.error)) {
         setSeverity('success');
         setMessage('Weight Machine Setup configuration saved successfully!');
       } else {
         setSeverity('error');
-        setMessage(data.message || 'Failed to save setup configuration');
+        setMessage(data?.message || 'Failed to save setup configuration');
       }
     } catch (e) {
       setSeverity('error');

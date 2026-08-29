@@ -45,7 +45,6 @@ const StockAlertBell = () => {
 
     try {
       const data = await api('/stock-alerts/active-count');
-
       if (data && data.success) {
         setAlertData({
           count: data.count || 0,

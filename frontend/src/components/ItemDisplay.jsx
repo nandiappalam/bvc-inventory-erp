@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api.js';
-import { printElement } from '../utils/printHelper';
 import './ItemDisplay.css';
 
 // Default laboratory parameters template
@@ -225,7 +224,7 @@ const ItemDisplay = () => {
   };
 
   const handlePrintAction = () => {
-    printElement('.printable-content-box', `Item Specifications - ${printItem?.item_name || ''}`);
+    window.print();
   };
 
   // Robust delete handler with foreign key constraint checks

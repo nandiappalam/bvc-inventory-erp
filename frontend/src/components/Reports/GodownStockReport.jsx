@@ -40,6 +40,7 @@ import {
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { printHtml } from '../../utils/printHelper';
+import api from '../../services/api.js';
 
 const GodownStockReport = () => {
   const [data, setData] = useState([]);
@@ -60,8 +61,7 @@ const GodownStockReport = () => {
 
   // Fetch Godowns list
   useEffect(() => {
-    fetch('/api/godowns')
-      .then((res) => res.json())
+    api('/godowns')
       .then((list) => {
         if (Array.isArray(list)) {
           setGodowns(list);
@@ -76,8 +76,7 @@ const GodownStockReport = () => {
       setGodownLots([]);
       return;
     }
-    fetch(`/api/item-transfers/godown-items/${selectedGodown}`)
-      .then((res) => res.json())
+    api(`/item-transfers/godown-items/${selectedGodown}`)
       .then((resData) => {
         if (resData && Array.isArray(resData.items)) {
           const lots = Array.from(new Set(resData.items.map((i) => i.lot_no).filter(Boolean)));
@@ -103,8 +102,7 @@ const GodownStockReport = () => {
       if (searchLotNo) {
         params.append('lotNo', searchLotNo);
       }
-      const res = await fetch(`/api/reports/godown-stock?${params.toString()}`);
-      const result = await res.json();
+      const result = await api(`/reports/godown-stock?${params.toString()}`);
 
       let list = [];
       if (Array.isArray(result)) {
@@ -132,9 +130,8 @@ const GodownStockReport = () => {
       // Fetch Stock Alert configs for threshold comparison
       let configMap = {};
       try {
-        const confRes = await fetch('/api/stock-alerts/config');
-        const confJson = await confRes.json();
-        if (confJson.success && Array.isArray(confJson.configs)) {
+        const confJson = await api('/stock-alerts/config');
+        if (confJson && confJson.success && Array.isArray(confJson.configs)) {
           setConfigs(confJson.configs);
           confJson.configs.forEach((cfg) => {
             const key = `${cfg.item_name || ''}_${cfg.godown_id || 'all'}`;

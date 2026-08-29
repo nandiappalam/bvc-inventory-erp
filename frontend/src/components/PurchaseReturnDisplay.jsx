@@ -2,6 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { EntryDisplay } from './entry';
 import { printHtml } from '../utils/printHelper';
+import api from '../services/api.js';
 
 // Column definitions for Purchase Return Display
 const columns = [
@@ -46,9 +47,9 @@ const handlePrint = async (row) => {
   try {
     let fullData = row;
     try {
-      const res = await fetch(`/api/purchase-returns/${row.id}`);
-      if (res.ok) {
-        fullData = await res.json();
+      const data = await api(`/purchase-returns/${row.id}`);
+      if (data && !data.error) {
+        fullData = data;
       }
     } catch (e) {
       console.error('Error fetching full purchase return for print:', e);
@@ -213,18 +214,18 @@ const PurchaseReturnDisplay = () => {
 
     const doDelete = async () => {
       try {
-        const res = await fetch(`/api/purchase-returns/${id}`, { method: 'DELETE' });
-        if (res.ok) {
+        const res = await api(`/purchase-returns/${id}`, { method: 'DELETE' });
+        if (res && res.success !== false) {
           if (showAlert) showAlert('Success', 'Record deleted successfully', refresh);
           else { alert('Record deleted successfully'); if (refresh) refresh(); }
         } else {
-          if (showAlert) showAlert('Error', 'Delete failed');
-          else alert('Delete failed');
+          if (showAlert) showAlert('Error', 'Delete failed: ' + (res?.message || 'Unknown error'));
+          else alert('Delete failed: ' + (res?.message || 'Unknown error'));
         }
       } catch (err) {
         console.error(err);
-        if (showAlert) showAlert('Error', 'Delete failed');
-        else alert('Delete failed');
+        if (showAlert) showAlert('Error', 'Delete failed: ' + err.message);
+        else alert('Delete failed: ' + err.message);
       }
     };
 

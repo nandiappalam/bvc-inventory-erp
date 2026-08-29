@@ -30,20 +30,18 @@ router.get('/:id/summary', async (req, res) => {
     let deductionsRows = []
     try {
       const dRes = await db.query(
-        `SELECT deduction_id, deduction_name, type, calc_type, value, amount, percentage, remarks
-         FROM purchase_deductions
-         WHERE purchase_id = ?`,
+        `SELECT * FROM purchase_deductions WHERE purchase_id = ?`,
         [purchaseId]
       )
 
       deductionsRows = (dRes.rows || []).map(r => ({
-        id: r.deduction_id,
-        name: r.deduction_name,
+        id: r.deduction_id || r.deduction_purchase_id || r.id,
+        name: r.deduction_name || '',
         type: (r.type || '').toUpperCase(),
-        calc_type: r.calc_type,
+        calc_type: r.calc_type || r.calculation_type || 'Fixed',
         amount: Number(r.amount || 0),
-        percentage: Number(r.percentage || 0),
-        value: Number(r.value || 0),
+        percentage: Number(r.percentage || r.value || 0),
+        value: Number(r.value || r.percentage || 0),
         remarks: r.remarks || ''
       }))
 

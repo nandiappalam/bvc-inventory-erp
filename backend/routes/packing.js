@@ -39,8 +39,6 @@ async function initTables() {
     console.error('Error initializing packing tables:', err);
   }
 }
-initTables();
-
 // Middleware to guarantee tables exist
 router.use(async (req, res, next) => {
   await initTables();

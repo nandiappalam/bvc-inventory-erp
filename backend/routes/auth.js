@@ -1,8 +1,6 @@
 const express = require('express')
 const router = express.Router()
-const db = require('../config/masterDatabase')
-const jwt = require('jsonwebtoken')
-const JWT_SECRET = process.env.JWT_SECRET || 'bvc-development-secret-change-me'
+const db = require('../config/database')
 
 // ============================================================================
 // AUTH TABLES MANAGEMENT - Simplified initialization with logging
@@ -73,8 +71,6 @@ const createAuthTables = async () => {
   }
 }
 
-createAuthTables()
-
 // ============================================================================
 // SEED DEFAULT DATA
 // ============================================================================
@@ -104,8 +100,6 @@ const seedDefaultData = async () => {
     console.error('Error seeding default data:', error.message)
   }
 }
-
-setTimeout(seedDefaultData, 2000)
 
 // ============================================================================
 // API ROUTES
@@ -236,10 +230,18 @@ router.post('/login', async (req, res) => {
       console.error('Error recording login_history:', lhErr.message)
     }
 
-    const token = jwt.sign({ userId: userCandidate.id, companyId: activeCompanyId, role: userCandidate.role }, JWT_SECRET, { expiresIn: '12h' })
+    const { generateToken } = require('../middleware/authMiddleware')
+    const token = generateToken({
+      id: userCandidate.id,
+      username: userCandidate.username,
+      role: userCandidate.role,
+      companyId: activeCompanyId,
+      companyName: company.name
+    })
+
     res.json({
       message: 'Login successful',
-      token,
+      token: token,
       user: { id: userCandidate.id, username: userCandidate.username, role: userCandidate.role, company_id: activeCompanyId, company_name: company.name },
       company: company,
       permissions: permissions,

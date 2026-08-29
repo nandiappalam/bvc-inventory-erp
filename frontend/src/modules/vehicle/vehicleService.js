@@ -27,9 +27,7 @@ export async function createVehicleMovement(data) {
 }
 
 export async function getVehicleMovement(id) {
-  const response = await fetch(`/api/vehicle-movements/${id}`);
-  if (!response.ok) throw new Error(response.statusText);
-  return response.json();
+  return api(`vehicle-movements/${id}`);
 }
 
 export async function updateVehicleMovement(id, data) {

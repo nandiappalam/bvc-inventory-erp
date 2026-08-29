@@ -113,7 +113,11 @@ router.get('/next-sno', async (req, res) => {
 // GET sales by ID
 router.get('/:id', async (req, res) => {
   try {
-    const salesResult = await db.query('SELECT * FROM sales WHERE id = ?', [req.params.id])
+    const id = req.params.id;
+    if (!id || id === 'undefined' || id === 'null' || isNaN(Number(id))) {
+      return res.status(404).json({ message: 'Sales record not found' });
+    }
+    const salesResult = await db.query('SELECT * FROM sales WHERE id = ?', [id])
     if (salesResult.rows.length === 0) {
       return res.status(404).json({ message: 'Sales record not found' })
     }

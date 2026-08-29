@@ -108,7 +108,6 @@ const StockAlertDashboard = () => {
     setLoading(true);
     try {
       const json = await api('/stock-alerts/dashboard');
-
       if (json && json.success) {
         setData({
           summary: json.summary || {},

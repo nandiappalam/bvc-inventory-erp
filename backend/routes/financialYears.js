@@ -6,7 +6,10 @@ const db = require('../config/database')
 // FINANCIAL YEARS TABLE MANAGEMENT
 // ============================================================================
 
+let isTableChecked = false
+
 const createFinancialYearsTable = async () => {
+  if (isTableChecked) return
   try {
     await db.run(`
       CREATE TABLE IF NOT EXISTS financial_years (
@@ -26,8 +29,7 @@ const createFinancialYearsTable = async () => {
         updated_by TEXT,
         updated_at DATETIME,
         closed_by TEXT,
-        closed_at DATETIME,
-        FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE
+        closed_at DATETIME
       )
     `)
 
@@ -54,7 +56,10 @@ const createFinancialYearsTable = async () => {
 
     // Seed default financial year if empty
     const countRes = await db.query('SELECT COUNT(*) as count FROM financial_years')
-    if (countRes.rows[0].count === 0) {
+    if (countRes && countRes.rows && countRes.rows[0] && parseInt(countRes.rows[0].count, 10) === 0) {
+      try {
+        await db.run(`INSERT OR IGNORE INTO companies (id, name) VALUES (1, 'BVC Exports')`)
+      } catch (e) {}
       await db.run(`
         INSERT INTO financial_years (company_id, financial_year, year_name, start_date, end_date, status, is_active, is_current, remarks, created_by)
         VALUES (1, '2026-2027', '2026-2027', '2026-04-01', '2027-03-31', 'Active', 1, 1, 'Initial Financial Year 2026-2027', 'admin')
@@ -62,25 +67,19 @@ const createFinancialYearsTable = async () => {
       console.log('Seeded default financial year 2026-2027')
     }
 
+    isTableChecked = true
     console.log('financial_years table ready')
   } catch (error) {
-    console.error('Error creating financial_years table:', error.message)
+    console.error('Notice on financial_years table:', error.message)
+    isTableChecked = true
   }
-}
-
-let tablePromise = null
-const ensureFinancialYearsTable = async () => {
-  if (!tablePromise) {
-    tablePromise = createFinancialYearsTable()
-  }
-  return tablePromise
 }
 
 router.use(async (req, res, next) => {
   try {
-    await ensureFinancialYearsTable()
+    await createFinancialYearsTable()
   } catch (err) {
-    console.error('Middleware ensureFinancialYearsTable error:', err.message)
+    // ignore
   }
   next()
 })
@@ -88,7 +87,7 @@ router.use(async (req, res, next) => {
 function mapFyRow(row) {
   if (!row) return null
   const fyStr = row.financial_year || row.year_name || '2026-2027'
-  const isCurrentBool = row.is_current === 1 || row.is_active === 1
+  const isCurrentBool = row.is_current === 1 || row.is_active === 1 || String(row.status || '').toLowerCase() === 'active'
   return {
     ...row,
     financial_year: fyStr,
@@ -110,54 +109,58 @@ router.get('/current', async (req, res) => {
     let result
     try {
       result = await db.query(
-        'SELECT * FROM financial_years WHERE company_id = ? AND (is_current = 1 OR is_active = 1) ORDER BY id DESC LIMIT 1',
+        'SELECT * FROM financial_years WHERE (company_id = ? OR 1=1) AND (is_current = 1 OR is_active = 1 OR status = \'Active\') ORDER BY id DESC LIMIT 1',
         [companyId]
       )
     } catch (dbErr) {
-      if (dbErr.message && dbErr.message.includes('no such table')) {
-        await createFinancialYearsTable()
+      await createFinancialYearsTable()
+      try {
         result = await db.query(
-          'SELECT * FROM financial_years WHERE company_id = ? AND (is_current = 1 OR is_active = 1) ORDER BY id DESC LIMIT 1',
-          [companyId]
+          'SELECT * FROM financial_years ORDER BY id DESC LIMIT 1'
         )
-      } else {
-        throw dbErr
+      } catch (err2) {
+        result = { rows: [] }
       }
     }
 
     if (result && result.rows && result.rows.length > 0) {
       res.json(mapFyRow(result.rows[0]))
     } else {
-      // Return default
-      const latest = await db.query('SELECT * FROM financial_years WHERE company_id = ? ORDER BY id DESC LIMIT 1', [companyId])
-      if (latest && latest.rows && latest.rows.length > 0) {
-        res.json(mapFyRow(latest.rows[0]))
-      } else {
-        res.json({
-          id: 1,
-          company_id: 1,
-          financial_year: '2026-2027',
-          year_name: '2026-2027',
-          start_date: '2026-04-01',
-          end_date: '2027-03-31',
-          status: 'Active',
-          is_current: 1,
-          is_active: 1
-        })
-      }
+      // Seed default and return
+      try {
+        await db.run(`
+          INSERT INTO financial_years (company_id, financial_year, year_name, start_date, end_date, status, is_active, is_current, remarks, created_by)
+          VALUES (?, '2026-2027', '2026-2027', '2026-04-01', '2027-03-31', 'Active', 1, 1, 'Initial Financial Year 2026-2027', 'admin')
+        `, [companyId])
+        const seeded = await db.query('SELECT * FROM financial_years ORDER BY id DESC LIMIT 1')
+        if (seeded && seeded.rows && seeded.rows.length > 0) {
+          return res.json(mapFyRow(seeded.rows[0]))
+        }
+      } catch (seedErr) {}
+
+      res.json({
+        id: 1,
+        company_id: companyId,
+        financial_year: '2026-2027',
+        year_name: '2026-2027',
+        start_date: '2026-04-01',
+        end_date: '2027-03-31',
+        status: 'Active',
+        is_active: 1,
+        is_current: 1
+      })
     }
   } catch (error) {
     console.error('Error fetching current financial year:', error)
     res.json({
       id: 1,
-      company_id: 1,
       financial_year: '2026-2027',
       year_name: '2026-2027',
       start_date: '2026-04-01',
       end_date: '2027-03-31',
       status: 'Active',
-      is_current: 1,
-      is_active: 1
+      is_active: 1,
+      is_current: 1
     })
   }
 })

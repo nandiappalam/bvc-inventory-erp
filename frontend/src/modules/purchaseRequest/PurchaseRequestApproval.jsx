@@ -116,14 +116,16 @@ const PurchaseRequestApproval = () => {
     setManagerRemarks('');
     try {
       const data = await api(`/purchase-requests/${id}`);
-      if (data && data.success !== false) {
+      if (data && !data.error) {
         setSelectedPr(data);
         
         // Fetch item master for fallback item name resolution
         let masterItems = [];
         try {
-          const mData = await api('/masters/item');
-          masterItems = Array.isArray(mData) ? mData : (mData?.data || []);
+          const mData = await api('/masters/items');
+          if (Array.isArray(mData)) {
+            masterItems = mData;
+          }
         } catch (e) {
           console.log('Notice master item fetch:', e.message);
         }
@@ -150,7 +152,7 @@ const PurchaseRequestApproval = () => {
           };
         }));
       } else {
-        throw new Error(data.error || 'Failed to fetch details');
+        throw new Error(data?.error || data?.message || 'Failed to fetch details');
       }
     } catch (err) {
       setSnackbar({ open: true, message: err.message, severity: 'error' });
@@ -184,9 +186,13 @@ const PurchaseRequestApproval = () => {
         item_approvals: itemApprovals
       };
 
-      const data = await api(endpoint, { method: 'POST', body: payload });
-      if (!data || data.success === false) {
-        throw new Error(data.error || 'Operation failed');
+      const data = await api(endpoint, {
+        method: 'POST',
+        body: payload
+      });
+
+      if (!data || data.error) {
+        throw new Error(data?.error || data?.message || 'Operation failed');
       }
 
       setSnackbar({ open: true, message: data.message || `PR ${actionType}ed successfully`, severity: 'success' });

@@ -5,15 +5,10 @@ const https = require('https')
 const crypto = require('crypto')
 const fs = require('fs')
 const db = require('./config/database')
-const jwt = require('jsonwebtoken')
-const tenantContext = require('./config/tenantContext')
-const masterDb = require('./config/masterDatabase')
-const { getCompanyDatabase } = require('./config/companyDatabase')
-const JWT_SECRET = process.env.JWT_SECRET || 'bvc-development-secret-change-me'
 
 const app = express()
 // AI Studio requires port 3000 strictly, but we allow configuration in dev
-const PORT = process.env.PORT || 3001
+const PORT = process.env.PORT || 3000
 let actualPort = PORT
 
 // Process-level crash protection (prevents 502s from uncaught errors)
@@ -25,21 +20,25 @@ process.on('unhandledRejection', (reason, promise) => {
 })
 
 // CORS configuration
-const allowedOrigins = [
+const defaultAllowedOrigins = [
   'http://localhost:5173',
   'http://127.0.0.1:5173',
   'http://localhost:3000',
   'https://bvc-inventory-ilakkiya.onrender.com',
 ];
+const allowedOrigins = (process.env.CORS_ORIGINS || defaultAllowedOrigins.join(','))
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
 app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (mobile apps, curl, etc.)
     if (!origin) return callback(null, true);
-    if (allowedOrigins.indexOf(origin) !== -1 || origin.endsWith('.onrender.com')) {
+    if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
-    callback(null, true); // permissive during development
+    return callback(new Error('Origin is not allowed by CORS'));
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
@@ -49,25 +48,15 @@ app.use(cors({
 }));
 
 // Explicitly handle OPTIONS preflight for all routes
-app.options('*', cors());
+app.options('*', cors({ origin: allowedOrigins, credentials: true }));
 
 app.use(express.json({ limit: '50mb' }))
 app.use(express.urlencoded({ extended: true, limit: '50mb' }))
-app.use('/api', async (req, res, next) => {
-  if (req.path === '/health' || (req.path.startsWith('/companies') && req.method === 'GET') || req.path === '/auth/login') return next()
-  const authorization = req.get('Authorization') || ''
-  if (!authorization.startsWith('Bearer ')) return res.status(401).json({ message: 'Authentication required' })
-  try {
-    const claims = jwt.verify(authorization.slice(7), JWT_SECRET)
-    const result = await masterDb.query('SELECT * FROM companies WHERE id = ? AND LOWER(status) = \'active\'', [claims.companyId])
-    if (!result.rows[0]) return res.status(401).json({ message: 'Company is inactive or not found' })
-    const companyDb = await getCompanyDatabase(result.rows[0])
-    req.user = claims
-    tenantContext.run(companyDb, () => next())
-  } catch (error) {
-    return res.status(401).json({ message: 'Invalid or expired authentication token' })
-  }
-})
+
+// Multi-company database routing & tenant isolation context middleware
+const { companyContextMiddleware } = require('./middleware/authMiddleware')
+app.use(companyContextMiddleware)
+
 const frontendPath = path.join(__dirname, '../frontend/dist')
 
 // Serve static frontend files
@@ -135,7 +124,7 @@ app.use('/api/work-orders', workOrdersRouter)
 app.use('/api/work-order', workOrdersRouter)
 app.use('/api/stock-alerts', stockAlertsRouter)
 app.use('/api/stock-alert', stockAlertsRouter)
-app.use('/api/purchases', purchasesRouter)
+//app.use('/api/purchases', purchasesRouter)
 app.use('/api/lots', lotsRouter)
 app.use('/api/purchase-returns', purchaseReturnsRouter)
 app.use('/api/grains', grainsRouter)
@@ -198,6 +187,41 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', message: 'BVC Purchase Management API is running' })
 })
 
+// Comprehensive System Health Endpoint
+app.get('/api/system/health', async (req, res) => {
+  try {
+    const dbCheck = await db.query('SELECT 1 AS check_val')
+    const dbStatus = (dbCheck.rows && dbCheck.rows.length > 0) ? 'OK' : 'ERROR'
+    const companiesRes = await db.master.query('SELECT id, code, name, status FROM companies WHERE status != ?', ['Deleted'])
+    const registryRes = await db.master.query('SELECT company_id, db_name, status, last_migrated_at FROM database_registry')
+
+    res.json({
+      status: 'OK',
+      application: 'OK',
+      database: dbStatus,
+      engine: db.isPostgres ? 'PostgreSQL' : 'SQLite (Multi-Tenant Isolated Databases)',
+      companyContext: {
+        activeCompanyId: req.companyId || 1,
+        activeUser: req.user?.username || 'Anonymous/Session',
+        isolationMode: 'Dedicated Company Database / Schema'
+      },
+      companies: (companiesRes.rows || []).map(c => ({ id: c.id, code: c.code, name: c.name })),
+      databaseRegistry: registryRes.rows || [],
+      schemaVersion: '2.0.0',
+      authentication: 'OK',
+      timestamp: new Date().toISOString()
+    })
+  } catch (err) {
+    res.status(500).json({
+      status: 'DEGRADED',
+      application: 'OK',
+      database: 'ERROR',
+      code: 'DATABASE_UNAVAILABLE',
+      timestamp: new Date().toISOString()
+    })
+  }
+})
+
 // Serve React app for any unmatched routes
 /*app.get('*', (req, res) => {
   const indexPath = path.join(__dirname, '../frontend/dist/index.html')
@@ -248,8 +272,8 @@ app.use((err, req, res, next) => {
   console.error('🔥 GLOBAL ERROR HANDLER:', err.stack || err)
   res.status(err.status || 500).json({
     success: false,
-    error: err.message || 'Internal Server Error',
-    path: req.path
+    message: err.expose ? err.message : 'Internal Server Error',
+    code: err.code || 'INTERNAL_ERROR'
   })
 })
 
@@ -740,29 +764,28 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
   console.log(`Health check: http://localhost:${PORT}/api/health`)
   console.log(`Network access: http://0.0.0.0:${PORT}/api/health`)
   
-  // Run full database initialization (including purchases, sales, etc.)
+  // Run full database initialization and migrations (master & company databases)
   try {
-    const initDatabase = require('./init_db')
-    await initDatabase()
-    console.log('✓ Full database initialization complete on startup')
+    const { runAllPendingMigrations } = require('./database/migrationRunner')
+    await runAllPendingMigrations()
+    console.log('✓ Full multi-company database migrations verified on startup')
     
     // Ensure voucher tables (voucher, voucher_entry, ledger_entries) exist and sync
-    const { ensureVoucherTables, syncAllLedgers } = require('./utils/ledgerHelper')
-    await ensureVoucherTables()
-    console.log('✓ Voucher tables initialized successfully on startup')
-    await syncAllLedgers()
-    console.log('✓ Ledger sync and rebuild successfully completed on startup')
+    if (process.env.RUN_STARTUP_RECONCILIATION === 'true') {
+      const { ensureVoucherTables, syncAllLedgers } = require('./utils/ledgerHelper')
+      await ensureVoucherTables()
+      console.log('✓ Voucher tables initialized successfully on startup')
+      await syncAllLedgers()
+      console.log('✓ Ledger sync and rebuild successfully completed on startup')
 
-    // Rebuild and synchronize stock lots and stock ledger
-    const { rebuildStockLedger } = require('./utils/stockRebuilder')
-    await rebuildStockLedger()
-    console.log('✓ Stock lots & stock ledger re-synchronized on startup')
+      const { rebuildStockLedger } = require('./utils/stockRebuilder')
+      await rebuildStockLedger()
+      console.log('✓ Stock lots & stock ledger re-synchronized on startup')
+    }
   } catch (err) {
-    console.error('⚠️ Database initialization error on startup:', err.message)
+    console.error('❌ Database initialization failed; refusing to serve requests:', err.message)
+    server.close(() => process.exit(1))
   }
-
-  // Initialize master tables
-  await initializeMasterTables()
 })
 
 server.on('error', (err) => {

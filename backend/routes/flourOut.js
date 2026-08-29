@@ -159,7 +159,11 @@ router.get('/next-sno', async (req, res) => {
 // GET flour out by ID
 router.get('/:id', async (req, res) => {
   try {
-    const flourOutResult = await db.query('SELECT * FROM flour_out WHERE id = ?', [req.params.id])
+    const id = req.params.id;
+    if (!id || id === 'undefined' || id === 'null' || isNaN(Number(id))) {
+      return res.status(404).json({ message: 'Flour out record not found' });
+    }
+    const flourOutResult = await db.query('SELECT * FROM flour_out WHERE id = ?', [id])
     if (flourOutResult.rows.length === 0) {
       return res.status(404).json({ message: 'Flour out record not found' })
     }

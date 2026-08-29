@@ -58,9 +58,11 @@ const PurchaseRequestDashboard = () => {
     setLoading(true);
     try {
       const data = await api('/purchase-requests/dashboard/metrics');
-      if (data.metrics) setMetrics(data.metrics);
-      if (Array.isArray(data.recent_requests)) setRecentRequests(data.recent_requests);
-      if (Array.isArray(data.department_stats)) setDepartmentStats(data.department_stats);
+      if (data) {
+        if (data.metrics) setMetrics(data.metrics);
+        if (Array.isArray(data.recent_requests)) setRecentRequests(data.recent_requests);
+        if (Array.isArray(data.department_stats)) setDepartmentStats(data.department_stats);
+      }
     } catch (err) {
       console.error('Error loading PR dashboard:', err);
     } finally {

@@ -1,6 +1,5 @@
-// CONFLICTING API CONFIG BACKED UP TO api.js.conflicted.backup
-// DEPRECATED - Use ../services/api.js instead
-// This file no longer used to avoid duplicates
+// Compatibility client retained for older imports. New code should use
+// ../services/api.js or ../utils/api.js.
 
 //import { invoke } from "@tauri-apps/api/core";
 // Detect Tauri
@@ -32,6 +31,7 @@
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke(cmd, args);
 };*/
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
 const isTauriApp = () => false;
 
 // ===============================

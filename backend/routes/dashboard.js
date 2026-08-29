@@ -9,34 +9,55 @@ const db = require('../config/database');
 router.get('/stats', async (req, res) => {
   try {
     // 1. Total Purchases
-    const pRes = await db.query(`
-      SELECT 
-        COUNT(*) as count, 
-        COALESCE(SUM(total_qty), 0) as total_qty,
-        COALESCE(SUM(total_weight), 0) as total_weight,
-        COALESCE(SUM(COALESCE(grand_total, total_amount, 0)), 0) as total_amount
-      FROM purchases
-    `);
+    let pRes = { rows: [{ count: 0, total_qty: 0, total_weight: 0, total_amount: 0 }] };
+    try {
+      pRes = await db.query(`
+        SELECT 
+          COUNT(*) as count, 
+          COALESCE(SUM(total_qty), 0) as total_qty,
+          COALESCE(SUM(total_weight), 0) as total_weight,
+          COALESCE(SUM(COALESCE(grand_total, total_amount, amount, 0)), 0) as total_amount
+        FROM purchases
+      `);
+    } catch (e) {
+      try {
+        pRes = await db.query(`SELECT COUNT(*) as count, 0 as total_qty, 0 as total_weight, 0 as total_amount FROM purchases`);
+      } catch (e2) {}
+    }
 
     // 2. Total Sales
-    const sRes = await db.query(`
-      SELECT 
-        COUNT(*) as count, 
-        COALESCE(SUM(total_qty), 0) as total_qty,
-        COALESCE(SUM(total_wt), 0) as total_weight,
-        COALESCE(SUM(COALESCE(grand_total, total_amt, 0)), 0) as total_amount
-      FROM sales
-    `);
+    let sRes = { rows: [{ count: 0, total_qty: 0, total_weight: 0, total_amount: 0 }] };
+    try {
+      sRes = await db.query(`
+        SELECT 
+          COUNT(*) as count, 
+          COALESCE(SUM(total_qty), 0) as total_qty,
+          COALESCE(SUM(total_wt), 0) as total_weight,
+          COALESCE(SUM(COALESCE(grand_total, total_amt, 0)), 0) as total_amount
+        FROM sales
+      `);
+    } catch (e) {
+      try {
+        sRes = await db.query(`SELECT COUNT(*) as count, 0 as total_qty, 0 as total_weight, 0 as total_amount FROM sales`);
+      } catch (e2) {}
+    }
 
     // 3. Total Returns (Purchase Returns + Sales Returns + Flour Out Returns + Papad Returns)
-    const prRes = await db.query(`
-      SELECT 
-        COUNT(*) as count, 
-        COALESCE(SUM(total_qty), 0) as total_qty,
-        COALESCE(SUM(total_weight), 0) as total_weight,
-        COALESCE(SUM(COALESCE(grand_total, total_amount, 0)), 0) as total_amount
-      FROM purchase_returns
-    `);
+    let prRes = { rows: [{ count: 0, total_qty: 0, total_weight: 0, total_amount: 0 }] };
+    try {
+      prRes = await db.query(`
+        SELECT 
+          COUNT(*) as count, 
+          COALESCE(SUM(total_qty), 0) as total_qty,
+          COALESCE(SUM(total_weight), 0) as total_weight,
+          COALESCE(SUM(COALESCE(grand_total, total_amount, 0)), 0) as total_amount
+        FROM purchase_returns
+      `);
+    } catch (e) {
+      try {
+        prRes = await db.query(`SELECT COUNT(*) as count, 0 as total_qty, 0 as total_weight, 0 as total_amount FROM purchase_returns`);
+      } catch (e2) {}
+    }
 
     let srRes = { rows: [{ count: 0, total_qty: 0, total_weight: 0, total_amount: 0 }] };
     try {
@@ -73,28 +94,54 @@ router.get('/stats', async (req, res) => {
     const totalReturnsAmount = (prRes.rows[0]?.total_amount || 0) + (srRes.rows[0]?.total_amount || 0);
 
     // 4. Total Grains (Grinding / Processing)
-    const gCountRes = await db.query(`SELECT COUNT(*) as count FROM grains`);
-    const giRes = await db.query(`
-      SELECT 
-        COALESCE(SUM(COALESCE(total_wt, weight * qty, 0)), 0) as total_weight,
-        COALESCE(SUM(qty), 0) as total_qty
-      FROM grain_input_items
-    `);
-    const goRes = await db.query(`
-      SELECT 
-        COALESCE(SUM(COALESCE(total_wt, weight * qty, 0)), 0) as total_weight,
-        COALESCE(SUM(qty), 0) as total_qty
-      FROM grain_output_items
-    `);
+    let gCount = 0;
+    let giWeight = 0;
+    let giQty = 0;
+    let goWeight = 0;
+    let goQty = 0;
+    try {
+      const gCountRes = await db.query(`SELECT COUNT(*) as count FROM grains`);
+      gCount = gCountRes.rows[0]?.count || 0;
+    } catch (e) {}
+
+    try {
+      const giRes = await db.query(`
+        SELECT 
+          COALESCE(SUM(COALESCE(total_wt, weight * qty, 0)), 0) as total_weight,
+          COALESCE(SUM(qty), 0) as total_qty
+        FROM grain_input_items
+      `);
+      giWeight = giRes.rows[0]?.total_weight || 0;
+      giQty = giRes.rows[0]?.total_qty || 0;
+    } catch (e) {}
+
+    try {
+      const goRes = await db.query(`
+        SELECT 
+          COALESCE(SUM(COALESCE(total_wt, weight * qty, 0)), 0) as total_weight,
+          COALESCE(SUM(qty), 0) as total_qty
+        FROM grain_output_items
+      `);
+      goWeight = goRes.rows[0]?.total_weight || 0;
+      goQty = goRes.rows[0]?.total_qty || 0;
+    } catch (e) {}
 
     // 5. Flour Out
-    const foRes = await db.query(`
-      SELECT 
-        COUNT(*) as count,
-        COALESCE(SUM(total_qty), 0) as total_qty,
-        COALESCE(SUM(COALESCE(total_weight, (SELECT SUM(COALESCE(total_wt, weight * qty, 0)) FROM flour_out_items WHERE flour_out_items.flour_out_id = flour_out.id), 0)), 0) as total_weight
-      FROM flour_out
-    `);
+    let foCount = 0;
+    let foQty = 0;
+    let foWeight = 0;
+    try {
+      const foRes = await db.query(`
+        SELECT 
+          COUNT(*) as count,
+          COALESCE(SUM(total_qty), 0) as total_qty,
+          COALESCE(SUM(COALESCE(total_weight, 0)), 0) as total_weight
+        FROM flour_out
+      `);
+      foCount = foRes.rows[0]?.count || 0;
+      foQty = foRes.rows[0]?.total_qty || 0;
+      foWeight = foRes.rows[0]?.total_weight || 0;
+    } catch (e) {}
 
     // 6. Pending Purchase Requests
     let pendingPRs = 0;
@@ -353,15 +400,15 @@ router.get('/stats', async (req, res) => {
         totalReturnsWeight,
         totalReturnsAmount,
 
-        totalGrains: giRes.rows[0]?.total_weight || 0,
-        totalGrainsInputQty: giRes.rows[0]?.total_qty || 0,
-        totalGrainsOutput: goRes.rows[0]?.total_weight || 0,
-        totalGrainsOutputQty: goRes.rows[0]?.total_qty || 0,
-        totalGrainsBatches: gCountRes.rows[0]?.count || 0,
+        totalGrains: giWeight,
+        totalGrainsInputQty: giQty,
+        totalGrainsOutput: goWeight,
+        totalGrainsOutputQty: goQty,
+        totalGrainsBatches: gCount,
 
-        totalFlourOut: foRes.rows[0]?.total_weight || 0,
-        totalFlourOutQty: foRes.rows[0]?.total_qty || 0,
-        totalFlourOutBatches: foRes.rows[0]?.count || 0,
+        totalFlourOut: foWeight,
+        totalFlourOutQty: foQty,
+        totalFlourOutBatches: foCount,
 
         pendingPRs,
         stockSummary

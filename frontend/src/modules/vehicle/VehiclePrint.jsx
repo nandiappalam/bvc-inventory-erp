@@ -44,47 +44,52 @@ const VehiclePrint = ({ movementId, onClose }) => {
   const formatDateTime = (dt) => dt ? new Date(dt).toLocaleString() : '';
 
   const handlePrint = async () => {
-    // Record current time as Gate Out Time and maintain RETURNED/RETURN status if rejected
-    const nowStr = new Date().toISOString();
     const isRet = (
       movement.status === 'RETURNED' || 
       movement.status === 'REJECTED' || 
       (movement.operation_type && String(movement.operation_type).toUpperCase().includes('RETURN')) ||
       (movement.status_details && String(movement.status_details).toUpperCase().includes('RETURN'))
     );
-    const finalStatus = isRet ? 'RETURNED' : 'OUT';
+
+    const isOutPass = movement.status === 'OUT' || (parseFloat(movement.gross_weight) > 0 && parseFloat(movement.tare_weight) > 0);
+    const isInPass = (movement.status === 'IN' || !movement.status);
+
+    const nowStr = new Date().toISOString();
+    const finalStatus = isRet ? 'RETURNED' : (isOutPass ? 'OUT' : (movement.status || 'IN'));
     const finalOpType = isRet ? 'RETURN' : (movement.operation_type || 'UNLOAD');
 
     let updatedMovement = { 
       ...movement, 
       status: finalStatus, 
       operation_type: finalOpType,
-      gate_out_time: nowStr 
+      gate_out_time: isOutPass ? (movement.gate_out_time || nowStr) : movement.gate_out_time 
     };
     
-    try {
-      await updateVehicleMovement(movement.id, {
-        status: finalStatus,
-        operation_type: finalOpType,
-        gate_out_time: nowStr
-      });
-      setMovement(updatedMovement);
-    } catch (e) {
-      console.error("Failed to automatically record Gate Out status and time:", e);
+    if (isOutPass && !movement.gate_out_time) {
+      try {
+        await updateVehicleMovement(movement.id, {
+          status: finalStatus,
+          operation_type: finalOpType,
+          gate_out_time: nowStr
+        });
+        setMovement(updatedMovement);
+      } catch (e) {
+        console.error("Failed to update Gate Out status and time:", e);
+      }
     }
 
-    const isUpdatedRet = (
-      updatedMovement.status === 'RETURNED' || 
-      updatedMovement.status === 'REJECTED' || 
-      (updatedMovement.operation_type && String(updatedMovement.operation_type).toUpperCase().includes('RETURN')) ||
-      (updatedMovement.status_details && String(updatedMovement.status_details).toUpperCase().includes('RETURN'))
-    );
+    const isUpdatedRet = isRet;
+    const isUpdatedInPass = (String(updatedMovement.status || '').toUpperCase().trim() === 'IN' || !updatedMovement.status);
+
+    const passTitle = isUpdatedInPass 
+      ? 'VEHICLE GATE IN PASS' 
+      : (updatedMovement.status === 'OUT' ? 'VEHICLE GATE OUT PASS' : 'VEHICLE GATE PASS');
 
     const html = `
       <div style="font-family: 'Courier New', Courier, monospace; padding: 10px; width: 80mm; font-size: 13px; line-height: 1.4; color: #000; margin: 0 auto;">
         <div style="text-align: center; border-bottom: 2px dashed #000; padding-bottom: 8px; margin-bottom: 8px;">
           <div style="font-size: 18px; font-weight: bold; letter-spacing: 1px;">BVC EXPORTS PVT LTD</div>
-          <div style="font-size: 14px; font-weight: bold; margin-top: 2px;">VEHICLE GATE PASS</div>
+          <div style="font-size: 14px; font-weight: bold; margin-top: 2px;">${passTitle}</div>
           <div>Slip No: ${updatedMovement.id}</div>
         </div>
 
@@ -127,15 +132,17 @@ const VehiclePrint = ({ movementId, onClose }) => {
           <span style="font-weight: bold;">Lot No:</span>
           <span style="font-weight: bold; color: #111;">${updatedMovement.lot_no || '-'}</span>
         </div>
-        ${(updatedMovement.movement_type === 'OUT' || updatedMovement.status === 'OUT' || Boolean(updatedMovement.gate_out_time) || String(updatedMovement.operation_type || '').toUpperCase().includes('OUT')) ? `
+        ${(!isUpdatedInPass && (updatedMovement.analyzing_team || updatedMovement.analyzing_area)) ? `
+        ${updatedMovement.analyzing_team ? `
         <div style="display: flex; justify-content: space-between; margin: 4px 0;">
           <span style="font-weight: bold;">Analyzing Team:</span>
-          <span>${updatedMovement.analyzing_team || '-'}</span>
-        </div>
+          <span>${updatedMovement.analyzing_team}</span>
+        </div>` : ''}
+        ${updatedMovement.analyzing_area ? `
         <div style="display: flex; justify-content: space-between; margin: 4px 0;">
           <span style="font-weight: bold;">Analyzing Area:</span>
-          <span>${updatedMovement.analyzing_area || '-'}</span>
-        </div>
+          <span>${updatedMovement.analyzing_area}</span>
+        </div>` : ''}
         ` : ''}
         <div style="display: flex; justify-content: space-between; margin: 4px 0;">
           <span style="font-weight: bold;">Item Name:</span>
@@ -236,7 +243,7 @@ const VehiclePrint = ({ movementId, onClose }) => {
         {/* 4-INCH THERMAL PRINT LAYOUT */}
         <div className="header">
           <div>BVC EXPORTS PVT LTD</div>
-          <div>GATE SLIP</div>
+          <div>{movement.status === 'IN' ? 'GATE IN PASS' : (movement.status === 'OUT' ? 'GATE OUT PASS' : 'GATE SLIP')}</div>
           <div>Movement ID: {movement.id}</div>
         </div>
 
@@ -267,12 +274,7 @@ const VehiclePrint = ({ movementId, onClose }) => {
             (movement.operation_type && String(movement.operation_type).toUpperCase().includes('RETURN')) ||
             (movement.status_details && String(movement.status_details).toUpperCase().includes('RETURN'))
           );
-          const isOutPassOnly = (
-            movement.movement_type === 'OUT' ||
-            movement.status === 'OUT' ||
-            Boolean(movement.gate_out_time) ||
-            String(movement.operation_type || '').toUpperCase().includes('OUT')
-          );
+          const isNotInPass = String(movement.status || '').toUpperCase().trim() !== 'IN' && movement.status;
           return (
             <>
               <div className="row">
@@ -297,19 +299,23 @@ const VehiclePrint = ({ movementId, onClose }) => {
                 <span className="value" style={{ fontWeight: 'bold' }}>{movement.lot_no || '-'}</span>
               </div>
 
-              {(!isOutPassOnly ? null : (
+              {(isNotInPass && (movement.analyzing_team || movement.analyzing_area)) ? (
                 <>
-                  <div className="row">
-                    <span className="label">Analyzing Team:</span>
-                    <span className="value">{movement.analyzing_team || '-'}</span>
-                  </div>
+                  {movement.analyzing_team ? (
+                    <div className="row">
+                      <span className="label">Analyzing Team:</span>
+                      <span className="value">{movement.analyzing_team}</span>
+                    </div>
+                  ) : null}
 
-                  <div className="row">
-                    <span className="label">Analyzing Area:</span>
-                    <span className="value">{movement.analyzing_area || '-'}</span>
-                  </div>
+                  {movement.analyzing_area ? (
+                    <div className="row">
+                      <span className="label">Analyzing Area:</span>
+                      <span className="value">{movement.analyzing_area}</span>
+                    </div>
+                  ) : null}
                 </>
-              ))}
+              ) : null}
 
               <div className="row">
                 <span className="label">Item:</span>

@@ -39,6 +39,7 @@ import {
   Phone as PhoneIcon
 } from '@mui/icons-material';
 import { Link, useNavigate } from 'react-router-dom';
+import api from '../../services/api.js';
 
 const StockAlertContacts = () => {
   const navigate = useNavigate();
@@ -61,17 +62,7 @@ const StockAlertContacts = () => {
   const fetchContacts = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/stock-alerts/contacts');
-      if (!res.ok) {
-        setLoading(false);
-        return;
-      }
-      const text = await res.text();
-      let json = null;
-      try {
-        json = text ? JSON.parse(text) : null;
-      } catch (parseErr) {}
-
+      const json = await api('/stock-alerts/contacts');
       if (json && json.success) {
         setContacts(json.contacts || []);
       }
@@ -113,9 +104,8 @@ const StockAlertContacts = () => {
   const handleDelete = async (id) => {
     if (!window.confirm('Are you sure you want to delete this alert contact?')) return;
     try {
-      const res = await fetch(`/api/stock-alerts/contacts/${id}`, { method: 'DELETE' });
-      const json = await res.json();
-      if (json.success) {
+      const json = await api(`/stock-alerts/contacts/${id}`, { method: 'DELETE' });
+      if (json && json.success) {
         setMessage({ type: 'success', text: 'Contact deleted successfully' });
         fetchContacts();
       }
@@ -131,22 +121,20 @@ const StockAlertContacts = () => {
     }
 
     try {
-      const url = editId ? `/api/stock-alerts/contacts/${editId}` : '/api/stock-alerts/contacts';
+      const endpoint = editId ? `/stock-alerts/contacts/${editId}` : '/stock-alerts/contacts';
       const method = editId ? 'PUT' : 'POST';
 
-      const res = await fetch(url, {
+      const json = await api(endpoint, {
         method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
+        body: formData
       });
-      const json = await res.json();
 
-      if (json.success) {
+      if (json && json.success) {
         setMessage({ type: 'success', text: 'Contact saved successfully!' });
         setOpenModal(false);
         fetchContacts();
       } else {
-        setMessage({ type: 'error', text: json.message || 'Failed to save contact' });
+        setMessage({ type: 'error', text: json?.message || 'Failed to save contact' });
       }
     } catch (err) {
       console.error('Error saving contact:', err);

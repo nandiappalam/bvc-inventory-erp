@@ -317,13 +317,15 @@ const SalesReturnCreate = () => {
         items: transformedItems
       };
 
-      const response = await fetch('/api/sales-returns', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+      const endpoint = editId ? `/sales-returns/${editId}` : '/sales-returns';
+      const method = editId ? 'PUT' : 'POST';
+
+      const response = await api(endpoint, {
+        method,
+        body: payload
       });
 
-      if (response.ok) {
+      if (response && response.success !== false) {
         setMessage('Sales Return saved successfully!');
         setMessageType('success');
         setFormData({

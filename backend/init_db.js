@@ -4,9 +4,19 @@ const path = require('path')
 const dbPath = path.join(__dirname, '../database/bvc.db')
 let db
 
-async function initializeDatabase(databasePath = dbPath) {
+async function initializeDatabase() {
   console.log('Initializing database schema...\n')
-  db = new sqlite3.Database(databasePath)
+  db = new sqlite3.Database(dbPath)
+  
+  await new Promise((resolve) => {
+    db.serialize(() => {
+      db.run('PRAGMA foreign_keys = ON');
+      db.run('PRAGMA journal_mode = WAL');
+      db.run('PRAGMA synchronous = NORMAL');
+      db.run('PRAGMA busy_timeout = 10000');
+      resolve();
+    });
+  });
 
   // Master tables with their schemas
   const masterTables = [
@@ -1185,14 +1195,12 @@ async function initializeDatabase(databasePath = dbPath) {
   })
 
   console.log('\n✓ Database initialization complete!')
-  if (require.main === module) {
-    await new Promise((resolve) => {
-      db.close((err) => {
-        if (err) console.error('Error closing database:', err.message);
-        resolve();
-      });
+  await new Promise((resolve) => {
+    db.close((err) => {
+      if (err) console.error('Error closing database:', err.message);
+      resolve();
     });
-  }
+  });
 }
 
 if (require.main === module) {

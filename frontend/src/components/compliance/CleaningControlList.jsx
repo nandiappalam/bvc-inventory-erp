@@ -115,8 +115,8 @@ export default function CleaningControlList({ onRefresh }) {
       defaultInspector = 'QA Officer';
       defaultSupervisor = 'QA Manager';
     } else if (code === 'C13') {
-      defaultInspector = 'Mr. Y (Pest Officer)';
-      defaultSupervisor = 'Mr. X (FSTL)';
+      defaultInspector = 'Vasu (Pest Officer)';
+      defaultSupervisor = 'Mr. Sasikumar (FSTL)';
     } else if (code === 'C14') {
       defaultInspector = 'Operator';
       defaultSupervisor = 'Plant Incharge';

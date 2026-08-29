@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import api from '../services/api.js';
 import {
   Box,
   Card,
@@ -94,13 +95,12 @@ const FinancialYearDisplay = () => {
       setLoading(true);
       setError('');
       const companyId = selectedCompany?.id || 1;
-      const response = await fetch(`/api/financial-years/${companyId}`);
-      const data = await response.json();
+      const data = await api(`/financial-years/${companyId}`);
       
-      if (response.ok) {
+      if (data && !data.error) {
         setFinancialYears(Array.isArray(data) ? data : []);
       } else {
-        setError(data.message || 'Failed to fetch financial years');
+        setError(data?.message || 'Failed to fetch financial years');
       }
     } catch (error) {
       setError('Error connecting to server');
@@ -112,20 +112,17 @@ const FinancialYearDisplay = () => {
   const handleSetCurrent = async (id, fyName) => {
     try {
       setError('');
-      const response = await fetch(`/api/financial-years/${id}/set-current`, {
+      const data = await api(`/financial-years/${id}/set-current`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ company_id: selectedCompany?.id || 1 })
+        body: { company_id: selectedCompany?.id || 1 }
       });
-      
-      const data = await response.json();
 
-      if (response.ok) {
+      if (data && data.success !== false) {
         setSuccess(`Financial year ${fyName || ''} set as current successfully!`);
         updateFinancialYear(fyName);
         fetchFinancialYears();
       } else {
-        setError(data.message || 'Failed to set as current financial year.');
+        setError(data?.message || 'Failed to set as current financial year.');
       }
     } catch (err) {
       setError('Error connecting to server.');
@@ -137,19 +134,16 @@ const FinancialYearDisplay = () => {
 
     try {
       setError('');
-      const response = await fetch(`/api/financial-years/${id}/close`, {
+      const data = await api(`/financial-years/${id}/close`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ closed_by: user?.username || 'admin' })
+        body: { closed_by: user?.username || 'admin' }
       });
 
-      const data = await response.json();
-
-      if (response.ok) {
+      if (data && data.success !== false) {
         setSuccess(`Financial year ${fyName} closed successfully!`);
         fetchFinancialYears();
       } else {
-        setError(data.message || 'Failed to close financial year.');
+        setError(data?.message || 'Failed to close financial year.');
       }
     } catch (err) {
       setError('Error connecting to server.');
@@ -161,17 +155,15 @@ const FinancialYearDisplay = () => {
 
     try {
       setError('');
-      const response = await fetch(`/api/financial-years/${id}`, {
+      const data = await api(`/financial-years/${id}`, {
         method: 'DELETE'
       });
 
-      const data = await response.json();
-
-      if (response.ok) {
+      if (data && data.success !== false) {
         setSuccess(`Financial year ${fyName} deleted successfully!`);
         fetchFinancialYears();
       } else {
-        setError(data.message || 'Cannot delete financial year.');
+        setError(data?.message || 'Cannot delete financial year.');
       }
     } catch (err) {
       setError('Error connecting to server.');

@@ -124,17 +124,39 @@ async function initComplianceTables() {
       }
     }
 
-    // Seed default sample documents if table is empty
-    const docCountRes = await db.query('SELECT COUNT(*) as count FROM compliance_documents');
-    if (docCountRes.rows && docCountRes.rows[0].count === 0) {
-      await seedDefaultComplianceData();
-    }
+    // Clean up sample and seed documents/records if any exist
+    await cleanupSeedComplianceData();
   } catch (err) {
     console.error('Error initializing compliance tables:', err);
   }
 }
 
+async function cleanupSeedComplianceData() {
+  try {
+    await db.run(`
+      DELETE FROM compliance_documents 
+      WHERE doc_number IN ('WI-GRD-001', 'HACCP-BVC-001', 'MTR-URD-2026', 'TRN-2026-004', 'SOP-SAN-003', 'RCCA-2026-002', 'MED-2026-012', 'FOSTAC-FSSAI-88912', 'REC-MOCK-2026-01', 'HALAL-DEC-2026', 'PFC-MFG-001')
+         OR prepared_by IN ('Quality Supervisor', 'HACCP Lead', 'QA Executive', 'HR & QA Trainer', 'Plant Sanitation Lead', 'Lead Investigator', 'Authorized Medical Officer', 'FSSAI Lead Auditor', 'Recall Committee Head', 'Quality Manager', 'Process Engineer')
+    `);
+
+    await db.run(`
+      DELETE FROM compliance_production_records 
+      WHERE record_no IN ('P1-2026-001', 'P2-2026-001', 'P2-2026-002', 'P4-2026-018')
+         OR supplier_name IN ('Sri Amman Traders', 'Royal Foods Exporters', 'PolyPack Industries')
+         OR lot_no IN ('LOT0003', 'LOT0016', 'LOT0007', 'LOT0014')
+    `);
+
+    await db.run(`
+      DELETE FROM compliance_cleaning_records 
+      WHERE record_no IN ('C1-2026-0816', 'C2-2026-0801', 'C3-2026-0816', 'C4-2026-0815', 'C5-2026-0816', 'C6-2026-0816', 'C7-2026-0805', 'C8-2026-0814', 'C9-2026-0816', 'C10-2026-0801')
+    `);
+  } catch (err) {
+    console.error('Error cleaning up seed compliance data:', err.message);
+  }
+}
+
 async function seedDefaultComplianceData() {
+  return;
   console.log('Seeding initial quality & compliance documents & records...');
   
   // D1: Work Instruction
@@ -1156,7 +1178,19 @@ async function syncAllProductionRecords() {
         ]);
       }
 
-      // P4: CCP Monitoring Records
+      // P4: CCP & OPRP Monitoring Records
+      const ccpRowsRes = await db.query(`SELECT * FROM grind_ccp_monitoring WHERE grind_id = ?`, [g.id]);
+      const ccps = ccpRowsRes.rows || [];
+      const oprpRowsRes = await db.query(`SELECT * FROM grind_oprp_monitoring WHERE grind_id = ?`, [g.id]);
+      const oprps = oprpRowsRes.rows || [];
+
+      const primaryCcp = ccps.length > 0 ? ccps[0] : null;
+      const ccpCategory = primaryCcp?.ccp_category || 'Sortex Machine & Magnet at end level';
+      const criticalLimit = primaryCcp?.critical_limit ? `${primaryCcp.critical_limit} ${primaryCcp.unit || ''}` : '0.50g / 500g';
+      const observedReading = primaryCcp?.actual_reading !== undefined && primaryCcp?.actual_reading !== null ? `${primaryCcp.actual_reading} ${primaryCcp.unit || ''}` : 'Compliant';
+      const ccpStatus = primaryCcp?.status ? primaryCcp.status.toUpperCase() : 'COMPLIANT';
+      const ccpCheckedBy = primaryCcp?.checked_by || 'HACCP CCP Monitor';
+
       const p4RecNo = `P4-${(g.date || '2026-08-04').substring(0, 4)}-${String(g.id).padStart(3, '0')}`;
       const p4Findings = {
         grind_no: grindNo,
@@ -1164,17 +1198,14 @@ async function syncAllProductionRecords() {
         milling_date: g.date || '2026-08-04',
         input_item: g.input_item,
         input_lot: g.input_lot,
-        ccp1_name: 'CCP-1: Rare Earth Magnet & Destoner Gravity Unit',
-        ccp1_critical_limit: 'Magnet Strength ≥ 10,000 Gauss, Destoner stone pass: 0%',
-        ccp1_observed_magnet: '10,200 Gauss (Calibrated)',
-        ccp1_observed_destoner: 'Zero stones passed / Cleaned trap',
-        ccp1_status: 'COMPLIANT',
-        ccp2_name: 'CCP-2: Flour Sifter Stainless Screen Integrity',
-        ccp2_critical_limit: 'Screen mesh 60 intact, no perforations/foreign debris',
-        ccp2_observed_sieve: 'Intact & Cleaned at start & end of batch',
-        ccp2_status: 'COMPLIANT',
-        monitoring_frequency: '2-Hourly Continuous Check',
-        corrective_action: 'None Required (All CCPs within critical limits)'
+        ccp1_name: ccpCategory,
+        ccp1_critical_limit: criticalLimit,
+        ccp1_observed_magnet: observedReading,
+        ccp1_status: ccpStatus,
+        ccp_records: ccps,
+        oprp_records: oprps,
+        monitoring_frequency: 'Daily / 2-Hourly Continuous Check',
+        corrective_action: primaryCcp?.corrective_action || 'None Required (Within critical limits)'
       };
 
       const p4Exist = await db.query(`SELECT id FROM compliance_production_records WHERE record_code = 'P4' AND (record_no = ? OR findings_json LIKE ?)`, [p4RecNo, `%"grind_no":"${grindNo}"%`]);
@@ -1185,17 +1216,17 @@ async function syncAllProductionRecords() {
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
           'P4', 'CCP_MONITORING', p4RecNo, g.date || '2026-08-04', 'Daily / 2-Hourly',
-          g.input_item, g.input_lot, 'Destoner, Magnet & Sifter', 'COMPLETED', 'HACCP CCP Monitor',
-          JSON.stringify(p4Findings), `CCP-1 (10,200 Gauss Magnet) and CCP-2 (Sifter Mesh 60) monitored and 100% compliant during ${grindNo}.`
+          g.input_item, g.input_lot, 'Destoner, Magnet & Sifter', 'COMPLETED', ccpCheckedBy,
+          JSON.stringify(p4Findings), `CCP & OPRP monitored and ${ccpStatus} during ${grindNo}.`
         ]);
       } else {
         await db.run(`
           UPDATE compliance_production_records
-          SET record_date = ?, item_name = ?, lot_no = ?, stage_name = ?, findings_json = ?, remarks = ?
+          SET record_date = ?, item_name = ?, lot_no = ?, stage_name = ?, checked_by = ?, findings_json = ?, remarks = ?
           WHERE id = ?
         `, [
-          g.date || '2026-08-04', g.input_item, g.input_lot, 'Destoner, Magnet & Sifter',
-          JSON.stringify(p4Findings), `CCP-1 (10,200 Gauss Magnet) and CCP-2 (Sifter Mesh 60) monitored and 100% compliant during ${grindNo}.`,
+          g.date || '2026-08-04', g.input_item, g.input_lot, 'Destoner, Magnet & Sifter', ccpCheckedBy,
+          JSON.stringify(p4Findings), `CCP & OPRP monitored and ${ccpStatus} during ${grindNo}.`,
           p4Exist.rows[0].id
         ]);
       }
@@ -1378,9 +1409,6 @@ async function syncAllProductionRecords() {
     console.error('Error in syncAllProductionRecords:', err);
   }
 }
-
-// Automatically sync on initial load
-syncAllProductionRecords();
 
 router.get('/production-records', async (req, res) => {
   try {
@@ -1777,8 +1805,8 @@ router.get('/master-entities', async (req, res) => {
         { id: 1, employee_name: 'Murugan K', department: 'Production', designation: 'Machine Operator' },
         { id: 2, employee_name: 'Suresh P', department: 'Production', designation: 'Cleaner / Operator' },
         { id: 3, employee_name: 'Anand R', department: 'Production', designation: 'Polishing Line Incharge' },
-        { id: 4, employee_name: 'Mr. Y', department: 'Sanitation', designation: 'Pest Officer' },
-        { id: 5, employee_name: 'Mr. X', department: 'Quality', designation: 'FSTL / QA Head' },
+        { id: 4, employee_name: 'Vasu', department: 'Sanitation', designation: 'Pest Officer' },
+        { id: 5, employee_name: 'Mr. Sasikumar', department: 'Quality', designation: 'FSTL / QA Head' },
         { id: 6, employee_name: 'Karthik V', department: 'Maintenance', designation: 'Plant Incharge' },
         { id: 7, employee_name: 'Ramu S', department: 'Housekeeping', designation: 'House Keeper' },
         { id: 8, employee_name: 'Ganesan P', department: 'HR', designation: 'HR MANAGER' },
@@ -2617,5 +2645,6 @@ router.get('/pending', async (req, res) => {
   }
 });
 
+router.syncAllProductionRecords = syncAllProductionRecords;
 module.exports = router;
 

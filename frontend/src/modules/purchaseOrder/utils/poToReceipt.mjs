@@ -6,6 +6,7 @@ export const buildReceiptDraftFromPurchaseOrder = (order = {}) => {
     formData: {
       supplier_id: order.supplierId || order.supplier_id || order.supplier || '',
       supplier_details: order.address || order.supplierAddress || '',
+      address: order.address || order.supplierAddress || '',
       date: order.date || new Date().toISOString().split('T')[0],
       inv_date: order.inv_date || order.invDate || '',
       pay_type: order.pay_type || order.payType || 'Cash',
@@ -28,8 +29,9 @@ export const buildReceiptDraftFromPurchaseOrder = (order = {}) => {
       const tax = Number(item.tax_percent ?? order.tax_percent ?? order.tax_rate ?? 5);
       const baseAmt = qty * rate;
       const discAmt = baseAmt * (disc / 100);
-      const taxAmt = ((baseAmt - discAmt) * tax) / 100;
-      const finalAmt = Number(item.amount) || (baseAmt + taxAmt);
+      const taxable = baseAmt - discAmt;
+      const taxAmt = (taxable * tax) / 100;
+      const finalAmt = Number(item.amount) || (taxable + taxAmt);
 
       return {
         item_id: item.item_id || item.itemId || item.item_name || item.itemName || '',
@@ -42,9 +44,13 @@ export const buildReceiptDraftFromPurchaseOrder = (order = {}) => {
         weight_id: item.weight_id || '',
         per_unit_wt: weight,
         per_unit_weight: weight,
+        tot_wt: totWt,
         total_wt: totWt,
         total_weight: totWt,
-        amount: finalAmt,
+        base_amount: baseAmt,
+        disc_amount: discAmt,
+        tax_amount: taxAmt,
+        amount: finalAmt.toFixed(2),
         disc: disc,
         disc_percent: disc,
         tax_rate: tax,
@@ -53,5 +59,17 @@ export const buildReceiptDraftFromPurchaseOrder = (order = {}) => {
         lot_status: 'reserved'
       };
     }),
+    selectedDeductions: (order.deductions || []).map(d => ({
+      id: d.deduction_id || d.id || '',
+      deduction_id: d.deduction_id || d.id || '',
+      name: d.deduction || d.deduction_name || d.name || '',
+      deduction: d.deduction || d.deduction_name || d.name || '',
+      amount: parseFloat(d.amount) || 0,
+      type: (d.type || 'LESS').toUpperCase(),
+      calculation_type: d.calculation_type || 'Percentage',
+      percentage: parseFloat(d.percent || d.percentage || d.value || 0),
+      percent: parseFloat(d.percent || d.percentage || d.value || 0),
+      remarks: d.remarks || ''
+    }))
   };
 };

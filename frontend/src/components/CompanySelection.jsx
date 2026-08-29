@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { printHtml } from '../utils/printHelper';
 import api from '../services/api.js';
 import { Box, Card, CardContent, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, IconButton, CircularProgress, Alert } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
@@ -53,7 +52,9 @@ const CompanySelection = () => {
     }
   };
   const handlePrint = (company) => {
-    printHtml(`<h1>${company.name}</h1><table><tr><th>Address</th><td>${company.address || 'N/A'}</td></tr><tr><th>GST Number</th><td>${company.gst_number || 'N/A'}</td></tr><tr><th>Contact</th><td>${company.contact || 'N/A'}</td></tr><tr><th>Email</th><td>${company.email || 'N/A'}</td></tr></table>`, `Company Details - ${company.name}`);
+    const printWindow = window.open('', '_blank', 'width=600,height=400');
+    printWindow.document.write(`<html><head><title>Company Details - ${company.name}</title><style>body{font-family:Arial,sans-serif;padding:20px}h1{color:#1f4fb2}table{width:100%;border-collapse:collapse}td{padding:8px;border-bottom:1px solid #ddd}.label{font-weight:bold;width:120px}</style></head><body><h1>${company.name}</h1><table><tr><td class="label">Address:</td><td>${company.address||'N/A'}</td></tr><tr><td class="label">GST Number:</td><td>${company.gst_number||'N/A'}</td></tr><tr><td class="label">Contact:</td><td>${company.contact||'N/A'}</td></tr><tr><td class="label">Email:</td><td>${company.email||'N/A'}</td></tr></table><script>window.print();</script></body></html>`);
+    printWindow.document.close();
   };
 
   if (loading) { return (<Box sx={{display:'flex',justifyContent:'center',alignItems:'center',minHeight:'100vh',background:`linear-gradient(135deg,${themeColors.primary}0%,${themeColors.secondary}100%)`}}><CircularProgress sx={{color:themeColors.white}}/></Box>); }

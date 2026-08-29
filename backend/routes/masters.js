@@ -90,7 +90,12 @@ const normalizeMasterData = async (tableName, rawData) => {
 // NOTE: Fixed hasStatus to correctly reflect which tables actually have status column
 const masterTypeAliases = {
   // Type aliases (frontend-friendly names) -> { table, displayField, hasStatus }
+  item: { table: 'item_master', displayField: 'item_name', hasStatus: true },
   items: { table: 'item_master', displayField: 'item_name', hasStatus: true },
+  item_master: { table: 'item_master', displayField: 'item_name', hasStatus: true },
+  items_master: { table: 'item_master', displayField: 'item_name', hasStatus: true },
+  group: { table: 'item_groups', displayField: 'group_name', hasStatus: false },
+  groups: { table: 'item_groups', displayField: 'group_name', hasStatus: false },
   item_group: { table: 'item_groups', displayField: 'group_name', hasStatus: false },
   item_groups: { table: 'item_groups', displayField: 'group_name', hasStatus: false },
   deduction_sale: { table: 'deduction_sales', displayField: 'ded_name', hasStatus: false },

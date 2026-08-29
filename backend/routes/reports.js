@@ -3828,7 +3828,7 @@ const categoryReportHandler = async (req, res) => {
             COALESCE(r.record_date, p.date) as date,
             COALESCE(r.record_no, 'IQR-' || p.id) as iqr_no,
             COALESCE(r.lot_no, pi.lot_no, 'RM-LOT') as lot_no,
-            COALESCE(r.supplier_name, s.name, p.supplier, 'Supplier') as supplier_name,
+            COALESCE(s.name, s.print_name, r.supplier_name, p.supplier, 'Supplier') as supplier_name,
             COALESCE(r.item_name, pi.item_name, 'Raw Material') as item_name,
             COALESCE(pi.qty, p.total_qty, 0) as inward_bags,
             COALESCE(pi.total_weight, p.total_weight, (pi.qty * COALESCE(pi.per_unit_weight, 50)), 0) as total_weight,
@@ -3839,7 +3839,7 @@ const categoryReportHandler = async (req, res) => {
             COALESCE(r.checked_by, 'QA QC Officer') as checked_by
           FROM purchases p
           JOIN purchase_items pi ON p.id = pi.purchase_id
-          LEFT JOIN supplier_master s ON (s.id = CAST(p.supplier AS INTEGER) OR p.supplier = s.name OR p.supplier = s.print_name)
+          LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(p.supplier AS TEXT) OR p.supplier = s.name OR p.supplier = s.print_name)
           LEFT JOIN compliance_production_records r ON (r.record_code = 'P1' AND (r.lot_no = pi.lot_no OR r.purchase_id = p.id))
           ORDER BY p.date DESC, p.id DESC
         `;
@@ -3865,7 +3865,7 @@ const categoryReportHandler = async (req, res) => {
           FROM grains g
           LEFT JOIN grain_input_items gi ON g.id = gi.grain_id
           LEFT JOIN grain_output_items go ON g.id = go.grain_id
-          LEFT JOIN flour_mill_master fm ON (fm.id = CAST(g.flour_mill AS INTEGER) OR g.flour_mill = fm.flourmill)
+          LEFT JOIN flour_mill_master fm ON (CAST(fm.id AS TEXT) = CAST(g.flour_mill AS TEXT) OR g.flour_mill = fm.flourmill)
           ORDER BY g.date DESC, g.id DESC
         `;
         const result = await db.query(sql);
@@ -3887,6 +3887,84 @@ const categoryReportHandler = async (req, res) => {
             'QA Lead Officer' as certified_by
           FROM grains g
           JOIN grain_output_items go ON g.id = go.grain_id
+          ORDER BY g.date DESC, g.id DESC
+        `;
+        const result = await db.query(sql);
+        rows = result.rows || [];
+      } else if (sub_type === 'ccp') {
+        const sql = `
+          SELECT 
+            COALESCE(g.date, c.created_at) as date,
+            COALESCE(c.voucher_number, 'GRD-' || PRINTF('%04d', COALESCE(g.s_no, g.id))) as voucher_no,
+            COALESCE(gi.item_name, 'Bengal Gram Split') as item_name,
+            COALESCE(c.lot_number, gi.lot_no, 'LOT-RM') as lot_number,
+            COALESCE(c.ccp_category, 'Sortex machine at end level') as location,
+            COALESCE(c.critical_limit, '0.50g / 500g') as critical_limit,
+            COALESCE(c.actual_reading || ' ' || COALESCE(c.unit, ''), 'Compliance') as actual_reading,
+            COALESCE(c.status, 'PASS') as status,
+            COALESCE(c.checked_by, 'J.V.N.') as checked_by,
+            COALESCE(c.corrective_action, '-') as corrective_action
+          FROM grind_ccp_monitoring c
+          LEFT JOIN grains g ON c.grind_id = g.id
+          LEFT JOIN grain_input_items gi ON g.id = gi.grain_id
+          ORDER BY c.id DESC
+        `;
+        const result = await db.query(sql);
+        rows = result.rows || [];
+      } else if (sub_type === 'oprp') {
+        const sql = `
+          SELECT 
+            COALESCE(o.date, g.date) as date,
+            COALESCE(o.voucher_number, 'GRD-' || PRINTF('%04d', COALESCE(g.s_no, g.id))) as voucher_no,
+            COALESCE(o.material, gi.item_name, 'Raw Material') as material,
+            COALESCE(o.rm_fg, 'RM') as rm_fg,
+            COALESCE(o.lot_number, gi.lot_no, 'LOT-RM') as lot_number,
+            COALESCE(o.quantity, gi.qty, 0) as quantity,
+            o.alp as alp,
+            o.g as g,
+            COALESCE(o.alp_gram, 0) as alp_gram,
+            COALESCE(o.checked_by, 'J.V.N.') as checked_by,
+            COALESCE(o.remarks, 'Compliant') as remarks
+          FROM grind_oprp_monitoring o
+          LEFT JOIN grains g ON o.grind_id = g.id
+          LEFT JOIN grain_input_items gi ON g.id = gi.grain_id
+          ORDER BY o.id DESC
+        `;
+        const result = await db.query(sql);
+        rows = result.rows || [];
+      } else if (sub_type === 'wastage') {
+        const sql = `
+          SELECT 
+            g.date,
+            'GRD-' || PRINTF('%04d', COALESCE(g.s_no, g.id)) as voucher_no,
+            gw.item_name as wastage_item,
+            gw.lot_no as wastage_lot,
+            gw.category as category,
+            gw.qty as bags,
+            gw.weight as per_bag_weight,
+            gw.total_wt as total_weight_kg,
+            'Logged' as status
+          FROM grain_wastage_items gw
+          JOIN grains g ON gw.grain_id = g.id
+          ORDER BY g.date DESC, gw.id DESC
+        `;
+        const result = await db.query(sql);
+        rows = result.rows || [];
+      } else if (sub_type === 'yield') {
+        const sql = `
+          SELECT 
+            g.date,
+            'GRD-' || PRINTF('%04d', COALESCE(g.s_no, g.id)) as voucher_no,
+            COALESCE(gi.item_name, 'Input RM') as input_item,
+            COALESCE(gi.total_wt, (gi.qty * 50), 0) as input_kg,
+            COALESCE(go.item_name, 'Output Flour') as output_item,
+            COALESCE(go.total_wt, (go.qty * 30), 0) as output_kg,
+            COALESCE(gw.total_wt, 0) as wastage_kg,
+            CASE WHEN COALESCE(gi.total_wt, 0) > 0 THEN ROUND((COALESCE(go.total_wt, 0) / gi.total_wt) * 100, 2) || '%' ELSE '100%' END as yield_percentage
+          FROM grains g
+          LEFT JOIN grain_input_items gi ON g.id = gi.grain_id
+          LEFT JOIN grain_output_items go ON g.id = go.grain_id
+          LEFT JOIN (SELECT grain_id, SUM(total_wt) as total_wt FROM grain_wastage_items GROUP BY grain_id) gw ON g.id = gw.grain_id
           ORDER BY g.date DESC, g.id DESC
         `;
         const result = await db.query(sql);

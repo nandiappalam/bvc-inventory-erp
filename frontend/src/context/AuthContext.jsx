@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api';
-import api from '../services/api.js';
 
 // Check if running in Tauri environment (Tauri v1 uses window.__TAURI__)
 const isRunningInTauri = () => {
@@ -123,20 +122,6 @@ const [financialYear, setFinancialYear] = useState('2024-2025');
 
   // Check for stored session on mount
   useEffect(() => {
-    const handleUnauthorized = () => {
-      setUser(null);
-      setCompany(null);
-      setSelectedCompany(null);
-      setPermissions([]);
-      setIsAdmin(false);
-      setLoginHistoryId(null);
-    };
-
-    window.addEventListener('erp:unauthorized', handleUnauthorized);
-    return () => window.removeEventListener('erp:unauthorized', handleUnauthorized);
-  }, []);
-
-  useEffect(() => {
     const storedUser = localStorage.getItem('erp_user');
     const storedCompany = localStorage.getItem('erp_company');
     const storedSelectedCompany = localStorage.getItem('erp_selected_company');
@@ -145,8 +130,7 @@ const [financialYear, setFinancialYear] = useState('2024-2025');
     const storedLoginHistoryId = localStorage.getItem('erp_login_history_id');
     const storedFinancialYear = localStorage.getItem('erp_financial_year');
 
-    const storedToken = localStorage.getItem('erp_token');
-    if (storedUser && storedSelectedCompany && (isRunningInTauri() || storedToken)) {
+    if (storedUser && storedSelectedCompany) {
       setUser(JSON.parse(storedUser));
       setCompany(JSON.parse(storedCompany));
       setSelectedCompany(JSON.parse(storedSelectedCompany));
@@ -158,14 +142,6 @@ const [financialYear, setFinancialYear] = useState('2024-2025');
       if (storedFinancialYear) {
         setFinancialYear(storedFinancialYear);
       }
-    } else if (storedUser || storedSelectedCompany) {
-      localStorage.removeItem('erp_user');
-      localStorage.removeItem('erp_company');
-      localStorage.removeItem('erp_selected_company');
-      localStorage.removeItem('erp_permissions');
-      localStorage.removeItem('erp_isAdmin');
-      localStorage.removeItem('erp_login_history_id');
-      localStorage.removeItem('erp_financial_year');
     }
     setLoading(false);
   }, []);
@@ -174,15 +150,20 @@ const [financialYear, setFinancialYear] = useState('2024-2025');
   useEffect(() => {
     let isMounted = true;
     const fetchCurrentFY = async () => {
-      if (!user || !selectedCompany || (!isRunningInTauri() && !localStorage.getItem('erp_token'))) {
-        return;
-      }
       const companyId = selectedCompany?.id || 1;
       try {
-        const data = await api('/financial-years/current', { params: { company_id: companyId } });
-        if (isMounted && data && data.financial_year) {
-          setFinancialYear(data.financial_year);
-          localStorage.setItem('erp_financial_year', data.financial_year);
+        const token = localStorage.getItem('erp_token');
+        const headers = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        if (companyId) headers['X-Company-Id'] = String(companyId);
+
+        const response = await fetch(`/api/financial-years/current?company_id=${companyId}`, { headers });
+        if (response.ok) {
+          const data = await response.json();
+          if (isMounted && data && data.financial_year) {
+            setFinancialYear(data.financial_year);
+            localStorage.setItem('erp_financial_year', data.financial_year);
+          }
         }
       } catch (err) {
         // Fallback silently if server is starting or endpoint unavailable
@@ -190,7 +171,7 @@ const [financialYear, setFinancialYear] = useState('2024-2025');
     };
     fetchCurrentFY();
     return () => { isMounted = false; };
-  }, [user, selectedCompany?.id]);
+  }, [selectedCompany?.id]);
 
   // Login function
   const login = async (loginData) => {
@@ -207,7 +188,6 @@ const [financialYear, setFinancialYear] = useState('2024-2025');
         username: loginData.username,
         role: loginData.role,
       };
-      if (loginData.token) userData.token = loginData.token;
       
       const companyData = loginData.company || {
         id: loginData.company_id,
@@ -223,7 +203,9 @@ const [financialYear, setFinancialYear] = useState('2024-2025');
       setLoginHistoryId(loginData.login_history_id);
 
       // Store in localStorage for persistence
-      if (loginData.token) localStorage.setItem('erp_token', loginData.token);
+      if (loginData.token) {
+        localStorage.setItem('erp_token', loginData.token);
+      }
       localStorage.setItem('erp_user', JSON.stringify(userData));
       localStorage.setItem('erp_company', JSON.stringify(companyData));
       localStorage.setItem('erp_selected_company', JSON.stringify(companyData));
@@ -241,18 +223,16 @@ const [financialYear, setFinancialYear] = useState('2024-2025');
   // Logout function
   const logout = async () => {
     try {
+      const token = localStorage.getItem('erp_token');
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       if (loginHistoryId) {
-        // Try Tauri invoke first, fall back to fetch for dev mode
-        const runningInTauri = isRunningInTauri();
-        if (runningInTauri) {
-          try {
-            await invoke('logout', { login_history_id: loginHistoryId });
-          } catch (e) {
-            console.warn('Tauri logout failed:', e);
-          }
-        } else {
-          await api('/auth/logout', { method: 'POST', body: { login_history_id: loginHistoryId } });
-        }
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ login_history_id: loginHistoryId })
+        }).catch(() => {});
       }
     } catch (error) {
       console.error('Logout error:', error);

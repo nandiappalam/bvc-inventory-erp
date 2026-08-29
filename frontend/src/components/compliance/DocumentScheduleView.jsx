@@ -28,6 +28,7 @@ import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import EventAvailableIcon from '@mui/icons-material/EventAvailable';
 import PlayCircleFilledWhiteIcon from '@mui/icons-material/PlayCircleFilledWhite';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import api from '../../services/api.js';
 
 export default function DocumentScheduleView({ onNavigateTab }) {
   const [data, setData] = useState([]);
@@ -39,13 +40,12 @@ export default function DocumentScheduleView({ onNavigateTab }) {
   const fetchSchedule = async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/compliance/dashboard');
-      const json = await res.json();
-      if (json.success) {
+      const json = await api('/compliance/dashboard');
+      if (json && json.success) {
         setData(json.schedulerTasks || []);
         setError(null);
       } else {
-        setError(json.error || 'Failed to fetch schedule');
+        setError(json?.error || json?.message || 'Failed to fetch schedule');
       }
     } catch (err) {
       console.error('Error loading schedule:', err);

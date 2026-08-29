@@ -600,8 +600,12 @@ const CategoryReportPage = () => {
         api('/masters/all/godowns'),
         api('/masters/item')
       ]);
-      setGodownsList(Array.isArray(gData) ? gData : (gData?.data || []));
-      setItemsList(Array.isArray(iData) ? iData : (iData?.data || []));
+      if (Array.isArray(gData)) {
+        setGodownsList(gData);
+      }
+      if (Array.isArray(iData)) {
+        setItemsList(iData);
+      }
     } catch (e) {
       console.log('Error fetching masters:', e);
     }
@@ -707,12 +711,12 @@ const CategoryReportPage = () => {
       });
 
       // Try category endpoint or direct categoryKey route
-      let data = await api(`/reports/category/${categoryKey}?${qParams.toString()}`);
-      if (!data || data.success === false) {
-        data = await api(`/reports/${categoryKey}?${qParams.toString()}`);
+      let data = await api(`/reports/category/${categoryKey}?${qParams.toString()}`).catch(() => null);
+      if (!data) {
+        data = await api(`/reports/${categoryKey}?${qParams.toString()}`).catch(() => null);
       }
 
-      if (data && data.success !== false) {
+      if (data) {
         const fetched = Array.isArray(data) ? data : (data.rows || []);
         setRows(fetched);
       } else {

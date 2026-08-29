@@ -40,25 +40,30 @@ router.get('/pending', asyncHandler(async (req, res) => {
       sl.quantity as received_qty,
       sl.rate,
       sl.qc_status,
-      sl.unloading_status,
-      p.id as purchase_id,
-      p.s_no as receipt_no,
+      COALESCE(sl.unloading_status, 'PENDING_DECISION') as unloading_status,
+      COALESCE(p.id, pi.purchase_id, sl.purchase_id) as purchase_id,
+      COALESCE(p.s_no, p.id, pi.purchase_id, sl.purchase_id) as receipt_no,
       p.date as receipt_date,
       p.inv_date as invoice_date,
-      sm.name as supplier_name,
-      pi.per_unit_weight as unit_weight,
-      pi.total_weight
+      COALESCE(sm.print_name, sm.name, p.supplier, '') as supplier_name,
+      COALESCE(pi.per_unit_weight, 50) as unit_weight,
+      COALESCE(pi.total_weight, (sl.quantity * COALESCE(pi.per_unit_weight, 50))) as total_weight
     FROM stock_lots sl
-    INNER JOIN purchases p ON sl.purchase_id = p.id
-    LEFT JOIN supplier_master sm ON p.supplier = sm.id
-    LEFT JOIN purchase_items pi ON (sl.purchase_id = pi.purchase_id AND sl.lot_no = pi.lot_no)
+    LEFT JOIN purchase_items pi ON sl.lot_no = pi.lot_no
+    LEFT JOIN purchases p ON (
+      p.id = pi.purchase_id 
+      OR CAST(p.id AS TEXT) = CAST(sl.purchase_id AS TEXT) 
+      OR ('PUR-' || p.id) = CAST(sl.purchase_id AS TEXT) 
+      OR ('PUR-' || p.s_no) = CAST(sl.purchase_id AS TEXT)
+    )
+    LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = p.supplier OR sm.print_name = p.supplier)
   `;
 
   if (!showAll) {
-    queryStr += ` WHERE sl.qc_status = 'QC_PENDING' OR sl.qc_status IS NULL OR sl.qc_status = '' `;
+    queryStr += ` WHERE (sl.qc_status = 'QC_PENDING' OR sl.qc_status IS NULL OR sl.qc_status = '') AND sl.lot_no NOT IN (SELECT rm_lot_no FROM qc_inspections) `;
   }
 
-  queryStr += ` ORDER BY p.date DESC `;
+  queryStr += ` GROUP BY sl.lot_no ORDER BY COALESCE(p.date, sl.created_at) DESC `;
 
   const pendingLots = await db.query(queryStr);
   res.json({ success: true, data: pendingLots.rows });
@@ -71,20 +76,28 @@ router.get(['/history', '/purchase-lab-testing'], asyncHandler(async (req, res) 
       qi.id,
       qi.id as qcId,
       qi.qc_no,
-      qi.purchase_id as purchaseId,
+      COALESCE(p.id, qi.purchase_id) as purchaseId,
       qi.rm_lot_no as lotNo,
       qi.inspection_date as inspectionDate,
       qi.inspector as analyst,
       qi.overall_result as overallResult,
       qi.remarks,
-      sl.item_name as item,
-      sl.quantity as quantity,
+      COALESCE(sl.item_name, pi.item_name, '') as item,
+      COALESCE(sl.quantity, pi.qty, 0) as quantity,
       p.date as receiptDate,
-      sm.name as supplier
+      COALESCE(sm.print_name, sm.name, p.supplier, '') as supplier
     FROM qc_inspections qi
     LEFT JOIN stock_lots sl ON qi.rm_lot_no = sl.lot_no
-    LEFT JOIN purchases p ON qi.purchase_id = p.id
-    LEFT JOIN supplier_master sm ON p.supplier = sm.id
+    LEFT JOIN purchase_items pi ON qi.rm_lot_no = pi.lot_no
+    LEFT JOIN purchases p ON (
+      p.id = pi.purchase_id 
+      OR CAST(p.id AS TEXT) = CAST(qi.purchase_id AS TEXT) 
+      OR ('PUR-' || p.id) = CAST(qi.purchase_id AS TEXT) 
+      OR ('PUR-' || p.s_no) = CAST(qi.purchase_id AS TEXT)
+      OR CAST(p.id AS TEXT) = CAST(sl.purchase_id AS TEXT)
+    )
+    LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = p.supplier OR sm.print_name = p.supplier)
+    GROUP BY qi.id
     ORDER BY qi.inspection_date DESC, qi.id DESC
   `);
   res.json({ success: true, data: history.rows });
@@ -104,25 +117,32 @@ router.get('/registers', asyncHandler(async (req, res) => {
     SELECT 
       qi.id,
       qi.qc_no,
-      qi.purchase_id,
+      COALESCE(p.id, qi.purchase_id) as purchase_id,
       p.inv_no as invoice_no,
-      p.s_no as receipt_no,
+      COALESCE(p.s_no, p.id, qi.purchase_id) as receipt_no,
       qi.rm_lot_no,
       qi.inspection_date,
       qi.overall_result,
-      sl.item_name,
-      sl.quantity,
-      sl.unloading_status,
+      COALESCE(sl.item_name, pi.item_name, '') as item_name,
+      COALESCE(sl.quantity, pi.qty, 0) as quantity,
+      COALESCE(sl.unloading_status, 'PENDING_DECISION') as unloading_status,
       sl.godown_id,
       g.godown_name,
-      sm.name as supplier_name
+      COALESCE(sm.print_name, sm.name, p.supplier, '') as supplier_name
     FROM qc_inspections qi
-    INNER JOIN stock_lots sl ON qi.rm_lot_no = sl.lot_no
-    INNER JOIN purchase_items pi ON sl.lot_no = pi.lot_no
-    INNER JOIN purchases p ON (pi.purchase_id = p.id AND sl.purchase_id = p.id)
-    LEFT JOIN supplier_master sm ON p.supplier = sm.id
+    LEFT JOIN stock_lots sl ON qi.rm_lot_no = sl.lot_no
+    LEFT JOIN purchase_items pi ON qi.rm_lot_no = pi.lot_no
+    LEFT JOIN purchases p ON (
+      p.id = pi.purchase_id 
+      OR CAST(p.id AS TEXT) = CAST(qi.purchase_id AS TEXT) 
+      OR ('PUR-' || p.id) = CAST(qi.purchase_id AS TEXT) 
+      OR ('PUR-' || p.s_no) = CAST(qi.purchase_id AS TEXT)
+      OR CAST(p.id AS TEXT) = CAST(sl.purchase_id AS TEXT)
+    )
+    LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = p.supplier OR sm.print_name = p.supplier)
     LEFT JOIN godown_master g ON sl.godown_id = g.id
     GROUP BY qi.id
+    ORDER BY qi.inspection_date DESC, qi.id DESC
   `);
 
   for (let row of qcList.rows) {
@@ -171,15 +191,23 @@ router.get('/registers', asyncHandler(async (req, res) => {
       iqr.uploaded_date,
       iqr.remarks,
       qi.overall_result,
-      sl.item_name,
-      sl.unloading_status,
-      sm.name as supplier_name
+      COALESCE(sl.item_name, pi.item_name, '') as item_name,
+      COALESCE(sl.unloading_status, 'PENDING_DECISION') as unloading_status,
+      COALESCE(sm.print_name, sm.name, p.supplier, '') as supplier_name
     FROM incoming_quality_reports iqr
     LEFT JOIN qc_inspections qi ON iqr.qc_id = qi.id
     LEFT JOIN stock_lots sl ON iqr.rm_lot_no = sl.lot_no
-    LEFT JOIN purchases p ON qi.purchase_id = p.id
-    LEFT JOIN supplier_master sm ON p.supplier = sm.id
+    LEFT JOIN purchase_items pi ON (iqr.rm_lot_no = pi.lot_no OR (qi.rm_lot_no IS NOT NULL AND qi.rm_lot_no = pi.lot_no))
+    LEFT JOIN purchases p ON (
+      p.id = pi.purchase_id 
+      OR CAST(p.id AS TEXT) = CAST(qi.purchase_id AS TEXT) 
+      OR ('PUR-' || p.id) = CAST(qi.purchase_id AS TEXT) 
+      OR ('PUR-' || p.s_no) = CAST(qi.purchase_id AS TEXT)
+      OR CAST(p.id AS TEXT) = CAST(sl.purchase_id AS TEXT)
+    )
+    LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = p.supplier OR sm.print_name = p.supplier)
     GROUP BY iqr.id
+    ORDER BY iqr.uploaded_date DESC, iqr.id DESC
   `);
 
   res.json({ 
@@ -199,30 +227,38 @@ router.get(['/inspection/:id', '/purchase-lab-testing/:id'], asyncHandler(async 
       qi.id,
       qi.id as qcId,
       qi.qc_no,
-      qi.purchase_id as purchaseId,
+      COALESCE(p.id, qi.purchase_id) as purchaseId,
       qi.rm_lot_no as lotNo,
       qi.inspection_date as inspectionDate,
       qi.inspector as analyst,
       qi.overall_result as overallResult,
       qi.remarks,
-      sl.item_name as item,
-      sl.quantity as quantity,
-      sl.unloading_status as unloadingStatus,
+      COALESCE(sl.item_name, pi.item_name, '') as item,
+      COALESCE(sl.quantity, pi.qty, 0) as quantity,
+      COALESCE(sl.unloading_status, 'PENDING_DECISION') as unloadingStatus,
+      COALESCE(sl.unloading_status, 'PENDING_DECISION') as unloading_status,
       sl.godown_id,
       g.godown_name,
-      sm.name as supplier,
+      COALESCE(sm.print_name, sm.name, p.supplier, '') as supplier,
       p.date as receipt_date,
       p.inv_date as invoice_date,
-      pi.per_unit_weight as unit_weight,
-      pi.total_weight
+      COALESCE(pi.per_unit_weight, 50) as unit_weight,
+      COALESCE(pi.total_weight, (COALESCE(sl.quantity, pi.qty, 0) * COALESCE(pi.per_unit_weight, 50))) as total_weight,
+      p.inv_no as invoice_no
     FROM qc_inspections qi
     LEFT JOIN stock_lots sl ON qi.rm_lot_no = sl.lot_no
-    LEFT JOIN purchases p ON qi.purchase_id = p.id
-    LEFT JOIN supplier_master sm ON p.supplier = sm.id
-    LEFT JOIN purchase_items pi ON (p.id = pi.purchase_id AND qi.rm_lot_no = pi.lot_no)
+    LEFT JOIN purchase_items pi ON qi.rm_lot_no = pi.lot_no
+    LEFT JOIN purchases p ON (
+      p.id = pi.purchase_id 
+      OR CAST(p.id AS TEXT) = CAST(qi.purchase_id AS TEXT) 
+      OR ('PUR-' || p.id) = CAST(qi.purchase_id AS TEXT) 
+      OR ('PUR-' || p.s_no) = CAST(qi.purchase_id AS TEXT)
+      OR CAST(p.id AS TEXT) = CAST(sl.purchase_id AS TEXT)
+    )
+    LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = p.supplier OR sm.print_name = p.supplier)
     LEFT JOIN godown_master g ON sl.godown_id = g.id
-    WHERE qi.id = ?
-  `, [id]);
+    WHERE qi.id = ? OR qi.qc_no = ?
+  `, [id, id]);
 
   if (inspectionResult.rows.length === 0) {
     return res.status(404).json({ success: false, message: 'Inspection not found' });

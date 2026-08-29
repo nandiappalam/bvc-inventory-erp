@@ -48,8 +48,8 @@ import {
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { printHtml } from '../../utils/printHelper';
-import api from '../../services/api.js';
 import { exportToExcel as exportExcelUtil, printTableList } from '../../utils/exportHelper';
+import api from '../../services/api.js';
 
 const DEPARTMENTS = [
   'Raw Materials',
@@ -152,12 +152,14 @@ const PurchaseRequestDisplay = () => {
     setLoadingDetails(true);
     try {
       const data = await api(`/purchase-requests/${id}`);
-      if (data && data.success !== false) {
+      if (data && !data.error) {
         // Fetch item master for fallback item name resolution
         let masterItems = [];
         try {
-          const mData = await api('/masters/item');
-          masterItems = Array.isArray(mData) ? mData : (mData?.data || []);
+          const mData = await api('/masters/items');
+          if (Array.isArray(mData)) {
+            masterItems = mData;
+          }
         } catch (e) {
           console.log('Notice master item fetch:', e.message);
         }
@@ -199,11 +201,11 @@ const PurchaseRequestDisplay = () => {
 
     try {
       const data = await api(`/purchase-requests/${id}`, { method: 'DELETE' });
-      if (data && data.success !== false) {
+      if (data && !data.error) {
         setSnackbar({ open: true, message: data.message || 'Deleted successfully', severity: 'success' });
         fetchRequests();
       } else {
-        throw new Error(data.error || 'Delete failed');
+        throw new Error(data?.error || data?.message || 'Delete failed');
       }
     } catch (err) {
       setSnackbar({ open: true, message: err.message, severity: 'error' });
@@ -212,95 +214,119 @@ const PurchaseRequestDisplay = () => {
 
   const handleCopyPr = async (id) => {
     try {
-      const data = await api(`/purchase-requests/${id}/copy`, { method: 'POST', body: {} });
-      if (data && data.success !== false) {
+      const data = await api(`/purchase-requests/${id}/copy`, {
+        method: 'POST',
+        body: {}
+      });
+      if (data && !data.error) {
         setSnackbar({ open: true, message: `Copied successfully as ${data.pr_no}`, severity: 'success' });
         fetchRequests();
       } else {
-        throw new Error(data.error || 'Copy failed');
+        throw new Error(data?.error || data?.message || 'Copy failed');
       }
     } catch (err) {
       setSnackbar({ open: true, message: err.message, severity: 'error' });
     }
   };
 
-  const handlePrintPr = (prData) => {
+  const handlePrintPr = async (prData) => {
     if (!prData) return;
-    const html = `
-      <div style="font-family: Arial, sans-serif; padding: 20px;">
-        <div style="text-align: center; border-bottom: 2px solid #1f4fb2; padding-bottom: 10px; margin-bottom: 20px;">
-          <h2 style="color: #1f4fb2; margin: 0;">BVC ERP INVENTORY SYSTEM</h2>
-          <h3 style="margin: 5px 0 0 0; color: #333;">PURCHASE REQUEST / REQUISITION</h3>
-        </div>
+    try {
+      let fullPr = prData;
+      if (!fullPr.items || fullPr.items.length === 0) {
+        try {
+          const data = await api(`/purchase-requests/${prData.id}`);
+          if (data && data.data) {
+            fullPr = data.data;
+          } else if (data && data.items) {
+            fullPr = data;
+          }
+        } catch (e) {
+          console.warn('Error fetching full PR for print:', e);
+        }
+      }
 
-        <table style="width: 100%; margin-bottom: 20px; font-size: 14px; border-collapse: collapse;">
-          <tr>
-            <td><strong>PR No:</strong> ${prData.pr_no}</td>
-            <td><strong>Request Date:</strong> ${prData.request_date}</td>
-            <td><strong>Required Date:</strong> ${prData.required_date || 'N/A'}</td>
-          </tr>
-          <tr>
-            <td><strong>Department:</strong> ${prData.department || 'N/A'}</td>
-            <td><strong>Requested By:</strong> ${prData.requested_by || 'N/A'}</td>
-            <td><strong>Priority:</strong> ${prData.priority}</td>
-          </tr>
-          <tr>
-            <td><strong>Preferred Supplier:</strong> ${prData.supplier_name || 'N/A'}</td>
-            <td><strong>Godown:</strong> ${prData.godown_name || 'Main Godown'}</td>
-            <td><strong>Status:</strong> ${prData.status}</td>
-          </tr>
-          ${prData.remarks ? `<tr><td colspan="3" style="padding-top: 8px;"><strong>Remarks:</strong> ${prData.remarks}</td></tr>` : ''}
-        </table>
+      const html = `
+        <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 850px; margin: 0 auto; color: #0f172a;">
+          <div style="text-align: center; border-bottom: 2px solid #1f4fb2; padding-bottom: 10px; margin-bottom: 20px;">
+            <h2 style="color: #1f4fb2; margin: 0; font-size: 22px;">BVC ERP INVENTORY SYSTEM</h2>
+            <h3 style="margin: 5px 0 0 0; color: #334155; font-size: 16px;">PURCHASE REQUEST / REQUISITION</h3>
+          </div>
 
-        <h4>Requested Items</h4>
-        <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 13px;" border="1" cellpadding="6">
-          <thead style="background-color: #f0f4fa;">
+          <table style="width: 100%; margin-bottom: 20px; font-size: 13px; border-collapse: collapse; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px;" cellpadding="8">
             <tr>
-              <th>S.No</th>
-              <th>Item Name</th>
-              <th>Description</th>
-              <th>Requested Qty</th>
-              <th>Approved Qty</th>
-              <th>Unit</th>
-              <th>Est. Rate (₹)</th>
-              <th>Est. Amount (₹)</th>
+              <td><strong>PR No:</strong> <span style="color: #1f4fb2; font-weight: bold;">${fullPr.pr_no}</span></td>
+              <td><strong>Request Date:</strong> ${fullPr.request_date}</td>
+              <td><strong>Required Date:</strong> ${fullPr.required_date || 'N/A'}</td>
             </tr>
-          </thead>
-          <tbody>
-            ${(prData.items || []).map((it, idx) => `
+            <tr>
+              <td><strong>Department:</strong> ${fullPr.department || 'Raw Materials'}</td>
+              <td><strong>Requested By:</strong> ${fullPr.requested_by || 'admin'}</td>
+              <td><strong>Priority:</strong> ${fullPr.priority || 'Medium'}</td>
+            </tr>
+            <tr>
+              <td><strong>Preferred Supplier:</strong> ${fullPr.supplier_name || 'N/A'}</td>
+              <td><strong>Destination Godown:</strong> ${fullPr.godown_name || 'Main Godown'}</td>
+              <td><strong>Status:</strong> <span style="font-weight: bold;">${fullPr.status}</span></td>
+            </tr>
+            ${fullPr.remarks ? `<tr><td colspan="3" style="border-top: 1px solid #e2e8f0; padding-top: 8px;"><strong>Remarks:</strong> ${fullPr.remarks}</td></tr>` : ''}
+          </table>
+
+          <h4 style="margin: 0 0 10px 0; color: #0f2942;">Requested Items Breakdown</h4>
+          <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 12px;" border="1" cellpadding="6" bordercolor="#cbd5e1">
+            <thead style="background-color: #1f4fb2; color: #ffffff;">
               <tr>
-                <td style="text-align: center;">${idx + 1}</td>
-                <td>${it.item_name}</td>
-                <td>${it.description || ''}</td>
-                <td style="text-align: right;">${it.requested_qty}</td>
-                <td style="text-align: right;">${it.approved_qty}</td>
-                <td>${it.unit}</td>
-                <td style="text-align: right;">₹${(it.estimated_rate || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                <td style="text-align: right;">₹${(it.estimated_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                <th style="text-align: center; width: 40px;">S.No</th>
+                <th style="text-align: left;">Item Name</th>
+                <th style="text-align: center;">Weight</th>
+                <th style="text-align: left;">Description / Specs</th>
+                <th style="text-align: right;">Req Qty</th>
+                <th style="text-align: right;">App Qty</th>
+                <th style="text-align: center;">Unit</th>
+                <th style="text-align: right;">Est. Rate (₹)</th>
+                <th style="text-align: right;">Est. Amount (₹)</th>
               </tr>
-            `).join('')}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              ${(fullPr.items || []).map((it, idx) => `
+                <tr>
+                  <td style="text-align: center;">${idx + 1}</td>
+                  <td style="font-weight: bold;">${it.item_name}</td>
+                  <td style="text-align: center;">${it.weight || '—'}</td>
+                  <td>${it.description || '—'}</td>
+                  <td style="text-align: right; font-weight: 600; color: #0284c7;">${it.requested_qty}</td>
+                  <td style="text-align: right; font-weight: bold; color: #16a34a;">${it.approved_qty || it.requested_qty}</td>
+                  <td style="text-align: center;">${it.unit || 'kg'}</td>
+                  <td style="text-align: right;">₹${(it.estimated_rate || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                  <td style="text-align: right; font-weight: bold;">₹${(it.estimated_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
 
-        ${prData.approval_remarks ? `<p><strong>Approval Remarks:</strong> ${prData.approval_remarks}</p>` : ''}
+          ${fullPr.approval_remarks ? `<p style="font-size: 13px;"><strong>Approval Remarks:</strong> ${fullPr.approval_remarks}</p>` : ''}
 
-        <div style="margin-top: 50px; display: flex; justify-content: space-between; padding: 0 30px;">
-          <div style="text-align: center;">
-            <p>____________________</p>
-            <p>Requested By</p>
-          </div>
-          <div style="text-align: center;">
-            <p>____________________</p>
-            <p>Department Head</p>
-          </div>
-          <div style="text-align: center;">
-            <p>____________________</p>
-            <p>Authorized Signatory</p>
+          <div style="margin-top: 50px; display: flex; justify-content: space-between; padding: 0 20px; font-size: 12px;">
+            <div style="text-align: center;">
+              <p>____________________</p>
+              <p style="font-weight: bold; margin-top: 4px;">Requested By</p>
+            </div>
+            <div style="text-align: center;">
+              <p>____________________</p>
+              <p style="font-weight: bold; margin-top: 4px;">Department Head</p>
+            </div>
+            <div style="text-align: center;">
+              <p>____________________</p>
+              <p style="font-weight: bold; margin-top: 4px;">Authorized Signatory</p>
+            </div>
           </div>
         </div>
-      </div>
-    `;
-    printHtml(html);
+      `;
+      printHtml(html, `Purchase Request - ${fullPr.pr_no}`);
+    } catch (err) {
+      console.error('Error printing PR:', err);
+      setSnackbar({ open: true, message: 'Print failed: ' + err.message, severity: 'error' });
+    }
   };
 
   const handlePrintTableList = () => {
@@ -589,7 +615,7 @@ const PurchaseRequestDisplay = () => {
                       </TableCell>
                       <TableCell>{getStatusChip(r.status)}</TableCell>
                       <TableCell align="center">
-                        <Stack direction="row" spacing={0.5} justifyContent="center" alignItems="center">
+                        <Stack direction="row" spacing={0.5} justifyContent="center" alignItems="center" flexWrap="wrap">
                           {r.status === 'Approved' && (
                             <Tooltip title="Create Purchase Order for this Request">
                               <Button
@@ -603,30 +629,33 @@ const PurchaseRequestDisplay = () => {
                               </Button>
                             </Tooltip>
                           )}
+
+                          <Tooltip title="Print Purchase Request">
+                            <IconButton size="small" color="primary" onClick={() => handlePrintPr(r)}>
+                              <PrintIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+
+                          <Tooltip title="Edit / Update PR">
+                            <IconButton size="small" color="info" onClick={() => navigate(`/entry/purchase-request-create?id=${r.id}`)}>
+                              <EditIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+
+                          <Tooltip title="Delete PR">
+                            <IconButton size="small" color="error" onClick={() => handleDeletePr(r.id, r.pr_no)}>
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+
                           <Tooltip title="View Details">
-                            <IconButton size="small" color="primary" onClick={() => handleViewPr(r.id)}>
+                            <IconButton size="small" color="default" onClick={() => handleViewPr(r.id)}>
                               <ViewIcon fontSize="small" />
                             </IconButton>
                           </Tooltip>
 
-                          {(r.status === 'Draft' || r.status === 'Returned') && (
-                            <Tooltip title="Edit PR">
-                              <IconButton size="small" color="secondary" onClick={() => navigate(`/entry/purchase-request-create?id=${r.id}`)}>
-                                <EditIcon fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                          )}
-
-                          {(r.status === 'Draft' || r.status === 'Returned') && (
-                            <Tooltip title="Delete PR">
-                              <IconButton size="small" color="error" onClick={() => handleDeletePr(r.id, r.pr_no)}>
-                                <DeleteIcon fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                          )}
-
                           <Tooltip title="Copy PR">
-                            <IconButton size="small" color="info" onClick={() => handleCopyPr(r.id)}>
+                            <IconButton size="small" color="secondary" onClick={() => handleCopyPr(r.id)}>
                               <CopyIcon fontSize="small" />
                             </IconButton>
                           </Tooltip>

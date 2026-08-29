@@ -379,11 +379,10 @@ const UserCreate = () => {
                   <InputLabel>Company</InputLabel>
                   <Select 
                     name="company_id" 
-                    value={formData.company_id} 
+                    value={companies.some(c => String(c.id) === String(formData.company_id)) ? String(formData.company_id) : (companies.length > 0 ? String(companies[0].id) : '')} 
                     onChange={handleChange} 
                     label="Company" 
                     required
-                    // Add displayEmpty to allow empty value without warning
                     displayEmpty
                   >
                     {companies.map(company => (

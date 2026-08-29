@@ -33,6 +33,7 @@ import SearchIcon from '@mui/icons-material/Search';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import MenuBookIcon from '@mui/icons-material/MenuBook';
+import api from '../../services/api.js';
 
 const DOC_CATEGORIES = [
   { code: 'ALL', label: 'All Documents (D1–D11)', type: '' },
@@ -59,7 +60,7 @@ export default function ControlledDocumentsList({ onViewDoc, onEditDoc, onCreate
   const fetchDocs = async () => {
     try {
       setLoading(true);
-      let url = '/api/compliance/documents';
+      let endpoint = '/compliance/documents';
       const params = [];
       if (selectedCategory !== 'ALL') {
         params.push(`doc_code=${selectedCategory}`);
@@ -68,12 +69,11 @@ export default function ControlledDocumentsList({ onViewDoc, onEditDoc, onCreate
         params.push(`search=${encodeURIComponent(searchQuery)}`);
       }
       if (params.length > 0) {
-        url += `?${params.join('&')}`;
+        endpoint += `?${params.join('&')}`;
       }
 
-      const res = await fetch(url);
-      const data = await res.json();
-      if (data.success) {
+      const data = await api(endpoint);
+      if (data && data.success) {
         setDocuments(data.documents || []);
       }
     } catch (err) {
@@ -90,9 +90,8 @@ export default function ControlledDocumentsList({ onViewDoc, onEditDoc, onCreate
   const handleDelete = async (id, title) => {
     if (!window.confirm(`Are you sure you want to delete "${title}"?`)) return;
     try {
-      const res = await fetch(`/api/compliance/documents/${id}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (data.success) {
+      const data = await api(`/compliance/documents/${id}`, { method: 'DELETE' });
+      if (data && data.success) {
         fetchDocs();
         if (onRefresh) onRefresh();
       }

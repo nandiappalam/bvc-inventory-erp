@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import api from '../services/api.js';
-import { printElement } from '../utils/printHelper';
 import { getMasters } from '../services/masterservice.js';
 import './WorkOrderSlipCreate.css';
 
@@ -615,7 +614,7 @@ const WorkOrderSlipCreate = () => {
   };
 
   const handlePrint = () => {
-    printElement('#printable-slip', 'Work Order Slip');
+    window.print();
   };
 
   return (
