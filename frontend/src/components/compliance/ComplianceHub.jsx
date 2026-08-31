@@ -75,11 +75,7 @@ export default function ComplianceHub() {
   };
 
   const [activeTab, setActiveTab] = useState(getInitialTab);
-<<<<<<< HEAD
   const [activeTraceLot, setActiveTraceLot] = useState(() => queryLot || '');
-=======
-  const [activeTraceLot, setActiveTraceLot] = useState(() => queryLot || 'LOT0014');
->>>>>>> origin/main
   const [dashboardData, setDashboardData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);

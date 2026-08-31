@@ -2,10 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 
 import App from './App.jsx'
-<<<<<<< HEAD
 import ErrorBoundary from './components/ErrorBoundary.jsx'
-=======
->>>>>>> origin/main
 import './index.css'
 import './components/global-styles.css'
 import './components/SalesCreate.css'
@@ -60,12 +57,8 @@ if (typeof window !== 'undefined') {
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-<<<<<<< HEAD
     <ErrorBoundary>
       <App />
     </ErrorBoundary>
-=======
-    <App />
->>>>>>> origin/main
   </React.StrictMode>,
 )

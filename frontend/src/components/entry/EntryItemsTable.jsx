@@ -506,7 +506,6 @@ const EntryItemsTable = ({
       item_name: '',
       item_label: '',
       lot_no: '',
-<<<<<<< HEAD
       qty: '',
       weight: '',
       rate: '',
@@ -514,15 +513,6 @@ const EntryItemsTable = ({
       tax_rate: (taxType === 'Without Tax' ? 0 : (taxRate || 5)),
       total_weight: '',
       amount: '',
-=======
-      qty: 0,
-      weight: 0,
-      rate: 0,
-      disc: 0,
-      tax_rate: 5,
-      total_weight: 0,
-      amount: 0,
->>>>>>> origin/main
     });
   };
 
@@ -530,7 +520,6 @@ const EntryItemsTable = ({
     (rowIndex, key, value) => {
       let updates = key === '__batch__' ? { ...value } : { [key]: value };
 
-<<<<<<< HEAD
       if (key === 'rate') {
         updates.rate = value;
         updates.purc_rate = value;
@@ -550,40 +539,27 @@ const EntryItemsTable = ({
         updates.disc_percent = value;
       }
 
-=======
->>>>>>> origin/main
       if (key === 'lot_no' && value) {
         const availableLots = data[rowIndex]?.available_lots || [];
         const selectedLot = availableLots.find(l => l.lot_no === value);
         if (selectedLot) {
           updates.rate = selectedLot.rate || 0;
-<<<<<<< HEAD
           updates.purc_rate = selectedLot.rate || 0;
           updates.weight = selectedLot.per_unit_weight || selectedLot.weight || 0;
           updates.qty = selectedLot.available_qty || selectedLot.balance_qty || selectedLot.remaining_quantity || 0;
           updates.per_unit_wt = updates.weight;
           updates.per_unit_weight = updates.weight;
-=======
-          updates.weight = selectedLot.per_unit_weight || selectedLot.weight || 0;
-          updates.qty = selectedLot.available_qty || selectedLot.balance_qty || selectedLot.remaining_quantity || 0;
-          updates.per_unit_wt = updates.weight;
->>>>>>> origin/main
         }
       }
 
       const currentRow = { ...data[rowIndex], ...updates };
 
-<<<<<<< HEAD
       const parseNumber = (v) => {
-=======
-      const normalizeNumber = (v) => {
->>>>>>> origin/main
         if (v === null || v === undefined || v === '') return 0;
         const n = typeof v === 'number' ? v : parseFloat(v);
         return Number.isFinite(n) ? n : 0;
       };
 
-<<<<<<< HEAD
       const safeQty = parseNumber(currentRow.qty);
       const safeRate = parseNumber(key === 'rate' || key === 'purc_rate' ? value : (currentRow.rate ?? currentRow.purc_rate));
       const safeDisc = parseNumber(key === 'disc' || key === 'disc_percent' ? value : (currentRow.disc ?? currentRow.disc_percent));
@@ -591,74 +567,33 @@ const EntryItemsTable = ({
       const rawWeight = (key === 'weight' || key === 'per_unit_wt' || key === 'per_unit_weight')
         ? value
         : (currentRow.weight ?? currentRow.per_unit_wt ?? currentRow.perUnitWt ?? currentRow.per_unit_weight ?? 0);
-=======
-      const safeQty = normalizeNumber(currentRow.qty);
-      const rate = safeNumber(currentRow.purc_rate !== undefined && currentRow.purc_rate !== '' ? currentRow.purc_rate : currentRow.rate);
-      const disc = safeNumber(currentRow.disc_percent !== undefined && currentRow.disc_percent !== '' ? currentRow.disc_percent : currentRow.disc);
-
-      const rawWeight =
-        currentRow.weight ??
-        currentRow.per_unit_wt ??
-        currentRow.perUnitWt ??
-        currentRow.per_unitWt ??
-        0;
->>>>>>> origin/main
 
       const numericWeight = (() => {
         if (rawWeight && typeof rawWeight === 'object') {
           const cand = rawWeight.weight ?? rawWeight.value ?? rawWeight.per_unit_wt ?? rawWeight.perUnitWt ?? rawWeight.wt ?? rawWeight.id ?? rawWeight.name;
-<<<<<<< HEAD
           return parseNumber(cand);
         }
         return parseNumber(rawWeight);
-=======
-          return normalizeNumber(cand);
-        }
-        return normalizeNumber(rawWeight);
->>>>>>> origin/main
       })();
 
       const safeWeight = numericWeight;
 
-<<<<<<< HEAD
       const base = safeQty * safeRate;
       const discAmt = base * (safeDisc / 100);
       const taxable = base - discAmt;
       const rowTaxRate = currentRow.tax_rate !== undefined ? parseNumber(currentRow.tax_rate) : (currentRow.tax !== undefined ? parseNumber(currentRow.tax) : (currentRow.tax_percent !== undefined ? parseNumber(currentRow.tax_percent) : taxRate));
-=======
-      const base = safeQty * rate;
-      const discAmt = base * (disc / 100);
-      const taxable = base - discAmt;
-      const rowTaxRate = currentRow.tax_rate !== undefined ? safeNumber(currentRow.tax_rate) : (currentRow.tax !== undefined ? safeNumber(currentRow.tax) : (currentRow.tax_percent !== undefined ? safeNumber(currentRow.tax_percent) : taxRate));
->>>>>>> origin/main
       const effectiveTaxRate = (taxType === 'Without Tax') ? 0 : rowTaxRate;
       const taxAmt = (taxable * effectiveTaxRate) / 100;
 
       const totalWt = safeQty * safeWeight;
 
       Object.assign(updates, {
-<<<<<<< HEAD
         base_amount: Number(base.toFixed(2)),
         disc_amount: Number(discAmt.toFixed(2)),
         tax_amount: Number(taxAmt.toFixed(2)),
         tot_wt: totalWt > 0 ? totalWt.toFixed(2) : (totalWt === 0 && safeQty > 0 ? '0.00' : ''),
         total_wt: totalWt,
         total_weight: totalWt,
-=======
-        qty: safeQty,
-        rate: rate,
-        purc_rate: currentRow.purc_rate !== undefined ? (updates.purc_rate !== undefined ? updates.purc_rate : rate) : rate,
-        disc: disc,
-        disc_percent: currentRow.disc_percent !== undefined ? (updates.disc_percent !== undefined ? updates.disc_percent : disc) : disc,
-        weight: safeWeight,
-        per_unit_wt: safeWeight,
-        tot_wt: totalWt > 0 ? totalWt.toFixed(2) : (totalWt === 0 && safeQty > 0 ? '0.00' : ''),
-        total_wt: totalWt,
-        total_weight: totalWt,
-        base_amount: base,
-        disc_amount: discAmt,
-        tax_amount: taxAmt,
->>>>>>> origin/main
         amount: (taxable + taxAmt).toFixed(2),
       });
 
@@ -786,14 +721,11 @@ const EntryItemsTable = ({
                         onChange={(e) =>
                           handleCellChange(rowIndex, col.key, e.target.value)
                         }
-<<<<<<< HEAD
                         onFocus={(e) => {
                           if (col.type === 'number') {
                             e.target.select();
                           }
                         }}
-=======
->>>>>>> origin/main
                         readOnly={col.readOnly}
                         style={{
                           ...styles.cellInput,

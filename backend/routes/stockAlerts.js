@@ -312,11 +312,7 @@ async function calculateLiveStock() {
 // ============================================================================
 // CORE STOCK ALERT ENGINE - EVALUATION & DE-DUPLICATION
 // ============================================================================
-<<<<<<< HEAD
 async function runEvaluationCore() {
-=======
-async function evaluateStockAlerts() {
->>>>>>> origin/main
   const { stockMap, itemTotalMap } = await calculateLiveStock();
 
   // 1. Fetch all configurations
@@ -563,7 +559,6 @@ async function evaluateStockAlerts() {
   return evaluationResults;
 }
 
-<<<<<<< HEAD
 let evalPromise = null;
 let cachedEvalResults = null;
 let lastEvalTimestamp = 0;
@@ -597,8 +592,6 @@ async function evaluateStockAlerts(force = false) {
   return evalPromise;
 }
 
-=======
->>>>>>> origin/main
 // ============================================================================
 // API ENDPOINTS
 // ============================================================================
@@ -606,11 +599,7 @@ async function evaluateStockAlerts(force = false) {
 // 1. GET /api/stock-alerts/dashboard - Full Dashboard Metrics & Items
 router.get('/dashboard', async (req, res) => {
   try {
-<<<<<<< HEAD
     const items = await evaluateStockAlerts(true);
-=======
-    const items = await evaluateStockAlerts();
->>>>>>> origin/main
 
     // Summaries
     const totalConfigured = items.length;
@@ -661,11 +650,7 @@ router.get('/dashboard', async (req, res) => {
 router.get('/active-count', async (req, res) => {
   try {
     const items = await evaluateStockAlerts();
-<<<<<<< HEAD
     const activeAlerts = (items || []).filter(i => i && i.status !== 'NORMAL');
-=======
-    const activeAlerts = items.filter(i => i.status !== 'NORMAL');
->>>>>>> origin/main
     const criticalCount = activeAlerts.filter(i => i.status === 'CRITICAL').length;
     const lowCount = activeAlerts.filter(i => i.status === 'LOW').length;
     const reorderCount = activeAlerts.filter(i => i.status === 'REORDER').length;
@@ -679,7 +664,6 @@ router.get('/active-count', async (req, res) => {
       alerts: activeAlerts.slice(0, 10)
     });
   } catch (err) {
-<<<<<<< HEAD
     console.error('Error fetching active stock alerts count:', err.message);
     res.json({
       success: true,
@@ -689,21 +673,13 @@ router.get('/active-count', async (req, res) => {
       reorderCount: 0,
       alerts: []
     });
-=======
-    console.error('Error fetching active stock alerts count:', err);
-    res.status(500).json({ success: false, count: 0, alerts: [] });
->>>>>>> origin/main
   }
 });
 
 // 3. POST /api/stock-alerts/evaluate - Trigger manual re-evaluation
 router.post('/evaluate', async (req, res) => {
   try {
-<<<<<<< HEAD
     const items = await evaluateStockAlerts(true);
-=======
-    const items = await evaluateStockAlerts();
->>>>>>> origin/main
     res.json({ success: true, message: 'Stock alert evaluation completed successfully', itemsCount: items.length });
   } catch (err) {
     console.error('Error evaluating stock alerts:', err);

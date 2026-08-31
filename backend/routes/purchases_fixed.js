@@ -27,7 +27,6 @@ const normalizePurchaseItem = (item) => {
   }
 }
 
-<<<<<<< HEAD
 // Ensure purchase deductions table and transport/vehicle columns exist for ERP purchase structure
 const initializedCompanyDbs = new Set();
 const ensurePurchaseDeductions = async (companyId = 1) => {
@@ -36,12 +35,6 @@ const ensurePurchaseDeductions = async (companyId = 1) => {
   try {
     const compDb = db.forCompany ? db.forCompany(cId) : db;
     await compDb.run(`
-=======
-// Ensure purchase deductions table exists for ERP purchase structure
-const ensurePurchaseDeductionsTable = async () => {
-  try {
-    await db.run(`
->>>>>>> origin/main
       CREATE TABLE IF NOT EXISTS purchase_deductions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         purchase_id INTEGER,
@@ -57,7 +50,6 @@ const ensurePurchaseDeductionsTable = async () => {
         remarks TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
-<<<<<<< HEAD
     `);
 
     // Ensure vehicle and transporter columns exist in purchases
@@ -95,28 +87,6 @@ router.use(async (req, res, next) => {
     next();
   } catch (err) {
     next();
-=======
-    `)
-  } catch (err) {
-    console.error('Error ensuring purchase_deductions table:', err.message)
-  }
-}
-let purchaseDeductionsPromise = null;
-const ensurePurchaseDeductions = () => {
-  if (!purchaseDeductionsPromise) {
-    purchaseDeductionsPromise = ensurePurchaseDeductionsTable();
-  }
-  return purchaseDeductionsPromise;
-};
-ensurePurchaseDeductions();
-
-router.use(async (req, res, next) => {
-  try {
-    await ensurePurchaseDeductions();
-    next();
-  } catch (err) {
-    next(err);
->>>>>>> origin/main
   }
 });
 
@@ -168,7 +138,6 @@ router.get(['/', '/list', '/purchase-list'], async (req, res) => {
 
       COALESCE(s.print_name, s.name, p.supplier, '') AS supplier_name,
       COALESCE(s.address1, p.address, '') AS address,
-<<<<<<< HEAD
       COALESCE(p.transporter, p.transport, '') AS transporter,
       COALESCE(p.transport, p.transporter, '') AS transport,
       COALESCE(p.vehicle_no, p.lorry_no, '') AS vehicle_no,
@@ -176,22 +145,15 @@ router.get(['/', '/list', '/purchase-list'], async (req, res) => {
       COALESCE(p.driver_name, p.driver, '') AS driver_name,
       COALESCE(p.driver, p.driver_name, '') AS driver,
       COALESCE(p.godown, '') AS godown,
-=======
->>>>>>> origin/main
 
       COALESCE(im.item_name, pi.item_name, '') AS item_name,
       pi.lot_no,
 
-<<<<<<< HEAD
       pi.qty,
       pi.per_unit_weight AS weight,
       pi.per_unit_weight,
       pi.total_weight,
       pi.total_weight AS total_wt,
-=======
-      pi.per_unit_weight AS weight,
-      pi.total_weight,
->>>>>>> origin/main
       pi.rate,
       (pi.qty * pi.rate) AS base_amount,
       pi.disc_percent AS disc_percent,
@@ -306,15 +268,12 @@ router.get('/:id', async (req, res) => {
 
     purchaseData.supplier_name = supplierName
     purchaseData.godown_name = godownName
-<<<<<<< HEAD
     purchaseData.transporter = purchaseData.transporter || purchaseData.transport || ''
     purchaseData.transport = purchaseData.transport || purchaseData.transporter || ''
     purchaseData.vehicle_no = purchaseData.vehicle_no || purchaseData.lorry_no || ''
     purchaseData.lorry_no = purchaseData.lorry_no || purchaseData.vehicle_no || ''
     purchaseData.driver_name = purchaseData.driver_name || purchaseData.driver || ''
     purchaseData.driver = purchaseData.driver || purchaseData.driver_name || ''
-=======
->>>>>>> origin/main
 
     res.json({
       ...purchaseData,
@@ -351,12 +310,9 @@ router.post('/', async (req, res) => {
 
     const purchase_order_id = formData.purchase_order_id || formData.purchaseOrderId || formData.po_id || formData.source_order_id || null;
     const po_no = formData.po_no || formData.poNo || formData.source_order_no || null;
-<<<<<<< HEAD
     const transporter = formData.transporter || formData.transport || '';
     const vehicle_no = formData.vehicle_no || formData.lorry_no || '';
     const driver_name = formData.driver_name || formData.driver || '';
-=======
->>>>>>> origin/main
 
     const insertValues = [
       parseInt(formData.sno || formData.s_no) || 1,
@@ -376,15 +332,12 @@ router.post('/', async (req, res) => {
       formData.tax_percent || 0,
       formData.godown || '',
       formData.remarks || '',
-<<<<<<< HEAD
       transporter,
       transporter,
       vehicle_no,
       vehicle_no,
       driver_name,
       driver_name,
-=======
->>>>>>> origin/main
       parseFloat(totals.totalQty) || 0,
       parseFloat(totals.totalWeight) || 0,
       parseFloat(totals.totalAmount) || 0,
@@ -403,16 +356,10 @@ router.post('/', async (req, res) => {
     const purchaseResult = await db.run(`
       INSERT INTO purchases (
         s_no, date, inv_no, supplier, pay_type, inv_date, type, contact_person, address, area, phone, gst_no, email, tax_type, tax_percent, godown, remarks,
-<<<<<<< HEAD
         transporter, transport, vehicle_no, lorry_no, driver_name, driver,
         total_qty, total_weight, total_amount, base_amount, disc_amount, tax_amount, net_amount, deduction_amount, grand_total,
         purchase_order_id, po_no, source_order_id, source_order_no
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-=======
-        total_qty, total_weight, total_amount, base_amount, disc_amount, tax_amount, net_amount, deduction_amount, grand_total,
-        purchase_order_id, po_no, source_order_id, source_order_no
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
->>>>>>> origin/main
     `, insertValues)
 
     const purchaseId = purchaseResult.lastID
@@ -550,24 +497,17 @@ router.put('/:id', async (req, res) => {
 
     const purchase_order_id = formData.purchase_order_id || formData.purchaseOrderId || formData.po_id || formData.source_order_id || null;
     const po_no = formData.po_no || formData.poNo || formData.source_order_no || null;
-<<<<<<< HEAD
     const transporter = formData.transporter || formData.transport || '';
     const vehicle_no = formData.vehicle_no || formData.lorry_no || '';
     const driver_name = formData.driver_name || formData.driver || '';
-=======
->>>>>>> origin/main
 
     await db.run(`
       UPDATE purchases SET
         s_no = ?, date = ?, inv_no = ?, supplier = ?, pay_type = ?,
         inv_date = ?, type = ?, contact_person = ?, address = ?, area = ?, phone = ?, gst_no = ?, email = ?,
         tax_type = ?, tax_percent = ?, godown = ?,
-<<<<<<< HEAD
         remarks = ?, transporter = ?, transport = ?, vehicle_no = ?, lorry_no = ?, driver_name = ?, driver = ?,
         total_qty = ?, total_weight = ?, total_amount = ?,
-=======
-        remarks = ?, total_qty = ?, total_weight = ?, total_amount = ?,
->>>>>>> origin/main
         base_amount = ?, disc_amount = ?, tax_amount = ?, net_amount = ?,
         deduction_amount = ?, grand_total = ?,
         purchase_order_id = ?, po_no = ?, source_order_id = ?, source_order_no = ?,
@@ -591,15 +531,12 @@ router.put('/:id', async (req, res) => {
       formData.tax_percent || 0,
       formData.godown,
       formData.remarks,
-<<<<<<< HEAD
       transporter,
       transporter,
       vehicle_no,
       vehicle_no,
       driver_name,
       driver_name,
-=======
->>>>>>> origin/main
       totals.totalQty,
       totals.totalWeight,
       totals.totalAmount,

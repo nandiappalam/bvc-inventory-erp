@@ -717,7 +717,6 @@ const CategoryReportPage = () => {
       }
 
       if (data) {
-<<<<<<< HEAD
         let fetched = [];
         if (Array.isArray(data)) {
           fetched = data;
@@ -730,9 +729,6 @@ const CategoryReportPage = () => {
         } else if (data.data && typeof data.data === 'object' && Array.isArray(data.data.data)) {
           fetched = data.data.data;
         }
-=======
-        const fetched = Array.isArray(data) ? data : (data.rows || []);
->>>>>>> origin/main
         setRows(fetched);
       } else {
         setRows([]);

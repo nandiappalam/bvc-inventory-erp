@@ -84,17 +84,10 @@ async function initPostgresSchema() {
 
     for (const tax of DEFAULT_TAX_RATES) {
       await client.query(`
-<<<<<<< HEAD
         INSERT INTO tax_master (tax_name, tax_percent, cgst, sgst, igst, status, hsn_code)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
         ON CONFLICT DO NOTHING
       `, [tax.tax_name, tax.tax_percent, tax.cgst, tax.sgst, tax.igst, 'Active', '9999']);
-=======
-        INSERT INTO tax_master (tax_name, hsn_code, gst_rate, cgst_rate, sgst_rate, igst_rate, status)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        ON CONFLICT DO NOTHING
-      `, [tax.tax_name, '9999', tax.tax_percent, tax.cgst, tax.sgst, tax.igst, 'Active']);
->>>>>>> origin/main
     }
 
     const now = new Date();
@@ -108,10 +101,6 @@ async function initPostgresSchema() {
     console.log('✅ PostgreSQL / Neon database schema initialization complete!');
   } catch (err) {
     console.error('❌ Error initializing PostgreSQL schema:', err);
-<<<<<<< HEAD
-=======
-    throw err;
->>>>>>> origin/main
   } finally {
     client.release();
     await pool.end();

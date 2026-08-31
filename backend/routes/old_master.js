@@ -325,11 +325,9 @@ const getTableConfig = (type) => {
   return masterTypeAliases[type] || masterTables[type] || null
 }
 
-// ============================================================================
-// GENERIC API: Get Active records only, ordered by name ASC
+// =====================================================================// GENERIC API: Get Active records only, ordered by name ASC
 // Returns: [{ id: 1, name: "ABC" }]
-// ============================================================================
-router.get('/:type', async (req, res) => {
+// =====================================================================router.get('/:type', async (req, res) => {
   try {
     const type = validateMasterType(req.params.type)
     
@@ -428,10 +426,8 @@ router.get('/:type', async (req, res) => {
   }
 })
 
-// ============================================================================
-// GET ALL RECORDS (Legacy - returns full records)
-// ============================================================================
-router.get('/all/:table', async (req, res) => {
+// =====================================================================// GET ALL RECORDS (Legacy - returns full records)
+// =====================================================================router.get('/all/:table', async (req, res) => {
   try {
     const tableNameParam = req.params.table
     const { tableName, tableConfig } = resolveTableConfig(tableNameParam)
@@ -448,10 +444,8 @@ router.get('/all/:table', async (req, res) => {
   }
 })
 
-// ============================================================================
-// GET SINGLE RECORD BY ID
-// ============================================================================
-router.get('/record/:table/:id', async (req, res) => {
+// =====================================================================// GET SINGLE RECORD BY ID
+// =====================================================================router.get('/record/:table/:id', async (req, res) => {
   try {
     const tableNameParam = req.params.table
     const { tableName, tableConfig } = resolveTableConfig(tableNameParam)
@@ -478,10 +472,8 @@ router.get('/record/:table/:id', async (req, res) => {
 })
 
 
-// ============================================================================
-// POST CREATE NEW RECORD - Short form /:table (matches frontend call)
-// ============================================================================
-router.post("/:table", async (req, res) => {
+// =====================================================================// POST CREATE NEW RECORD - Short form /:table (matches frontend call)
+// =====================================================================router.post("/:table", async (req, res) => {
   try {
     const { table } = req.params;
     const data = req.body;
@@ -531,10 +523,8 @@ router.post("/:table", async (req, res) => {
 });
 
 
-// ============================================================================
-// POST CREATE NEW RECORD - Legacy form /record/:table
-// ============================================================================
-router.post('/record/:table', async (req, res) => {
+// =====================================================================// POST CREATE NEW RECORD - Legacy form /record/:table
+// =====================================================================router.post('/record/:table', async (req, res) => {
   try {
     const tableNameParam = req.params.table
     const { tableName, tableConfig } = resolveTableConfig(tableNameParam)
@@ -571,10 +561,8 @@ router.post('/record/:table', async (req, res) => {
   }
 })
 
-// ============================================================================
-// PUT UPDATE RECORD - Short form /:table/:id (matches frontend call)
-// ============================================================================
-router.put('/:table/:id', async (req, res) => {
+// =====================================================================// PUT UPDATE RECORD - Short form /:table/:id (matches frontend call)
+// =====================================================================router.put('/:table/:id', async (req, res) => {
   try {
     const tableNameParam = req.params.table
     const { tableName, tableConfig } = resolveTableConfig(tableNameParam)
@@ -618,10 +606,8 @@ router.put('/:table/:id', async (req, res) => {
   }
 })
 
-// ============================================================================
-// PUT UPDATE RECORD - Legacy form /record/:table/:id
-// ============================================================================
-router.put('/record/:table/:id', async (req, res) => {
+// =====================================================================// PUT UPDATE RECORD - Legacy form /record/:table/:id
+// =====================================================================router.put('/record/:table/:id', async (req, res) => {
   try {
     const tableNameParam = req.params.table
     const { tableName, tableConfig } = resolveTableConfig(tableNameParam)
@@ -665,10 +651,8 @@ router.put('/record/:table/:id', async (req, res) => {
   }
 })
 
-// ============================================================================
-// DELETE RECORD - Short form /:table/:id (matches frontend call)
-// ============================================================================
-router.delete('/:table/:id', async (req, res) => {
+// =====================================================================// DELETE RECORD - Short form /:table/:id (matches frontend call)
+// =====================================================================router.delete('/:table/:id', async (req, res) => {
   try {
     const tableNameParam = req.params.table
     const { tableName, tableConfig } = resolveTableConfig(tableNameParam)
@@ -730,10 +714,8 @@ router.delete('/:table/:id', async (req, res) => {
   }
 })
 
-// ============================================================================
-// DELETE RECORD - Legacy form /record/:table/:id
-// ============================================================================
-router.delete('/record/:table/:id', async (req, res) => {
+// =====================================================================// DELETE RECORD - Legacy form /record/:table/:id
+// =====================================================================router.delete('/record/:table/:id', async (req, res) => {
   try {
     const tableNameParam = req.params.table
     const { tableName, tableConfig } = resolveTableConfig(tableNameParam)

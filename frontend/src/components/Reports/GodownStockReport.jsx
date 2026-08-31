@@ -105,7 +105,6 @@ const GodownStockReport = () => {
       const result = await api(`/reports/godown-stock?${params.toString()}`);
 
       let list = [];
-<<<<<<< HEAD
       const rawItems = Array.isArray(result) 
         ? result 
         : (Array.isArray(result?.data) 
@@ -131,29 +130,6 @@ const GodownStockReport = () => {
           list.push(g);
         }
       });
-=======
-      if (Array.isArray(result)) {
-        result.forEach((g) => {
-          if (g && Array.isArray(g.items)) {
-            g.items.forEach((item) => {
-              list.push({
-                ...item,
-                godown_id: item.godown_id || g.godown_id,
-                godown_name: item.godown_name || g.godown_name
-              });
-            });
-          } else if (g && g.item_name) {
-            list.push(g);
-          }
-        });
-      } else if (result && Array.isArray(result.items)) {
-        list = result.items;
-      } else if (result && Array.isArray(result.data)) {
-        list = result.data;
-      } else if (result && Array.isArray(result.stock)) {
-        list = result.stock;
-      }
->>>>>>> origin/main
 
       // Fetch Stock Alert configs for threshold comparison
       let configMap = {};

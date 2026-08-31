@@ -32,7 +32,6 @@ const PurchaseCreation = () => {
 
     // Supplier formatted details (auto-filled)
     supplier_details: '',
-<<<<<<< HEAD
     address: '',
 
     // Transport & Vehicle fields
@@ -42,9 +41,6 @@ const PurchaseCreation = () => {
     lorry_no: '',
     driver_name: '',
     driver: '',
-=======
-
->>>>>>> origin/main
 
     tax_type: 'Exclusive',
     tax_rate: 5,
@@ -74,15 +70,12 @@ const PurchaseCreation = () => {
       invDate: formData.inv_date,
       godown: formData.godown_id,
       taxType: formData.tax_type, // Use actual tax_type from form
-<<<<<<< HEAD
       transporter: formData.transporter || formData.transport || '',
       transport: formData.transporter || formData.transport || '',
       vehicle_no: formData.vehicle_no || formData.lorry_no || '',
       lorry_no: formData.vehicle_no || formData.lorry_no || '',
       driver_name: formData.driver_name || formData.driver || '',
       driver: formData.driver_name || formData.driver || '',
-=======
->>>>>>> origin/main
 
       tax_percent: formData.tax_rate,
       type: formData.type, // purchase_type
@@ -100,17 +93,13 @@ const PurchaseCreation = () => {
   const [tableData, setTableData] = useState([]);
   const [deductions, setDeductions] = useState([]);
   const [selectedDeductions, setSelectedDeductions] = useState([]);
-<<<<<<< HEAD
   const deductionsRef = React.useRef(deductions);
   deductionsRef.current = deductions;
-=======
->>>>>>> origin/main
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
-<<<<<<< HEAD
   const applyPurchaseOrder = useCallback(async (order) => {
     if (!order) return;
     const draft = buildReceiptDraftFromPurchaseOrder(order);
@@ -246,8 +235,6 @@ const PurchaseCreation = () => {
     }
   }, []);
 
-=======
->>>>>>> origin/main
   // Fetch Masters and Existing Record
   useEffect(() => {
     const loadDeductions = async () => {
@@ -269,12 +256,6 @@ const PurchaseCreation = () => {
       }
     };
 
-<<<<<<< HEAD
-=======
-    fetchNextSNo();
-    loadDeductions();
-
->>>>>>> origin/main
     const fetchPurchase = async () => {
       if (!id) return;
       setLoading(true);
@@ -294,15 +275,12 @@ const PurchaseCreation = () => {
             supplier_id: result.supplier,
             supplier_details: result.address || '',
             address: result.address || '',
-<<<<<<< HEAD
             transporter: result.transporter || result.transport || '',
             transport: result.transporter || result.transport || '',
             vehicle_no: result.vehicle_no || result.lorry_no || '',
             lorry_no: result.vehicle_no || result.lorry_no || '',
             driver_name: result.driver_name || result.driver || '',
             driver: result.driver_name || result.driver || '',
-=======
->>>>>>> origin/main
             date: result.date,
 
             inv_no: result.inv_no,
@@ -372,137 +350,6 @@ const PurchaseCreation = () => {
       finally { setLoading(false); }
     };
 
-<<<<<<< HEAD
-=======
-    const applyPurchaseOrder = async (order) => {
-      if (!order) return;
-      const draft = buildReceiptDraftFromPurchaseOrder(order);
-
-      // Fetch fresh next S.No
-      let nextSNo = formData.s_no;
-      try {
-        const snoRes = await api('/purchases/next-sno');
-        if (snoRes?.next_sno || snoRes?.data?.s_no) {
-          nextSNo = String(snoRes.next_sno || snoRes.data.s_no);
-        }
-      } catch (e) {}
-
-      let suppAddress = order.address || order.supplierAddress || '';
-      const suppId = draft.formData.supplier_id || order.supplier_id || order.supplierId || '';
-      if ((!suppAddress || suppAddress.length < 5) && suppId) {
-        try {
-          const suppRes = await api(`/masters/record/suppliers/${suppId}`);
-          if (suppRes) {
-            const partyName = suppRes.name || suppRes.supplier_name || '';
-            const contactPerson = suppRes.contact_person || '';
-            const addressLine = suppRes.address || suppRes.address1 || '';
-            const area = suppRes.area || '';
-            const phone = suppRes.phone || suppRes.mobile || '';
-            const email = suppRes.email || '';
-            const gstNo = suppRes.gst_no || suppRes.tin_no || '';
-            suppAddress = [
-              partyName && `Name : ${partyName}`,
-              contactPerson && `Contact Person : ${contactPerson}`,
-              addressLine && `Address : ${addressLine}`,
-              area && `Area : ${area}`,
-              phone && `Phone : ${phone}`,
-              email && `Email : ${email}`,
-              gstNo && `GST/TIN No : ${gstNo}`
-            ].filter(Boolean).join('\n');
-          }
-        } catch (e) {}
-      }
-
-      setFormData((prev) => ({
-        ...prev,
-        ...draft.formData,
-        s_no: nextSNo || prev.s_no,
-        supplier_id: suppId || prev.supplier_id,
-        address: suppAddress || draft.formData.address || prev.address || '',
-        supplier_details: suppAddress || draft.formData.supplier_details || prev.supplier_details || '',
-        remarks: draft.formData.remarks || (order.remarks ? `PO: ${order.inv_no || order.invNo} - ${order.remarks}` : `Inwarded from PO #${order.inv_no || order.invNo}`),
-        source_order_no: draft.formData.source_order_no || order.inv_no || order.invNo || '',
-        source_order_id: draft.formData.source_order_id || order.id || '',
-        purchase_order_id: order.id || '',
-        po_no: order.inv_no || order.invNo || ''
-      }));
-
-      // Get next lot number preview
-      let startLotNum = 1;
-      try {
-        const lotPrev = await api('/lots/preview', { method: 'GET' });
-        const match = String(lotPrev?.lot_no || lotPrev?.data?.lot_no || 'LOT0001').match(/LOT(\d+)/i);
-        if (match) startLotNum = parseInt(match[1], 10);
-      } catch (e) {}
-
-      const baseItems = (draft.tableData && draft.tableData.length > 0) ? draft.tableData : (order.items || []);
-      const mappedItems = baseItems.map((it, idx) => {
-        const qty = Number(it.qty || 0);
-        const rate = Number(it.rate || it.purc_rate || 0);
-        const weight = Number(it.weight || it.per_unit_weight || it.perUnitWeight || 0);
-        const totWt = Number(it.tot_wt || it.total_wt || it.total_weight || (qty * (weight || 1)));
-        const disc = Number(it.discount_percent || it.disc_percent || it.disc || 0);
-        const tax = Number(it.tax_percent ?? it.tax_rate ?? order.tax_percent ?? order.tax_rate ?? 5);
-        const baseAmt = qty * rate;
-        const discAmt = baseAmt * (disc / 100);
-        const taxable = baseAmt - discAmt;
-        const taxAmt = (taxable * tax) / 100;
-        const finalAmt = Number(it.amount) || (taxable + taxAmt);
-        const autoLot = it.lot_no || `LOT${String(startLotNum + idx).padStart(4, '0')}`;
-
-        return {
-          item_id: it.item_id || it.itemId || it.item_name || it.itemName || '',
-          item_name: it.item_name || it.itemName || '',
-          item_label: it.item_name || it.itemName || '',
-          qty,
-          weight,
-          weight_id: it.weight_id || '',
-          per_unit_wt: weight,
-          per_unit_weight: weight,
-          tot_wt: totWt,
-          total_wt: totWt,
-          total_weight: totWt,
-          rate,
-          purc_rate: rate,
-          disc,
-          disc_percent: disc,
-          tax_rate: tax,
-          tax_percent: tax,
-          base_amount: baseAmt,
-          disc_amount: discAmt,
-          tax_amount: taxAmt,
-          amount: finalAmt.toFixed(2),
-          lot_no: autoLot,
-          lot_status: 'reserved'
-        };
-      });
-
-      setTableData(mappedItems);
-
-      const orderDeductions = (order.deductions && order.deductions.length > 0) ? order.deductions : (draft.selectedDeductions || []);
-      if (orderDeductions.length > 0) {
-        setSelectedDeductions(orderDeductions.map(d => {
-          const matchedDed = deductions.find(master => 
-            String(master.id) === String(d.id || d.deduction_id) || 
-            (master.ded_name && (d.deduction || d.deduction_name || d.name) && master.ded_name.toLowerCase() === (d.deduction || d.deduction_name || d.name).toLowerCase())
-          );
-          return {
-            id: matchedDed ? matchedDed.id : (d.deduction_id || d.id || ''),
-            deduction_id: matchedDed ? matchedDed.id : (d.deduction_id || d.id || ''),
-            name: matchedDed ? (matchedDed.ded_name || matchedDed.name) : (d.deduction || d.deduction_name || d.name || ''),
-            deduction: matchedDed ? (matchedDed.ded_name || matchedDed.name) : (d.deduction || d.deduction_name || d.name || ''),
-            amount: parseFloat(d.amount) || 0,
-            type: (d.type || matchedDed?.type || 'LESS').toUpperCase(),
-            calculation_type: d.calculation_type || matchedDed?.calculation_type || 'Percentage',
-            percentage: parseFloat(d.percent || d.percentage || d.value || 0),
-            percent: parseFloat(d.percent || d.percentage || d.value || 0),
-            remarks: d.remarks || ''
-          };
-        }));
-      }
-    };
-
->>>>>>> origin/main
     const preloadFromPurchaseOrder = async () => {
       const params = new URLSearchParams(location.search);
       const sourceOrderId = params.get('sourcePurchaseOrderId') || params.get('po_id') || params.get('purchase_order_id') || params.get('po');
@@ -539,18 +386,11 @@ const PurchaseCreation = () => {
       }
     };
 
-<<<<<<< HEAD
     fetchNextSNo();
     loadDeductions();
     fetchPurchase();
     preloadFromPurchaseOrder();
   }, [id, location.search, applyPurchaseOrder]);
-=======
-    loadDeductions();
-    fetchPurchase();
-    preloadFromPurchaseOrder();
-  }, [id, location.search]);
->>>>>>> origin/main
 
   // Auto-save draft when form changes (for new entries only)
   useEffect(() => {
@@ -926,11 +766,7 @@ const PurchaseCreation = () => {
   });
 
   // Define fields for EntryTopFrame - organized by columns (matches SalesCreate)
-<<<<<<< HEAD
   // ✅ Purchase fields with Transporter, Vehicle No, Driver name
-=======
-  // ✅ FIXED Purchase fields - NO 'value', supplier autofill
->>>>>>> origin/main
   const topFrameFields = [
     // Column 1
     { name: 's_no', label: 'S.No', readOnly: true, col: 1 },
@@ -944,15 +780,11 @@ const PurchaseCreation = () => {
       {value: 'Inclusive', label: 'Inclusive'},
       {value: 'Without Tax', label: 'Without Tax'}
     ], col: 1 },
-<<<<<<< HEAD
     { name: 'godown_id', label: 'Godown', type: 'masterSelect', masterType: 'godowns', col: 1 },
-=======
->>>>>>> origin/main
 
     // Column 2
     { name: 'inv_no', label: 'Invoice No', type: 'text', col: 2 },
     { name: 'inv_date', label: 'Invoice Date', type: 'date', col: 2 },
-<<<<<<< HEAD
     { name: 'transporter', label: 'Transporter', type: 'masterSelect', masterType: 'transports', placeholder: 'Select/Enter Transporter', col: 2 },
     { name: 'vehicle_no', label: 'Vehicle No', type: 'text', placeholder: 'e.g. TN-38-AB-1234', col: 2 },
     { name: 'driver_name', label: 'Driver Name', type: 'text', placeholder: 'Driver Name', col: 2 },
@@ -968,40 +800,16 @@ const PurchaseCreation = () => {
 
   // ✅ FIXED Purchase columns: Auto lot generation on Item select, manual Qty, manual Weight, manual Rate
   const columns = [
-=======
-    { name: 'godown_id', label: 'Godown', type: 'masterSelect', masterType: 'godowns', col: 2 },
-    { name: 'type', label: 'Type', type: 'select', options: [
-      {value: 'Urad', label: 'Urad'}, {value: 'Rice', label: 'Rice'}, {value: 'Flour', label: 'Flour'}, {value: 'Other', label: 'Other'}
-    ], col: 2 },
-    { name: 'remarks', label: 'Remarks', type: 'textarea', col: 2 },
-
-    // Column 3
-    { name: 'supplier_id', label: 'Supplier', type: 'masterSelect', masterType: 'suppliers', col: 3 },
-    { name: 'address', label: 'Address', type: 'textarea', readOnly: true, col: 3 },
-  ];
-
-  // ✅ FIXED Purchase columns + autoLotMode=true (creation)
-const columns = [
->>>>>>> origin/main
     { key: 'sno', title: 'S.No', readOnly: true },
     { key: 'item_name', title: 'Item', type: 'masterSelect', masterType: 'items' },
     { key: 'lot_no', title: 'Lot No' },
     { key: 'qty', title: 'Qty', type: 'number' },
-<<<<<<< HEAD
     { key: 'weight', title: 'Per Unit Wt', type: 'number' }, // Manual entry as requested
     { key: 'total_wt', title: 'Total Wt', readOnly: true },
     { key: 'rate', title: 'Rate', type: 'number' }, // Manual entry
     { key: 'disc', title: 'Disc%', type: 'number' },
     { key: 'tax_rate', title: 'Tax%', type: 'number' },
     { key: 'amount', title: 'Amount', readOnly: true } // Taxable/net amount
-=======
-    { key: 'weight', title: 'Per Unit Wt', type: 'masterSelect', masterType: 'weights' }, // Changed to masterSelect
-    { key: 'total_wt', title: 'Total Wt', readOnly: true },
-    { key: 'rate', title: 'Rate', type: 'number' },
-    { key: 'disc', title: 'Disc%', type: 'number' },
-    { key: 'tax_rate', title: 'Tax%', type: 'number' },
-    { key: 'amount', title: 'Amount', readOnly: true } // This is taxable amount
->>>>>>> origin/main
   ];
 
   // Define totals for EntryTotalsRow - matches SalesCreate
@@ -1022,7 +830,6 @@ const columns = [
     // This will be handled by the dedicated deductions section
   ];
 
-<<<<<<< HEAD
   const isPoWise = Boolean(formData.po_no || formData.source_order_no);
 
   return (
@@ -1100,33 +907,6 @@ const columns = [
               🔗 Link Purchase Order (PO Wise)
             </button>
           )}
-=======
-  return (
-    <div className="window">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-        <div className="screen-title" style={{ margin: 0 }}>Purchase Creation</div>
-        <div style={{ display: 'flex', gap: '10px' }}>
-          <button
-            type="button"
-            onClick={handleOpenPoPicker}
-            style={{
-              padding: '6px 14px',
-              backgroundColor: '#0284c7',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: '4px',
-              fontWeight: 'bold',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              fontSize: '13px',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.12)'
-            }}
-          >
-            🔗 Link Purchase Order
-          </button>
->>>>>>> origin/main
         </div>
       </div>
 

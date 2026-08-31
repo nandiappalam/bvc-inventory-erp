@@ -20,39 +20,21 @@ process.on('unhandledRejection', (reason, promise) => {
 })
 
 // CORS configuration
-<<<<<<< HEAD
 const allowedOrigins = [
-=======
-const defaultAllowedOrigins = [
->>>>>>> origin/main
   'http://localhost:5173',
   'http://127.0.0.1:5173',
   'http://localhost:3000',
   'https://bvc-inventory-ilakkiya.onrender.com',
 ];
-<<<<<<< HEAD
-=======
-const allowedOrigins = (process.env.CORS_ORIGINS || defaultAllowedOrigins.join(','))
-  .split(',')
-  .map((origin) => origin.trim())
-  .filter(Boolean);
->>>>>>> origin/main
 
 app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (mobile apps, curl, etc.)
     if (!origin) return callback(null, true);
-<<<<<<< HEAD
     if (allowedOrigins.indexOf(origin) !== -1 || origin.endsWith('.onrender.com')) {
       return callback(null, true);
     }
     callback(null, true); // permissive during development
-=======
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-    return callback(new Error('Origin is not allowed by CORS'));
->>>>>>> origin/main
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
@@ -62,11 +44,7 @@ app.use(cors({
 }));
 
 // Explicitly handle OPTIONS preflight for all routes
-<<<<<<< HEAD
 app.options('*', cors());
-=======
-app.options('*', cors({ origin: allowedOrigins, credentials: true }));
->>>>>>> origin/main
 
 app.use(express.json({ limit: '50mb' }))
 app.use(express.urlencoded({ extended: true, limit: '50mb' }))
@@ -76,33 +54,6 @@ const { companyContextMiddleware } = require('./middleware/authMiddleware')
 app.use(companyContextMiddleware)
 
 const frontendPath = path.join(__dirname, '../frontend/dist')
-<<<<<<< HEAD
-=======
-
-// Serve static frontend files
-if (fs.existsSync(frontendPath)) {
-  app.use(express.static(frontendPath, {
-  index: false
-}));
-}
-// API routes FIRST
-// (your existing routes here)
-
-// React fallback ONLY for non-API routes
-/*app.get('*', (req, res) => {
-  if (req.path.startsWith('/api')) {
-    return res.status(404).json({ message: 'API route not found' });
-  }
-
-  const indexPath = path.join(frontendPath, 'index.html');
-
-  if (fs.existsSync(indexPath)) {
-    res.sendFile(indexPath);
-  } else {
-    res.send('Frontend not built. API is running.');
-  }
-});*/
->>>>>>> origin/main
 app.use('/Entry', express.static(path.join(__dirname, '../Entry')))
 
 // Routes
@@ -145,11 +96,7 @@ app.use('/api/work-orders', workOrdersRouter)
 app.use('/api/work-order', workOrdersRouter)
 app.use('/api/stock-alerts', stockAlertsRouter)
 app.use('/api/stock-alert', stockAlertsRouter)
-<<<<<<< HEAD
 app.use('/api/purchases', purchasesRouter)
-=======
-//app.use('/api/purchases', purchasesRouter)
->>>>>>> origin/main
 app.use('/api/lots', lotsRouter)
 app.use('/api/purchase-returns', purchaseReturnsRouter)
 app.use('/api/grains', grainsRouter)
@@ -207,7 +154,6 @@ app.use('/api/quality', require('./routes/qc'))
 app.use('/api/compliance', require('./routes/compliance'))
 app.use('/api/documents', require('./routes/compliance'))
 
-<<<<<<< HEAD
 // System Health and Diagnostic Routes
 const systemHealthRouter = require('./routes/systemHealth')
 app.use('/api', systemHealthRouter)
@@ -215,62 +161,6 @@ app.use('/api', systemHealthRouter)
 // Ensure any unmatched /api route returns JSON 404 for all HTTP methods (placed before static files)
 app.all(['/api', '/api/*'], (req, res) => {
   res.status(404).json({ success: false, error: { code: 'NOT_FOUND_ERROR', message: `API route not found: ${req.method} ${req.originalUrl}` } });
-=======
-// Health check
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK', message: 'BVC Purchase Management API is running' })
-})
-
-// Comprehensive System Health Endpoint
-app.get('/api/system/health', async (req, res) => {
-  try {
-    const dbCheck = await db.query('SELECT 1 AS check_val')
-    const dbStatus = (dbCheck.rows && dbCheck.rows.length > 0) ? 'OK' : 'ERROR'
-    const companiesRes = await db.master.query('SELECT id, code, name, status FROM companies WHERE status != ?', ['Deleted'])
-    const registryRes = await db.master.query('SELECT company_id, db_name, status, last_migrated_at FROM database_registry')
-
-    res.json({
-      status: 'OK',
-      application: 'OK',
-      database: dbStatus,
-      engine: db.isPostgres ? 'PostgreSQL' : 'SQLite (Multi-Tenant Isolated Databases)',
-      companyContext: {
-        activeCompanyId: req.companyId || 1,
-        activeUser: req.user?.username || 'Anonymous/Session',
-        isolationMode: 'Dedicated Company Database / Schema'
-      },
-      companies: (companiesRes.rows || []).map(c => ({ id: c.id, code: c.code, name: c.name })),
-      databaseRegistry: registryRes.rows || [],
-      schemaVersion: '2.0.0',
-      authentication: 'OK',
-      timestamp: new Date().toISOString()
-    })
-  } catch (err) {
-    res.status(500).json({
-      status: 'DEGRADED',
-      application: 'OK',
-      database: 'ERROR',
-      code: 'DATABASE_UNAVAILABLE',
-      timestamp: new Date().toISOString()
-    })
-  }
-})
-
-// Serve React app for any unmatched routes
-/*app.get('*', (req, res) => {
-  const indexPath = path.join(__dirname, '../frontend/dist/index.html')
-
-  if (fs.existsSync(indexPath)) {
-    res.sendFile(indexPath)
-  } else {
-    res.send('Frontend not built. API is running.')
-  }
-})*/
-
-// Ensure any unmatched /api route returns JSON 404 for all HTTP methods (placed before static files)
-app.all(['/api', '/api/*'], (req, res) => {
-  res.status(404).json({ success: false, message: `API route not found: ${req.method} ${req.originalUrl}` });
->>>>>>> origin/main
 });
 
 app.use(express.static(frontendPath));
@@ -278,11 +168,7 @@ app.use(express.static(frontendPath));
 // Serve React app for any unmatched non-API frontend routes
 app.get('*', (req, res) => {
   if (req.originalUrl.startsWith('/api')) {
-<<<<<<< HEAD
     return res.status(404).json({ success: false, error: { code: 'NOT_FOUND_ERROR', message: `API route not found: ${req.method} ${req.originalUrl}` } });
-=======
-    return res.status(404).json({ success: false, message: `API route not found: ${req.method} ${req.originalUrl}` });
->>>>>>> origin/main
   }
   const indexPath = path.join(frontendPath, 'index.html');
 
@@ -292,36 +178,10 @@ app.get('*', (req, res) => {
 
   res.send('Frontend not built. API is running.');
 });
-<<<<<<< HEAD
 
 // Centralized Global Error Handling Middleware (Catches all unhandled route errors, generates Diagnostic ID, logs & classifies)
 const { globalErrorHandler } = require('./middleware/errorHandler');
 app.use(globalErrorHandler);
-=======
-  // Let static files pass through (IMPORTANT)
- /* const filePath = path.join(frontendPath, req.path);
-  if (fs.existsSync(filePath)) {
-    return res.sendFile(filePath);
-  }
-
-  // React fallback
-  const indexPath = path.join(frontendPath, 'index.html');
-  if (fs.existsSync(indexPath)) {
-    return res.sendFile(indexPath);
-  }*/
-
- // res.send('Frontend not built. API is running.');
-
-// Global error handling middleware (catches all unhandled route errors)
-app.use((err, req, res, next) => {
-  console.error('🔥 GLOBAL ERROR HANDLER:', err.stack || err)
-  res.status(err.status || 500).json({
-    success: false,
-    message: err.expose ? err.message : 'Internal Server Error',
-    code: err.code || 'INTERNAL_ERROR'
-  })
-})
->>>>>>> origin/main
 
 // Initialize master tables on startup
 async function initializeMasterTables() {
@@ -817,7 +677,6 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
     console.log('✓ Full multi-company database migrations verified on startup')
     
     // Ensure voucher tables (voucher, voucher_entry, ledger_entries) exist and sync
-<<<<<<< HEAD
     const { ensureVoucherTables, syncAllLedgers } = require('./utils/ledgerHelper')
     await ensureVoucherTables()
     console.log('✓ Voucher tables initialized successfully on startup')
@@ -839,23 +698,6 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
   const databaseHealth = require('./services/DatabaseHealthService');
   databaseHealth.setReady(true);
   console.log('✓ BVC ERP Database & Services marked READY (100% operational)');
-=======
-    if (process.env.RUN_STARTUP_RECONCILIATION === 'true') {
-      const { ensureVoucherTables, syncAllLedgers } = require('./utils/ledgerHelper')
-      await ensureVoucherTables()
-      console.log('✓ Voucher tables initialized successfully on startup')
-      await syncAllLedgers()
-      console.log('✓ Ledger sync and rebuild successfully completed on startup')
-
-      const { rebuildStockLedger } = require('./utils/stockRebuilder')
-      await rebuildStockLedger()
-      console.log('✓ Stock lots & stock ledger re-synchronized on startup')
-    }
-  } catch (err) {
-    console.error('❌ Database initialization failed; refusing to serve requests:', err.message)
-    server.close(() => process.exit(1))
-  }
->>>>>>> origin/main
 })
 
 server.on('error', (err) => {

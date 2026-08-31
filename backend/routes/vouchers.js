@@ -109,15 +109,11 @@ async function initTables() {
     console.error('voucher_entry table error:', err);
   }
 
-<<<<<<< HEAD
   // Heal ledger names that were saved as numeric IDs
   await healDatabaseVouchers();
   
   // Heal all transactions (purchases, sales, advances) to ensure they have corresponding double-entry vouchers & ledger_entries
   await healAllTransactions();
-=======
-  // Data healing is an explicit operator action, never an import-time startup mutation.
->>>>>>> origin/main
 }
 
 async function healAllTransactions() {
@@ -374,11 +370,8 @@ async function healDatabaseVouchers() {
 
 const { resolveLedgerId } = require('../utils/ledgerHelper');
 
-<<<<<<< HEAD
 initTables().catch(console.error);
 
-=======
->>>>>>> origin/main
 // GET /vouchers/ledgers - Get standard ledgers + parties
 router.get('/ledgers', async (req, res) => {
   try {
@@ -547,16 +540,10 @@ router.post('/', async (req, res) => {
 
     // Insert entries
     for (const entry of data.entries) {
-<<<<<<< HEAD
       const entryType = entry.type || (Number(entry.debit) > 0 ? 'Dr' : 'Cr');
       await db.run(
         'INSERT INTO voucher_entry (voucher_id, type, ledger_id, debit, credit, remarks) VALUES (?, ?, ?, ?, ?, ?)',
         [voucherId, entryType, entry.ledger_id, entry.debit || 0, entry.credit || 0, entry.remarks || '']
-=======
-      await db.run(
-        'INSERT INTO voucher_entry (voucher_id, type, ledger_id, debit, credit, remarks) VALUES (?, ?, ?, ?, ?, ?)',
-        [voucherId, entry.type, entry.ledger_id, entry.debit || 0, entry.credit || 0, entry.remarks || '']
->>>>>>> origin/main
       );
     }
 

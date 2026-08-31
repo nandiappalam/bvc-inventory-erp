@@ -6,21 +6,6 @@ async function testCompanyIsolation() {
   console.log('🧪 ==================================================\n');
 
   try {
-<<<<<<< HEAD
-=======
-    // A fresh disposable database has no default tenant. Create it first so
-    // the test tenant is distinct from company 1 and the isolation assertion
-    // is meaningful.
-    const defaultCompany = await db.master.query('SELECT id FROM companies WHERE id = ?', [1]);
-    if (defaultCompany.rows.length === 0) {
-      await db.master.run(
-        `INSERT INTO companies (id, code, name, status) VALUES (?, ?, ?, 'Active')`,
-        [1, 'COMP_TEST_DEFAULT', 'Default Test Company']
-      );
-      await db.createCompanyDatabase(1, 'COMP_TEST_DEFAULT');
-    }
-
->>>>>>> origin/main
     // 1. Create a test company (Company 999)
     const testCompanyCode = `TEST_${Date.now().toString(36).toUpperCase()}`;
     const testCompanyName = `Test Isolation Company ${Date.now()}`;

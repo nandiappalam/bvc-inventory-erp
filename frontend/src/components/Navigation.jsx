@@ -25,10 +25,7 @@ import RecyclingIcon from '@mui/icons-material/Recycling';
 import CalculatorModal from './CalculatorModal';
 import RecycleBinModal from './RecycleBinModal';
 import StockAlertBell from './StockAlert/StockAlertBell';
-<<<<<<< HEAD
 import SystemStatus from './SystemStatus';
-=======
->>>>>>> origin/main
 import { useAuth, MODULE_CATEGORIES, PERMISSION_TYPES } from '../context/AuthContext';
 
 // ERP Theme Colors
@@ -546,10 +543,7 @@ const Navigation = () => {
             <Typography variant="body2" sx={{ color: '#e0f2fe', fontSize: '12px', background: 'rgba(255,255,255,0.15)', px: 1, py: 0.3, borderRadius: '4px', fontFamily: 'monospace' }}>
               {currentTime}
             </Typography>
-<<<<<<< HEAD
             <SystemStatus />
-=======
->>>>>>> origin/main
             <StockAlertBell />
             <Tooltip title="Calculator Tool">
               <IconButton 

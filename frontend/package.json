@@ -7,15 +7,10 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
-<<<<<<< HEAD
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"
-=======
-    "preview": "vite preview"
-    
->>>>>>> origin/main
   },
   "dependencies": {
     "@emotion/react": "^11.11.0",

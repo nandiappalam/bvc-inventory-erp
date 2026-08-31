@@ -24,11 +24,7 @@ export default defineConfig({
     },
     proxy: {
       '/api': {
-<<<<<<< HEAD
         target: 'http://127.0.0.1:3001',
-=======
-        target: 'http://127.0.0.1:3000',
->>>>>>> origin/main
         changeOrigin: true,
         secure: false,
         timeout: 60000,
