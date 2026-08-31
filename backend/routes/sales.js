@@ -219,6 +219,7 @@ router.post('/', async (req, res) => {
 
     // Insert sales items and deduct from stock using FIFO
     for (const item of items) {
+<<<<<<< HEAD
       const itName = item.itemName || item.item_name || '';
       const itLot = item.lotNo || item.lot_no || '';
       const itTotalWt = item.totalWt || item.total_wt || item.total_weight || 0;
@@ -226,23 +227,38 @@ router.post('/', async (req, res) => {
       const itTaxPerc = item.taxPerc || item.tax_perc || 0;
       const itTotalAmt = item.totalAmt || item.total_amt || item.amount || 0;
 
+=======
+>>>>>>> origin/main
       // Insert sales item
       await db.run(`
         INSERT INTO sales_items (sales_id, item_name, lot_no, weight, qty, total_wt, rate, disc_perc, tax_perc, total_amt)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+<<<<<<< HEAD
       `, [salesId, itName, itLot, item.weight || 0, item.qty, itTotalWt,
            item.rate, itDiscPerc, itTaxPerc, itTotalAmt])
+=======
+      `, [salesId, item.itemName, item.lotNo || '', item.weight || 0, item.qty, item.totalWt || 0,
+           item.rate, item.discPerc || 0, item.taxPerc || 0, item.totalAmt || 0])
+>>>>>>> origin/main
       
       // Deduct from stock using FIFO
       const qtyToDeduct = parseFloat(item.qty) || 0
       
       // Get available lots ordered by FIFO (oldest first)
+<<<<<<< HEAD
       const availableLotsRes = await db.query(`
         SELECT * FROM stock_lots 
         WHERE (item_name = ? OR item_name = ?) AND remaining_quantity > 0
         ORDER BY created_at ASC
       `, [itName, itName])
       const availableLots = availableLotsRes.rows || []
+=======
+      const availableLots = await db.query(`
+        SELECT * FROM stock_lots 
+        WHERE item_name = ? AND remaining_quantity > 0
+        ORDER BY created_at ASC
+      `, [item.itemName])
+>>>>>>> origin/main
       
       // Check if total available quantity is enough
       const totalAvailable = availableLots.reduce((sum, lot) => sum + lot.remaining_quantity, 0)
@@ -251,7 +267,11 @@ router.post('/', async (req, res) => {
         await db.run('DELETE FROM sales_items WHERE sales_id = ?', [salesId])
         await db.run('DELETE FROM sales WHERE id = ?', [salesId])
         return res.status(400).json({ 
+<<<<<<< HEAD
           message: `Insufficient stock for ${itName}. Available: ${totalAvailable}, Requested: ${qtyToDeduct}` 
+=======
+          message: `Insufficient stock for ${item.itemName}. Available: ${totalAvailable}, Requested: ${qtyToDeduct}` 
+>>>>>>> origin/main
         })
       }
       
@@ -274,7 +294,11 @@ router.post('/', async (req, res) => {
         await db.run(`
           INSERT INTO stock (item_name, lot_no, qty, weight, rate, amount, date, type, reference_id)
           VALUES (?, ?, ?, ?, ?, ?, ?, 'Sale', ?)
+<<<<<<< HEAD
         `, [itName, lot.lot_no, -deductFromThis, -(item.weight || 0) * (deductFromThis / qtyToDeduct), item.rate, -itTotalAmt, formData.date, salesId])
+=======
+        `, [item.itemName, lot.lot_no, -deductFromThis, -(item.weight || 0) * (deductFromThis / qtyToDeduct), item.rate, -item.totalAmt, formData.date, salesId])
+>>>>>>> origin/main
         
         remainingToDeduct -= deductFromThis
       }

@@ -94,6 +94,10 @@ pub fn main() {
             commands_reports::get_papad_ledger_report,
             commands_reports::get_ledger_statement_report,
             commands::get_next_lot,
+<<<<<<< HEAD
+=======
+            commands::get_available_lots,
+>>>>>>> origin/main
         ])
 
         .setup(|app| {

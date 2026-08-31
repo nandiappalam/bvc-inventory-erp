@@ -7,6 +7,17 @@ async function runAllPendingMigrations() {
   console.log('🔄 [MIGRATIONS] Starting safe database migration check...');
 
   try {
+<<<<<<< HEAD
+=======
+    // The legacy runner below contains SQLite DDL and upsert syntax. PostgreSQL
+    // startup must use its dedicated schema path instead of translating it.
+    if (db.isPostgres) {
+      const initializePostgresSchema = require('../scripts/init-postgres-schema');
+      await initializePostgresSchema();
+      return { success: true, engine: 'postgres' };
+    }
+
+>>>>>>> origin/main
     // 1. Ensure Master Database and tables
     const master = db.master;
     for (const tbl of MASTER_TABLES) {
@@ -30,7 +41,11 @@ async function runAllPendingMigrations() {
           '33AABCB1234A1Z5',
           '9876543210',
           'info@bvcexports.com',
+<<<<<<< HEAD
           'company_1.db',
+=======
+          'bvc.db',
+>>>>>>> origin/main
           'Active'
         ]
       );
@@ -52,7 +67,11 @@ async function runAllPendingMigrations() {
       // Register Company 1 database
       await master.run(
         `INSERT OR REPLACE INTO database_registry (company_id, db_type, db_name, status) VALUES (?, ?, ?, ?)`,
+<<<<<<< HEAD
         [defaultCompanyId, db.isPostgres ? 'postgres' : 'sqlite', db.isPostgres ? 'company_1' : 'company_1.db', 'Active']
+=======
+        [defaultCompanyId, 'sqlite', 'bvc.db', 'Active']
+>>>>>>> origin/main
       );
       console.log(`✅ [MIGRATIONS] Initial Company ${defaultCompanyId} and users seeded`);
     } else {
@@ -82,6 +101,7 @@ async function runAllPendingMigrations() {
         // Ensure default taxes exist
         for (const tax of DEFAULT_TAX_RATES) {
           await compDb.run(
+<<<<<<< HEAD
             `INSERT OR IGNORE INTO tax_master (tax_name, tax_percent, cgst, sgst, igst, status) VALUES (?, ?, ?, ?, ?, ?)`,
             [tax.tax_name, tax.tax_percent, tax.cgst, tax.sgst, tax.igst, 'Active']
           );
@@ -89,6 +109,16 @@ async function runAllPendingMigrations() {
 
         // Run auto-migrations in company context
         if (db.companyStorage) {
+=======
+            `INSERT OR IGNORE INTO tax_master (tax_name, hsn_code, gst_rate, cgst_rate, sgst_rate, igst_rate, status) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [tax.tax_name, '9999', tax.tax_percent, tax.cgst, tax.sgst, tax.igst, 'Active']
+          );
+        }
+
+        // The legacy auto-migrator also seeds and reconciles business data.
+        // It is not a startup migration and may be run only explicitly.
+        if (process.env.RUN_LEGACY_AUTO_MIGRATIONS === 'true' && db.companyStorage) {
+>>>>>>> origin/main
           await db.companyStorage.run({ companyId: comp.id }, async () => {
             const autoMigrate = require('../autoMigrate');
             await autoMigrate();
@@ -104,6 +134,7 @@ async function runAllPendingMigrations() {
 
         console.log(`✅ [MIGRATIONS] Company ${comp.id} (${comp.name}) database verified and up-to-date`);
       } catch (compErr) {
+<<<<<<< HEAD
         console.error(`⚠️ [MIGRATIONS] Warning migrating company ${comp.id}:`, compErr.message);
       }
     }
@@ -114,6 +145,22 @@ async function runAllPendingMigrations() {
       await autoMigrate();
     } catch (migErr) {
       console.log('Notice running legacy autoMigrate:', migErr.message);
+=======
+        console.error(`❌ [MIGRATIONS] Company ${comp.id} migration failed:`, compErr.message);
+        throw compErr;
+      }
+    }
+
+    // Keep legacy data-changing reconciliation out of ordinary application
+    // starts and deployments. Operators can opt in for a reviewed repair run.
+    if (process.env.RUN_LEGACY_AUTO_MIGRATIONS === 'true') {
+      try {
+        const autoMigrate = require('../autoMigrate');
+        await autoMigrate();
+      } catch (migErr) {
+        console.log('Notice running legacy autoMigrate:', migErr.message);
+      }
+>>>>>>> origin/main
     }
 
     console.log('🎉 [MIGRATIONS] All database migrations completed safely with zero data loss');

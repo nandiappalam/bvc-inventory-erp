@@ -1,7 +1,14 @@
 const jwt = require('jsonwebtoken');
 const db = require('../config/database');
 
+<<<<<<< HEAD
 const JWT_SECRET = process.env.JWT_SECRET || 'bvc-erp-secure-jwt-secret-key-2026';
+=======
+if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
+  throw new Error('JWT_SECRET is required when NODE_ENV=production.');
+}
+const JWT_SECRET = process.env.JWT_SECRET || 'bvc-erp-local-development-secret';
+>>>>>>> origin/main
 
 // Middleware to establish multi-company database context for EVERY request
 function companyContextMiddleware(req, res, next) {
@@ -25,8 +32,15 @@ function companyContextMiddleware(req, res, next) {
       }
     }
 
+<<<<<<< HEAD
     // 2. Try resolving from custom header
     if (req.headers['x-company-id']) {
+=======
+    // A verified token is authoritative.  UI-provided company ids are used
+    // only for the legacy unauthenticated local flow and may never override a
+    // signed company claim.
+    if (!user && req.headers['x-company-id']) {
+>>>>>>> origin/main
       const parsed = parseInt(req.headers['x-company-id'], 10);
       if (!isNaN(parsed) && parsed > 0) {
         companyId = parsed;
@@ -34,7 +48,11 @@ function companyContextMiddleware(req, res, next) {
     }
 
     // 3. Try resolving from query parameters
+<<<<<<< HEAD
     if (req.query && req.query.company_id) {
+=======
+    if (!user && req.query && req.query.company_id) {
+>>>>>>> origin/main
       const parsed = parseInt(req.query.company_id, 10);
       if (!isNaN(parsed) && parsed > 0) {
         companyId = parsed;
@@ -42,7 +60,11 @@ function companyContextMiddleware(req, res, next) {
     }
 
     // 4. Try resolving from body (for POST/PUT requests)
+<<<<<<< HEAD
     if (req.body && req.body.company_id) {
+=======
+    if (!user && req.body && req.body.company_id) {
+>>>>>>> origin/main
       const parsed = parseInt(req.body.company_id, 10);
       if (!isNaN(parsed) && parsed > 0) {
         companyId = parsed;
@@ -106,7 +128,10 @@ function generateToken(payload) {
 module.exports = {
   companyContextMiddleware,
   authenticateToken,
+<<<<<<< HEAD
   authMiddleware: authenticateToken,
+=======
+>>>>>>> origin/main
   generateToken,
   JWT_SECRET,
 };

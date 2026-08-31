@@ -33,9 +33,14 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 
 export default function RecallManagement() {
   const [itemsList, setItemsList] = useState([]);
+<<<<<<< HEAD
   const [activeLots, setActiveLots] = useState([]);
   const [selectedItem, setSelectedItem] = useState('');
   const [targetLot, setTargetLot] = useState('');
+=======
+  const [selectedItem, setSelectedItem] = useState('');
+  const [targetLot, setTargetLot] = useState('LOT0014');
+>>>>>>> origin/main
   const [recallClass, setRecallClass] = useState('Class II (Potential Non-life threatening health hazard)');
   const [reason, setReason] = useState('Routine Mock Recall Exercise for FSSAI / ISO 22000 Audit verification.');
   const [simulationResult, setSimulationResult] = useState(null);
@@ -43,6 +48,7 @@ export default function RecallManagement() {
   const [noticeDialogOpen, setNoticeDialogOpen] = useState(false);
 
   useEffect(() => {
+<<<<<<< HEAD
     const loadItemsAndLots = async () => {
       try {
         const [itemsRes, traceRes] = await Promise.all([
@@ -72,12 +78,36 @@ export default function RecallManagement() {
     setLoading(true);
     try {
       const lotToSim = lotParam || targetLot || 'LOT0018';
+=======
+    const loadItems = async () => {
+      try {
+        const res = await fetch('/api/masters/items');
+        const data = await res.json();
+        if (data.data) {
+          setItemsList(data.data);
+          if (data.data.length > 0) setSelectedItem(data.data[0].name);
+        }
+      } catch (err) {
+        console.error('Error fetching items for recall:', err);
+      }
+    };
+    loadItems();
+  }, []);
+
+  const handleSimulateRecall = async () => {
+    setLoading(true);
+    try {
+>>>>>>> origin/main
       const res = await fetch('/api/compliance/recall/simulate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           item_name: selectedItem,
+<<<<<<< HEAD
           lot_no: lotToSim,
+=======
+          lot_no: targetLot,
+>>>>>>> origin/main
           reason,
           recall_class: recallClass,
         }),
@@ -94,10 +124,15 @@ export default function RecallManagement() {
   };
 
   useEffect(() => {
+<<<<<<< HEAD
     if (targetLot) {
       handleSimulateRecall(targetLot);
     }
   }, [targetLot, selectedItem]);
+=======
+    handleSimulateRecall();
+  }, []);
+>>>>>>> origin/main
 
   return (
     <Box>

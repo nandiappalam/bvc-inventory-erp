@@ -422,12 +422,15 @@ module.exports = async function autoMigrate() {
   await safeAddColumn('purchases', 'gross_weight', 'REAL DEFAULT 0');
   await safeAddColumn('purchases', 'tare_weight', 'REAL DEFAULT 0');
   await safeAddColumn('purchases', 'net_weight', 'REAL DEFAULT 0');
+<<<<<<< HEAD
   await safeAddColumn('purchases', 'transporter', 'TEXT');
   await safeAddColumn('purchases', 'transport', 'TEXT');
   await safeAddColumn('purchases', 'vehicle_no', 'TEXT');
   await safeAddColumn('purchases', 'lorry_no', 'TEXT');
   await safeAddColumn('purchases', 'driver_name', 'TEXT');
   await safeAddColumn('purchases', 'driver', 'TEXT');
+=======
+>>>>>>> origin/main
 
   await safeAddColumn('sales', 'sub_total', 'REAL DEFAULT 0');
   await safeAddColumn('sales', 'tax_amount', 'REAL DEFAULT 0');

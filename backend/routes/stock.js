@@ -40,9 +40,12 @@ const createStockLotsTable = async () => {
   }
 }
 
+<<<<<<< HEAD
 // Initialize table on module load
 createStockLotsTable()
 
+=======
+>>>>>>> origin/main
 // ============================================================================
 // CREATE INDEXES FOR PERFORMANCE
 // ============================================================================
@@ -58,8 +61,11 @@ const createIndexes = async () => {
     console.error('Error creating stock indexes:', error.message)
   }
 }
+<<<<<<< HEAD
 createIndexes()
 
+=======
+>>>>>>> origin/main
 // ============================================================================
 // STOCK CATEGORY DETERMINATION HELPER
 // ============================================================================

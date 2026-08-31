@@ -1410,9 +1410,12 @@ async function syncAllProductionRecords() {
   }
 }
 
+<<<<<<< HEAD
 // Automatically sync on initial load
 syncAllProductionRecords();
 
+=======
+>>>>>>> origin/main
 router.get('/production-records', async (req, res) => {
   try {
     // Ensure records are synchronized
@@ -1967,11 +1970,19 @@ router.get('/master-entities', async (req, res) => {
 // ============================================================================
 router.get('/traceability/:lotNo', async (req, res) => {
   try {
+<<<<<<< HEAD
     let lotNo = (req.params.lotNo || '').trim();
+=======
+    const lotNo = (req.params.lotNo || '').trim();
+    if (!lotNo) {
+      return res.status(400).json({ success: false, message: 'Lot number is required' });
+    }
+>>>>>>> origin/main
 
     // Ensure production compliance records are synchronized
     await syncAllProductionRecords();
 
+<<<<<<< HEAD
     // If 'latest' or empty, resolve the most recent active lot
     if (!lotNo || lotNo.toLowerCase() === 'latest' || lotNo.toLowerCase() === 'default') {
       const latestLotRes = await db.query(`
@@ -1987,11 +1998,14 @@ router.get('/traceability/:lotNo', async (req, res) => {
       }
     }
 
+=======
+>>>>>>> origin/main
     // 1. Find Lot in stock_lots with godown info
     const lotRes = await db.query(`
       SELECT sl.*, COALESCE(gm.godown_name, 'KNJ Godown') as godown_name
       FROM stock_lots sl
       LEFT JOIN godown_master gm ON sl.godown_id = gm.id
+<<<<<<< HEAD
       WHERE UPPER(sl.lot_no) = UPPER(?) OR UPPER(sl.lot_no) LIKE UPPER(?)
       ORDER BY CASE WHEN UPPER(sl.lot_no) = UPPER(?) THEN 0 ELSE 1 END, sl.id DESC
     `, [lotNo, `%${lotNo}%`, lotNo]);
@@ -2043,6 +2057,12 @@ router.get('/traceability/:lotNo', async (req, res) => {
     // Use canonical lot name if resolved
     const canonicalLotNo = lot?.lot_no || lotNo;
 
+=======
+      WHERE sl.lot_no LIKE ?
+    `, [`%${lotNo}%`]);
+    let lot = lotRes.rows && lotRes.rows[0] ? lotRes.rows[0] : null;
+
+>>>>>>> origin/main
     // 2. Backward Trace: Purchase & Supplier
     let purchaseInfo = null;
     let supplierInfo = null;
@@ -2062,9 +2082,14 @@ router.get('/traceability/:lotNo', async (req, res) => {
       JOIN purchase_items pi ON p.id = pi.purchase_id
       LEFT JOIN supplier_master s ON (s.id = CAST(p.supplier AS INTEGER) OR p.supplier = s.name OR p.supplier = s.print_name)
       LEFT JOIN godown_master gm ON (gm.id = CAST(p.godown AS INTEGER) OR p.godown = gm.godown_name)
+<<<<<<< HEAD
       WHERE UPPER(pi.lot_no) = UPPER(?) OR UPPER(pi.lot_no) LIKE UPPER(?)
       ORDER BY CASE WHEN UPPER(pi.lot_no) = UPPER(?) THEN 0 ELSE 1 END, p.id DESC
     `, [canonicalLotNo, `%${canonicalLotNo}%`, canonicalLotNo]);
+=======
+      WHERE pi.lot_no LIKE ?
+    `, [`%${lotNo}%`]);
+>>>>>>> origin/main
 
     if (purByItemRes.rows && purByItemRes.rows[0]) {
       purchaseInfo = purByItemRes.rows[0];
@@ -2074,9 +2099,15 @@ router.get('/traceability/:lotNo', async (req, res) => {
                COALESCE(s.name, s.print_name, p.supplier) as supplier_name, 
                COALESCE(s.phone_off, s.mobile1, p.phone, '') as supplier_phone, 
                COALESCE(s.address1, p.address, '') as supplier_address, 
+<<<<<<< HEAD
                COALESCE(s.gst_number, p.gst_no, '') as supplier_gstin, 
                COALESCE(s.area, p.area, '') as supplier_area, 
                COALESCE(p.inv_no, CAST(p.s_no AS TEXT), CAST(p.id AS TEXT)) as invoice_no, 
+=======
+               COALESCE(s.gst_number, p.gst_no, '') as supplier_gstin,
+               COALESCE(s.area, p.area, '') as supplier_area,
+               COALESCE(p.inv_no, CAST(p.s_no AS TEXT), CAST(p.id AS TEXT)) as invoice_no,
+>>>>>>> origin/main
                COALESCE(gm.godown_name, 'KNJ Godown') as godown_name
         FROM purchases p
         LEFT JOIN supplier_master s ON (s.id = CAST(p.supplier AS INTEGER) OR p.supplier = s.name OR p.supplier = s.print_name)
@@ -2096,8 +2127,13 @@ router.get('/traceability/:lotNo', async (req, res) => {
       FROM grains g
       JOIN grain_input_items gi ON g.id = gi.grain_id
       LEFT JOIN flour_mill_master fm ON (fm.id = CAST(g.flour_mill AS INTEGER) OR g.flour_mill = fm.flourmill)
+<<<<<<< HEAD
       WHERE UPPER(gi.lot_no) = UPPER(?) OR UPPER(gi.lot_no) LIKE UPPER(?)
     `, [canonicalLotNo, `%${canonicalLotNo}%`]);
+=======
+      WHERE gi.lot_no LIKE ?
+    `, [`%${lotNo}%`]);
+>>>>>>> origin/main
 
     const grainAsOutput = await db.query(`
       SELECT g.*, go.item_name as output_item, go.lot_no as output_lot, go.qty as output_qty, go.total_wt as output_weight,
@@ -2107,8 +2143,13 @@ router.get('/traceability/:lotNo', async (req, res) => {
       JOIN grain_output_items go ON g.id = go.grain_id
       LEFT JOIN grain_input_items gi ON g.id = gi.grain_id
       LEFT JOIN flour_mill_master fm ON (fm.id = CAST(g.flour_mill AS INTEGER) OR g.flour_mill = fm.flourmill)
+<<<<<<< HEAD
       WHERE UPPER(go.lot_no) = UPPER(?) OR UPPER(go.lot_no) LIKE UPPER(?)
     `, [canonicalLotNo, `%${canonicalLotNo}%`]);
+=======
+      WHERE go.lot_no LIKE ?
+    `, [`%${lotNo}%`]);
+>>>>>>> origin/main
 
     // If queried lot is an output (Finished Good) and we didn't find direct purchase, trace through parent input lot!
     if (!purchaseInfo && grainAsOutput.rows && grainAsOutput.rows.length > 0) {
@@ -2127,8 +2168,13 @@ router.get('/traceability/:lotNo', async (req, res) => {
           JOIN purchase_items pi ON p.id = pi.purchase_id
           LEFT JOIN supplier_master s ON (s.id = CAST(p.supplier AS INTEGER) OR p.supplier = s.name OR p.supplier = s.print_name)
           LEFT JOIN godown_master gm ON (gm.id = CAST(p.godown AS INTEGER) OR p.godown = gm.godown_name)
+<<<<<<< HEAD
           WHERE UPPER(pi.lot_no) = UPPER(?) OR UPPER(pi.lot_no) LIKE UPPER(?)
         `, [parentInputLot, `%${parentInputLot}%`]);
+=======
+          WHERE pi.lot_no LIKE ?
+        `, [`%${parentInputLot}%`]);
+>>>>>>> origin/main
         if (parentPurRes.rows && parentPurRes.rows[0]) {
           purchaseInfo = parentPurRes.rows[0];
         }
@@ -2198,7 +2244,11 @@ router.get('/traceability/:lotNo', async (req, res) => {
     }
 
     // Collect all associated child lots produced from this lot
+<<<<<<< HEAD
     const associatedLots = new Set([canonicalLotNo]);
+=======
+    const associatedLots = new Set([lotNo]);
+>>>>>>> origin/main
     if (parentInputLot) associatedLots.add(parentInputLot);
     grindBatches.forEach(g => {
       g.inputs.forEach(i => i.lot_no && associatedLots.add(i.lot_no));
@@ -2222,20 +2272,35 @@ router.get('/traceability/:lotNo', async (req, res) => {
 
     // Default IQR if not found
     let primaryIQR = iqrList[0] || {
+<<<<<<< HEAD
       record_no: `P1-2026-${canonicalLotNo}`,
       record_date: purchaseInfo ? (purchaseInfo.inv_date || purchaseInfo.date) : '2026-08-24',
       status: 'COMPLETED',
       checked_by: 'QA QC Officer',
       findings: {
         iqr_no: `IQR-2026-${canonicalLotNo}`,
+=======
+      record_no: `P1-2026-${lotNo}`,
+      record_date: purchaseInfo ? (purchaseInfo.inv_date || purchaseInfo.date) : '2026-08-04',
+      status: 'COMPLETED',
+      checked_by: 'QA QC Officer',
+      findings: {
+        iqr_no: `IQR-2026-${lotNo}`,
+>>>>>>> origin/main
         moisture: '10.8%',
         foreign_matter: '0.4%',
         broken_grain: '1.2%',
         weevils: '0%',
         decision: 'ACCEPTED',
+<<<<<<< HEAD
         inward_bags: purchaseInfo ? (purchaseInfo.inward_qty || purchaseInfo.total_qty) : (lot ? lot.quantity : 100),
         bag_weight_kg: 50,
         total_weight_kg: purchaseInfo ? (purchaseInfo.total_weight || (purchaseInfo.inward_qty * 50)) : (lot ? lot.quantity * 50 : 5000)
+=======
+        inward_bags: purchaseInfo ? (purchaseInfo.inward_qty || purchaseInfo.total_qty) : (lot ? lot.quantity : 540),
+        bag_weight_kg: 50,
+        total_weight_kg: purchaseInfo ? (purchaseInfo.total_weight || (purchaseInfo.inward_qty * 50)) : 27000
+>>>>>>> origin/main
       }
     };
 
@@ -2280,10 +2345,17 @@ router.get('/traceability/:lotNo', async (req, res) => {
       sales_id: s.id,
       invoice_no: s.invoice_no,
       date: s.date,
+<<<<<<< HEAD
       customer_name: s.customer_name || 'Customer Records',
       customer_phone: s.customer_phone || '',
       customer_city: s.customer_city || 'Regional Distribution',
       customer_gstin: s.customer_gstin || '',
+=======
+      customer_name: s.customer_name || 'Royal Foods Exporters',
+      customer_phone: s.customer_phone || '9842693423',
+      customer_city: s.customer_city || 'Madurai / Export Zone',
+      customer_gstin: s.customer_gstin || '33AABCR1234F1Z5',
+>>>>>>> origin/main
       item_name: s.item_name,
       lot_no: s.lot_no,
       sold_qty: s.sold_qty,
@@ -2299,6 +2371,7 @@ router.get('/traceability/:lotNo', async (req, res) => {
       }
     }));
 
+<<<<<<< HEAD
     // 8. Fetch list of all active lots across stock_lots, purchase_items, and grain_output_items for quick switching
     const activeLotsRes = await db.query(`
       SELECT lot_no, MAX(item_name) as item_name, SUM(initial_qty) as initial_qty, SUM(remaining_quantity) as remaining_quantity, MAX(godown_name) as godown_name
@@ -2319,16 +2392,33 @@ router.get('/traceability/:lotNo', async (req, res) => {
       GROUP BY lot_no
       ORDER BY lot_no ASC
       LIMIT 100
+=======
+    // 8. Fetch list of all active stock lots in the ERP for quick switching
+    const activeLotsRes = await db.query(`
+      SELECT sl.lot_no, MAX(sl.item_name) as item_name, SUM(sl.quantity) as initial_qty, SUM(sl.remaining_quantity) as remaining_quantity,
+             COALESCE(MAX(gm.godown_name), 'KNJ Godown') as godown_name
+      FROM stock_lots sl
+      LEFT JOIN godown_master gm ON sl.godown_id = gm.id
+      WHERE sl.lot_no IS NOT NULL AND TRIM(sl.lot_no) != ''
+      GROUP BY sl.lot_no
+      ORDER BY MAX(sl.id) DESC
+      LIMIT 25
+>>>>>>> origin/main
     `);
 
     // Prepare normalized Supplier Data
     let supplierDetails = null;
     if (purchaseInfo) {
+<<<<<<< HEAD
       const inwardBags = purchaseInfo.inward_qty || purchaseInfo.total_qty || (lot ? lot.quantity : 100);
+=======
+      const inwardBags = purchaseInfo.inward_qty || purchaseInfo.total_qty || (lot ? lot.quantity : 540);
+>>>>>>> origin/main
       const perBagWt = purchaseInfo.per_unit_weight || 50;
       const inwardWeightKg = purchaseInfo.total_weight || (inwardBags * perBagWt);
 
       supplierDetails = {
+<<<<<<< HEAD
         name: purchaseInfo.supplier_name || 'Direct Supplier',
         phone: purchaseInfo.supplier_phone || '',
         address: purchaseInfo.supplier_address || '',
@@ -2343,13 +2433,33 @@ router.get('/traceability/:lotNo', async (req, res) => {
         rate_per_unit: purchaseInfo.rate || (lot ? lot.rate : 0),
         pay_type: purchaseInfo.pay_type || 'Cash',
         godown_name: purchaseInfo.godown_name || 'KNJ Godown',
+=======
+        name: purchaseInfo.supplier_name || 'KTH',
+        phone: purchaseInfo.supplier_phone || '7356678989',
+        address: purchaseInfo.supplier_address || '22, MM st, TK',
+        area: purchaseInfo.supplier_area || 'MG Road',
+        gstin: purchaseInfo.supplier_gstin || '22BG1DG5R2',
+        invoice_no: purchaseInfo.invoice_no || purchaseInfo.inv_no || 'INV-2026-006',
+        invoice_date: purchaseInfo.inv_date || purchaseInfo.date || '2026-08-04',
+        receiving_date: purchaseInfo.date || '2026-08-04',
+        inward_qty_bags: inwardBags,
+        per_unit_weight_kg: perBagWt,
+        total_weight_kg: inwardWeightKg,
+        rate_per_unit: purchaseInfo.rate || (lot ? lot.rate : 1380),
+        pay_type: purchaseInfo.pay_type || 'Cash',
+        godown_name: purchaseInfo.godown_name || 'KNJ Godown (Godown 2)',
+>>>>>>> origin/main
         vehicle_no: purchaseInfo.lorry_no || purchaseInfo.transport || 'TN-58-AX-9912'
       };
     }
 
     res.json({
       success: true,
+<<<<<<< HEAD
       lotNo: canonicalLotNo,
+=======
+      lotNo,
+>>>>>>> origin/main
       lotDetails: lot,
       parentLot: parentInputLot,
       activeLots: activeLotsRes.rows || [],

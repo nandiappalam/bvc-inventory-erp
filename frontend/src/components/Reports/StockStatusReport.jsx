@@ -61,7 +61,11 @@ const StockStatusReport = () => {
       setFromDate(dates.start);
       setToDate(dates.end);
     } else {
+<<<<<<< HEAD
       const dates = getDatesForFinancialYear('2026-2027');
+=======
+      const dates = getDatesForFinancialYear('2024-2025');
+>>>>>>> origin/main
       setFromDate(dates.start);
       setToDate(dates.end);
     }

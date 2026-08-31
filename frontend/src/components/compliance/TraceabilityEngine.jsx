@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+=======
+import React, { useState, useEffect } from 'react';
+>>>>>>> origin/main
 import { useSearchParams } from 'react-router-dom';
 import {
   Box,
@@ -21,8 +25,12 @@ import {
   TableRow,
   Stack,
   Tooltip,
+<<<<<<< HEAD
   IconButton,
   Autocomplete
+=======
+  IconButton
+>>>>>>> origin/main
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import AltRouteIcon from '@mui/icons-material/AltRoute';
@@ -39,6 +47,7 @@ import SecurityIcon from '@mui/icons-material/Security';
 import SyncAltIcon from '@mui/icons-material/SyncAlt';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+<<<<<<< HEAD
 import ClearIcon from '@mui/icons-material/Clear';
 
 export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
@@ -117,6 +126,50 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
     }
   };
 
+=======
+
+export default function TraceabilityEngine({ targetLot = 'LOT0014', onLotChange }) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlLot = searchParams.get('lot') || searchParams.get('lot_no');
+  const initialLot = urlLot || targetLot || 'LOT0014';
+
+  const [lotInput, setLotInput] = useState(initialLot);
+  const [traceData, setTraceData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const handleTrace = async (target = lotInput) => {
+    const lotToQuery = (target || lotInput || urlLot || targetLot || '').trim();
+    if (!lotToQuery) return;
+    setLoading(true);
+    setError(null);
+    setLotInput(lotToQuery);
+    if (onLotChange) onLotChange(lotToQuery);
+    try {
+      const res = await fetch(`/api/compliance/traceability/${encodeURIComponent(lotToQuery)}`);
+      const data = await res.json();
+      if (data.success) {
+        setTraceData(data);
+      } else {
+        setError(data.message || 'No trace records found for this lot');
+        setTraceData(null);
+      }
+    } catch (err) {
+      console.error('Error tracing lot:', err);
+      setError('Failed to query traceability engine.');
+      setTraceData(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const lot = urlLot || targetLot || 'LOT0014';
+    setLotInput(lot);
+    handleTrace(lot);
+  }, [targetLot, urlLot]);
+
+>>>>>>> origin/main
   const handlePrint = () => {
     window.print();
   };
@@ -127,19 +180,31 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
   const coas = traceData?.qualityCertificates?.coas || [];
   const currentStock = traceData?.currentStock || [];
   const dispatches = traceData?.forwardTrace?.dispatches || [];
+<<<<<<< HEAD
   const activeLots = (traceData?.activeLots && traceData.activeLots.length > 0) ? traceData.activeLots : allLots;
+=======
+  const activeLots = traceData?.activeLots || [];
+>>>>>>> origin/main
 
   return (
     <Box sx={{ pb: 6 }}>
       {/* SEARCH HEADER & LOT PICKER */}
       <Card sx={{ mb: 3, p: 2.5, backgroundColor: '#f0f6ff', border: '1px solid #bfdbfe' }}>
         <Grid container spacing={2} alignItems="center">
+<<<<<<< HEAD
           <Grid item xs={12} md={6}>
+=======
+          <Grid item xs={12} md={7}>
+>>>>>>> origin/main
             <Typography variant="subtitle1" sx={{ fontWeight: 800, color: '#1f4fb2', mb: 0.5, display: 'flex', alignItems: 'center', gap: 1 }}>
               <AltRouteIcon /> P8 — Interactive Traceability Engine (360° Backward & Forward Trace)
             </Typography>
             <Typography variant="body2" color="text.secondary">
+<<<<<<< HEAD
               Search or select any Raw Material or Finished Goods Lot Number to inspect full supplier origin, inward QC, milling transformation batches, godown balances, and customer dispatches.
+=======
+              Enter any Raw Material or Finished Goods Lot Number to trace supplier origin, inward QC, processing batches, godown balances, and customer dispatches.
+>>>>>>> origin/main
             </Typography>
 
             {/* Quick Active Lots Chips */}
@@ -148,23 +213,37 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
                 <Typography variant="caption" sx={{ fontWeight: 700, color: '#475569', mr: 0.5 }}>
                   Active Factory Lots:
                 </Typography>
+<<<<<<< HEAD
                 {activeLots.slice(0, 12).map((al, idx) => (
+=======
+                {activeLots.slice(0, 8).map((al, idx) => (
+>>>>>>> origin/main
                   <Chip
                     key={`${al.lot_no}-${idx}`}
                     label={`${al.lot_no} (${al.item_name})`}
                     size="small"
+<<<<<<< HEAD
                     onClick={() => {
                       setLotInput(al.lot_no);
                       handleManualSearch(al.lot_no);
                     }}
                     color={traceData?.lotNo?.toUpperCase() === al.lot_no?.toUpperCase() ? 'primary' : 'default'}
                     variant={traceData?.lotNo?.toUpperCase() === al.lot_no?.toUpperCase() ? 'filled' : 'outlined'}
+=======
+                    onClick={() => handleTrace(al.lot_no)}
+                    color={traceData?.lotNo === al.lot_no ? 'primary' : 'default'}
+                    variant={traceData?.lotNo === al.lot_no ? 'filled' : 'outlined'}
+>>>>>>> origin/main
                     sx={{
                       fontSize: '11px',
                       fontWeight: 600,
                       cursor: 'pointer',
+<<<<<<< HEAD
                       bgcolor: traceData?.lotNo?.toUpperCase() === al.lot_no?.toUpperCase() ? '#1f4fb2' : '#ffffff',
                       borderColor: traceData?.lotNo?.toUpperCase() === al.lot_no?.toUpperCase() ? '#1f4fb2' : '#cbd5e1',
+=======
+                      bgcolor: traceData?.lotNo === al.lot_no ? '#1f4fb2' : '#ffffff',
+>>>>>>> origin/main
                       '&:hover': { bgcolor: '#e0f2fe' }
                     }}
                   />
@@ -172,6 +251,7 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
               </Box>
             )}
           </Grid>
+<<<<<<< HEAD
 
           <Grid item xs={12} md={6}>
             <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
@@ -222,6 +302,27 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
                 onClick={() => handleManualSearch(lotInput)}
                 disabled={loading}
                 sx={{ fontWeight: 700, minWidth: 120, height: 40, bgcolor: '#1f4fb2' }}
+=======
+          <Grid item xs={12} md={5}>
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <TextField
+                size="small"
+                fullWidth
+                placeholder="Enter Lot No (e.g. LOT0014, LOT0016, LOT0003)..."
+                value={lotInput}
+                onChange={(e) => setLotInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleTrace(); }}
+                InputProps={{
+                  startAdornment: <SearchIcon sx={{ color: 'text.secondary', mr: 1 }} />,
+                }}
+                sx={{ bgcolor: 'white' }}
+              />
+              <Button
+                variant="contained"
+                onClick={() => handleTrace()}
+                disabled={loading}
+                sx={{ fontWeight: 700, minWidth: 120, bgcolor: '#1f4fb2' }}
+>>>>>>> origin/main
               >
                 {loading ? <CircularProgress size={20} color="inherit" /> : 'Trace Lot'}
               </Button>

@@ -1,5 +1,9 @@
 // Use relative URLs so that the application handles API calls locally
+<<<<<<< HEAD
 const BASE_URL = "";
+=======
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
+>>>>>>> origin/main
 
 console.log("🚀 BASE URL:", BASE_URL || "(relative — using Vite proxy)");
 

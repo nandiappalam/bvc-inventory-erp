@@ -1,0 +1,17 @@
+[package]
+name = "convert_case"
+version = "0.4.0"
+authors = ["David Purdum <purdum41@gmail.com>"]
+edition = "2018"
+description = "Convert strings into any case"
+license = "MIT"
+keywords = [ "casing", "case", "string" ]
+categories = [ "text-processing" ]
+readme = "README.md"
+repository = "https://github.com/rutrum/convert-case"
+
+[features]
+random = ["rand"]
+
+[dependencies]
+rand = { version = "^0.7", optional = true }

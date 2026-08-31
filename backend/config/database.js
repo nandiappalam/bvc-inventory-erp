@@ -1,5 +1,10 @@
+<<<<<<< HEAD
 const { Pool } = require('pg');
 const sqlite3 = require('sqlite3').verbose();
+=======
+require('dotenv').config();
+
+>>>>>>> origin/main
 const path = require('path');
 const fs = require('fs');
 const { AsyncLocalStorage } = require('async_hooks');
@@ -9,6 +14,7 @@ const { COMPANY_TABLES, DEFAULT_LEDGER_CHART, DEFAULT_TAX_RATES } = require('../
 // Context storage for multi-tenant requests
 const asyncLocalStorage = new AsyncLocalStorage();
 
+<<<<<<< HEAD
 // Check if PostgreSQL (Neon / Supabase / RDS / Render Postgres) is configured
 const isPostgres = !!process.env.DATABASE_URL;
 
@@ -33,6 +39,63 @@ if (isPostgres) {
   console.log('🔹 Cloud-Desktop Sync: STRICTLY NON-SYNCED & NON-LINKED');
   console.log('================================================================');
 
+=======
+// Database selection is intentionally explicit. A local machine can have a
+// DATABASE_URL for another tool; that must never make desktop mode use Neon.
+const configuredEngine = String(process.env.DB_ENGINE || '').trim().toLowerCase();
+const isProduction = process.env.NODE_ENV === 'production' || process.env.APP_ENV === 'production';
+const DB_ENGINE = configuredEngine || (isProduction ? '' : 'sqlite');
+if (!['sqlite', 'postgres'].includes(DB_ENGINE)) {
+  throw new Error('Invalid DB_ENGINE. Set DB_ENGINE to "sqlite" or "postgres" explicitly. Production cannot fall back to SQLite.');
+}
+if (DB_ENGINE === 'postgres' && !process.env.DATABASE_URL) {
+  throw new Error('DATABASE_URL is required when DB_ENGINE=postgres.');
+}
+if (DB_ENGINE === 'sqlite' && process.env.DATABASE_URL) {
+  console.warn('[Database] DATABASE_URL is ignored because DB_ENGINE=sqlite.');
+}
+const isPostgres = DB_ENGINE === 'postgres';
+// Load only the selected engine. In particular, PostgreSQL mode must not even
+// initialize SQLite's files or connections, and desktop mode must not create a
+// PostgreSQL pool.
+const Pool = isPostgres ? require('pg').Pool : null;
+const sqlite3 = isPostgres ? null : require('sqlite3').verbose();
+
+// ============================================================================
+// SQLITE SETUP (Local Dev & Desktop Tauri)
+// ============================================================================
+// Packaged Node-backed desktop builds set SQLITE_DATABASE_DIR to an app-data
+// folder. Development keeps its local database in the repository.
+const dbDir = !isPostgres
+  ? (process.env.SQLITE_DATABASE_DIR
+    ? path.resolve(process.env.SQLITE_DATABASE_DIR)
+    : path.join(__dirname, '../../database'))
+  : null;
+if (dbDir && !fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true });
+}
+
+const masterDbPath = dbDir ? path.join(dbDir, 'master.db') : null;
+const legacyDbPath = dbDir ? path.join(dbDir, 'bvc.db') : null;
+
+const companyDbPool = new Map();
+let masterDb = null;
+
+function normalizeCompanyId(companyId) {
+  const value = Number(companyId);
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error('Invalid company ID.');
+  }
+  return value;
+}
+
+// ============================================================================
+// POSTGRESQL SETUP (Neon Cloud / Production / Render)
+// ============================================================================
+let pgPool = null;
+
+if (isPostgres) {
+>>>>>>> origin/main
   const connectionString = process.env.DATABASE_URL;
   const isSslNeeded = process.env.NODE_ENV === 'production' || 
                       connectionString.includes('neon.tech') || 
@@ -49,6 +112,7 @@ if (isPostgres) {
   });
 
   pgPool.on('error', (err) => {
+<<<<<<< HEAD
     console.error('⚠️ [PostgreSQL Pool] Error on idle client:', err.message);
   });
 } else {
@@ -67,6 +131,14 @@ if (isPostgres) {
   }
 
   masterDbPath = path.join(dbDir, 'master.db');
+=======
+    console.error('⚠️ [PostgreSQL Pool] Unexpected error on idle client:', err.message);
+  });
+
+  console.log('🚀 [Database Adapter] Initialized PostgreSQL connection pool (Neon/Cloud Engine)');
+} else {
+  console.log('📦 [Database Adapter] Initialized SQLite Multi-Tenant Engine (Local/Desktop Mode)');
+>>>>>>> origin/main
 }
 
 // ============================================================================
@@ -121,6 +193,7 @@ function translateSqlForPostgres(sql, companyId = 1) {
   transformed = transformed.replace(/DATETIME\s+DEFAULT\s+CURRENT_TIMESTAMP/gi, 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
   transformed = transformed.replace(/DATETIME/gi, 'TIMESTAMP');
 
+<<<<<<< HEAD
   // 4b. Translate SQLite SQL functions for PostgreSQL
   transformed = transformed.replace(/STRFTIME\s*\(\s*['"]%Y-%m['"]\s*,\s*([^)]+)\)/gi, 'SUBSTRING(($1)::text FROM 1 FOR 7)');
   transformed = transformed.replace(/STRFTIME\s*\(\s*['"]%Y['"]\s*,\s*([^)]+)\)/gi, 'SUBSTRING(($1)::text FROM 1 FOR 4)');
@@ -128,6 +201,8 @@ function translateSqlForPostgres(sql, companyId = 1) {
   transformed = transformed.replace(/STRFTIME\s*\(\s*['"]%d['"]\s*,\s*([^)]+)\)/gi, 'SUBSTRING(($1)::text FROM 9 FOR 2)');
   transformed = transformed.replace(/IFNULL\s*\(/gi, 'COALESCE(');
 
+=======
+>>>>>>> origin/main
   // 5. If INSERT statement without RETURNING clause, append RETURNING id
   const trimmed = transformed.trim();
   if (/^INSERT\s+INTO/i.test(trimmed) && !/RETURNING/i.test(trimmed)) {
@@ -164,7 +239,11 @@ function openMasterDatabase() {
     masterDb.run('PRAGMA foreign_keys = ON');
     masterDb.run('PRAGMA journal_mode = WAL');
     masterDb.run('PRAGMA synchronous = NORMAL');
+<<<<<<< HEAD
     masterDb.run('PRAGMA busy_timeout = 30000');
+=======
+    masterDb.run('PRAGMA busy_timeout = 10000');
+>>>>>>> origin/main
 
     for (const tbl of MASTER_TABLES) {
       masterDb.run(tbl.sql);
@@ -179,13 +258,27 @@ if (!isPostgres) {
 }
 
 function getCompanyDbPath(companyId = 1) {
+<<<<<<< HEAD
   if (isPostgres || !dbDir) return null;
   const cId = parseInt(companyId, 10) || 1;
+=======
+  const cId = normalizeCompanyId(companyId);
+  if (cId === 1) {
+    if (fs.existsSync(legacyDbPath)) {
+      return legacyDbPath;
+    }
+    return path.join(dbDir, 'company_1.db');
+  }
+>>>>>>> origin/main
   return path.join(dbDir, `company_${cId}.db`);
 }
 
 function getCompanyDatabaseInstance(companyId = 1) {
+<<<<<<< HEAD
   const cId = parseInt(companyId, 10) || 1;
+=======
+  const cId = normalizeCompanyId(companyId);
+>>>>>>> origin/main
   if (companyDbPool.has(cId)) {
     return companyDbPool.get(cId);
   }
@@ -201,6 +294,7 @@ function getCompanyDatabaseInstance(companyId = 1) {
     instance.run('PRAGMA foreign_keys = ON');
     instance.run('PRAGMA journal_mode = WAL');
     instance.run('PRAGMA synchronous = NORMAL');
+<<<<<<< HEAD
     instance.run('PRAGMA busy_timeout = 30000');
 
     // Ensure company tables exist
@@ -231,6 +325,9 @@ function getCompanyDatabaseInstance(companyId = 1) {
     for (const sql of extraCols) {
       instance.run(sql, () => {});
     }
+=======
+    instance.run('PRAGMA busy_timeout = 10000');
+>>>>>>> origin/main
   });
 
   companyDbPool.set(cId, instance);
@@ -242,10 +339,17 @@ function resolveTargetDatabase(sql, explicitCompanyId = null) {
     return openMasterDatabase();
   }
   if (explicitCompanyId) {
+<<<<<<< HEAD
     return getCompanyDatabaseInstance(explicitCompanyId);
   }
   const store = asyncLocalStorage.getStore();
   const contextCompanyId = store ? store.companyId : 1;
+=======
+    return getCompanyDatabaseInstance(normalizeCompanyId(explicitCompanyId));
+  }
+  const store = asyncLocalStorage.getStore();
+  const contextCompanyId = store ? normalizeCompanyId(store.companyId) : 1;
+>>>>>>> origin/main
   return getCompanyDatabaseInstance(contextCompanyId);
 }
 
@@ -259,12 +363,22 @@ async function executePgQuery(sql, params = [], companyId = 1, isMaster = false)
 
   const client = await pgPool.connect();
   try {
+<<<<<<< HEAD
     const cId = parseInt(companyId, 10) || 1;
     const schemaName = isMaster ? 'public' : `company_${cId}`;
 
     // Ensure schema exists and set search_path for isolation
     if (!isMaster) {
       await client.query(`CREATE SCHEMA IF NOT EXISTS ${schemaName};`);
+=======
+    const cId = normalizeCompanyId(companyId);
+    const schemaName = isMaster ? 'public' : `company_${cId}`;
+
+    // Schemas are provisioned by migrations/company creation, never implicitly
+    // by an arbitrary request. The company id is parsed before it is an SQL
+    // identifier, so request input cannot change search_path.
+    if (!isMaster) {
+>>>>>>> origin/main
       await client.query(`SET search_path TO ${schemaName}, public;`);
     } else {
       await client.query(`SET search_path TO public;`);
@@ -287,11 +401,16 @@ async function executePgQuery(sql, params = [], companyId = 1, isMaster = false)
       lastInsertRowid: lastID,
     };
   } catch (err) {
+<<<<<<< HEAD
     // If table doesn't exist, log cleanly and handle gracefully
     if (err.code === '42P01') { // undefined_table
       console.warn(`[PostgreSQL] Table not yet created: ${err.message}. Returning empty result.`);
       return { rows: [], rowCount: 0, changes: 0, lastID: null, lastInsertRowid: null };
     }
+=======
+    // Never hide a database error as an empty result: that can make an ERP
+    // screen appear to have saved business data when it did not.
+>>>>>>> origin/main
     throw err;
   } finally {
     client.release();
@@ -329,8 +448,12 @@ function runOnSqlite(dbInst, text, params = []) {
 // CREATE NEW COMPANY DATABASE / SCHEMA (Zero-Error Automatic Provisioning)
 // ============================================================================
 async function createCompanyDatabase(companyId, companyCode) {
+<<<<<<< HEAD
   const cId = parseInt(companyId, 10);
   if (!cId) throw new Error('Invalid companyId for database creation');
+=======
+  const cId = normalizeCompanyId(companyId);
+>>>>>>> origin/main
 
   console.log(`🏗️ [Database] Creating isolated tenant environment for Company ${cId} (${companyCode})...`);
 
@@ -362,10 +485,17 @@ async function createCompanyDatabase(companyId, companyCode) {
       // 3. Seed Default Tax Rates
       for (const tax of DEFAULT_TAX_RATES) {
         await client.query(
+<<<<<<< HEAD
           `INSERT INTO tax_master (tax_name, tax_percent, cgst, sgst, igst, status, hsn_code) 
            VALUES ($1, $2, $3, $4, $5, $6, $7) 
            ON CONFLICT DO NOTHING`,
           [tax.tax_name, tax.tax_percent, tax.cgst, tax.sgst, tax.igst, 'Active', '9999']
+=======
+          `INSERT INTO tax_master (tax_name, hsn_code, gst_rate, cgst_rate, sgst_rate, igst_rate, status) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7) 
+           ON CONFLICT DO NOTHING`,
+          [tax.tax_name, '9999', tax.tax_percent, tax.cgst, tax.sgst, tax.igst, 'Active']
+>>>>>>> origin/main
         );
       }
 
@@ -466,7 +596,11 @@ async function createCompanyDatabase(companyId, companyCode) {
 // RESTORE DATABASE FUNCTIONALITY (SQLite & PostgreSQL)
 // ============================================================================
 async function restoreDatabase(tempFilePath, companyId = 1) {
+<<<<<<< HEAD
   const cId = parseInt(companyId, 10) || 1;
+=======
+  const cId = normalizeCompanyId(companyId);
+>>>>>>> origin/main
   if (!fs.existsSync(tempFilePath)) {
     throw new Error('Uploaded backup file does not exist.');
   }
@@ -477,7 +611,14 @@ async function restoreDatabase(tempFilePath, companyId = 1) {
   }
 
   if (isPostgres) {
+<<<<<<< HEAD
     // In PostgreSQL mode: Restore tables from the uploaded SQLite backup file
+=======
+    // SQLite files and PostgreSQL backups are deliberately incompatible. An
+    // HTTP upload must never synchronize or truncate the Neon database.
+    throw new Error('SQLite restore is available only when DB_ENGINE=sqlite. PostgreSQL restore is an explicit administrator operation.');
+    /*
+>>>>>>> origin/main
     const client = await pgPool.connect();
     try {
       const tempDb = new sqlite3.Database(tempFilePath, sqlite3.OPEN_READONLY);
@@ -526,6 +667,10 @@ async function restoreDatabase(tempFilePath, companyId = 1) {
     } finally {
       client.release();
     }
+<<<<<<< HEAD
+=======
+    */
+>>>>>>> origin/main
   } else {
     // In SQLite mode:
     // 1. If an active connection exists in companyDbPool, close it and evict from cache
@@ -608,7 +753,10 @@ class PgDbConnection {
   async beginTransaction() {
     const schemaName = this.isMaster ? 'public' : `company_${this.companyId}`;
     if (!this.isMaster) {
+<<<<<<< HEAD
       await this.client.query(`CREATE SCHEMA IF NOT EXISTS ${schemaName};`);
+=======
+>>>>>>> origin/main
       await this.client.query(`SET search_path TO ${schemaName}, public;`);
     } else {
       await this.client.query(`SET search_path TO public;`);
@@ -692,6 +840,10 @@ class SqliteDbConnection {
 // MODULE EXPORTS (Unified Dual-Engine API)
 // ============================================================================
 module.exports = {
+<<<<<<< HEAD
+=======
+  engine: DB_ENGINE,
+>>>>>>> origin/main
   isPostgres,
   asyncLocalStorage,
   companyStorage: asyncLocalStorage,
@@ -730,7 +882,11 @@ module.exports = {
 
   // Explicit Company DB accessor
   forCompany: (companyId) => {
+<<<<<<< HEAD
     const cId = parseInt(companyId, 10) || 1;
+=======
+    const cId = normalizeCompanyId(companyId);
+>>>>>>> origin/main
     return {
       query: (text, params = []) => {
         if (isPostgres) return executePgQuery(text, params, cId, false);

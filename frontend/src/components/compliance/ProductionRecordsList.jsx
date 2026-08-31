@@ -297,7 +297,11 @@ export default function ProductionRecordsList({ onRefresh, onNavigateToTrace, on
             <Grid container spacing={1.5}>
               <Grid item xs={12} sm={4}>
                 <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 700 }}>COMMODITY / LOT</Typography>
+<<<<<<< HEAD
                 <Typography variant="body2" sx={{ fontWeight: 700 }}>{rec.item_name} {rec.lot_no ? `(${rec.lot_no})` : ''}</Typography>
+=======
+                <Typography variant="body2" sx={{ fontWeight: 700 }}>{rec.item_name} ({rec.lot_no || 'LOT0014'})</Typography>
+>>>>>>> origin/main
               </Grid>
               <Grid item xs={12} sm={4}>
                 <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 700 }}>FUMIGANT CHEMICAL</Typography>

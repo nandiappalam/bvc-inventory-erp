@@ -2,12 +2,27 @@ node_modules
 dist
 .vite
 .env
+<<<<<<< HEAD
+=======
+.env.*
+!.env.example
+>>>>>>> origin/main
 *.log
 
 src-tauri/target
 target
 node_modules
 
+<<<<<<< HEAD
+=======
+# Local SQLite data and recovery files are operational data, not source code.
+database/*.db
+database/*.db-*
+database/*.backup
+database/backups/
+src-tauri/*.db
+
+>>>>>>> origin/main
 # Playwright
 /test-results/
 /playwright-report/

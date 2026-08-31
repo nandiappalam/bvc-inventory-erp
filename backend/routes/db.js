@@ -16,6 +16,7 @@ if (!fs.existsSync('database/temp/')) {
 // Download/Export database backup
 router.get('/backup', async (req, res) => {
   try {
+<<<<<<< HEAD
     const companyId = parseInt(req.headers['x-company-id'] || req.query.company_id || (req.user && req.user.company_id) || 1, 10);
     
     if (db.isPostgres) {
@@ -50,10 +51,20 @@ router.get('/backup', async (req, res) => {
     const dbPath = db.getDbPath(companyId);
     if (!fs.existsSync(dbPath)) {
       return res.status(404).json({ message: 'Database file not found' });
+=======
+    if (db.isPostgres) {
+      return res.status(501).json({ success: false, message: 'PostgreSQL backups are managed outside this SQLite download endpoint.', code: 'POSTGRES_BACKUP_UNSUPPORTED' })
+    }
+    const companyId = req.companyId || (req.user && (req.user.companyId || req.user.company_id)) || 1
+    const dbPath = db.getDbPath(companyId)
+    if (!fs.existsSync(dbPath)) {
+      return res.status(404).json({ message: 'Database file not found' })
+>>>>>>> origin/main
     }
 
     // Flush any pending WAL checkpoint to ensure db contains all latest data before download
     try {
+<<<<<<< HEAD
       await db.forCompany(companyId).run('PRAGMA wal_checkpoint(TRUNCATE)');
     } catch (e) {
       console.warn('WAL checkpoint before backup warning:', e.message);
@@ -70,16 +81,44 @@ router.get('/backup', async (req, res) => {
     res.status(500).json({ message: 'Failed to create database backup', error: error.message });
   }
 });
+=======
+      await db.forCompany(companyId).run('PRAGMA wal_checkpoint(TRUNCATE)')
+    } catch (e) {
+      console.warn('WAL checkpoint before backup warning:', e.message)
+    }
+    
+    // Set appropriate headers for file download
+    res.setHeader('Content-Type', 'application/x-sqlite3')
+    res.setHeader('Content-Disposition', `attachment; filename="bvc_backup_company_${companyId}.db"`)
+    
+    const fileStream = fs.createReadStream(dbPath)
+    fileStream.pipe(res)
+  } catch (error) {
+    console.error('Database backup error:', error)
+    res.status(500).json({ message: 'Failed to create database backup', error: error.message })
+  }
+})
+>>>>>>> origin/main
 
 // Upload/Restore database backup
 router.post('/restore', upload.single('database'), async (req, res) => {
   try {
+<<<<<<< HEAD
+=======
+    if (db.isPostgres) {
+      return res.status(501).json({ success: false, message: 'SQLite uploads cannot restore PostgreSQL data.', code: 'POSTGRES_RESTORE_UNSUPPORTED' })
+    }
+>>>>>>> origin/main
     if (!req.file) {
       return res.status(400).json({ message: 'No database file uploaded' })
     }
     
     const tempFilePath = req.file.path
+<<<<<<< HEAD
     const companyId = req.headers['x-company-id'] || req.body.company_id || (req.user && req.user.company_id) || 1
+=======
+    const companyId = req.companyId || (req.user && (req.user.companyId || req.user.company_id)) || 1
+>>>>>>> origin/main
     
     // Perform database restoration
     await db.restoreDatabase(tempFilePath, companyId)
