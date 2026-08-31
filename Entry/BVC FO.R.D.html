@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Flour Out Return Display</title>
+
+<style>
+    body {
+        margin: 0;
+        font-family: Calibri, Arial, sans-serif;
+        background: #e6f0e6;
+    }
+
+    /* HEADER BAR */
+    .top-bar {
+        background: #3c5f5c;
+        color: white;
+        padding: 6px 12px;
+        font-size: 14px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .menu-bar {
+        background: #d9d9d9;
+        padding: 6px;
+        border-bottom: 1px solid #999;
+        font-size: 14px;
+    }
+
+    .menu-bar span {
+        margin-right: 15px;
+        font-weight: bold;
+        cursor: pointer;
+    }
+
+    /* MAIN WINDOW */
+    .window {
+        margin: 10px;
+        border: 1px solid #777;
+        background: #f2f6f2;
+    }
+
+    .title {
+        background: #b9cfc3;
+        padding: 6px 10px;
+        font-weight: bold;
+        border-bottom: 1px solid #888;
+    }
+
+    /* FILTER BAR */
+    .filter-bar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px;
+        background: #e1ece5;
+        border-bottom: 1px solid #999;
+        font-size: 14px;
+    }
+
+    .filter-bar label {
+        font-weight: bold;
+    }
+
+    .filter-bar input {
+        padding: 4px;
+        border: 1px solid #777;
+        width: 120px;
+    }
+
+    /* TABLE */
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        background: #e6f0e6;
+    }
+
+    th {
+        background: #cfded4;
+        border: 1px solid #777;
+        padding: 6px;
+        font-size: 14px;
+        text-align: left;
+    }
+
+    td {
+        border: 1px solid #aaa;
+        padding: 6px;
+        height: 26px;
+        font-size: 14px;
+    }
+
+    /* FOOTER BAR */
+    .footer {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 6px 10px;
+        background: #d9e3dc;
+        border-top: 1px solid #999;
+        font-size: 14px;
+    }
+
+    .footer button {
+        padding: 6px 16px;
+        border: 1px solid #666;
+        background: #efefef;
+        cursor: pointer;
+        font-size: 14px;
+    }
+
+    .footer button:hover {
+        background: #ddd;
+    }
+</style>
+</head>
+
+<body>
+
+<!-- TOP HEADER -->
+<div class="top-bar">
+    <div>xxx Softwares, Txxx - xxxx6 | Mobile : 9xxxxxx0045</div>
+    <div>Inventory Management System</div>
+</div>
+
+<!-- MENU -->
+<div class="menu-bar">
+    <span>Entry</span>
+    <span>Master</span>
+    <span>Report</span>
+    <span>Accounts</span>
+    <span>Features</span>
+    <span>Company</span>
+    <span>Quit</span>
+</div>
+
+<!-- MAIN WINDOW -->
+<div class="window">
+
+    <div class="title">Flour Out Return Display</div>
+
+    <!-- FILTER -->
+    <div class="filter-bar">
+        <label>Date :</label>
+        <input type="date">
+        <label>to</label>
+        <input type="date">
+    </div>
+
+    <!-- DISPLAY TABLE -->
+    <table>
+        <thead>
+            <tr>
+                <th>Flour Mill</th>
+                <th>Item Name</th>
+                <th>Lot No</th>
+                <th>Weight</th>
+                <th>Qty</th>
+                <th>Total Wt</th>
+                <th>Wages / Kg</th>
+                <th>Wages</th>
+            </tr>
+        </thead>
+
+        <tbody>
+            <!-- EMPTY ROWS (like original software) -->
+            <tr><td colspan="8">&nbsp;</td></tr>
+            <tr><td colspan="8">&nbsp;</td></tr>
+            <tr><td colspan="8">&nbsp;</td></tr>
+            <tr><td colspan="8">&nbsp;</td></tr>
+            <tr><td colspan="8">&nbsp;</td></tr>
+        </tbody>
+    </table>
+
+    <!-- FOOTER -->
+    <div class="footer">
+        <div>Row(s): 0</div>
+        <div>
+            <button>Print</button>
+            <button>Cancel</button>
+            <button>Options</button>
+        </div>
+    </div>
+
+</div>
+
+</body>
+</html>

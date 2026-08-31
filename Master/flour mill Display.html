@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Flour Mill Display</title>
+    <link rel="stylesheet" href="flour mill D.css">
+    <script>
+        async function loadFlourMills() {
+            try {
+                const response = await fetch('http://localhost:3000/api/masters/flour_mill_master');
+                const flourMills = await response.json();
+
+                const tbody = document.querySelector('.grid-table tbody');
+                tbody.innerHTML = '';
+
+                flourMills.forEach((mill, index) => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${index + 1}</td>
+                        <td>${mill.flourmill}</td>
+                        <td>${mill.contact_person || ''}</td>
+                        <td>${mill.area || ''}</td>
+                        <td>${mill.mobile1 || ''}</td>
+                        <td>${mill.wages_kg || 0}</td>
+                        <td>${mill.opening_balance || 0}</td>
+                        <td>${mill.gst_number ? 'GST' : 'Non-GST'}</td>
+                        <td>Active</td>
+                        <td>
+                            <button onclick="editFlourMill(${mill.id})">Edit</button>
+                            <button onclick="deleteFlourMill(${mill.id})">Delete</button>
+                        </td>
+                    `;
+                    tbody.appendChild(row);
+                });
+
+                document.querySelector('.footer-bar').innerHTML = `Rows: ${flourMills.length} <span class="footer-right">Options</span>`;
+            } catch (error) {
+                console.error('Error loading flour mills:', error);
+            }
+        }
+
+        async function deleteFlourMill(id) {
+            if (!confirm('Are you sure you want to delete this flour mill?')) return;
+
+            try {
+                const response = await fetch(`http://localhost:3000/api/masters/flour_mill_master/${id}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    alert('Flour mill deleted successfully');
+                    loadFlourMills();
+                } else {
+                    const result = await response.json();
+                    alert('Error: ' + result.message);
+                }
+            } catch (error) {
+                alert('Error deleting flour mill: ' + error.message);
+            }
+        }
+
+        function editFlourMill(id) {
+            alert('Edit functionality would be implemented here for flour mill ID: ' + id);
+        }
+
+        document.addEventListener('DOMContentLoaded', loadFlourMills);
+    </script>
+</head>
+<body>
+
+<div class="app-container">
+    <div class="entry-box">
+        <h3>Flour Mill Display</h3>
+
+        <div class="table-wrapper">
+            <table class="grid-table">
+                <thead>
+                    <tr>
+                        <th>S.No</th>
+                        <th>Flour Mill</th>
+                        <th>Contact Person</th>
+                        <th>Area</th>
+                        <th>Mobile</th>
+                        <th>Wages/Kg</th>
+                        <th>Opening Balance</th>
+                        <th>Type</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Data will be loaded here -->
+                </tbody>
+            </table>
+        </div>
+
+        <div class="footer-bar">
+            Rows: 0
+            <span class="footer-right">Options</span>
+        </div>
+    </div>
+</div>
+
+</body>
+</html>

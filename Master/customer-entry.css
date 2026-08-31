@@ -1,0 +1,108 @@
+* {
+    box-sizing: border-box;
+    font-family: Tahoma, Arial, sans-serif;
+}
+
+body {
+    margin: 0;
+    background: #6b7386;
+}
+
+/* Top Bars */
+.top-bar {
+    background: linear-gradient(#4a74b5, #355f9f);
+    color: white;
+    padding: 6px 10px;
+    font-weight: bold;
+}
+
+.company {
+    float: right;
+}
+
+.menu-bar {
+    background: #d6deef;
+    padding: 5px 10px;
+    font-size: 14px;
+    border-bottom: 1px solid #777;
+}
+
+.menu-bar .date {
+    float: right;
+}
+
+/* Window Header */
+.window-header {
+    background: #2f4f87;
+    color: white;
+    padding: 6px 10px;
+    font-weight: bold;
+    position: relative;
+}
+
+.close {
+    position: absolute;
+    right: 10px;
+}
+
+/* Form Wrapper */
+.form-wrapper {
+    background: #cfd6e6;
+    padding: 15px;
+    min-height: 450px;
+}
+
+/* Form Box */
+.entry-form {
+    background: #e9eef7;
+    width: 500px;
+    margin: auto;
+    padding: 15px;
+    border: 1px solid #7b8fb3;
+}
+
+/* Rows */
+.row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.row label {
+    width: 150px;
+    font-size: 13px;
+    color: #000;
+}
+
+.row input,
+.row textarea,
+.row select {
+    flex: 1;
+    padding: 4px 6px;
+    border: 1px solid #7b8fb3;
+    background: white;
+    font-size: 13px;
+}
+
+textarea {
+    resize: none;
+}
+
+.drcr {
+    width: 60px;
+    margin-left: 5px;
+}
+
+/* Buttons */
+.actions {
+    text-align: right;
+    margin-top: 10px;
+}
+
+.actions button {
+    padding: 4px 14px;
+    border: 1px solid #4a74b5;
+    background: linear-gradient(#ffffff, #c7d6f1);
+    cursor: pointer;
+    font-size: 13px;
+}

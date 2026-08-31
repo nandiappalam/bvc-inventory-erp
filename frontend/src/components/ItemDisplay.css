@@ -1,0 +1,556 @@
+/*============================================================================
+  ItemDisplay.css - ERP Unified Blue & White Theme
+  Clean, high-precision layout matching CityDisplay.css
+  ============================================================================*/
+
+.item-display-container {
+    width: 100%;
+    margin: 0;
+    background: #f0f6ff;
+    font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+    min-height: 100vh;
+    padding-bottom: 30px;
+}
+
+/* Header Screen Title */
+.screen-title-bar {
+    background: linear-gradient(135deg, #1f4fb2 0%, #2a5ea0 100%);
+    color: #fff;
+    padding: 12px 20px;
+    font-weight: bold;
+    font-size: 18px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.screen-title-text {
+    margin: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* New Item Button */
+.add-new-item-btn {
+    background: #4caf50;
+    color: #fff;
+    border: 1px solid #3d8b40;
+    padding: 6px 16px;
+    font-weight: bold;
+    font-size: 13px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.add-new-item-btn:hover {
+    background: #43a047;
+}
+
+/* Unified Filters Top Head Block */
+.filter-panel {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 12px 18px;
+    margin: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 15px;
+}
+
+.filter-title {
+    font-size: 12px;
+    font-weight: bold;
+    color: #1f4fb2;
+    text-transform: uppercase;
+    width: 100%;
+    margin-bottom: 5px;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 4px;
+}
+
+.filter-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.filter-group label {
+    font-size: 13px;
+    font-weight: bold;
+    color: #333;
+    white-space: nowrap;
+}
+
+.filter-group input,
+.filter-group select {
+    padding: 5px 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 13px;
+    outline: none;
+    background-color: #fff;
+    min-width: 140px;
+    height: 30px;
+    box-sizing: border-box;
+}
+
+.filter-group input:focus,
+.filter-group select:focus {
+    border-color: #1f4fb2;
+}
+
+/* Alert Notification Banner */
+.notification-banner {
+    margin: 10px;
+    padding: 10px 15px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-weight: bold;
+}
+
+.notification-banner.success {
+    background-color: #e8f5e9;
+    color: #2e7d32;
+    border: 1px solid #c8e6c9;
+}
+
+.notification-banner.error {
+    background-color: #ffebee;
+    color: #c62828;
+    border: 1px solid #ffcdd2;
+}
+
+/* Content Container & Table styling */
+.items-list-container {
+    padding: 0 10px;
+}
+
+.items-table-wrapper {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    overflow-x: auto;
+    max-height: calc(100vh - 280px);
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.items-data-table {
+    width: 100%;
+    min-width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    table-layout: auto;
+    box-sizing: border-box;
+}
+
+.items-data-table th {
+    background: #1f4fb2;
+    color: #fff;
+    font-weight: bold;
+    padding: 8px 10px;
+    border: 1px solid #ddd;
+    text-align: left;
+    font-size: 12px;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.items-data-table td {
+    padding: 7px 10px;
+    border: 1px solid #ddd;
+    color: #333;
+    white-space: normal;
+    word-break: break-word;
+}
+
+.items-data-table tbody tr:nth-child(even) {
+    background: #f9f9f9;
+}
+
+.items-data-table tbody tr:hover {
+    background: #e8f0ff;
+}
+
+/* Inline Lab Parameter Button Badges */
+.lab-badge {
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: bold;
+    border: 1px solid #ccc;
+    cursor: pointer;
+    background: #f5f5f5;
+    color: #666;
+    margin-right: 4px;
+    transition: all 0.2s;
+    outline: none;
+    display: inline-block;
+}
+
+.lab-badge:hover {
+    background: #e0e0e0;
+}
+
+.lab-badge.active-Physical {
+    background-color: #e8f5e9;
+    color: #2e7d32;
+    border-color: #81c784;
+}
+
+.lab-badge.active-Physical:hover {
+    background-color: #c8e6c9;
+}
+
+.lab-badge.active-Chemical {
+    background-color: #e3f2fd;
+    color: #1565c0;
+    border-color: #64b5f6;
+}
+
+.lab-badge.active-Chemical:hover {
+    background-color: #bbdefb;
+}
+
+.lab-badge.active-Microbiology {
+    background-color: #fff8e1;
+    color: #f57f17;
+    border-color: #ffd54f;
+}
+
+.lab-badge.active-Microbiology:hover {
+    background-color: #ffecb3;
+}
+
+/* Quick specs settings button */
+.inline-specs-btn {
+    background: #37474f;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 11px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.inline-specs-btn:hover {
+    background: #263238;
+}
+
+/* Standard row badges */
+.type-badge {
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+.type-badge.Urad { background-color: #f3e5f5; color: #7b1fa2; }
+.type-badge.Rice { background-color: #efebe9; color: #5d4037; }
+.type-badge.Flour { background-color: #e0f7fa; color: #00838f; }
+.type-badge.Suji { background-color: #e8eaf6; color: #283593; }
+
+/* Modal overlays (Specs editor and Print Preview) */
+.custom-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+}
+
+.custom-modal {
+    background: #fff;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    display: flex;
+    flex-direction: column;
+}
+
+.custom-modal-header {
+    background: #1f4fb2;
+    color: #fff;
+    padding: 12px 18px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: bold;
+    font-size: 15px;
+}
+
+.custom-modal-header button {
+    background: transparent;
+    border: none;
+    color: #fff;
+    font-size: 20px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.custom-modal-body {
+    padding: 18px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.custom-modal-footer {
+    background: #f5f5f5;
+    padding: 10px 18px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    border-top: 1px solid #ddd;
+}
+
+/* Modal Actions and standard buttons */
+.btn-secondary {
+    background: #e0e0e0;
+    color: #333;
+    border: 1px solid #ccc;
+    padding: 6px 16px;
+    font-weight: bold;
+    font-size: 13px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.btn-secondary:hover {
+    background: #d5d5d5;
+}
+
+.btn-primary {
+    background: #1f4fb2;
+    color: #fff;
+    border: 1px solid #1a4398;
+    padding: 6px 16px;
+    font-weight: bold;
+    font-size: 13px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.btn-primary:hover {
+    background: #1a4398;
+}
+
+/* Specs Editor Grid Structure */
+.specs-grid-header {
+    display: grid;
+    grid-template-columns: 2.5fr 1.5fr 1.5fr 1.5fr 1fr 2fr;
+    gap: 8px;
+    font-weight: bold;
+    font-size: 11px;
+    text-transform: uppercase;
+    color: #555;
+    padding: 6px 10px;
+    background: #e8f0ff;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    margin-bottom: 8px;
+}
+
+.specs-grid-row {
+    display: grid;
+    grid-template-columns: 2.5fr 1.5fr 1.5fr 1.5fr 1fr 2fr;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 10px;
+    background: #fdfdfd;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    margin-bottom: 6px;
+}
+
+.specs-grid-row input {
+    width: 100%;
+    padding: 4px 6px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 12px;
+    box-sizing: border-box;
+}
+
+.specs-grid-row input:focus {
+    border-color: #1f4fb2;
+    outline: none;
+}
+
+/* Specific Category Tags */
+.cat-tag {
+    font-size: 10px;
+    font-weight: bold;
+    padding: 2px 6px;
+    border-radius: 10px;
+    display: inline-block;
+}
+
+.cat-tag.Physical { background: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }
+.cat-tag.Chemical { background: #e3f2fd; color: #1565c0; border: 1px solid #bbdefb; }
+.cat-tag.Microbiology { background: #fff8e1; color: #f57f17; border: 1px solid #ffecb3; }
+
+/* Print Layout Specifications (Inside Modal) */
+.printable-content-box {
+    border: 1px solid #333;
+    padding: 25px;
+    background: #fff;
+    color: #000;
+    font-family: Arial, Helvetica, sans-serif;
+    border-radius: 4px;
+}
+
+.printable-header {
+    text-align: center;
+    border-bottom: 2px solid #000;
+    padding-bottom: 10px;
+    margin-bottom: 15px;
+}
+
+.printable-header h1 {
+    margin: 0;
+    font-size: 22px;
+    font-weight: 900;
+}
+
+.printable-header p {
+    margin: 3px 0;
+    font-size: 11px;
+    font-weight: bold;
+    color: #444;
+}
+
+.printable-section-title {
+    text-align: center;
+    font-size: 14px;
+    font-weight: bold;
+    border-top: 1px solid #000;
+    border-bottom: 1px solid #000;
+    padding: 5px 0;
+    margin: 15px 0;
+    background-color: #f5f5f5;
+}
+
+.printable-info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px 25px;
+    font-size: 13px;
+    margin-bottom: 20px;
+    background: #fcfcfc;
+    padding: 12px;
+    border: 1px solid #ddd;
+}
+
+.info-item {
+    display: flex;
+    flex-direction: column;
+}
+
+.info-item label {
+    font-size: 11px;
+    font-weight: bold;
+    color: #666;
+    text-transform: uppercase;
+}
+
+.info-item span {
+    font-weight: bold;
+    color: #000;
+}
+
+.print-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    margin-top: 10px;
+}
+
+.print-table th, .print-table td {
+    border: 1px solid #000;
+    padding: 6px 8px;
+    text-align: left;
+}
+
+.print-table th {
+    background-color: #f0f0f0;
+    font-weight: bold;
+}
+
+.printable-signoffs {
+    margin-top: 50px;
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+.signoff-box {
+    text-align: center;
+    width: 150px;
+}
+
+.signoff-line {
+    border-bottom: 1px solid #000;
+    height: 30px;
+    margin-bottom: 5px;
+}
+
+/* ============================================================================
+   PRINT MEDIA RULES
+   ============================================================================*/
+@media print {
+    body, html, #root {
+        background: #fff !important;
+        color: #000 !important;
+    }
+
+    /* Hide EVERYTHING standard, sidebars, headers, action panels */
+    header, nav, aside, footer,
+    .item-display-container > div:not(.custom-modal-overlay),
+    .custom-modal-overlay:not(.print-overlay),
+    .print-overlay .custom-modal-header,
+    .print-overlay .custom-modal-footer,
+    .no-print {
+        display: none !important;
+    }
+
+    /* Standardize print overlay to render as a flat document block */
+    .print-overlay {
+        position: absolute !important;
+        inset: 0 !important;
+        background: #fff !important;
+        display: block !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        z-index: auto !important;
+    }
+
+    .print-overlay .custom-modal {
+        border: none !important;
+        box-shadow: none !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        height: auto !important;
+        display: block !important;
+    }
+
+    .print-overlay .custom-modal-body {
+        padding: 0 !important;
+        margin: 0 !important;
+        overflow: visible !important;
+    }
+
+    .printable-content-box {
+        border: none !important;
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+}

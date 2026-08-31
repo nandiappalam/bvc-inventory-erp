@@ -1,0 +1,491 @@
+/* Window Container */
+.window {
+  min-height: 100vh;
+  background: #eef3ff;
+  font-family: Tahoma, Arial, sans-serif;
+  font-size: 12px;
+}
+
+/* Top */
+.top-bar {
+  background: #1f4fa3;
+  color: white;
+  padding: 4px 8px;
+  display: flex;
+  justify-content: space-between;
+}
+
+/* Title */
+.system-title {
+  background: #2d64c8;
+  color: white;
+  text-align: center;
+  padding: 6px;
+  font-weight: bold;
+}
+
+/* Screen title */
+.screen-title {
+  background: #f7f9ff;
+  border-bottom: 1px solid #9bb8f0;
+  padding: 5px 8px;
+  font-weight: bold;
+}
+
+/* Info Bar - Entry Top Frame (3-column grid) */
+.info-bar {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  padding: 20px;
+  background: #e9eef7;
+  border-bottom: 2px solid #9fb6dd;
+}
+
+.info-bar .column {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.info-bar .field-group {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.info-bar .field-group label {
+  width: 110px;
+  min-width: 110px;
+  max-width: 110px;
+  font-size: 11px;
+  font-weight: bold;
+  color: #1f3f67;
+  margin-right: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.2;
+}
+
+.info-bar .field-group input,
+.info-bar .field-group select {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  height: 32px;
+  box-sizing: border-box;
+  padding: 4px 8px;
+  border: 1px solid #7fa1d6;
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 1.2;
+  background: #ffffff;
+}
+
+.info-bar .field-group input:focus,
+.info-bar .field-group select:focus {
+  outline: none;
+  border-color: #1f4fa3;
+  box-shadow: 0 0 4px rgba(31, 79, 178, 0.3);
+}
+
+/* Entry form */
+.entry-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 20px;
+  padding: 8px;
+}
+.col {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.col.wide {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 10px;
+}
+label {
+  width: 90px;
+  font-weight: bold;
+}
+input {
+  flex: 1;
+  height: 20px;
+  border: 1px solid #9bb8f0;
+}
+
+/* Grid */
+.grid-box {
+  padding: 20px;
+}
+
+/* Section Container */
+.section-container {
+  padding: 15px 20px;
+  background: #ffffff;
+  margin: 10px 20px;
+  border-radius: 4px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* Data Grid Table */
+.data-grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  background: #ffffff;
+}
+
+.data-grid thead tr th {
+  background: #2d64c8;
+  color: #ffffff;
+  padding: 10px 8px;
+  text-align: left;
+  font-weight: bold;
+  font-size: 12px;
+  border: 1px solid #9bb8f0;
+  white-space: nowrap;
+}
+
+.data-grid tbody tr:hover {
+  background: #eaf2fb;
+}
+
+.data-grid tbody tr:nth-child(even) {
+  background: #f0f6ff;
+}
+
+.data-grid tbody tr td {
+  padding: 4px 8px;
+  border: 1px solid #c5d6f8;
+  height: 30px;
+}
+
+.data-grid tbody tr td input {
+  width: 100%;
+  height: 100%;
+  border: none;
+  padding: 4px 8px;
+  font-size: 13px;
+  box-sizing: border-box;
+  background: transparent;
+}
+
+.data-grid tbody tr td input:focus {
+  outline: none;
+  background: #f0f6ff;
+}
+
+/* Add Row Button */
+.section-container button[type="button"] {
+  padding: 8px 16px;
+  background: #2d64c8;
+  color: #ffffff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: bold;
+  margin-top: 10px;
+}
+
+.section-container button[type="button"]:hover {
+  background: #1f4fa3;
+}
+
+/* Delete Row Button */
+.section-container .delete-btn {
+  padding: 4px 8px;
+  background: #dc3545;
+  color: #ffffff;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.section-container .delete-btn:hover {
+  background: #c82333;
+}
+
+/* Legacy table styles */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: white;
+}
+th {
+  background: #2d64c8;
+  color: white;
+  border: 1px solid #9bb8f0;
+  height: 22px;
+}
+td {
+  border: 1px solid #c5d6f8;
+  height: 24px;
+}
+
+/* Bottom */
+.bottom-area {
+  display: flex;
+  gap: 10px;
+  padding: 8px;
+}
+.bottom-area div {
+  background: #f7f9ff;
+  padding: 6px;
+}
+.totals div,
+.deduction div {
+  display: flex;
+  margin-bottom: 4px;
+}
+.totals label,
+.deduction label {
+  width: 80px;
+}
+.final {
+  text-align: center;
+}
+.final .amount {
+  font-size: 22px;
+  font-weight: bold;
+  margin-bottom: 8px;
+}
+button {
+  margin: 2px;
+  padding: 4px 10px;
+  border: 1px solid #2d64c8;
+  background: #e3ecff;
+  cursor: pointer;
+}
+.save {
+  background: #2d64c8;
+  color: white;
+}
+
+/* Alert/Message boxes */
+.alert {
+  padding: 12px 20px;
+  margin: 15px 20px;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.alert.success {
+  background: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
+}
+
+.alert.error {
+  background: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
+}
+
+/* Totals Row */
+.totals-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 30px;
+  padding: 15px 20px;
+  background: #dbe7fb;
+  border-top: 1px solid #9fb6dd;
+  border-bottom: 1px solid #9fb6dd;
+}
+
+.totals-row .total-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.totals-row .total-label {
+  font-size: 14px;
+  font-weight: bold;
+  color: #1f3f67;
+}
+
+.totals-row .total-value {
+  font-size: 14px;
+  font-weight: bold;
+  color: #2d64c8;
+  min-width: 80px;
+  text-align: right;
+}
+
+.totals-row .total-amount {
+  font-size: 16px;
+  font-weight: bold;
+  color: #2d64c8;
+  min-width: 120px;
+  text-align: right;
+}
+
+/* Bottom Summary */
+.bottom-summary {
+  padding: 15px 20px;
+  background: #e9eef7;
+  border-top: 1px solid #9fb6dd;
+}
+
+.bottom-summary .title {
+  font-size: 14px;
+  font-weight: bold;
+  color: #1f3f67;
+  margin-bottom: 12px;
+}
+
+.bottom-summary .summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 15px;
+}
+
+.bottom-summary .summary-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 15px;
+  background: #ffffff;
+  border-radius: 4px;
+  border: 1px solid #c7d6f3;
+}
+
+.bottom-summary .summary-item .label {
+  font-size: 13px;
+  color: #666666;
+}
+
+.bottom-summary .summary-item .value {
+  font-size: 13px;
+  font-weight: bold;
+  color: #333333;
+}
+
+.bottom-summary .summary-item .amount {
+  font-size: 14px;
+  font-weight: bold;
+  color: #2d64c8;
+}
+
+/* Deductions Section */
+.deductions-section {
+  padding: 15px 20px;
+  background: #dbe7fb;
+  margin: 10px 20px;
+  border-radius: 4px;
+  border: 1px solid #9fb6dd;
+}
+
+.deductions-section .deductions-title {
+  font-size: 14px;
+  font-weight: bold;
+  color: #1f3f67;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #9fb6dd;
+}
+
+.deductions-section .deductions-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+
+.deductions-section .deduction-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.deductions-section .deduction-item label {
+  font-size: 12px;
+  font-weight: bold;
+  color: #1f3f67;
+}
+
+.deductions-section .deduction-item input {
+  padding: 8px 12px;
+  border: 1px solid #7fa1d6;
+  border-radius: 4px;
+  font-size: 13px;
+  background: #ffffff;
+}
+
+.deductions-section .deduction-item input:focus {
+  outline: none;
+  border-color: #2d64c8;
+  box-shadow: 0 0 4px rgba(31, 79, 178, 0.3);
+}
+
+/* Grand Total */
+.grand-total {
+  background: linear-gradient(135deg, #2d64c8 0%, #1f4fa3 100%);
+  color: #ffffff;
+  padding: 15px 20px;
+  margin: 10px 20px;
+  border-radius: 4px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 15px;
+  font-size: 16px;
+  font-weight: bold;
+}
+
+.grand-total .grand-total-amount {
+  font-size: 24px;
+  font-weight: bold;
+}
+
+/* Window Footer - Action Buttons */
+.window-footer {
+  background: #dbe7fb;
+  padding: 15px 20px;
+  text-align: right;
+  border-top: 1px solid #9fb6dd;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.window-footer .button-group {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.window-footer button[type="submit"],
+.window-footer .btn-save {
+  padding: 10px 24px;
+  background: #2d64c8;
+  color: #ffffff;
+  border: none;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background 0.2s, box-shadow 0.2s;
+}
+
+.window-footer button[type="submit"]:hover,
+.window-footer .btn-save:hover {
+  background: #1f4fa3;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+.window-footer button[type="submit"]:disabled,
+.window-footer .btn-save:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Supplier Update</title>
+    <link rel="stylesheet" href="city-create.css">
+</head>
+<body>
+
+
+
+<!-- Overlay background -->
+<div class="overlay">
+
+    <!-- Form Box -->
+    <div class="form-box">
+        <div class="form-title">Supplier Update</div>
+
+        <div class="form-body">
+            <div class="form-row">
+                <label>Name</label>
+                <input type="text" name="name" required>
+            </div>
+
+            <div class="form-row">
+                <label>Print Name</label>
+                <input type="text" name="print_name">
+            </div>
+
+            <div class="form-row">
+                <label>Contact Person</label>
+                <input type="text" name="contact_person">
+            </div>
+
+            <div class="form-row">
+                <label>Address</label>
+                <textarea name="address" rows="3"></textarea>
+            </div>
+
+            <div class="form-row">
+                <label>Phone (Res)</label>
+                <input type="text" name="phone_res">
+            </div>
+
+            <div class="form-row">
+                <label>Phone (Off)</label>
+                <input type="text" name="phone_off">
+            </div>
+
+            <div class="form-row">
+                <label>Mobile</label>
+                <input type="text" name="mobile">
+            </div>
+
+            <div class="form-row">
+                <label>Email ID</label>
+                <input type="email" name="email">
+            </div>
+
+            <div class="form-row">
+                <label>Web</label>
+                <input type="text" name="web">
+            </div>
+
+            <div class="form-row">
+                <label>GST / TIN No</label>
+                <input type="text" name="gst_number">
+            </div>
+
+            <div class="form-row">
+                <label>Area</label>
+                <input type="text" name="area">
+            </div>
+
+            <div class="form-row">
+                <label>Transport</label>
+                <input type="text" name="transport">
+            </div>
+
+            <div class="form-row">
+                <label>Limit Days</label>
+                <input type="number" name="limit_days">
+            </div>
+
+            <div class="form-row">
+                <label>Limit Amount</label>
+                <input type="number" name="limit_amount">
+            </div>
+
+            <div class="form-row">
+                <label>Opening Balance</label>
+                <input type="number" name="opening_balance">
+                <select name="dr_cr">
+                    <option>Dr</option>
+                    <option>Cr</option>
+                </select>
+            </div>
+
+            <div class="form-row">
+                <label>Status</label>
+                <select name="status">
+                    <option>Active</option>
+                    <option>Inactive</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="form-footer">
+            <button onclick="updateSupplier(event)">Update</button>
+            <button onclick="cancelUpdate()">Cancel</button>
+        </div>
+    </div>
+
+</div>
+
+<!-- Bottom Status Bar -->
+<div class="status-bar">
+    Ready
+    <span class="right">27-01-2025</span>
+</div>
+
+<script>
+async function loadSupplier() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const id = urlParams.get('id');
+
+    if (!id) {
+        alert('No supplier ID provided');
+        window.location.href = 'suppliers Display.html';
+        return;
+    }
+
+    try {
+        const response = await fetch(`http://localhost:3000/api/masters/supplier_master/${id}`);
+        const supplier = await response.json();
+
+        if (response.ok) {
+            document.querySelector('input[name="name"]').value = supplier.name;
+            document.querySelector('input[name="print_name"]').value = supplier.print_name || '';
+            document.querySelector('input[name="contact_person"]').value = supplier.contact_person || '';
+            document.querySelector('textarea[name="address"]').value = supplier.address1 || '';
+            document.querySelector('input[name="phone_res"]').value = supplier.phone_res || '';
+            document.querySelector('input[name="phone_off"]').value = supplier.phone_off || '';
+            document.querySelector('input[name="mobile"]').value = supplier.mobile1 || '';
+            document.querySelector('input[name="email"]').value = supplier.email || '';
+            document.querySelector('input[name="web"]').value = supplier.web || '';
+            document.querySelector('input[name="gst_number"]').value = supplier.gst_number || '';
+            document.querySelector('input[name="area"]').value = supplier.area || '';
+            document.querySelector('input[name="transport"]').value = supplier.transport || '';
+            document.querySelector('input[name="limit_days"]').value = supplier.limit_days || '';
+            document.querySelector('input[name="limit_amount"]').value = supplier.limit_amount || '';
+            document.querySelector('input[name="opening_balance"]').value = supplier.opening_balance || '';
+            document.querySelector('select[name="dr_cr"]').value = supplier.dr_cr || 'Dr';
+            document.querySelector('select[name="status"]').value = supplier.status;
+        } else {
+            alert('Error loading supplier data');
+            window.location.href = 'suppliers Display.html';
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+        window.location.href = 'suppliers Display.html';
+    }
+}
+
+async function updateSupplier(event) {
+    event.preventDefault();
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const id = urlParams.get('id');
+
+    const formData = {
+        name: document.querySelector('input[name="name"]').value.trim(),
+        print_name: document.querySelector('input[name="print_name"]').value,
+        contact_person: document.querySelector('input[name="contact_person"]').value,
+        address1: document.querySelector('textarea[name="address"]').value,
+        phone_res: document.querySelector('input[name="phone_res"]').value,
+        phone_off: document.querySelector('input[name="phone_off"]').value,
+        mobile1: document.querySelector('input[name="mobile"]').value,
+        email: document.querySelector('input[name="email"]').value,
+        web: document.querySelector('input[name="web"]').value,
+        gst_number: document.querySelector('input[name="gst_number"]').value,
+        area: document.querySelector('input[name="area"]').value,
+        transport: document.querySelector('input[name="transport"]').value,
+        limit_days: parseInt(document.querySelector('input[name="limit_days"]').value) || 0,
+        limit_amount: parseFloat(document.querySelector('input[name="limit_amount"]').value) || 0,
+        opening_balance: parseFloat(document.querySelector('input[name="opening_balance"]').value) || 0,
+        dr_cr: document.querySelector('select[name="dr_cr"]').value,
+        status: document.querySelector('select[name="status"]').value
+    };
+
+    if (!formData.name) {
+        alert('Supplier name is required');
+        return;
+    }
+
+    try {
+        const response = await fetch(`http://localhost:3000/api/masters/supplier_master/${id}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(formData)
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            alert('Supplier updated successfully');
+            window.location.href = 'suppliers Display.html';
+        } else {
+            alert('Error: ' + result.message);
+        }
+    } catch (error) {
+        alert('Error updating supplier: ' + error.message);
+    }
+}
+
+function cancelUpdate() {
+    window.location.href = 'suppliers Display.html';
+}
+
+document.addEventListener('DOMContentLoaded', loadSupplier);
+</script>
+
+</body>
+</html>
+
+

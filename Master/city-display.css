@@ -1,0 +1,79 @@
+* {
+    box-sizing: border-box;
+    font-family: Tahoma, Arial, sans-serif;
+}
+
+body {
+    margin: 0;
+    background-color: #eef3fb;
+}
+
+/* Top title bar */
+.title-bar {
+    background: linear-gradient(#3b6fb6, #2a5ea0);
+    color: white;
+    padding: 6px 12px;
+    font-weight: bold;
+}
+
+.company {
+    float: right;
+}
+
+/* Menu bar */
+.menu-bar {
+    background-color: #dbe6f7;
+    padding: 5px 10px;
+    font-size: 14px;
+    border-bottom: 1px solid #999;
+}
+
+/* Page header */
+.page-header {
+    background-color: #2a5ea0;
+    color: white;
+    padding: 6px 10px;
+    font-weight: bold;
+}
+
+/* Table container */
+.table-container {
+    padding: 10px;
+}
+
+/* Table */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    background-color: white;
+}
+
+thead th {
+    background-color: #bcd0f0;
+    border: 1px solid #7fa1d6;
+    padding: 6px;
+    font-size: 14px;
+    text-align: left;
+}
+
+tbody td {
+    border: 1px solid #c2cbe0;
+    height: 26px;
+    padding: 4px;
+    font-size: 13px;
+}
+
+/* Bottom status bar */
+.status-bar {
+    position: fixed;
+    bottom: 0;
+    width: 100%;
+    background-color: #dbe6f7;
+    padding: 5px 10px;
+    font-size: 13px;
+    border-top: 1px solid #999;
+}
+
+.status-bar .right {
+    float: right;
+}

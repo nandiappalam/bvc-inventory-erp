@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Consignee Creation Form</title>
+    <style>
+        :root {
+            --header-blue: #304a7d; /* Darker blue for headers */
+            --border-blue: #a5b4fc;
+            --bg-light: #f0f4f8;
+            --input-focus: #e0e7ff;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #d1d5db;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+
+        /* Main Form Container */
+        .window-container {
+            width: 550px;
+            background-color: white;
+            border: 1px solid #666;
+            box-shadow: 5px 5px 15px rgba(0,0,0,0.3);
+        }
+
+        /* Title Bar */
+        .window-header {
+            background-color: var(--header-blue);
+            color: white;
+            padding: 5px 12px;
+            font-size: 14px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .close-icon {
+            background: #ccc;
+            color: black;
+            width: 18px;
+            height: 18px;
+            text-align: center;
+            line-height: 16px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        /* Form Content */
+        .form-content {
+            padding: 25px 40px;
+        }
+
+        .row {
+            display: flex;
+            margin-bottom: 6px;
+            align-items: center;
+        }
+
+        .row label {
+            width: 140px;
+            font-size: 13px;
+            color: #333;
+        }
+
+        .row input, .row select, .row textarea {
+            flex: 1;
+            border: 1px solid var(--border-blue);
+            padding: 3px 5px;
+            font-size: 14px;
+            outline-color: var(--header-blue);
+        }
+
+        .row input:focus {
+            background-color: var(--input-focus);
+        }
+
+        /* Footer / Button Area */
+        .form-footer {
+            padding: 10px 40px 20px;
+            text-align: right;
+        }
+
+        .save-btn {
+            background-color: #f3f4f6;
+            border: 1px solid #999;
+            padding: 4px 25px;
+            font-size: 13px;
+            cursor: pointer;
+            box-shadow: 1px 1px 2px rgba(0,0,0,0.1);
+        }
+
+        .save-btn:hover {
+            background-color: #e5e7eb;
+            border-color: var(--header-blue);
+        }
+    </style>
+</head>
+<body>
+
+<div class="window-container">
+    <div class="window-header">
+        <span>Consignee Creation</span>
+        <div class="close-icon">×</div>
+    </div>
+    
+    <div class="form-content">
+        <div class="row">
+            <label>Name</label>
+            <input type="text" name="name">
+        </div>
+        <div class="row">
+            <label>(Print Name)</label>
+            <input type="text" name="print_name">
+        </div>
+        <div class="row">
+            <label>Cont. Person</label>
+            <input type="text" name="contact">
+        </div>
+        <div class="row">
+            <label>Address</label>
+            <textarea name="address" rows="3"></textarea>
+        </div>
+        <div class="row" style="margin-top: 15px;">
+            <label>Area</label>
+            <input type="text" name="area">
+        </div>
+        <div class="row">
+            <label>Phone (Res)</label>
+            <input type="text" name="phone_res">
+        </div>
+        <div class="row">
+            <label>Phone (Off)</label>
+            <input type="text" name="phone_off">
+        </div>
+        <div class="row">
+            <label>Mobile</label>
+            <input type="text" name="mobile">
+        </div>
+        <div class="row">
+            <label>TIN No</label>
+            <input type="text" name="tin_no">
+        </div>
+        <div class="row">
+            <label>Status</label>
+            <select name="status">
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="form-footer">
+        <button type="submit" class="save-btn">Save</button>
+    </div>
+</div>
+
+</body>
+</html>

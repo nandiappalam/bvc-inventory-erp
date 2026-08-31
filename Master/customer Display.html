@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Customer Display</title>
+    <link rel="stylesheet" href="customer-display.css">
+    <script>
+        async function loadCustomers() {
+            try {
+                const response = await fetch('http://localhost:3000/api/masters/customer_master');
+                const customers = await response.json();
+
+                const tbody = document.querySelector('.grid-table tbody');
+                tbody.innerHTML = '';
+
+                customers.forEach((customer, index) => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${index + 1}</td>
+                        <td>${customer.name}</td>
+                        <td>${customer.contact_person || ''}</td>
+                        <td>${customer.area || ''}</td>
+                        <td>${customer.mobile1 || ''}</td>
+                        <td>${customer.opening_balance || 0}</td>
+                        <td>${customer.gst_number ? 'GST' : 'Non-GST'}</td>
+                        <td>Active</td>
+                        <td>
+                            <button onclick="editCustomer(${customer.id})">Edit</button>
+                            <button onclick="deleteCustomer(${customer.id})">Delete</button>
+                        </td>
+                    `;
+                    tbody.appendChild(row);
+                });
+
+                document.querySelector('.footer-bar').innerHTML = `Rows: ${customers.length} <span class="footer-right">Options</span>`;
+            } catch (error) {
+                console.error('Error loading customers:', error);
+            }
+        }
+
+        async function deleteCustomer(id) {
+            if (!confirm('Are you sure you want to delete this customer?')) return;
+
+            try {
+                const response = await fetch(`http://localhost:3000/api/masters/customer_master/${id}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    alert('Customer deleted successfully');
+                    loadCustomers();
+                } else {
+                    const result = await response.json();
+                    alert('Error: ' + result.message);
+                }
+            } catch (error) {
+                alert('Error deleting customer: ' + error.message);
+            }
+        }
+
+        function editCustomer(id) {
+            alert('Edit functionality would be implemented here for customer ID: ' + id);
+        }
+
+        document.addEventListener('DOMContentLoaded', loadCustomers);
+    </script>
+</head>
+<body>
+
+<!-- Top Header -->
+<div class="top-bar">
+    Inventory Management System
+    <span class="company">A.S. MOORTHY & CO</span>
+</div>
+
+<!-- Window Title -->
+<div class="window-header">
+    Customer Display
+    <span class="close">✕</span>
+</div>
+
+<!-- Table Area -->
+<div class="table-wrapper">
+    <table class="grid-table">
+        <thead>
+            <tr>
+                <th>S.No</th>
+                <th>Customer</th>
+                <th>Cont. Person</th>
+                <th>Area</th>
+                <th>Mobile</th>
+                <th>Opening Balance</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Data will be loaded here -->
+        </tbody>
+    </table>
+</div>
+
+<!-- Footer -->
+<div class="footer-bar">
+    Rows: 0
+    <span class="footer-right">Options</span>
+</div>
+
+</body>
+</html>

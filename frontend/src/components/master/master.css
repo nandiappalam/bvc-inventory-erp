@@ -1,0 +1,410 @@
+/* ============================================
+   MASTER CSS - Shared styles for ALL master pages
+   ============================================ */
+
+.standard-display {
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  padding: 12px 16px;
+  min-height: auto;
+  box-sizing: border-box;
+}
+
+.master-form-container {
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+/* Custom scrollbar */
+.standard-display::-webkit-scrollbar {
+  width: 6px;
+}
+.standard-display::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+.standard-display::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+.standard-display::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+/* Screen title - standard flow to prevent overlapping AppBar */
+.screen-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #333;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #e0e0e0;
+  position: relative;
+  background: #fff;
+  z-index: 10;
+}
+
+.master-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px 16px;
+}
+
+.full-span {
+  grid-column: span 2;
+}
+
+.form-section {
+  margin-bottom: 14px;
+}
+
+.section-title {
+  color: #1976d2;
+  font-size: 14px;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+/* ============================================
+   UNIFORM INPUT - Compact height override
+   ============================================ */
+
+.uniform-input {
+  height: 32px;
+  padding: 5px 8px;
+  border: 1px solid #1976d2;
+  border-radius: 4px;
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 13px;
+  background-color: #fff;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  outline: none;
+}
+
+.uniform-input:focus {
+  border-color: #1565c0;
+  box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.2);
+}
+
+/* Flat layout — no card borders */
+.flat-form .form-section {
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+
+.flat-form .section-title {
+  display: none;
+}
+
+.field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.field-label {
+  color: #1976d2;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.readonly-field {
+  background-color: #f5f5f5;
+  color: #555;
+  cursor: not-allowed;
+}
+
+.full-span {
+  grid-column: span 2;
+}
+
+/* ============================================
+   MASTER ACTIONS - Footer buttons
+   ============================================ */
+
+.master-actions {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px solid #e1e5e9;
+  grid-column: span 2;
+}
+
+.btn {
+  padding: 8px 20px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-primary {
+  background: #1976d2;
+  color: white;
+}
+
+.btn-primary:hover {
+  background: #1565c0;
+}
+
+.btn-secondary {
+  background: #f5f5f5;
+  color: #1976d2;
+  border: 1px solid #1976d2;
+}
+
+.btn-secondary:hover {
+  background: #e3f2fd;
+}
+
+/* ============================================
+   MESSAGE / ALERT STYLES
+   ============================================ */
+
+.message {
+  padding: 6px 10px;
+  border-radius: 4px;
+  margin-bottom: 10px;
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.message.success {
+  background: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
+}
+
+.message.error {
+  background: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
+}
+
+/* ============================================
+   RESPONSIVE
+   ============================================ */
+
+@media (max-width: 768px) {
+  .standard-display {
+    padding: 10px 12px;
+  }
+
+  .master-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .full-span {
+    grid-column: span 1;
+  }
+
+  .master-actions {
+    grid-column: span 1;
+  }
+}
+
+/* ============================================================================
+   Screen Header - Back (Left) & Refresh (Right) Actions for Master Pages
+   ============================================================================ */
+.screen-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #e0e0e0;
+  position: relative;
+  background: #fff;
+  z-index: 10;
+  gap: 16px;
+}
+
+.screen-title-text {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1f4fb2; /* ERP Deep Blue */
+  text-align: center;
+  flex: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.header-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+  border: 1px solid #ccc;
+  background: #fff;
+  user-select: none;
+}
+
+.header-btn .btn-icon {
+  width: 14px;
+  height: 14px;
+  display: block;
+  stroke: currentColor;
+  stroke-width: 2.5;
+}
+
+/* Back button: soft-slate/gray */
+.header-btn.back-btn {
+  color: #475569;
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+
+.header-btn.back-btn:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+  color: #1e293b;
+}
+
+/* Refresh button: soft blue */
+.header-btn.refresh-btn {
+  color: #1f4fb2;
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.header-btn.refresh-btn:hover {
+  background: #dbeafe;
+  border-color: #1f4fb2;
+  color: #1e40af;
+}
+
+.header-btn:active {
+  transform: translateY(1px);
+}
+
+/* ============================================================================
+   Search & Filter Bar Styles - Fits Blue & White theme, No Tailwind required
+   ============================================================================ */
+.search-filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background-color: #fff;
+  padding: 10px 15px;
+  border-radius: 6px;
+  border: 1px solid #ddd;
+  margin-bottom: 12px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.search-input-wrapper {
+  position: relative;
+  flex: 1;
+  max-width: 400px;
+}
+
+.search-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #888;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.search-icon svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+.search-input {
+  width: 100%;
+  height: 36px;
+  padding: 8px 12px 8px 34px;
+  font-size: 14px;
+  color: #333;
+  background-color: #fafafa;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  outline: none;
+  box-sizing: border-box;
+  transition: all 0.2s ease-in-out;
+}
+
+.search-input:focus {
+  background-color: #fff;
+  border-color: #1f4fb2;
+  box-shadow: 0 0 0 2px rgba(31, 79, 178, 0.15);
+}
+
+.clear-search-btn {
+  background: none;
+  border: none;
+  color: #1f4fb2;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+.clear-search-btn:hover {
+  background-color: #e8f0ff;
+  text-decoration: underline;
+}
+
+/* Action buttons styling inside Master lists */
+.actions-cell {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.action-btn {
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: opacity 0.2s;
+  height: 26px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.action-btn:hover {
+  opacity: 0.85;
+}
+
+.action-btn.print-btn {
+  background-color: #0284c7 !important;
+  color: #fff !important;
+}
+
+.action-btn.update-btn {
+  background-color: #10b981 !important;
+  color: #fff !important;
+}
+
+.action-btn.delete-btn {
+  background-color: #ef4444 !important;
+  color: #fff !important;
+}
+
+

@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Area Creation</title>
+    <link rel="stylesheet" href="area c.css">    
+    <style>
+        * {
+    box-sizing: border-box;
+    font-family: Arial, Helvetica, sans-serif;
+}
+
+body {
+    margin: 0;
+    background-color: #eef3fb;
+}
+
+/* Top bar */
+.top-bar {
+    background-color: #1f4ea8;
+    color: white;
+    padding: 12px;
+    text-align: center;
+    font-weight: bold;
+    font-size: 16px;
+}
+
+/* Center wrapper */
+.wrapper {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: calc(100vh - 50px);
+}
+
+/* Form box */
+.form-box {
+    background-color: #ffffff;
+    width: 450px;
+    padding: 25px;
+    border: 1px solid #b5c7e3;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+}
+
+/* Title */
+.form-box h3 {
+    margin-top: 0;
+    margin-bottom: 20px;
+    color: #1f4ea8;
+    border-bottom: 2px solid #1f4ea8;
+    padding-bottom: 5px;
+}
+
+/* Form rows */
+.row {
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    margin-bottom: 15px;
+    align-items: center;
+}
+
+label {
+    color: #333;
+    font-weight: bold;
+}
+
+input, select {
+    padding: 6px;
+    border: 1px solid #9db2d8;
+}
+
+input:focus, select:focus {
+    outline: none;
+    border-color: #1f4ea8;
+}
+
+/* Button */
+.btn-row {
+    text-align: right;
+}
+
+button {
+    background-color: #1f4ea8;
+    color: white;
+    border: none;
+    padding: 8px 24px;
+    cursor: pointer;
+}
+
+button:hover {
+    background-color: #163b82;
+}
+    </style>
+</head>
+<body>
+
+<!-- Top Bar -->
+<div class="top-bar">
+    Inventory Management System
+</div>
+
+<!-- Form Box -->
+<div class="wrapper">
+    <div class="form-box">
+        <h3>Area Creation</h3>
+
+        <div class="row">
+            <label>Area</label>
+            <input type="text">
+        </div>
+
+        <div class="row">
+            <label>(Print Name)</label>
+            <input type="text">
+        </div>
+
+        <div class="row">
+            <label>Status</label>
+            <select>
+                <option>Active</option>
+                <option>Inactive</option>
+            </select>
+        </div>
+
+        <div class="btn-row">
+            <button onclick="saveArea()">Save</button>
+        </div>
+
+        <script>
+            async function saveArea() {
+                const areaName = document.querySelector('input[placeholder="Area"]').value;
+                const printName = document.querySelector('input[placeholder="(Print Name)"]').value;
+                const status = document.querySelector('select').value;
+
+                if (!areaName.trim()) {
+                    alert('Area name is required');
+                    return;
+                }
+
+                try {
+                    const response = await fetch('http://localhost:3000/api/masters/area_master', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            name: areaName,
+                            print_name: printName,
+                            status: status
+                        })
+                    });
+
+                    const result = await response.json();
+
+                    if (response.ok) {
+                        alert('Area created successfully');
+                        // Clear form
+                        document.querySelector('input[placeholder="Area"]').value = '';
+                        document.querySelector('input[placeholder="(Print Name)"]').value = '';
+                        document.querySelector('select').value = 'Active';
+                    } else {
+                        alert('Error: ' + result.message);
+                    }
+                } catch (error) {
+                    alert('Error saving area: ' + error.message);
+                }
+            }
+        </script>
+    </div>
+</div>
+
+</body>
+</html>

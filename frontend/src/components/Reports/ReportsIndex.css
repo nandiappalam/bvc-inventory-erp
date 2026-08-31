@@ -1,0 +1,59 @@
+.reports-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 20px;
+  padding: 20px;
+}
+
+.report-card {
+  display: flex;
+  align-items: center;
+  padding: 20px;
+  background: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  text-decoration: none;
+  color: inherit;
+  transition: all 0.2s ease;
+  border: 1px solid #e0e0e0;
+}
+
+.report-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(25, 118, 210, 0.2);
+  border-color: #1976d2;
+}
+
+.report-icon {
+  font-size: 36px;
+  margin-right: 20px;
+  flex-shrink: 0;
+}
+
+.report-info h3 {
+  margin: 0 0 8px 0;
+  font-size: 18px;
+  color: #1976d2;
+  font-weight: 600;
+}
+
+.report-info p {
+  margin: 0;
+  font-size: 14px;
+  color: #666;
+  line-height: 1.4;
+}
+
+/* Section styling for Reports Index */
+.reports-section {
+  margin-bottom: 30px;
+}
+
+.section-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: #1565c0;
+  margin: 0 0 15px 20px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #1976d2;
+}

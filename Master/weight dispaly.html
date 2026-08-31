@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Weight Display</title>
+    <link rel="stylesheet" href="Weight display.css">
+    <script>
+        async function loadWeights() {
+            try {
+                const response = await fetch('http://localhost:3000/api/masters/weightmaster');
+                const weights = await response.json();
+
+                const tbody = document.querySelector('.grid-table tbody');
+                tbody.innerHTML = '';
+
+                weights.forEach((weight, index) => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${index + 1}</td>
+                        <td>${weight.name}</td>
+                        <td>${weight.printname || ''}</td>
+                        <td>${weight.weight || 0}</td>
+                        <td>
+                            <button onclick="editWeight(${weight.id})">Edit</button>
+                            <button onclick="deleteWeight(${weight.id})">Delete</button>
+                        </td>
+                    `;
+                    tbody.appendChild(row);
+                });
+
+                document.querySelector('.footer-bar').innerHTML = `Rows: ${weights.length} <span class="footer-right">Options</span>`;
+            } catch (error) {
+                console.error('Error loading weights:', error);
+            }
+        }
+
+        async function deleteWeight(id) {
+            if (!confirm('Are you sure you want to delete this weight?')) return;
+
+            try {
+                const response = await fetch(`http://localhost:3000/api/masters/weightmaster/${id}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    alert('Weight deleted successfully');
+                    loadWeights();
+                } else {
+                    const result = await response.json();
+                    alert('Error: ' + result.message);
+                }
+            } catch (error) {
+                alert('Error deleting weight: ' + error.message);
+            }
+        }
+
+        function editWeight(id) {
+            alert('Edit functionality would be implemented here for weight ID: ' + id);
+        }
+
+        document.addEventListener('DOMContentLoaded', loadWeights);
+    </script>
+</head>
+<body>
+
+<div class="app-container">
+    <div class="entry-box">
+        <h3>Weight Display</h3>
+
+        <div class="table-wrapper">
+            <table class="grid-table">
+                <thead>
+                    <tr>
+                        <th>S.No</th>
+                        <th>Name</th>
+                        <th>Print Name</th>
+                        <th>Weight</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Data will be loaded here -->
+                </tbody>
+            </table>
+        </div>
+
+        <div class="footer-bar">
+            Rows: 0
+            <span class="footer-right">Options</span>
+        </div>
+    </div>
+</div>
+
+</body>
+</html>

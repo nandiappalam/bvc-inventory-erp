@@ -1,0 +1,85 @@
+* {
+    box-sizing: border-box;
+    font-family: Tahoma, Arial, sans-serif;
+}
+
+body {
+    margin: 0;
+    background: #6b7386;
+}
+
+/* Header bars */
+.top-bar {
+    background: linear-gradient(#4a74b5, #355f9f);
+    color: white;
+    padding: 6px 10px;
+    font-weight: bold;
+}
+
+.company {
+    float: right;
+}
+
+.menu-bar {
+    background: #d6deef;
+    padding: 5px 10px;
+    border-bottom: 1px solid #888;
+}
+
+.menu-bar .date {
+    float: right;
+}
+
+/* Window header */
+.window-header {
+    background: #2f4f87;
+    color: white;
+    padding: 6px 10px;
+    font-weight: bold;
+    position: relative;
+}
+
+.close {
+    position: absolute;
+    right: 10px;
+}
+
+/* Table */
+.table-wrapper {
+    background: #cfd6e6;
+    padding: 10px;
+    height: 420px;
+}
+
+.grid-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #ffffff;
+    font-size: 13px;
+}
+
+.grid-table thead th {
+    background: #e1e8f7;
+    border: 1px solid #7b8fb3;
+    padding: 4px;
+    text-align: left;
+    font-weight: bold;
+}
+
+.grid-table tbody td {
+    border: 1px solid #c0c8da;
+    height: 22px;
+    padding: 2px 4px;
+}
+
+/* Footer */
+.footer-bar {
+    background: #d6deef;
+    padding: 4px 10px;
+    border-top: 1px solid #888;
+    font-size: 12px;
+}
+
+.footer-right {
+    float: right;
+}

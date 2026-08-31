@@ -1,0 +1,30 @@
+/* Grains Creation Styles */
+/* Using global styles from erp-theme.css */
+.window {
+  background: var(--bg-light, #f5f5f5);
+  min-height: 100vh;
+}
+
+.screen-title {
+  background: #1f4fb2;
+  color: white;
+  padding: 10px 20px;
+  font-size: 18px;
+  font-weight: bold;
+}
+
+.message {
+  padding: 10px 20px;
+  margin: 10px 20px;
+  border-radius: 4px;
+}
+
+.message.success {
+  background: #4caf50;
+  color: white;
+}
+
+.message.error {
+  background: #f44336;
+  color: white;
+}

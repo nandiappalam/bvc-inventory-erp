@@ -1,0 +1,90 @@
+body {
+    margin: 0;
+    background: #dde6f7;
+    font-family: Tahoma, Arial, sans-serif;
+}
+
+/* App Window */
+.app-window {
+    width: 98%;
+    margin: 15px auto;
+    background: #ffffff;
+    border: 1px solid #9db3e3;
+}
+
+/* Top Bar */
+.top-bar {
+    background: #4a6fc2;
+    color: white;
+    padding: 6px 10px;
+    display: flex;
+    justify-content: space-between;
+    font-weight: bold;
+    font-size: 14px;
+}
+
+/* Menu Bar */
+.menu-bar {
+    background: #eef3fb;
+    padding: 5px 10px;
+    font-size: 13px;
+    border-bottom: 1px solid #b7c9eb;
+}
+
+/* Page Title */
+.page-title {
+    background: #d7e3fb;
+    padding: 6px 10px;
+    font-weight: bold;
+    border-bottom: 1px solid #a7bce8;
+}
+
+/* Grid Area */
+.grid-area {
+    height: 420px;
+    overflow-y: auto;
+}
+
+/* Table */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+thead th {
+    background: #c9d8f6;
+    position: sticky;
+    top: 0;
+    border: 1px solid #b3c7ec;
+    padding: 4px;
+    text-align: left;
+}
+
+tbody td {
+    height: 26px;
+    border: 1px solid #d2dcf2;
+    padding: 4px;
+}
+
+/* Alternate Rows */
+tbody tr:nth-child(even) {
+    background: #f5f8ff;
+}
+
+/* Hover */
+tbody tr:hover {
+    background: #e2ebff;
+}
+
+/* Footer */
+.footer {
+    background: #eef3fb;
+    padding: 6px 10px;
+    font-size: 12px;
+    border-top: 1px solid #b7c9eb;
+}
+
+.footer .right {
+    float: right;
+}

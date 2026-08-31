@@ -1,0 +1,90 @@
+body {
+    margin: 0;
+    font-family: Calibri, sans-serif;
+    background: #C1F0B1;
+}
+
+/* Top Header */
+.top-header {
+    background: #3d4a63;
+    color: white;
+    padding: 12px;
+    text-align: center;
+    font-size: 22px;
+    font-weight: bold;
+    border-bottom: 3px solid #1d2533;
+}
+
+/* Sub Header */
+.sub-header {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 20px;
+    background: #66B4E3;
+    border-bottom: 2px solid #a8a8a8;
+    font-size: 14px;
+}
+
+/* Date Filter Section */
+.filter-box {
+    background: #F5C376;
+    padding: 12px;
+    border-bottom: 2px solid #ccc;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 15px;
+}
+
+.filter-box input {
+    padding: 5px;
+    border: 1px solid gray;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.filter-box button {
+    padding: 6px 12px;
+    background: #b32d2d;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+/* Table Styling */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+    font-size: 15px;
+}
+
+table th {
+    background: #66B4E3;
+    color: white;
+    padding: 8px;
+    border: 1px solid #ccc;
+    font-weight: normal;
+    text-align: left;
+}
+
+table td {
+    padding: 8px;
+    border: 1px solid #ccc;
+}
+
+table tr:nth-child(even) {
+    background: #f2f2f2;
+}
+
+/* Footer Bar */
+.footer-bar {
+    padding: 8px 20px;
+    background: #d8d8d8;
+    border-top: 2px solid #a8a8a8;
+    font-size: 15px;
+    display: flex;
+    justify-content: space-between;
+}

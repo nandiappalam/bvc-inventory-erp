@@ -1,0 +1,94 @@
+* {
+    box-sizing: border-box;
+    font-family: Tahoma, Arial, sans-serif;
+}
+
+body {
+    margin: 0;
+    background-color: #eef3fb;
+}
+
+/* Title bar */
+.title-bar {
+    background: linear-gradient(#3b6fb6, #2a5ea0);
+    color: #fff;
+    padding: 6px 12px;
+    font-weight: bold;
+}
+
+.company {
+    float: right;
+}
+
+/* Menu bar */
+.menu-bar {
+    background-color: #dbe6f7;
+    padding: 6px 10px;
+    font-size: 14px;
+    border-bottom: 1px solid #999;
+}
+
+/* Page header */
+.page-header {
+    background-color: #2a5ea0;
+    color: white;
+    padding: 6px 10px;
+    font-weight: bold;
+}
+
+/* Table container */
+.table-container {
+    padding: 10px;
+    height: calc(100vh - 140px);
+}
+
+/* Table style */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    background-color: #f8fbff;
+}
+
+th {
+    background-color: #c6d8f2;
+    border: 1px solid #8faadc;
+    padding: 6px;
+    font-size: 14px;
+    text-align: left;
+}
+
+td {
+    border: 1px solid #b6c9ea;
+    height: 26px;
+}
+
+/* Footer */
+.footer {
+    position: fixed;
+    bottom: 0;
+    width: 100%;
+    background-color: #dbe6f7;
+    padding: 6px;
+    border-top: 1px solid #999;
+}
+
+.footer button {
+    padding: 4px 14px;
+    margin-right: 6px;
+    border: 1px solid #7fa1d6;
+    background-color: #f2f6ff;
+    cursor: pointer;
+}
+
+.footer button:hover {
+    background-color: #cfe0f8;
+}
+
+.footer .right {
+    float: right;
+}
+
+.footer .rows {
+    margin-left: 20px;
+    font-weight: bold;
+}
