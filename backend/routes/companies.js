@@ -44,7 +44,7 @@ router.post('/', async (req, res) => {
 
     const trimmedName = name.trim();
     const code = `COMP_${Date.now().toString(36).toUpperCase()}`;
-    const dbName = `company_${Date.now()}.db`;
+   // const dbName = `company_${Date.now()}.db`;
 
     // 1. Insert into Master DB companies table
     const result = await db.master.run(`
@@ -52,9 +52,16 @@ router.post('/', async (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, ?, 'Active')
     `, [code, trimmedName, address || null, gst_number || null, contact || null, email || null, dbName]);
 
-    const companyId = result.lastInsertRowid;
-    console.log(`✅ Company record created in master DB with ID: ${companyId}`);
+    //const companyId = result.lastInsertRowid;
+    //console.log(`✅ Company record created in master DB with ID: ${companyId}`);
+      const companyId = result.lastInsertRowid;
+      const dbName = `company_${companyId}.db`;
 
+      // 2. Store canonical database mapping
+      await db.master.run(
+        `UPDATE companies SET database_name = ? WHERE id = ?`,
+        [dbName, companyId]
+      );
     // 2. Initialize isolated database with clean ERP schema (Company B gets empty tables!)
     await db.createCompanyDatabase(companyId, code);
 
