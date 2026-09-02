@@ -1,0 +1,20 @@
+:root{
+  --erp-primary:#1F4FB2;
+  --erp-secondary:#2E63C7;
+  --erp-bg:#F5F8FC;
+  --erp-card:#FFFFFF;
+  --erp-border:#D8E3F4;
+  --erp-text:#2C3E50;
+  --erp-radius:8px;
+  --erp-shadow:0 2px 10px rgba(16,24,40,0.06);
+  --erp-shadow-soft:0 1px 6px rgba(16,24,40,0.06);
+}
+
+*{box-sizing:border-box;}
+
+body{
+  background:var(--erp-bg);
+  color:var(--erp-text);
+  font-family: Inter, Roboto, Arial, sans-serif;
+}
+

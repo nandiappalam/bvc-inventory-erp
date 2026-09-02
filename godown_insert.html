@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Godown Insert Tool</title>
+  <script type="module">
+    import { invoke } from '@tauri-apps/api';
+    import api from "../config/api";    
+    async function insertGodown() {
+      try {
+        const result = await invoke('execute_statement', {
+          sql: "INSERT OR IGNORE INTO godown_master (godown_name, status) VALUES ('Main Godown', 'Active');",
+          params: []
+        });
+        document.body.innerHTML += '<p style="color: green;">SUCCESS: Godown inserted. Result: ' + JSON.stringify(result) + '</p>';
+        console.log('Godown inserted:', result);
+      } catch (error) {
+        document.body.innerHTML += '<p style="color: red;">ERROR: ' + error.message + '</p>';
+        console.error('Insert failed:', error);
+      }
+    }
+    
+    // Run on load
+    window.addEventListener('DOMContentLoaded', insertGodown);
+  </script>
+</head>
+<body>
+  <h1>Godown Insert Tool</h1>
+  <p>Opening Tauri context and inserting 'Main Godown'...</p>
+  <p>Open dev tools to see logs. Close after success.</p>
+</body>
+</html>

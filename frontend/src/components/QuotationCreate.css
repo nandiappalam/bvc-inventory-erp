@@ -1,0 +1,165 @@
+/* Main Container */
+.quotation-container {
+  min-height: 100vh;
+  background: #eef3ff;
+  font-family: Tahoma, Arial, sans-serif;
+  font-size: 12px;
+  margin: 0;
+  padding: 0;
+}
+
+/* TITLE BAR */
+.title-bar {
+  background: linear-gradient(180deg, #3a6ea5 0%, #1f4fbf 100%);
+  color: #fff;
+  padding: 5px 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.title-bar .company {
+  font-weight: bold;
+  font-size: 14px;
+}
+
+/* MENU BAR */
+.menu-bar {
+  background: #2e6de6;
+  color: #fff;
+  padding: 4px 10px;
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+}
+
+.menu-bar .date {
+  color: #fff;
+}
+
+/* WINDOW HEADER */
+.window-header {
+  background: #f7f9ff;
+  padding: 8px 10px;
+  font-weight: bold;
+  border-bottom: 1px solid #9db8f2;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.window-header .close {
+  cursor: pointer;
+  color: #666;
+}
+
+/* TOP FRAME */
+.top-frame {
+  background: #1f4fbf;
+  color: #fff;
+  padding: 4px 8px;
+  display: flex;
+  justify-content: space-between;
+}
+
+.screen-title {
+  background: #f7f9ff;
+  padding: 5px 8px;
+  font-weight: bold;
+  border-bottom: 1px solid #9db8f2;
+  color: #333;
+}
+
+/* MIDDLE FRAME */
+.middle-frame {
+  padding: 8px;
+}
+
+.form-header {
+  display: flex;
+  gap: 15px;
+  margin-bottom: 6px;
+}
+
+.col {
+  width: 220px;
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: 4px;
+}
+
+.col.wide {
+  width: 300px;
+}
+
+input {
+  height: 20px;
+  border: 1px solid #9db8f2;
+}
+
+/* GRID */
+.grid {
+  width: 100%;
+  border-collapse: collapse;
+  background: white;
+}
+
+.grid th {
+  background: #2e6de6;
+  color: white;
+  border: 1px solid #9db8f2;
+  height: 22px;
+}
+
+.grid td {
+  border: 1px solid #c5d6fb;
+  height: 24px;
+}
+
+/* BOTTOM FRAME */
+.bottom-frame {
+  display: flex;
+  gap: 10px;
+  padding: 8px;
+}
+
+.bottom-left,
+.bottom-right {
+  background: #f7f9ff;
+  padding: 8px;
+  border: 1px solid #9db8f2;
+}
+
+.bottom-left {
+  width: 300px;
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 4px;
+}
+
+.bottom-right {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: 4px;
+}
+
+.final {
+  grid-column: 1 / 3;
+  text-align: right;
+  margin-top: 8px;
+}
+
+.total {
+  font-size: 22px;
+  font-weight: bold;
+  margin-bottom: 4px;
+}
+
+button {
+  background: #2e6de6;
+  color: white;
+  border: 1px solid #1f4fbf;
+  padding: 4px 18px;
+  cursor: pointer;
+}

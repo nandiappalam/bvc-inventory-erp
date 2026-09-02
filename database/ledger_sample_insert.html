@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Ledger Sample Data Insert</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.min.js"></script>
+</head>
+<body>
+    <h1>Ledger Sample Data</h1>
+    <button onclick="insertSamples()">Insert Sample Ledgers</button>
+    <button onclick="viewLedgers()">View Ledgers</button>
+    <pre id="output"></pre>
+
+    <script>
+    async function initDB() {
+        const response = await fetch('bvc.db');
+        const buffer = await response.arrayBuffer();
+        return await initSqlJs().then(function (SQL) {
+            return new SQL.Database(new Uint8Array(buffer));
+        });
+    }
+
+    async function insertSamples() {
+        const db = await initDB();
+        db.run(`DELETE FROM ledgermaster`);
+        
+        const samples = [
+            ['Sales', 'Sales A/c', null, 0.0, null, 0.0, 0.0],
+            ['Purchases', 'Purchase A/c', null, 0.0, null, 0.0, 0.0],
+            ['Cash in Hand', 'Cash', null, 5000.00, null, 0.0, 0.0],
+            ['SBI Bank Current', 'SBI Bank', null, 25000.00, null, 0.0, 0.0],
+            ['Outstanding Expenses', 'Outstanding Exp', null, 1500.0, null, 0.0, 0.0]
+        ];
+        
+        samples.forEach(row => {
+            db.run(`INSERT INTO ledgermaster (name, printname, under, openingbalance, area, credit, debit) VALUES (?, ?, ?, ?, ?, ?, ?)`, row);
+        });
+        
+        // Save updated DB
+        const data = db.export();
+        const blob = new Blob([data]);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'bvc_updated.db';
+        a.click();
+        
+        document.getElementById('output').textContent = `Inserted ${samples.length} sample ledgers. Download bvc_updated.db and replace database/bvc.db`;
+    }
+
+    async function viewLedgers() {
+        const db = await initDB();
+        const res = db.exec('SELECT * FROM ledgermaster');
+        const output = JSON.stringify(res[0]?.values || [], null, 2);
+        document.getElementById('output').textContent = output;
+    }
+    </script>
+</body>
+</html>

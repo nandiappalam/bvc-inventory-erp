@@ -1,0 +1,185 @@
+/*============================================================================
+  supplier-creation.css - ERP Unified Blue & White Theme
+  Standardized Create Page Styles
+  ============================================================================*/
+
+/* Import ERP Theme Variables */
+@import './erp-theme.css';
+
+body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    background: var(--bg-content);
+}
+
+.container {
+    width: 750px;
+    margin: 40px auto;
+    background: var(--bg-white);
+    border: 1px solid var(--border-medium);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+}
+
+/* Header - Blue Theme */
+.header {
+    background: linear-gradient(135deg, var(--primary-blue) 0%, var(--secondary-blue) 100%);
+    color: var(--text-white);
+    padding: var(--spacing-lg);
+    font-size: var(--font-xl);
+    font-weight: bold;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.entry-form {
+    padding: var(--spacing-xl);
+}
+
+.form-row {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    margin-bottom: var(--spacing-md);
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+/* Label - Blue Theme */
+label {
+    color: var(--primary-blue);
+    font-weight: bold;
+    font-size: var(--font-md);
+}
+
+/* Input Fields - Standardized */
+input, textarea, select {
+    padding: var(--spacing-sm);
+    border: 1px solid var(--border-dark);
+    outline: none;
+    font-size: var(--font-md);
+    font-family: inherit;
+    border-radius: var(--radius-sm);
+    background: var(--bg-white);
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+textarea {
+    height: 60px;
+    resize: none;
+}
+
+input:focus, textarea:focus, select:focus {
+    border-color: var(--primary-blue);
+    box-shadow: 0 0 4px var(--primary-blue);
+    background: var(--bg-light);
+}
+
+/* Button Row */
+.button-row {
+    text-align: right;
+    margin-top: var(--spacing-xl);
+}
+
+/* SAVE Button - Blue - Standardized */
+button,
+.save-btn {
+    background: var(--btn-save-bg);
+    color: var(--text-white);
+    padding: var(--spacing-sm) 25px;
+    border: none;
+    font-size: var(--font-md);
+    font-weight: bold;
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    transition: all var(--transition-fast);
+}
+
+button:hover,
+.save-btn:hover {
+    background: var(--btn-save-hover);
+    box-shadow: var(--shadow-md);
+}
+
+/* CANCEL Button - Grey - Standardized */
+.cancel-btn {
+    background: var(--btn-cancel-bg);
+    color: var(--text-white);
+    padding: var(--spacing-sm) 25px;
+    border: none;
+    font-size: var(--font-md);
+    font-weight: bold;
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    transition: all var(--transition-fast);
+}
+
+.cancel-btn:hover {
+    background: var(--btn-cancel-hover);
+}
+
+/* Message Box - Standardized */
+.message-box {
+    padding: var(--spacing-lg) var(--spacing-xl);
+    margin-bottom: var(--spacing-xl);
+    border-radius: var(--radius-md);
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.message-box.success {
+    background-color: var(--success-bg);
+    color: #155724;
+    border: 1px solid var(--success-border);
+}
+
+.message-box.error {
+    background-color: var(--error-bg);
+    color: #721c24;
+    border: 1px solid var(--error-border);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .container {
+        width: 95%;
+        margin: var(--spacing-lg) auto;
+    }
+    
+    .form-row {
+        grid-template-columns: 1fr;
+    }
+    
+    .button-row {
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-sm);
+    }
+    
+    button,
+    .save-btn,
+    .cancel-btn {
+        width: 100%;
+    }
+}
+
+/* Print Styles - Clean Invoice Format */
+@media print {
+    .header {
+        background: none;
+        color: var(--text-primary);
+        border-bottom: 2px solid var(--primary-blue);
+    }
+    
+    .container {
+        box-shadow: none;
+        border: 1px solid var(--grey-400);
+    }
+    
+    .button-row {
+        display: none;
+    }
+    
+    .message-box {
+        display: none;
+    }
+}

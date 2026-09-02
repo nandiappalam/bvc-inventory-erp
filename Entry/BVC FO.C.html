@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Flour Out Creation</title>
+
+<!-- XLSX Library (Export to Excel) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.17.0/xlsx.full.min.js"></script>
+
+<!-- jsPDF (Export to PDF) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+<style>
+    body {
+        margin: 0;
+        font-family: Calibri, sans-serif;
+        background: white
+    }
+
+    .top-header {
+        background: #66B4E3;
+        padding: 10px;
+        color: white;
+        text-align: center;
+        font-size: 22px;
+        border-bottom: 3px solid #1c2531;
+    }
+
+    .title-bar {
+        background: #66B4E3;
+        padding: 8px 15px;
+        border-bottom: 2px solid #999;
+        font-weight: bold;
+        font-size: 17px;
+    }
+
+    .form-container {
+        display: grid;
+        grid-template-columns: 150px 200px 150px 200px;
+        gap: 10px;
+        padding: 20px;
+        background: #66B4E3;
+        border-bottom: 2px solid #aaa;
+    }
+
+    .form-container input {
+        padding: 5px;
+        border: 1px solid #7a7a7a;
+        border-radius: 3px;
+        background: white;
+    }
+
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        background: white;
+        font-size: 15px;
+        margin-top: 5px;
+    }
+
+    table th {
+        background: #66B4E3;
+        color: white;
+        padding: 6px;
+        border: 1px solid #555;
+        font-weight: normal;
+    }
+
+    table td {
+        border: 1px solid #999;
+        padding: 6px;
+    }
+
+    input.table-input {
+        width: 100%;
+        border: none;
+        outline: none;
+        padding: 4px;
+        background: transparent;
+    }
+
+    .add-row-btn {
+        margin: 15px;
+        padding: 8px 15px;
+        background: #005bbb;
+        border: none;
+        color: white;
+        cursor: pointer;
+        border-radius: 4px;
+    }
+
+    .save-btn {
+        margin: 20px;
+        float: right;
+        padding: 10px 20px;
+        background: #005bbb;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 15px;
+    }
+
+    .export-btn {
+        margin: 20px;
+        padding: 10px 15px;
+        background: #005bbb;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+    }
+
+    .totals-box {
+        background: #66B4E3;
+        padding: 10px;
+        display: flex;
+        justify-content: space-between;
+        border-top: 2px solid #999;
+    }
+
+    .totals-box div {
+        font-size: 17px;
+        font-weight: bold;
+    }
+</style>
+
+</head>
+
+<body>
+
+<div class="title-bar">Flour Out Creation</div>
+
+<!-- FORM SECTION -->
+<div class="form-container">
+    <label>S.No</label><input type="text" value="1">
+    <label>Date</label><input type="date">
+
+    <label>Papad Company</label><input type="text">
+    <label>Remarks</label><input type="text">
+</div>
+
+<!-- TABLE SECTION -->
+<button class="add-row-btn" onclick="addRow()">+ Add Row</button>
+
+<table id="data-table">
+    <tr>
+        <th>S.No</th>
+        <th>Item Name</th>
+        <th>Lot No</th>
+        <th>Weight</th>
+        <th>Qty</th>
+        <th>Total Wt</th>
+        <th>Papad Kg</th>
+        <th>Wages / Bag</th>
+        <th>Wages</th>
+        <th>Delete</th>
+    </tr>
+</table>
+
+<div class="totals-box">
+    <div>Total Qty: <span id="tqty">0</span></div>
+    <div>Total Weight: <span id="tweight">0</span></div>
+    <div>Total Wages: <span id="twages">0</span></div>
+</div>
+
+<button class="export-btn" onclick="exportExcel()">Export Excel</button>
+<button class="export-btn" onclick="exportPDF()">Export PDF</button>
+
+<button class="save-btn">Save</button>
+
+<script>
+let rowCount = 0;
+
+function addRow() {
+    rowCount++;
+
+    let table = document.getElementById("data-table");
+    let row = table.insertRow(-1);
+
+    row.innerHTML = `
+        <td>${rowCount}</td>
+        <td><input class="table-input"></td>
+        <td><input class="table-input"></td>
+        <td><input class="table-input" type="number" oninput="calculate(this)"></td>
+        <td><input class="table-input" type="number" oninput="calculate(this)"></td>
+        <td><input class="table-input" readonly></td>
+        <td><input class="table-input" type="number" oninput="calculate(this)"></td>
+        <td><input class="table-input" type="number" oninput="calculate(this)"></td>
+        <td><input class="table-input" readonly></td>
+        <td><button onclick="deleteRow(this)">X</button></td>
+    `;
+}
+
+function deleteRow(btn) {
+    let row = btn.parentElement.parentElement;
+    row.remove();
+    calculateTotals();
+}
+
+function calculate(input) {
+    let row = input.parentElement.parentElement;
+
+    let weight = parseFloat(row.cells[3].children[0].value) || 0;
+    let qty = parseFloat(row.cells[4].children[0].value) || 0;
+
+    row.cells[5].children[0].value = (weight * qty).toFixed(2);
+
+    let papadkg = parseFloat(row.cells[6].children[0].value) || 0;
+    let wagebag = parseFloat(row.cells[7].children[0].value) || 0;
+
+    row.cells[8].children[0].value = (papadkg * wagebag).toFixed(2);
+
+    calculateTotals();
+}
+
+function calculateTotals() {
+    let table = document.getElementById("data-table");
+    let totalQty = 0, totalWt = 0, totalWages = 0;
+
+    for (let i = 1; i < table.rows.length; i++) {
+        let row = table.rows[i];
+
+        totalQty += parseFloat(row.cells[4].children[0].value) || 0;
+        totalWt += parseFloat(row.cells[5].children[0].value) || 0;
+        totalWages += parseFloat(row.cells[8].children[0].value) || 0;
+    }
+
+    document.getElementById("tqty").innerText = totalQty.toFixed(2);
+    document.getElementById("tweight").innerText = totalWt.toFixed(2);
+    document.getElementById("twages").innerText = totalWages.toFixed(2);
+}
+
+function exportExcel() {
+    let table = document.getElementById("data-table");
+    let wb = XLSX.utils.table_to_book(table, {sheet:"Flour Out"});
+    XLSX.writeFile(wb, "FlourOut.xlsx");
+}
+
+function exportPDF() {
+    const { jsPDF } = window.jspdf;
+    let pdf = new jsPDF();
+    pdf.text("Flour Out Report", 10, 10);
+    pdf.save("FlourOut.pdf");
+}
+</script>
+
+</body>
+</html>

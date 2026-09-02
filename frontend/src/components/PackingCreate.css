@@ -1,0 +1,172 @@
+body{
+    margin:0;
+    font-family:Tahoma, Arial;
+    background:#eaf2ff;
+    font-size:17px;
+}
+
+/* ===== SCREEN TITLE ===== */
+.screen-title {
+  background: #1f4fb2;
+  color: white;
+  padding: 10px 12px;
+  font-weight: 700;
+  text-align: center;
+}
+
+/* ===== INFO BAR (Top Frame) ===== */
+.info-bar {
+    display: grid !important;
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 20px !important;
+    padding: 20px !important;
+    border-bottom: 2px solid #9fb6dd !important;
+    background-color: #e9eef7 !important;
+    margin-bottom: 15px !important;
+    position: relative !important;
+    top: auto !important;
+    z-index: auto !important;
+    min-height: 80px !important;
+    overflow: visible !important;
+}
+
+.info-bar .field-group {
+    display: flex;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.info-bar .field-group label {
+    width: 80px;
+    font-size: 12px;
+    font-weight: bold;
+    color: #1f3f67;
+    margin-right: 8px;
+}
+
+.info-bar .field-group input,
+.info-bar .field-group select {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid #7fa1d6;
+    border-radius: 4px;
+    font-size: 13px;
+    background-color: #ffffff;
+}
+
+.info-bar .field-group input:focus,
+.info-bar .field-group select:focus {
+    outline: none;
+    border-color: #1f4fb2;
+    box-shadow: 0 0 0 2px rgba(31, 79, 178, 0.2);
+}
+
+/* ===== HEADER ===== */
+.header{
+    background:#2458a6;
+    color:#fff;
+    padding:6px 10px;
+    display:flex;
+    justify-content:space-between;
+	
+}
+
+/* ===== MAIN WINDOW ===== */
+.window{
+    margin:8px;
+    border:1px solid #8aa4d8;
+    background:white;
+    min-height: calc(100vh - 16px);
+    max-height: calc(100vh - 16px);
+    overflow-y: auto !important;
+    overflow-x: hidden;
+    padding-top: 0 !important;
+    position: relative !important;
+}
+
+/* ===== TITLE ===== */
+.title{
+    background:#3f6fc0;
+    color:white;
+    padding:6px 10px;
+    font-weight:bold;
+	
+}
+
+/* ===== SECTION ===== */
+.section{
+    border-top:1px solid #8aa4d8;
+    padding:15px;
+    background:#f9fbff;
+	
+}
+
+.section1{
+    border-top:1px solid #8aa4d8;
+    padding:15px;
+    background:#f9fbff;
+	margin-top:0px;
+	
+}
+.section2{
+    border-top:1px solid #8aa4d8;
+    padding:15px;
+    background:#f9fbff;
+	margin-top:0px;
+	
+}
+
+.row{
+    display:flex;
+    gap:10px;
+    margin-bottom:6px;
+}
+.label{ width:80px; }
+input{
+    height:25px;
+    border:1px solid #8aa4d8;
+    width:160px;
+}
+
+/* ===== TABLE ===== */
+table{
+    width:50%;
+    border-collapse:collapse;
+    margin-top:6px;
+	  
+}
+th{
+    background:#3f6fc0;
+    color:white;
+    border:1px solid #8aa4d8;
+    height:22px;
+}
+td{
+    border:1px solid #8aa4d8;
+    height:22px;
+}
+
+/* ===== BOTTOM ===== */
+
+.bottom{
+    display:flex;
+    border-top:1px solid #8aa4d8;
+	margin-top:0px;
+}
+
+.bottom-left,
+.bottom-right{
+    flex:1;
+    padding:8px;
+    background:#f4f7ff;
+}
+.bottom-right{
+    text-align:right;
+}
+button{
+    padding:5px 20px;
+    background:#3f6fc0;
+    color:white;
+    border:1px solid #2458a6;
+    cursor:pointer;
+}

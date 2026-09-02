@@ -1,0 +1,87 @@
+* {
+    box-sizing: border-box;
+    font-family: Tahoma, Arial, sans-serif;
+}
+
+body {
+    margin: 0;
+    background: #6b7386;
+}
+
+/* Top Bars */
+.top-bar {
+    background: linear-gradient(#4a74b5, #355f9f);
+    color: white;
+    padding: 6px 10px;
+    font-weight: bold;
+}
+
+.company {
+    float: right;
+}
+
+.menu-bar {
+    background: #d6deef;
+    padding: 5px 10px;
+    font-size: 14px;
+    border-bottom: 1px solid #777;
+}
+
+.menu-bar .date {
+    float: right;
+}
+
+/* Window Header */
+.window-header {
+    background: #2f4f87;
+    color: white;
+    padding: 6px 10px;
+    font-weight: bold;
+    position: relative;
+}
+
+.close {
+    position: absolute;
+    right: 10px;
+}
+
+/* Content */
+.content {
+    background: #cfd6e6;
+    padding: 10px;
+    min-height: 400px;
+}
+
+/* Table */
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #e9eef7;
+}
+
+.data-table th {
+    background: #b7c6e4;
+    border: 1px solid #7b8fb3;
+    padding: 6px;
+    font-size: 13px;
+    text-align: left;
+}
+
+.data-table td {
+    border: 1px solid #7b8fb3;
+    height: 26px;
+    padding: 4px 6px;
+    font-size: 13px;
+}
+
+/* Footer */
+.footer {
+    background: #d6deef;
+    padding: 4px 10px;
+    font-size: 13px;
+    border-top: 1px solid #777;
+}
+
+.footer .right {
+    float: right;
+}

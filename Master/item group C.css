@@ -1,0 +1,76 @@
+body {
+    font-family: "Segoe UI", Arial, sans-serif;
+    background: #eef4fb;
+    margin: 0;
+}
+
+/* Top Header */
+.app-header {
+    background: #1e5ed8;
+    color: white;
+    padding: 12px;
+    text-align: center;
+    font-size: 18px;
+}
+
+/* Page Wrapper */
+.form-wrapper {
+    padding: 40px;
+}
+
+.form-wrapper h3 {
+    color: #1e5ed8;
+    margin-bottom: 15px;
+}
+
+/* Form Box */
+.form-box {
+    background: white;
+    border: 1px solid #cfd9e6;
+    width: 480px;
+    padding: 25px;
+}
+
+/* Row Layout */
+.form-row {
+    display: grid;
+    grid-template-columns: 140px 20px auto;
+    align-items: center;
+    margin-bottom: 18px;
+}
+
+.form-row label {
+    font-weight: 600;
+    color: #333;
+}
+
+.form-row input,
+.form-row select {
+    padding: 6px 8px;
+    border: 1px solid #9fb8e8;
+    outline: none;
+    font-size: 14px;
+}
+
+.form-row input:focus,
+.form-row select:focus {
+    border-color: #1e5ed8;
+}
+
+/* Buttons */
+.form-actions {
+    text-align: right;
+}
+
+button {
+    background: #1e5ed8;
+    color: white;
+    border: none;
+    padding: 6px 18px;
+    font-size: 14px;
+    cursor: pointer;
+}
+
+button:hover {
+    background: #174bb2;
+}

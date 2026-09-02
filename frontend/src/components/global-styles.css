@@ -1,0 +1,673 @@
+/*============================================================================
+  UNIVERSAL COMPONENT STYLES - BLUE & WHITE THEME
+  For consistent UI/UX across all Master and Entry modules
+  ============================================================================*/
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Segoe UI', 'Tahoma', Arial, sans-serif;
+  background: #e9eff8;
+  color: #333;
+  line-height: 1.5;
+}
+
+/* ============================================================================
+   COLOR SCHEME
+   ============================================================================ */
+:root {
+  --primary-blue: #1f4fb2;
+  --secondary-blue: #2a5ea0;
+  --tertiary-blue: #3b6fd8;
+  --light-blue: #dbe7fb;
+  --lighter-blue: #eaf2fb;
+  --bg-light: #f0f6ff;
+  --success-color: #4CAF50;
+  --error-color: #f44336;
+  --info-color: #2196F3;
+}
+
+/* ============================================================================
+   TOP BAR - Header
+   ============================================================================ */
+.top-bar,
+.title-bar {
+  background: linear-gradient(135deg, #3b6fb6 0%, #2a5ea0 100%);
+  color: white;
+  padding: 8px 15px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: bold;
+  font-size: 14px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.top-bar .company,
+.title-bar .company {
+  font-size: 12px;
+  font-weight: normal;
+}
+
+/* ============================================================================
+   MENU BAR
+   ============================================================================ */
+.menu-bar {
+  background: #dbe6f7;
+  padding: 6px 12px;
+  border-bottom: 1px solid #999;
+  font-size: 12px;
+  color: #333;
+}
+
+/* ============================================================================
+   PAGE HEADER / WINDOW HEADER
+   ============================================================================ */
+.page-header,
+.window-header {
+  background: var(--secondary-blue);
+  color: white;
+  padding: 10px 15px;
+  font-weight: bold;
+  font-size: 15px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.page-header {
+  margin: 0;
+}
+
+.close {
+  cursor: pointer;
+  font-size: 18px;
+  font-weight: bold;
+}
+
+/* ============================================================================
+   FORM CONTAINERS
+   ============================================================================ */
+.form-wrapper,
+.form-container,
+.content {
+  padding: 20px;
+  min-height: calc(100vh - 120px);
+}
+
+.form-box {
+  width: 520px;
+  background: #f5f8fe;
+  border: 1px solid #9fb6dd;
+  padding: 20px;
+  margin: 20px auto;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+/* ============================================================================
+   FORM ROWS - Labels and Inputs
+   ============================================================================ */
+.form-row,
+.row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
+  gap: 10px;
+}
+
+.form-row label,
+.row label {
+  width: 160px;
+  font-weight: bold;
+  color: var(--primary-blue);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.form-row label small,
+.row label small {
+  font-size: 10px;
+  color: #666;
+  display: block;
+  font-weight: normal;
+}
+
+.form-row input,
+.form-row select,
+.form-row textarea,
+.row input,
+.row select,
+.row textarea {
+  flex: 1;
+  padding: 6px 8px;
+  border: 1px solid #7fa1d6;
+  border-radius: 2px;
+  font-size: 12px;
+  background: white;
+  font-family: inherit;
+}
+
+.form-row input:focus,
+.form-row select:focus,
+.form-row textarea:focus,
+.row input:focus,
+.row select:focus,
+.row textarea:focus {
+  outline: none;
+  border-color: var(--primary-blue);
+  box-shadow: 0 0 4px var(--primary-blue);
+}
+
+.form-row textarea,
+.row textarea {
+  resize: vertical;
+  min-height: 60px;
+}
+
+/* ============================================================================
+   BUTTONS
+   ============================================================================ */
+.save-btn,
+.cancel-btn,
+.btn-row button {
+  padding: 8px 20px;
+  margin: 5px;
+  border: none;
+  border-radius: 2px;
+  cursor: pointer;
+  font-weight: bold;
+  font-size: 12px;
+  transition: background-color 0.2s, box-shadow 0.2s;
+}
+
+.save-btn,
+.btn-row button[type="submit"] {
+  background: var(--primary-blue);
+  color: white;
+}
+
+.save-btn:hover:not(:disabled) {
+  background: #163aa6;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+}
+
+.save-btn:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.cancel-btn {
+  background: #ddd;
+  color: #333;
+}
+
+.cancel-btn:hover {
+  background: #bbb;
+}
+
+/* Action Buttons */
+.action-btn {
+  padding: 5px 11px;
+  margin: 2px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  background: #1976d2;
+  color: white;
+  transition: background-color 0.2s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.update-btn {
+  background: #1976d2;
+}
+
+.update-btn:hover {
+  background: #1565c0;
+}
+
+.delete-btn {
+  background: var(--error-color);
+}
+
+.delete-btn:hover {
+  background: #da190b;
+}
+
+.print-btn {
+  background: #0288d1;
+}
+
+.print-btn:hover {
+  background: #0277bd;
+}
+
+.footer-btn {
+  padding: 6px 15px;
+  margin: 5px;
+  font-size: 12px;
+}
+
+/* ============================================================================
+   TABLE STYLES
+   ============================================================================ */
+.table-container,
+.table-wrapper {
+  padding: 10px 15px;
+  margin-bottom: 50px;
+  overflow-x: auto;
+}
+
+.grid-table,
+.data-table,
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: white;
+  font-size: 12px;
+}
+
+.grid-table th,
+.data-table th,
+table th {
+  background: var(--light-blue);
+  border: 1px solid #9fb8e8;
+  padding: 8px;
+  text-align: left;
+  font-weight: bold;
+  color: var(--tertiary-blue);
+  font-size: 11px;
+}
+
+.grid-table td,
+.data-table td,
+table td {
+  border: 1px solid #c7d6f3;
+  padding: 6px 8px;
+  height: 28px;
+  font-size: 11px;
+}
+
+.grid-table tr:hover,
+.data-table tr:hover,
+table tr:hover {
+  background: var(--bg-light);
+}
+
+.grid-table tr.selected-row,
+.data-table tr.selected-row {
+  background: #d9e7fb;
+}
+
+/* Actions Cell */
+.actions-cell {
+  text-align: center !important;
+  padding: 4px !important;
+  width: 220px !important;
+  white-space: nowrap;
+}
+
+/* ============================================================================
+   FOOTER
+   ============================================================================ */
+.footer,
+.footer-bar {
+  position: fixed;
+  bottom: 0;
+  width: 100%;
+  background: var(--light-blue);
+  border-top: 1px solid #9fb8e8;
+  padding: 8px 15px;
+  font-size: 12px;
+  color: #333;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 100;
+  box-shadow: 0 -2px 4px rgba(0,0,0,0.05);
+}
+
+.footer-right {
+  margin-left: auto;
+}
+
+/* ============================================================================
+   MESSAGES & ALERTS
+   ============================================================================ */
+.message-box {
+  padding: 12px 15px;
+  margin-bottom: 15px;
+  border-radius: 2px;
+  font-size: 12px;
+  border-left: 4px solid;
+}
+
+.message-box.success {
+  background: #d4edda;
+  color: #155724;
+  border-left-color: var(--success-color);
+}
+
+.message-box.error {
+  background: #f8d7da;
+  color: #721c24;
+  border-left-color: var(--error-color);
+}
+
+.message-box.info {
+  background: #d1ecf1;
+  color: #0c5460;
+  border-left-color: var(--info-color);
+}
+
+.success-message {
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  background: var(--success-color);
+  color: white;
+  padding: 12px 15px;
+  border-radius: 2px;
+  z-index: 1000;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  font-size: 12px;
+  animation: slideIn 0.3s ease-in-out;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(400px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* ============================================================================
+   MODAL
+   ============================================================================ */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+}
+
+.modal-content {
+  background: white;
+  padding: 25px;
+  border-radius: 2px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  width: 450px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.modal-content h3 {
+  color: var(--tertiary-blue);
+  margin-bottom: 20px;
+  font-size: 14px;
+  border-bottom: 2px solid var(--light-blue);
+  padding-bottom: 10px;
+}
+
+.form-group {
+  margin-bottom: 12px;
+}
+
+.form-group label {
+  display: block;
+  color: #333;
+  font-weight: bold;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #9fb8e8;
+  border-radius: 2px;
+  box-sizing: border-box;
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+  outline: none;
+  border-color: var(--tertiary-blue);
+  box-shadow: 0 0 4px var(--tertiary-blue);
+}
+
+.form-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 20px;
+  padding-top: 15px;
+  border-top: 1px solid #ddd;
+}
+
+/* ============================================================================
+   SPECIAL CONTAINERS
+   ============================================================================ */
+.deduction-create-container,
+.supplier-container,
+.weight-container {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-bg {
+  height: 100vh;
+  background: linear-gradient(135deg, #5b67b2 0%, #8f96d6 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.app-bg .form-container {
+  width: 520px;
+  background: white;
+  border: 1px solid #3b4aa0;
+  box-shadow: 0 0 12px rgba(0,0,0,0.3);
+  padding: 0;
+  margin: 0;
+}
+
+.app-bg .form-title {
+  background: var(--primary-blue);
+  color: white;
+  padding: 10px 15px;
+  font-size: 13px;
+  border-bottom: 1px solid #9fb8e8;
+}
+
+.app-bg .form-body {
+  padding: 20px;
+}
+
+.app-bg .form-footer {
+  padding: 15px 20px;
+  text-align: right;
+  border-top: 1px solid #ddd;
+  background: #f9f9f9;
+}
+
+/* ============================================================================
+   WEIGHT DISPLAY SPECIFIC
+   ============================================================================ */
+.weight-display {
+  font-family: 'Segoe UI', Arial, sans-serif;
+}
+
+.weight-display .header {
+  background: var(--secondary-blue);
+  color: white;
+  padding: 12px;
+  text-align: center;
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.weight-display .window {
+  margin: 20px;
+  background: white;
+  border: 1px solid #ccc;
+}
+
+.weight-display .title {
+  background: #f5f5f5;
+  padding: 10px 15px;
+  border-bottom: 1px solid #ccc;
+}
+
+.weight-display .filter-bar {
+  margin-top: 10px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.weight-display .filter-bar input {
+  padding: 4px 8px;
+  border: 1px solid #999;
+}
+
+.weight-display .footer {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 15px;
+  border-top: 1px solid #ccc;
+  background: #f5f5f5;
+}
+
+/* ============================================================================
+   RESPONSIVE & PRINT
+   ============================================================================ */
+@media (max-width: 768px) {
+  .form-box {
+    width: 100%;
+  }
+
+  .modal-content {
+    width: 90%;
+  }
+
+  .form-row,
+  .row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .form-row label,
+  .row label {
+    width: 100%;
+    margin-bottom: 5px;
+  }
+
+  .form-row input,
+  .form-row select,
+  .form-row textarea,
+  .row input,
+  .row select,
+  .row textarea {
+    width: 100%;
+  }
+}
+
+@media print {
+  .top-bar,
+  .title-bar,
+  .menu-bar,
+  .page-header,
+  .window-header,
+  .footer,
+  .footer-bar,
+  .action-btn,
+  .actions-cell {
+    display: none !important;
+  }
+
+  .table-container,
+  .table-wrapper {
+    margin-bottom: 0;
+    padding: 0;
+  }
+
+  table,
+  .grid-table,
+  .data-table {
+    font-size: 10px;
+  }
+
+  body {
+    background: white;
+  }
+}
+
+/* ============================================================================
+   UTILITY CLASSES
+   ============================================================================ */
+.text-center {
+  text-align: center;
+}
+
+.text-right {
+  text-align: right;
+}
+
+.hidden {
+  display: none;
+}
+
+.mt-10 {
+  margin-top: 10px;
+}
+
+.mt-20 {
+  margin-top: 20px;
+}
+
+.mb-10 {
+  margin-bottom: 10px;
+}
+
+.mb-20 {
+  margin-bottom: 20px;
+}
+
+.error {
+  color: var(--error-color);
+}
+
+.success {
+  color: var(--success-color);
+}
+
+.info {
+  color: var(--info-color);
+}

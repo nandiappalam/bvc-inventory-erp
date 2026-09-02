@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>PackingCreate - Simple HTML Test</title>
+  <style>
+    body { margin: 0; font-family: Tahoma, Arial; background: #eaf2ff; font-size: 17px; }
+    .screen-title { background: #1f4fb2; color: white; padding: 10px 12px; font-weight: 700; text-align: center; }
+    .window {
+      margin: 8px;
+      border: 1px solid #8aa4d8;
+      background: white;
+      min-height: calc(100vh - 16px);
+      overflow-y: auto;
+      overflow-x: hidden;
+    }
+    .top-frame {
+      min-height: 160px;
+      padding: 20px;
+      border: 3px solid #1f4fb2 !important;
+      background-color: #e9eef7;
+      margin-bottom: 20px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-around;
+      flex-wrap: wrap;
+    }
+    .field-group {
+      display: flex;
+      align-items: center;
+      margin-bottom: 8px;
+      min-width: 200px;
+    }
+    .field-group label {
+      width: 80px;
+      font-size: 12px;
+      font-weight: bold;
+      color: #1f3f67;
+      margin-right: 8px;
+    }
+    .field-group input {
+      flex: 1;
+      padding: 8px 12px;
+      border: 1px solid #7fa1d6;
+      border-radius: 4px;
+      font-size: 13px;
+      background-color: #ffffff;
+      min-width: 120px;
+    }
+    .section {
+      border-top: 1px solid #8aa4d8;
+      padding: 15px;
+      background: #f9fbff;
+      margin-bottom: 15px;
+    }
+    h3 { color: #1f4fb2; margin-top: 0; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th { background: #3f6fc0; color: white; border: 1px solid #8aa4d8; padding: 8px; }
+    td { border: 1px solid #8aa4d8; padding: 8px; }
+    button { padding: 10px 25px; background: #3f6fc0; color: white; border: 1px solid #2458a6; cursor: pointer; font-size: 16px; }
+  </style>
+</head>
+<body>
+  <div class="window">
+    <div class="screen-title">Packing Create - SIMPLE HTML TEST</div>
+    
+    <!-- PROMINENT TOP FRAME -->
+    <div class="top-frame">
+      <div class="field-group">
+        <label>S.No:</label>
+        <input type="text" value="1" readonly />
+      </div>
+      <div class="field-group">
+        <label>Date:</label>
+        <input type="date" value="2024-01-15" />
+      </div>
+      <div class="field-group">
+        <label>Remarks:</label>
+        <input type="text" placeholder="Enter remarks" />
+      </div>
+    </div>
+    
+    <!-- 3 TABLES -->
+    <div class="section">
+      <h3>Packing From</h3>
+      <table>
+        <tr><th>Item</th><th>Lot</th><th>Kg</th></tr>
+        <tr><td>Item1</td><td>LOT001</td><td>100</td></tr>
+      </table>
+    </div>
+    
+    <div class="section">
+      <h3>Packing Material</h3>
+      <table>
+        <tr><th>Item</th><th>Lot</th><th>Qty</th></tr>
+        <tr><td>Material1</td><td>LOT002</td><td>50</td></tr>
+      </table>
+    </div>
+    
+    <div class="section">
+      <h3>Packing To</h3>
+      <table>
+        <tr><th>Item</th><th>Lot</th><th>Box</th><th>Qty</th></tr>
+        <tr><td>FinalItem</td><td>LOT003</td><td>10</td><td>500</td></tr>
+      </table>
+      <br>
+      <button>Save Packing</button>
+    </div>
+  </div>
+</body>
+</html>

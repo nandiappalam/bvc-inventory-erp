@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>PTrans Update</title>
+    <link rel="stylesheet" href="city-create.css">
+</head>
+<body>
+
+
+
+<!-- Overlay background -->
+<div class="overlay">
+
+    <!-- Form Box -->
+    <div class="form-box">
+        <div class="form-title">PTrans Update</div>
+
+        <div class="form-body">
+            <div class="form-row">
+                <label>PTrans</label>
+                <input type="text" name="ptrans" required>
+            </div>
+
+            <div class="form-row">
+                <label>Print Name</label>
+                <input type="text" name="print_name">
+            </div>
+
+            <div class="form-row">
+                <label>Status</label>
+                <select name="status">
+                    <option>Active</option>
+                    <option>Inactive</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="form-footer">
+            <button onclick="updatePTrans(event)">Update</button>
+            <button onclick="cancelUpdate()">Cancel</button>
+        </div>
+    </div>
+
+</div>
+
+<!-- Bottom Status Bar -->
+<div class="status-bar">
+    Ready
+    <span class="right">27-01-2025</span>
+</div>
+
+<script>
+async function loadPTrans() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const id = urlParams.get('id');
+
+    if (!id) {
+        alert('No PTrans ID provided');
+        window.location.href = 'ptrans Display.html';
+        return;
+    }
+
+    try {
+        const response = await fetch(`http://localhost:3000/api/masters/ptrans_master/${id}`);
+        const ptrans = await response.json();
+
+        if (response.ok) {
+            document.querySelector('input[name="ptrans"]').value = ptrans.name;
+            document.querySelector('input[name="print_name"]').value = ptrans.print_name || '';
+            document.querySelector('select[name="status"]').value = ptrans.status;
+        } else {
+            alert('Error loading PTrans data');
+            window.location.href = 'ptrans Display.html';
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+        window.location.href = 'ptrans Display.html';
+    }
+}
+
+async function updatePTrans(event) {
+    event.preventDefault();
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const id = urlParams.get('id');
+
+    const ptransName = document.querySelector('input[name="ptrans"]').value.trim();
+    const printName = document.querySelector('input[name="print_name"]').value;
+    const status = document.querySelector('select[name="status"]').value;
+
+    if (!ptransName) {
+        alert('PTrans name is required');
+        return;
+    }
+
+    try {
+        const response = await fetch(`http://localhost:3000/api/masters/ptrans_master/${id}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                name: ptransName,
+                print_name: printName,
+                status: status
+            })
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            alert('PTrans updated successfully');
+            window.location.href = 'ptrans Display.html';
+        } else {
+            alert('Error: ' + result.message);
+        }
+    } catch (error) {
+        alert('Error updating PTrans: ' + error.message);
+    }
+}
+
+function cancelUpdate() {
+    window.location.href = 'ptrans Display.html';
+}
+
+document.addEventListener('DOMContentLoaded', loadPTrans);
+</script>
+
+</body>
+</html>
+
+

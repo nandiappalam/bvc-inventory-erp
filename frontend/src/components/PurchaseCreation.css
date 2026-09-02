@@ -1,0 +1,438 @@
+/**
+ * Purchase Creation - Blue & White Theme Styles
+ * 
+ * This CSS ensures Purchase Creation page follows the same
+ * Blue & White theme as other Entry pages.
+ */
+
+/* Window Container */
+.window {
+  min-height: 100vh;
+  background: var(--bg-content, #f0f6ff);
+  font-family: 'Segoe UI', 'Tahoma', Arial, sans-serif;
+}
+
+/* Screen Title - Blue Header */
+.screen-title {
+  background: linear-gradient(135deg, var(--primary-blue, #1f4fb2) 0%, var(--secondary-blue, #2a5ea0) 100%);
+  color: var(--text-white, #ffffff);
+  padding: 12px 20px;
+  font-size: 20px;
+  font-weight: bold;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Message Box */
+.message {
+  padding: 12px 20px;
+  margin: 15px 20px;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.message.success {
+  background: var(--success-bg, #d4edda);
+  color: #155724;
+  border: 1px solid var(--success-border, #c3e6cb);
+}
+
+.message.error {
+  background: var(--error-bg, #f8d7da);
+  color: #721c24;
+  border: 1px solid var(--error-border, #f5c6cb);
+}
+
+/* Info Bar - Entry Top Frame Styles */
+.info-bar {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 20px;
+  padding: 20px;
+  background: var(--bg-form, #e9eef7);
+  border-bottom: 2px solid var(--border-medium, #9fb6dd);
+}
+
+.info-bar .column {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.info-bar .field-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.info-bar .field-group label {
+  width: 110px;
+  min-width: 110px;
+  max-width: 110px;
+  font-size: 11px;
+  font-weight: bold;
+  color: var(--text-secondary, #1f3f67);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.2;
+}
+
+.info-bar .field-group input,
+.info-bar .field-group select {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  height: 32px;
+  box-sizing: border-box;
+  padding: 4px 8px;
+  border: 1px solid var(--border-dark, #7fa1d6);
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 1.2;
+  background: var(--bg-white, #ffffff);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.info-bar .field-group input:focus,
+.info-bar .field-group select:focus {
+  outline: none;
+  border-color: var(--primary-blue, #1f4fb2);
+  box-shadow: 0 0 4px rgba(31, 79, 178, 0.3);
+}
+
+/* Table Container */
+.section-container {
+  padding: 15px 20px;
+  background: var(--bg-white, #ffffff);
+  margin: 10px 20px;
+  border-radius: 4px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* Data Grid Table */
+.data-grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  background: var(--bg-white, #ffffff);
+}
+
+.data-grid thead tr th {
+  background: var(--primary-blue, #1f4fb2);
+  color: var(--text-white, #ffffff);
+  padding: 10px 8px;
+  text-align: left;
+  font-weight: bold;
+  font-size: 12px;
+  border: 1px solid var(--border-medium, #9fb6dd);
+  white-space: nowrap;
+}
+
+.data-grid tbody tr:hover {
+  background: var(--bg-lighter-blue, #eaf2fb);
+}
+
+.data-grid tbody tr:nth-child(even) {
+  background: var(--bg-light, #f0f6ff);
+}
+
+.data-grid tbody tr td {
+  padding: 4px 8px;
+  border: 1px solid var(--border-table, #c0c8da);
+  height: 30px;
+}
+
+.data-grid tbody tr td input {
+  width: 100%;
+  height: 100%;
+  border: none;
+  padding: 4px 8px;
+  font-size: 13px;
+  box-sizing: border-box;
+  background: transparent;
+}
+
+.data-grid tbody tr td input:focus {
+  outline: none;
+  background: var(--bg-light, #f0f6ff);
+}
+
+/* Add Row Button */
+.section-container button[type="button"] {
+  padding: 8px 16px;
+  background: var(--primary-blue, #1f4fb2);
+  color: var(--text-white, #ffffff);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: bold;
+  margin-top: 10px;
+  transition: background 0.2s;
+}
+
+.section-container button[type="button"]:hover {
+  background: var(--primary-blue-dark, #163aa6);
+}
+
+/* Delete Row Button */
+.section-container .delete-btn {
+  padding: 4px 8px;
+  background: var(--error-color, #f44336);
+  color: var(--text-white, #ffffff);
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.section-container .delete-btn:hover {
+  background: var(--error-hover, #da190b);
+}
+
+/* Totals Row */
+.totals-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 30px;
+  padding: 15px 20px;
+  background: var(--bg-light-blue, #dbe7fb);
+  border-top: 1px solid var(--border-medium, #9fb6dd);
+  border-bottom: 1px solid var(--border-medium, #9fb6dd);
+}
+
+.totals-row .total-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.totals-row .total-label {
+  font-size: 14px;
+  font-weight: bold;
+  color: var(--text-secondary, #1f3f67);
+}
+
+.totals-row .total-value {
+  font-size: 14px;
+  font-weight: bold;
+  color: var(--primary-blue, #1f4fb2);
+  min-width: 80px;
+  text-align: right;
+}
+
+.totals-row .total-amount {
+  font-size: 16px;
+  font-weight: bold;
+  color: var(--primary-blue, #1f4fb2);
+  min-width: 120px;
+  text-align: right;
+}
+
+/* Bottom Summary */
+.bottom-summary {
+  padding: 15px 20px;
+  background: var(--bg-form, #e9eef7);
+  border-top: 1px solid var(--border-medium, #9fb6dd);
+}
+
+.bottom-summary .title {
+  font-size: 14px;
+  font-weight: bold;
+  color: var(--text-secondary, #1f3f67);
+  margin-bottom: 12px;
+}
+
+.bottom-summary .summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 15px;
+}
+
+.bottom-summary .summary-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 15px;
+  background: var(--bg-white, #ffffff);
+  border-radius: 4px;
+  border: 1px solid var(--border-light, #c7d6f3);
+}
+
+.bottom-summary .summary-item .label {
+  font-size: 13px;
+  color: var(--text-muted, #666666);
+}
+
+.bottom-summary .summary-item .value {
+  font-size: 13px;
+  font-weight: bold;
+  color: var(--text-primary, #333333);
+}
+
+.bottom-summary .summary-item .amount {
+  font-size: 14px;
+  font-weight: bold;
+  color: var(--primary-blue, #1f4fb2);
+}
+
+/* Deductions Section */
+.deductions-section {
+  padding: 15px 20px;
+  background: var(--bg-light-blue, #dbe7fb);
+  margin: 10px 20px;
+  border-radius: 4px;
+  border: 1px solid var(--border-medium, #9fb6dd);
+}
+
+.deductions-section .deductions-title {
+  font-size: 14px;
+  font-weight: bold;
+  color: var(--text-secondary, #1f3f67);
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-medium, #9fb6dd);
+}
+
+.deductions-section .deductions-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+
+.deductions-section .deduction-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.deductions-section .deduction-item label {
+  font-size: 12px;
+  font-weight: bold;
+  color: var(--text-secondary, #1f3f67);
+}
+
+.deductions-section .deduction-item input {
+  padding: 8px 12px;
+  border: 1px solid var(--border-dark, #7fa1d6);
+  border-radius: 4px;
+  font-size: 13px;
+  background: var(--bg-white, #ffffff);
+}
+
+.deductions-section .deduction-item input:focus {
+  outline: none;
+  border-color: var(--primary-blue, #1f4fb2);
+  box-shadow: 0 0 4px rgba(31, 79, 178, 0.3);
+}
+
+.deductions-section .deduction-item .deduction-value {
+  padding: 8px 12px;
+  font-size: 14px;
+  font-weight: bold;
+  color: var(--primary-blue, #1f4fb2);
+  background: var(--bg-white, #ffffff);
+  border-radius: 4px;
+  border: 1px solid var(--border-light, #c7d6f3);
+}
+
+/* Grand Total */
+.grand-total {
+  background: linear-gradient(135deg, var(--primary-blue, #1f4fb2) 0%, var(--secondary-blue, #2a5ea0) 100%);
+  color: var(--text-white, #ffffff);
+  padding: 15px 20px;
+  margin: 10px 20px;
+  border-radius: 4px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 15px;
+  font-size: 16px;
+  font-weight: bold;
+}
+
+.grand-total .grand-total-amount {
+  font-size: 24px;
+  font-weight: bold;
+}
+
+/* Window Footer - Action Buttons */
+.window-footer {
+  background: var(--bg-light-blue, #dbe7fb);
+  padding: 15px 20px;
+  text-align: right;
+  border-top: 1px solid var(--border-medium, #9fb6dd);
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.window-footer .button-group {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.window-footer button[type="submit"],
+.window-footer .btn-save {
+  padding: 10px 24px;
+  background: var(--btn-save-bg, #1f4fb2);
+  color: var(--text-white, #ffffff);
+  border: none;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background 0.2s, box-shadow 0.2s;
+}
+
+.window-footer button[type="submit"]:hover,
+.window-footer .btn-save:hover {
+  background: var(--btn-save-hover, #163aa6);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+.window-footer button[type="submit"]:disabled,
+.window-footer .btn-save:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Responsive Design */
+@media (max-width: 1200px) {
+  .info-bar {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  
+  .bottom-summary .summary-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  
+  .deductions-section .deductions-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .info-bar {
+    grid-template-columns: 1fr;
+  }
+  
+  .bottom-summary .summary-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .deductions-section .deductions-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .totals-row {
+    flex-wrap: wrap;
+    gap: 15px;
+  }
+  
+  .grand-total {
+    flex-direction: column;
+    text-align: center;
+  }
+}

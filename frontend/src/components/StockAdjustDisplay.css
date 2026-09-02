@@ -1,0 +1,125 @@
+body{
+    margin:0;
+    font-family:Tahoma, Arial;
+    background:#eaf2ff;
+}
+
+/* ===== TOP BAR ===== */
+.top-bar{
+    background:#2f5fa7;
+    color:#fff;
+    padding:6px 10px;
+    font-size:17px;
+    display:flex;
+    justify-content:space-between;
+}
+
+/* ===== WINDOW ===== */
+.window{
+    margin:8px;
+    border:1px solid #8aa4d8;
+    background:#ffffff;
+}
+
+/* ===== TITLE ===== */
+.form-title{
+    background:#3f6fc0;
+    color:white;
+    padding:6px 10px;
+    font-weight:bold;
+    font-size:15px;
+}
+
+/* ===== FILTER BAR ===== */
+.filter-bar{
+    padding:12px 10px;
+    display:flex;
+    justify-content:flex-end;
+    gap:6px;
+    border-bottom:1px solid #8aa4d8;
+    background:#f4f7ff;
+	height:25px;
+}
+
+.filter-bar label{
+    font-size:15px;
+    margin-top:3px;
+}
+
+.filter-bar input{
+    height:20px;
+    border:1px solid #8aa4d8;
+    width:150px;
+}
+
+/* ===== GRID ===== */
+.grid{
+    height:750px;
+    background:#ffffff;
+}
+
+table{
+    width:100%;
+    border-collapse:collapse;
+    font-size:15px;
+}
+
+th{
+    background:#3f6fc0;
+    color:white;
+    border:1px solid #8aa4d8;
+    height:24px;
+    text-align:center;
+}
+
+td{
+    border:1px solid #8aa4d8;
+    height:22px;
+}
+
+/* ===== BOTTOM BAR ===== */
+.bottom-bar{
+    background:#f4f7ff;
+    border-top:1px solid #8aa4d8;
+    padding:6px 10px;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+}
+
+.badge {
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: bold;
+}
+.badge-add {
+    background-color: #e8f5e9;
+    color: #2e7d32;
+    border: 1px solid #c8e6c9;
+}
+.badge-sub {
+    background-color: #ffebee;
+    color: #c62828;
+    border: 1px solid #ffcdd2;
+}
+
+@media print {
+    .no-print, .no-print * {
+        display: none !important;
+    }
+}
+
+.btn-group button{
+    padding:4px 16px;
+    margin-right:6px;
+    border:1px solid #2f5fa7;
+    background:#3f6fc0;
+    color:white;
+    cursor:pointer;
+    font-size:15px;
+}
+
+.status{
+    font-size:12px;
+}

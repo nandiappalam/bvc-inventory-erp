@@ -1,0 +1,221 @@
+/* Standard CSS for Blue and White Theme */
+
+* {
+    box-sizing: border-box;
+    font-family: Arial, Helvetica, sans-serif;
+}
+
+body {
+    margin: 0;
+    background-color: #f0f6ff;
+    color: #333;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+/* Top Bar */
+.top-bar {
+    background-color: #1f4fb2;
+    color: white;
+    padding: 10px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: bold;
+    font-size: 16px;
+}
+
+/* Window Header */
+.window-header {
+    background-color: #3b6fd8;
+    color: white;
+    padding: 10px 20px;
+    font-weight: bold;
+    font-size: 18px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.close {
+    cursor: pointer;
+    font-size: 20px;
+}
+
+/* Form Container */
+.form-container {
+    background-color: #eaf1ff;
+    border: 1px solid #9db7e8;
+    padding: 20px;
+    margin: 20px auto;
+    width: 90%;
+    max-width: 800px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+/* Form Title */
+.form-title {
+    color: #1f4fb2;
+    font-size: 20px;
+    margin-bottom: 20px;
+    border-bottom: 2px solid #1f4fb2;
+    padding-bottom: 5px;
+}
+
+/* Form Row */
+.form-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.form-label {
+    width: 150px;
+    font-weight: bold;
+    color: #333;
+}
+
+.form-input {
+    flex: 1;
+    padding: 8px;
+    border: 1px solid #9db7e8;
+    border-radius: 3px;
+}
+
+.form-input:focus {
+    outline: none;
+    border-color: #1f4fb2;
+}
+
+/* Save Button */
+.save-btn {
+    background-color: #1f4fb2;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    font-size: 16px;
+    cursor: pointer;
+    border-radius: 3px;
+    margin-top: 20px;
+}
+
+.save-btn:hover {
+    background-color: #163b82;
+}
+
+/* Table Container */
+.table-container {
+    background-color: #eaf1ff;
+    border: 1px solid #9db7e8;
+    padding: 20px;
+    margin: 20px auto;
+    width: 90%;
+    max-width: 1200px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+/* Table */
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    background-color: white;
+}
+
+.data-table th {
+    background-color: #dce8ff;
+    border: 1px solid #9db7e8;
+    padding: 10px;
+    text-align: left;
+    font-weight: bold;
+}
+
+.data-table td {
+    border: 1px solid #9db7e8;
+    padding: 10px;
+}
+
+/* Actions Column */
+.actions {
+    display: flex;
+    gap: 10px;
+}
+
+.action-btn {
+    background-color: #1f4fb2;
+    color: white;
+    border: none;
+    padding: 5px 10px;
+    cursor: pointer;
+    border-radius: 3px;
+    font-size: 12px;
+}
+
+.action-btn:hover {
+    background-color: #163b82;
+}
+
+.update-btn {
+    background-color: #28a745;
+}
+
+.update-btn:hover {
+    background-color: #218838;
+}
+
+.print-btn {
+    background-color: #17a2b8;
+}
+
+.print-btn:hover {
+    background-color: #138496;
+}
+
+.delete-btn {
+    background-color: #dc3545;
+}
+
+.delete-btn:hover {
+    background-color: #c82333;
+}
+
+/* Footer */
+.footer {
+    background-color: #f8f9fa;
+    border-top: 1px solid #9db7e8;
+    padding: 10px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 20px;
+}
+
+.footer-info {
+    font-size: 14px;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .form-container, .table-container {
+        width: 95%;
+        padding: 15px;
+    }
+
+    .form-row {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .form-label {
+        width: auto;
+        margin-bottom: 5px;
+    }
+
+    .data-table {
+        font-size: 12px;
+    }
+
+    .actions {
+        flex-direction: column;
+        gap: 5px;
+    }
+}

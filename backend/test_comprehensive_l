@@ -1,0 +1,401 @@
+/**
+ * Comprehensive Lot System Test Suite
+ * Tests: Purchase → Lot → Sales → Grind → Ledger Flow
+ */
+
+const axios = require('axios');
+const db = require('./config/database');
+
+const API_BASE = 'http://localhost:3000/api';
+
+let testsPassed = 0;
+let testsFailed = 0;
+
+async function log(message, type = 'INFO') {
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] [${type}] ${message}`);
+}
+
+async function test(name, fn) {
+  try {
+    await fn();
+    log(`✅ PASS: ${name}`, 'PASS');
+    testsPassed++;
+  } catch (error) {
+    log(`❌ FAIL: ${name} - ${error.message}`, 'FAIL');
+    testsFailed++;
+  }
+}
+
+async function checkLedgerBalance() {
+  const result = await db.query(`
+    SELECT 
+      SUM(CASE WHEN debit > 0 THEN debit ELSE 0 END) as total_debit,
+      SUM(CASE WHEN credit > 0 THEN credit ELSE 0 END) as total_credit
+    FROM ledger_entries
+  `);
+  const totalDebit = result.rows[0]?.total_debit || 0;
+  const totalCredit = result.rows[0]?.total_credit || 0;
+  log(`Ledger Balance - Debit: ${totalDebit}, Credit: ${totalCredit}`, 'INFO');
+  if (Math.abs(totalDebit - totalCredit) > 0.01) {
+    throw new Error(`Ledger imbalance: Debit ${totalDebit} != Credit ${totalCredit}`);
+  }
+}
+
+async function checkNoNegativeStock() {
+  const result = await db.query(`
+    SELECT lot_no, remaining_quantity FROM stock_lots 
+    WHERE remaining_quantity < 0
+  `);
+  if (result.rows.length > 0) {
+    throw new Error(`Found negative stock: ${JSON.stringify(result.rows)}`);
+  }
+}
+
+async function runTests() {
+  log('========================================');
+  log('LOT SYSTEM COMPREHENSIVE TEST SUITE');
+  log('========================================');
+
+  // ========================================
+  // 1. CRITICAL FLOW TEST
+  // ========================================
+  log('--- 1. PURCHASE FLOW TEST ---');
+
+  await test('Create Purchase with auto lot generation', async () => {
+    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    
+    const purchaseData = {
+      formData: {
+        sno: 1,
+        date: new Date().toISOString().slice(0, 10),
+        supplier: 'Test Supplier',
+        invNo: 'INV-TEST-001',
+        payType: 'Cash',
+        taxType: 'Exclusive',
+        remarks: 'Test purchase'
+      },
+      items: [{
+        itemName: 'Urad',
+        qty: 25,
+        weight: 2500,
+        rate: 100,
+        amount: 2500,
+        totalWt: 2500
+      }],
+      totals: {
+        totalQty: 25,
+        totalWeight: 2500,
+        totalAmount: 2500,
+        baseAmount: 2500,
+        discAmount: 0,
+        taxAmount: 0,
+        grandTotal: 2500
+      }
+    };
+
+    const response = await axios.post(`${API_BASE}/purchases`, purchaseData);
+    if (!response.data.id) {
+      throw new Error('Purchase not created');
+    }
+    
+    // Verify lot was auto-generated
+    const lots = await db.query(`SELECT * FROM stock_lots WHERE item_name = 'Urad' ORDER BY id DESC LIMIT 1`);
+    const newLot = lots.rows[0];
+    log(`Generated Lot: ${newLot.lot_no}`, 'INFO');
+    
+    if (!newLot.lot_no.includes(today)) {
+      throw new Error(`Lot number format incorrect: ${newLot.lot_no}`);
+    }
+    
+    if (newLot.quantity !== 25) {
+      throw new Error(`Quantity mismatch: expected 25, got ${newLot.quantity}`);
+    }
+  });
+
+  await test('Verify stock inserted for purchase', async () => {
+    const result = await db.query(`
+      SELECT * FROM stock WHERE type = 'Purchase' ORDER BY id DESC LIMIT 1
+    `);
+    if (result.rows.length === 0) {
+      throw new Error('Stock entry not created');
+    }
+    log(`Stock entry: ${result.rows[0].item_name} - ${result.rows[0].qty}`, 'INFO');
+  });
+
+  await test('Verify ledger entry created for purchase', async () => {
+    const result = await db.query(`
+      SELECT * FROM ledger_entries ORDER BY id DESC LIMIT 1
+    `);
+    if (result.rows.length === 0) {
+      throw new Error('Ledger entry not created');
+    }
+    log(`Ledger: Debit ${result.rows[0].debit}, Credit ${result.rows[0].credit}`, 'INFO');
+  });
+
+  // ========================================
+  // 2. SALES FIFO DEDUCTION TEST
+  // ========================================
+  log('--- 2. SALES FIFO DEDUCTION TEST ---');
+
+  await test('Create Sale - FIFO deduction', async () => {
+    const salesData = {
+      formData: {
+        sNo: 'SALE-001',
+        date: new Date().toISOString().slice(0, 10),
+        customer: 'Test Customer',
+        remarks: 'Test sale'
+      },
+      items: [{
+        itemName: 'Urad',
+        qty: 10,
+        weight: 1000,
+        rate: 120,
+        totalAmt: 1200,
+        totalWt: 1000
+      }],
+      totals: {
+        totalQty: 10,
+        totalWeight: 1000,
+        totalAmt: 1200
+      }
+    };
+
+    const response = await axios.post(`${API_BASE}/sales`, salesData);
+    if (!response.data.id) {
+      throw new Error('Sale not created');
+    }
+    
+    // Verify stock was deducted
+    const lots = await db.query(`SELECT * FROM stock_lots WHERE item_name = 'Urad' ORDER BY id DESC`);
+    const latestLot = lots.rows[0];
+    
+    log(`Lot after sale: ${latestLot.lot_no} - Remaining: ${latestLot.remaining_quantity}`, 'INFO');
+    
+    // Should have 15 remaining (25 - 10)
+    if (latestLot.remaining_quantity !== 15) {
+      throw new Error(`Incorrect remaining qty: expected 15, got ${latestLot.remaining_quantity}`);
+    }
+  });
+
+  await test('Verify stock deduction recorded', async () => {
+    const result = await db.query(`
+      SELECT * FROM stock WHERE type = 'Sale' ORDER BY id DESC LIMIT 1
+    `);
+    if (result.rows.length === 0) {
+      throw new Error('Sale stock entry not created');
+    }
+    if (result.rows[0].qty !== -10) {
+      throw new Error(`Sale qty incorrect: ${result.rows[0].qty}`);
+    }
+  });
+
+  // ========================================
+  // 3. GRIND (FLOUR OUT) TEST
+  // ========================================
+  log('--- 3. GRIND (FLOUR OUT) TEST ---');
+
+  await test('Create Grind - convert grain to flour', async () => {
+    // Get available grain lot
+    const lots = await db.query(`
+      SELECT * FROM stock_lots WHERE item_name = 'Urad' AND remaining_quantity > 0 LIMIT 1
+    `);
+    
+    if (lots.rows.length === 0) {
+      throw new Error('No grain lot available');
+    }
+    
+    const grainLot = lots.rows[0];
+    const grindData = {
+      formData: {
+        sNo: 'GRIND-001',
+        date: new Date().toISOString().slice(0, 10),
+        papad_company: 'Test Papad Co',
+        remarks: 'Test grind'
+      },
+      items: [{
+        item_name: 'Urad',
+        lot_no: grainLot.lot_no,
+        qty: 5,
+        weight: 500,
+        total_wt: 500,
+        wages: 50
+      }]
+    };
+
+    const response = await axios.post(`${API_BASE}/flour-out`, grindData);
+    if (!response.data.id) {
+      throw new Error('Grind not created');
+    }
+    
+    // Verify grain lot was reduced
+    const updatedGrain = await db.query(`
+      SELECT * FROM stock_lots WHERE lot_no = ?
+    `, [grainLot.lot_no]);
+    
+    log(`Grain lot after grind: ${grainLot.lot_no} - Remaining: ${updatedGrain.rows[0].remaining_quantity}`, 'INFO');
+    
+    // Should have 10 remaining (15 - 5)
+    if (updatedGrain.rows[0].remaining_quantity !== 10) {
+      throw new Error(`Grain qty incorrect: expected 10, got ${updatedGrain.rows[0].remaining_quantity}`);
+    }
+    
+    // Verify flour lot was created
+    const flourLots = await db.query(`
+      SELECT * FROM stock_lots WHERE item_name LIKE 'Flour%' ORDER BY id DESC LIMIT 1
+    `);
+    
+    if (flourLots.rows.length === 0) {
+      throw new Error('Flour lot not created');
+    }
+    
+    log(`Created flour lot: ${flourLots.rows[0].lot_no}`, 'INFO');
+  });
+
+  // ========================================
+  // 4. EDGE CASE TESTS
+  // ========================================
+  log('--- 4. EDGE CASE TESTS ---');
+
+  await test('Block oversell - insufficient stock', async () => {
+    const salesData = {
+      formData: {
+        sNo: 'SALE-OVER-001',
+        date: new Date().toISOString().slice(0, 10),
+        customer: 'Test Customer'
+      },
+      items: [{
+        itemName: 'Urad',
+        qty: 1000, // Try to sell more than available (only 10 left)
+        weight: 100000,
+        rate: 120,
+        totalAmt: 120000,
+        totalWt: 100000
+      }],
+      totals: {
+        totalQty: 1000,
+        totalAmt: 120000
+      }
+    };
+
+    try {
+      await axios.post(`${API_BASE}/sales`, salesData);
+      throw new Error('Should have blocked oversell');
+    } catch (error) {
+      if (error.response && error.response.data.message.includes('Insufficient stock')) {
+        log('Correctly blocked oversell', 'INFO');
+      } else {
+        throw error;
+      }
+    }
+  });
+
+  await test('Multiple same-day purchases - sequence increments', async () => {
+    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    
+    // Create second purchase
+    const purchaseData = {
+      formData: {
+        sno: 2,
+        date: new Date().toISOString().slice(0, 10),
+        supplier: 'Test Supplier 2',
+        invNo: 'INV-TEST-002'
+      },
+      items: [{
+        itemName: 'Urad',
+        qty: 30,
+        weight: 3000,
+        rate: 100,
+        amount: 3000,
+        totalWt: 3000
+      }],
+      totals: {
+        totalQty: 30,
+        totalAmount: 3000,
+        baseAmount: 3000,
+        grandTotal: 3000
+      }
+    };
+
+    await axios.post(`${API_BASE}/purchases`, purchaseData);
+    
+    // Check lot numbers - should be URA-YYYYMMDD-0003
+    const lots = await db.query(`
+      SELECT lot_no FROM stock_lots WHERE item_name = 'Urad' ORDER BY id DESC LIMIT 2
+    `);
+    
+    // Latest lot should have sequence 3 (or higher if previous tests added more)
+    const latestLot = lots.rows[0].lot_no;
+    log(`Latest lot number: ${latestLot}`, 'INFO');
+    
+    if (!latestLot.includes(today)) {
+      throw new Error(`Lot not using today's date: ${latestLot}`);
+    }
+  });
+
+  // ========================================
+  // 5. DATA INTEGRITY TESTS
+  // ========================================
+  log('--- 5. DATA INTEGRITY TESTS ---');
+
+  await test('No negative stock quantities', async () => {
+    await checkNoNegativeStock();
+    log('All stock quantities are positive', 'INFO');
+  });
+
+  await test('Ledger debit equals credit', async () => {
+    await checkLedgerBalance();
+    log('Ledger is balanced', 'INFO');
+  });
+
+  await test('No duplicate lot numbers', async () => {
+    const result = await db.query(`
+      SELECT lot_no, COUNT(*) as cnt FROM stock_lots 
+      GROUP BY lot_no HAVING cnt > 1
+    `);
+    if (result.rows.length > 0) {
+      throw new Error(`Duplicate lots found: ${JSON.stringify(result.rows)}`);
+    }
+    log('No duplicate lot numbers', 'INFO');
+  });
+
+  // ========================================
+  // 6. LOT HISTORY TRACEABILITY TEST
+  // ========================================
+  log('--- 6. LOT HISTORY TRACEABILITY TEST ---');
+
+  await test('Lot history returns complete traceability', async () => {
+    const lots = await db.query(`SELECT lot_no FROM stock_lots WHERE item_name = 'Urad' LIMIT 1`);
+    const lotNo = lots.rows[0].lot_no;
+    
+    const response = await axios.get(`${API_BASE}/stock/lot-history/${lotNo}`);
+    
+    if (!response.data.lotDetails) {
+      throw new Error('Lot history missing lot details');
+    }
+    
+    log(`Lot ${lotNo} history:`, 'INFO');
+    log(`  Initial: ${response.data.summary.initialQuantity}`, 'INFO');
+    log(`  Remaining: ${response.data.summary.remainingQuantity}`, 'INFO');
+    log(`  Sales: ${response.data.summary.totalSales}`, 'INFO');
+    log(`  Grind: ${response.data.summary.totalGrind}`, 'INFO');
+  });
+
+  // ========================================
+  // SUMMARY
+  // ========================================
+  log('========================================');
+  log('TEST SUMMARY');
+  log(`✅ Passed: ${testsPassed}`);
+  log(`❌ Failed: ${testsFailed}`);
+  log('========================================');
+
+  if (testsFailed > 0) {
+    process.exit(1);
+  }
+}
+
+runTests().catch(err => {
+  log(`Fatal error: ${err.message}`, 'FATAL');
+  process.exit(1);
+});

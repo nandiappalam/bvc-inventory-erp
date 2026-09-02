@@ -1,0 +1,101 @@
+* {
+    box-sizing: border-box;
+    font-family: Tahoma, Arial, sans-serif;
+}
+
+body {
+    margin: 0;
+    background-color: #6b7386;
+}
+
+/* Top Bars */
+.top-bar {
+    background: linear-gradient(#4a74b5, #355f9f);
+    color: #fff;
+    padding: 6px 10px;
+    font-weight: bold;
+}
+
+.company {
+    float: right;
+}
+
+.menu-bar {
+    background: #d6deef;
+    padding: 5px 10px;
+    font-size: 14px;
+    border-bottom: 1px solid #888;
+}
+
+.menu-bar .date {
+    float: right;
+}
+
+/* Window Header */
+.window-header {
+    background: #2f4f87;
+    color: #fff;
+    padding: 6px 10px;
+    font-weight: bold;
+    position: relative;
+}
+
+.close {
+    position: absolute;
+    right: 10px;
+    cursor: pointer;
+}
+
+/* Form Area */
+.form-wrapper {
+    display: flex;
+    justify-content: center;
+    margin-top: 40px;
+}
+
+.form-box {
+    background: #e6ebf4;
+    padding: 20px 25px;
+    width: 420px;
+    border: 1px solid #7b8fb3;
+    box-shadow: 0 0 6px rgba(0,0,0,0.4);
+}
+
+.row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.row label {
+    width: 200px;
+    font-size: 14px;
+}
+
+.row small {
+    font-size: 11px;
+}
+
+.row input,
+.row select {
+    width: 180px;
+    padding: 4px;
+    border: 1px solid #7a8fb4;
+    background: #fff;
+}
+
+.btn-row {
+    text-align: right;
+    margin-top: 15px;
+}
+
+button {
+    padding: 5px 16px;
+    border: 1px solid #6a86b8;
+    background: #f3f6fc;
+    cursor: pointer;
+}
+
+button:hover {
+    background: #dbe6f7;
+}

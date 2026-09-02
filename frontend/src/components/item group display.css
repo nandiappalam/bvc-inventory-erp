@@ -1,0 +1,215 @@
+body {
+    font-family: "Segoe UI", Arial, sans-serif;
+    margin: 0;
+    background: #eaf2fb;
+}
+
+/* Top Header */
+.app-header {
+    background: #1e5ed8;
+    color: white;
+    padding: 10px;
+    font-size: 18px;
+}
+
+/* Page Title */
+.page-title {
+    padding: 10px 15px;
+    font-weight: bold;
+    color: #1e5ed8;
+    font-size: 16px;
+}
+
+/* Table Container */
+.table-container {
+    padding: 10px 15px;
+    margin-bottom: 40px;
+}
+
+/* Excel-like Grid */
+.grid-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+}
+
+.grid-table th {
+    background: #dbe7fb;
+    border: 1px solid #9fb8e8;
+    padding: 8px;
+    text-align: left;
+    font-weight: bold;
+    color: #1e5ed8;
+}
+
+.grid-table td {
+    border: 1px solid #c7d6f3;
+    height: 32px;
+    padding: 6px 8px;
+}
+
+.grid-table tr:hover {
+    background-color: #f0f6ff;
+}
+
+.grid-table tr.selected-row {
+    background-color: #d9e7fb;
+}
+
+/* Actions Cell */
+.actions-cell {
+    text-align: center;
+    padding: 4px !important;
+}
+
+/* Action Buttons */
+.action-btn {
+    padding: 4px 10px;
+    margin: 2px;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: bold;
+    background-color: #1976d2;
+    color: white;
+    transition: background-color 0.3s;
+}
+
+.update-btn {
+    background-color: #4CAF50;
+}
+
+.update-btn:hover {
+    background-color: #45a049;
+}
+
+.delete-btn {
+    background-color: #f44336;
+}
+
+.delete-btn:hover {
+    background-color: #da190b;
+}
+
+.print-btn {
+    background-color: #2196F3;
+}
+
+.print-btn:hover {
+    background-color: #0b7dda;
+}
+
+/* Footer */
+.footer-bar {
+    position: fixed;
+    bottom: 0;
+    width: 100%;
+    background: #dbe7fb;
+    border-top: 1px solid #9fb8e8;
+    padding: 8px 10px;
+    font-size: 14px;
+    color: #333;
+}
+
+/* Success Message */
+.success-message {
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    background-color: #4CAF50;
+    color: white;
+    padding: 15px 20px;
+    border-radius: 4px;
+    z-index: 1000;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+
+/* Modal Overlay */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 999;
+}
+
+.modal-content {
+    background: white;
+    padding: 25px;
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    width: 400px;
+}
+
+.modal-content h3 {
+    color: #1e5ed8;
+    margin-top: 0;
+}
+
+.form-group {
+    margin-bottom: 15px;
+}
+
+.form-group label {
+    display: block;
+    color: #333;
+    font-weight: bold;
+    margin-bottom: 5px;
+}
+
+.form-group input,
+.form-group select {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #9fb8e8;
+    border-radius: 3px;
+    box-sizing: border-box;
+    font-size: 14px;
+}
+
+.form-group input:focus,
+.form-group select:focus {
+    outline: none;
+    border-color: #1e5ed8;
+    box-shadow: 0 0 4px #1e5ed8;
+}
+
+.form-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    margin-top: 20px;
+}
+
+.save-btn,
+.cancel-btn {
+    padding: 8px 20px;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 14px;
+}
+
+.save-btn {
+    background-color: #1e5ed8;
+    color: white;
+}
+
+.save-btn:hover {
+    background-color: #1a4aa6;
+}
+
+.cancel-btn {
+    background-color: #ccc;
+    color: #333;
+}
+
+.cancel-btn:hover {
+    background-color: #aaa;

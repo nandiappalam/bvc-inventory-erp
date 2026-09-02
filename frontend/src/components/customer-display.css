@@ -1,0 +1,203 @@
+/*============================================================================
+  customer-display.css - ERP Unified Blue & White Theme
+  Standardized Display Page Styles - WIDE LAYOUT
+  ============================================================================*/
+
+/* Import ERP Theme Variables */
+@import './erp-theme.css';
+
+body {
+    margin: 0;
+    background: var(--bg-content);
+    font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+}
+
+/* Standard Display Container - Full Width */
+.standard-display {
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    background: var(--bg-white);
+    box-sizing: border-box;
+}
+
+/* Screen Title */
+.screen-title {
+    background: linear-gradient(135deg, var(--primary-blue) 0%, var(--secondary-blue) 100%);
+    color: var(--text-white);
+    padding: 12px 20px;
+    font-weight: bold;
+    font-size: 18px;
+    text-align: center;
+}
+
+/* Container */
+.container {
+    padding: 10px 0;
+    width: 100%;
+    box-sizing: border-box;
+    overflow: visible;
+}
+
+/* Table Wrapper */
+.table-wrapper {
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: auto;
+    max-height: calc(100vh - 220px);
+    box-sizing: border-box;
+}
+
+/* Table - Standardized */
+table.data-table {
+    width: 100%;
+    min-width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    table-layout: auto;
+    box-sizing: border-box;
+}
+
+thead th {
+    background: var(--primary-blue);
+    position: sticky;
+    top: 0;
+    border: 1px solid var(--border-medium);
+    padding: 8px 10px;
+    text-align: left;
+    font-weight: bold;
+    color: var(--text-white);
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+tbody td {
+    height: 28px;
+    border: 1px solid var(--border-table);
+    padding: 7px 10px;
+    font-size: 13px;
+    vertical-align: middle;
+    white-space: normal;
+    word-break: break-word;
+}
+
+/* Alternate Rows */
+tbody tr:nth-child(even) {
+    background: var(--bg-light);
+}
+
+/* Hover */
+tbody tr:hover {
+    background: var(--bg-lighter-blue);
+}
+
+/* Actions Header */
+.actions-header {
+    width: 200px;
+    text-align: center;
+}
+
+/* Actions Cell */
+.actions-cell {
+    text-align: center;
+    white-space: nowrap;
+}
+
+/* Action Buttons */
+.action-btn {
+    padding: 4px 10px;
+    margin: 2px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: bold;
+    background: #1976d2;
+    color: #ffffff;
+    transition: all 0.2s;
+}
+
+.action-btn.update-btn {
+    background: #1976d2;
+}
+
+.action-btn.update-btn:hover {
+    background: #1565c0;
+}
+
+.action-btn.delete-btn {
+    background: #f44336;
+}
+
+.action-btn.delete-btn:hover {
+    background: #d32f2f;
+}
+
+.action-btn.print-btn {
+    background: #0288d1;
+}
+
+.action-btn.print-btn:hover {
+    background: #0277bd;
+}
+
+/* Footer Bar */
+.footer-bar {
+    background: var(--bg-light-blue);
+    padding: 10px 20px;
+    font-size: 14px;
+    border-top: 1px solid var(--border-medium);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg-content);
+}
+
+::-webkit-scrollbar-thumb {
+    background: #999;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--primary-blue);
+}
+
+/* Print Styles */
+@media print {
+    .screen-title {
+        background: white;
+        color: black;
+        border-bottom: 2px solid black;
+    }
+    
+    table.data-table {
+        font-size: 11px;
+    }
+    
+    thead th {
+        background: #f0f0f0 !important;
+        color: black !important;
+        border: 1px solid black;
+    }
+    
+    tbody td {
+        border: 1px solid black;
+    }
+    
+    .action-btn {
+        display: none;
+    }
+    
+    .footer-bar {
+        display: none;
+    }
+}

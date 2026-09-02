@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Consignee Update</title>
+    <link rel="stylesheet" href="city-create.css">
+</head>
+<body>
+
+
+
+<!-- Overlay background -->
+<div class="overlay">
+
+    <!-- Form Box -->
+    <div class="form-box">
+        <div class="form-title">Consignee Update</div>
+
+        <div class="form-body">
+            <div class="form-row">
+                <label>Name</label>
+                <input type="text" name="name" required>
+            </div>
+
+            <div class="form-row">
+                <label>Print Name</label>
+                <input type="text" name="print_name">
+            </div>
+
+            <div class="form-row">
+                <label>Contact Person</label>
+                <input type="text" name="contact_person">
+            </div>
+
+            <div class="form-row">
+                <label>Address</label>
+                <textarea name="address" rows="3"></textarea>
+            </div>
+
+            <div class="form-row">
+                <label>Area</label>
+                <input type="text" name="area">
+            </div>
+
+            <div class="form-row">
+                <label>Phone (Res)</label>
+                <input type="text" name="phone_res">
+            </div>
+
+            <div class="form-row">
+                <label>Phone (Off)</label>
+                <input type="text" name="phone_off">
+            </div>
+
+            <div class="form-row">
+                <label>Mobile</label>
+                <input type="text" name="mobile">
+            </div>
+
+            <div class="form-row">
+                <label>TIN No</label>
+                <input type="text" name="tin_no">
+            </div>
+
+            <div class="form-row">
+                <label>Status</label>
+                <select name="status">
+                    <option>Active</option>
+                    <option>Inactive</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="form-footer">
+            <button onclick="updateConsignee(event)">Update</button>
+            <button onclick="cancelUpdate()">Cancel</button>
+        </div>
+    </div>
+
+</div>
+
+<!-- Bottom Status Bar -->
+<div class="status-bar">
+    Ready
+    <span class="right">27-01-2025</span>
+</div>
+
+<script>
+async function loadConsignee() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const id = urlParams.get('id');
+
+    if (!id) {
+        alert('No consignee ID provided');
+        window.location.href = 'consignee display.html';
+        return;
+    }
+
+    try {
+        const response = await fetch(`http://localhost:3000/api/masters/consignee_master/${id}`);
+        const consignee = await response.json();
+
+        if (response.ok) {
+            document.querySelector('input[name="name"]').value = consignee.name;
+            document.querySelector('input[name="print_name"]').value = consignee.print_name || '';
+            document.querySelector('input[name="contact_person"]').value = consignee.contact_person || '';
+            document.querySelector('textarea[name="address"]').value = consignee.address1 || '';
+            document.querySelector('input[name="area"]').value = consignee.area || '';
+            document.querySelector('input[name="phone_res"]').value = consignee.phone_res || '';
+            document.querySelector('input[name="phone_off"]').value = consignee.phone_off || '';
+            document.querySelector('input[name="mobile"]').value = consignee.mobile1 || '';
+            document.querySelector('input[name="tin_no"]').value = consignee.tin_no || '';
+            document.querySelector('select[name="status"]').value = consignee.status;
+        } else {
+            alert('Error loading consignee data');
+            window.location.href = 'consignee display.html';
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+        window.location.href = 'consignee display.html';
+    }
+}
+
+async function updateConsignee(event) {
+    event.preventDefault();
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const id = urlParams.get('id');
+
+    const formData = {
+        name: document.querySelector('input[name="name"]').value.trim(),
+        print_name: document.querySelector('input[name="print_name"]').value,
+        contact_person: document.querySelector('input[name="contact_person"]').value,
+        address1: document.querySelector('textarea[name="address"]').value,
+        area: document.querySelector('input[name="area"]').value,
+        phone_res: document.querySelector('input[name="phone_res"]').value,
+        phone_off: document.querySelector('input[name="phone_off"]').value,
+        mobile1: document.querySelector('input[name="mobile"]').value,
+        tin_no: document.querySelector('input[name="tin_no"]').value,
+        status: document.querySelector('select[name="status"]').value
+    };
+
+    if (!formData.name) {
+        alert('Consignee name is required');
+        return;
+    }
+
+    try {
+        const response = await fetch(`http://localhost:3000/api/masters/consignee_master/${id}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(formData)
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            alert('Consignee updated successfully');
+            window.location.href = 'consignee display.html';
+        } else {
+            alert('Error: ' + result.message);
+        }
+    } catch (error) {
+        alert('Error updating consignee: ' + error.message);
+    }
+}
+
+function cancelUpdate() {
+    window.location.href = 'consignee display.html';
+}
+
+document.addEventListener('DOMContentLoaded', loadConsignee);
+</script>
+
+</body>
+</html>
+
+

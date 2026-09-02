@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Supplier Entry</title>
+    <link rel="stylesheet" href="supplier-creation.css">
+</head>
+<body>
+
+<div class="container">
+    <div class="header">Supplier Creation</div>
+
+    <form class="entry-form">
+        <div class="form-row">
+            <label>Name</label>
+            <input type="text">
+        </div>
+
+        <div class="form-row">
+            <label>Print Name</label>
+            <input type="text">
+        </div>
+
+        <div class="form-row">
+            <label>Contact Person</label>
+            <input type="text">
+        </div>
+
+        <div class="form-row">
+            <label>Address</label>
+            <textarea></textarea>
+        </div>
+
+        <div class="form-row">
+            <label>Phone (Res)</label>
+            <input type="text">
+        </div>
+
+        <div class="form-row">
+            <label>Phone (Off)</label>
+            <input type="text">
+        </div>
+
+        <div class="form-row">
+            <label>Mobile</label>
+            <input type="text">
+        </div>
+
+        <div class="form-row">
+            <label>Email ID</label>
+            <input type="email">
+        </div>
+
+        <div class="form-row">
+            <label>Web</label>
+            <input type="text">
+        </div>
+
+        <div class="form-row">
+            <label>GST / TIN No</label>
+            <input type="text">
+        </div>
+
+        <div class="form-row">
+            <label>Area</label>
+            <input type="text">
+        </div>
+
+        <div class="form-row">
+            <label>Transport</label>
+            <input type="text">
+        </div>
+
+        <div class="form-row">
+            <label>Limit Days</label>
+            <input type="number">
+        </div>
+
+        <div class="form-row">
+            <label>Limit Amount</label>
+            <input type="number">
+        </div>
+
+        <div class="form-row">
+            <label>Status</label>
+            <select>
+                <option>Active</option>
+                <option>Inactive</option>
+            </select>
+        </div>
+
+        <div class="button-row">
+            <button type="submit" onclick="saveSupplier(event)">Save</button>
+        </div>
+
+        <script>
+            async function saveSupplier(event) {
+                event.preventDefault();
+
+                const formData = {
+                    name: document.querySelector('input[name="name"]').value,
+                    print_name: document.querySelector('input[name="print_name"]').value,
+                    contact_person: document.querySelector('input[name="contact_person"]').value,
+                    address1: document.querySelector('textarea[name="address"]').value,
+                    phone_res: document.querySelector('input[name="phone_res"]').value,
+                    phone_off: document.querySelector('input[name="phone_off"]').value,
+                    mobile1: document.querySelector('input[name="mobile"]').value,
+                    gst_number: document.querySelector('input[name="gst_number"]').value,
+                    area: document.querySelector('input[name="area"]').value,
+                    opening_balance: parseFloat(document.querySelector('input[name="opening_balance"]')?.value || 0)
+                };
+
+                if (!formData.name.trim()) {
+                    alert('Supplier name is required');
+                    return;
+                }
+
+                try {
+                    const response = await fetch('http://localhost:3000/api/masters/supplier_master', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(formData)
+                    });
+
+                    const result = await response.json();
+
+                    if (response.ok) {
+                        alert('Supplier created successfully');
+                        // Clear form
+                        document.querySelector('form').reset();
+                    } else {
+                        alert('Error: ' + result.message);
+                    }
+                } catch (error) {
+                    alert('Error saving supplier: ' + error.message);
+                }
+            }
+        </script>
+    </form>
+</div>
+
+</body>
+</html>

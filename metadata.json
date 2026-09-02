@@ -1,0 +1,6 @@
+{
+  "name": "BVC Exports ERP",
+  "description": "Enterprise Resource Planning and Purchase Management System with Multi-Tenant PostgreSQL/SQLite architecture, production compliance records, and inventory workflows.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

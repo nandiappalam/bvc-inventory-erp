@@ -1,0 +1,38 @@
+{
+  "$schema": "https://schema.tauri.app/config/1.5.0",
+  "build": {
+    "beforeDevCommand": "npm run frontend",
+    "beforeBuildCommand": "npm run build:frontend",
+    "devPath": "http://localhost:3000",
+    "distDir": "../frontend/dist"
+  },
+  "package": {
+    "productName": "BVC ERP",
+    "version": "1.0.0"
+  },
+  "tauri": {
+    "bundle": {
+      "identifier": "com.bvc.erp",
+      "active": true,
+      "targets": "all",
+      "icon": [
+        "icons/32x32.png",
+        "icons/128x128.png",
+        "icons/128x128@2x.png",
+        "icons/icon.icns",
+        "icons/icon.ico"
+      ]
+    },
+    "security": {
+      "csp": null
+    },
+    "windows": [
+      {
+        "title": "BVC ERP - Purchase Management System",
+        "width": 1200,
+        "height": 800,
+        "resizable": true
+      }
+    ]
+  }
+}

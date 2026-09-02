@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Stock Adjust Creation</title>
+
+<style>
+body{
+    margin:0;
+    font-family:Tahoma, Arial;
+   background:white;
+}
+
+/* ===== TOP SOFTWARE BAR ===== */
+.top-bar{
+    background:#1f4fb2;
+    color:#fff;
+    padding:6px 10px;
+    font-size:13px;
+    display:flex;
+    justify-content:space-between;
+}
+
+
+/* ===== MAIN WINDOW ===== */
+.window{
+    margin:8px;
+    border:1px solid #6c8f8a;
+     background:#dfe9ff;
+}
+
+/* ===== FORM TITLE ===== */
+.form-title{
+    background:#2f6fd6;
+    color:white;
+    padding:6px 10px;
+    font-weight:bold;
+    font-size:14px;
+}
+
+/* ===== ENTRY DETAILS ===== */
+.details{
+    padding:10px;
+}
+
+.row{
+    display:flex;
+    margin-bottom:6px;
+}
+
+.label{
+    width:110px;
+    font-size:15px;
+	font-weight:bold;
+}
+
+input{
+    height:22px;
+    border:1px solid #6c8f8a;
+    background:#fff;
+    width:250px;
+}
+
+.space{ width:30px; }
+
+/* ===== GRID ===== */
+.grid{
+    border-top:1px solid #6c8f8a;
+    border-bottom:1px solid #6c8f8a;
+     background:#dfe9ff;
+    height:700px;
+}
+
+table{
+    width:100%;
+    border-1px;
+    font-size:15px;
+}
+
+th{
+    background:#2f6fd6;
+    color:white;
+    border:1px solid #6c8f8a;
+    height:24px;
+}
+
+td{
+    border:1px solid #6c8f8a;
+    height:22px;
+}
+
+td input{
+    width:100%;
+    height:20px;
+    border:none;
+}
+
+/* ===== BOTTOM BAR ===== */
+.bottom-bar{
+    background:#2f6fd6;
+    padding:6px 10px;
+    text-align:right;
+}
+
+.save-btn{
+    padding:4px 20px;
+    background:green;
+    color:white;
+    border:1px solid #2f4f4f;
+    cursor:pointer;
+}
+</style>
+</head>
+
+<body>
+
+<!-- TOP -->
+<div class="top-bar">
+    <div>Inventory Management System</div>
+    <div>A.S.MOORTHY & CO</div>
+</div>
+
+
+<!-- WINDOW -->
+<div class="window">
+
+<div class="form-title">Stock Adjust Creation</div>
+
+<!-- DETAILS -->
+<div class="details">
+
+<div class="row">
+    <div class="label">S.No</div><input value="">
+    <div class="space"></div>
+    <div class="label">Type</div><input value="">
+    <div class="space"></div>
+    <div class="label">Papad Comp</div><input>
+</div>
+
+<div class="row">
+    <div class="label">Date</div><input value="">
+    <div class="space"></div>
+    <div class="label">Flour Mill</div><input>
+    <div class="space"></div>
+    <div class="label">Remarks</div><input>
+</div>
+
+</div>
+
+<!-- GRID -->
+<div class="grid">
+<table>
+<thead>
+<tr>
+    <th>S.No</th>
+    <th>Item Name</th>
+    <th>Lot No</th>
+    <th>Weight</th>
+    <th>Type</th>
+    <th>Qty</th>
+    <th>Tot Wt</th>
+    <th>Rate</th>
+	<th>Remarks</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><input></td><td><input></td><td><input></td><td><input></td><td><input></td>
+<td><input></td><td><input></td><td><input></td><td><input></td><td>
+</tr>
+<tr>
+<td><input></td><td><input></td><td><input></td><td><input></td><td><input></td>
+<td><input></td><td><input></td><td><input></td><td><input></td>
+</tr>
+<tr>
+<td><input></td><td><input></td><td><input></td><td><input></td><td><input></td>
+<td><input></td><td><input></td><td><input></td><td><input></td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<!-- BOTTOM -->
+<div class="bottom-bar">
+<button class="save-btn">Save</button>
+</div>
+
+</div>
+
+</body>
+</html>

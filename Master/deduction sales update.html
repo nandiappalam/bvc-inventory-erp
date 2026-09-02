@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Sales Deduction Update</title>
+    <link rel="stylesheet" href="city-create.css">
+</head>
+<body>
+
+
+
+<!-- Overlay background -->
+<div class="overlay">
+
+    <!-- Form Box -->
+    <div class="form-box">
+        <div class="form-title">Sales Deduction Update</div>
+
+        <div class="form-body">
+            <div class="form-row">
+                <label>Deduction Name</label>
+                <input type="text" name="name" required>
+            </div>
+
+            <div class="form-row">
+                <label>Print Name</label>
+                <input type="text" name="print_name">
+            </div>
+
+            <div class="form-row">
+                <label>Adjust with Sales Amount</label>
+                <select name="adjust_with_sales">
+                    <option>No</option>
+                    <option>Yes</option>
+                </select>
+            </div>
+
+            <div class="form-row">
+                <label>Account Head</label>
+                <input type="text" name="account_head">
+            </div>
+
+            <div class="form-row">
+                <label>Deduction Type</label>
+                <select name="deduction_type">
+                    <option>Add</option>
+                    <option>Less</option>
+                </select>
+            </div>
+
+            <div class="form-row">
+                <label>Deduction Calc Type</label>
+                <select name="calc_type">
+                    <option>Amount</option>
+                    <option>Percentage</option>
+                </select>
+            </div>
+
+            <div class="form-row">
+                <label>Deduction Value</label>
+                <input type="number" name="deduction_value">
+            </div>
+
+            <div class="form-row">
+                <label>Status</label>
+                <select name="status">
+                    <option>Active</option>
+                    <option>Inactive</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="form-footer">
+            <button onclick="updateSalesDeduction(event)">Update</button>
+            <button onclick="cancelUpdate()">Cancel</button>
+        </div>
+    </div>
+
+</div>
+
+<!-- Bottom Status Bar -->
+<div class="status-bar">
+    Ready
+    <span class="right">27-01-2025</span>
+</div>
+
+<script>
+async function loadSalesDeduction() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const id = urlParams.get('id');
+
+    if (!id) {
+        alert('No sales deduction ID provided');
+        window.location.href = 'deduction sales Display.html';
+        return;
+    }
+
+    try {
+        const response = await fetch(`http://localhost:3000/api/masters/sales_deduction_master/${id}`);
+        const deduction = await response.json();
+
+        if (response.ok) {
+            document.querySelector('input[name="name"]').value = deduction.name;
+            document.querySelector('input[name="print_name"]').value = deduction.print_name || '';
+            document.querySelector('select[name="adjust_with_sales"]').value = deduction.adjust_with_sales;
+            document.querySelector('input[name="account_head"]').value = deduction.account_head || '';
+            document.querySelector('select[name="deduction_type"]').value = deduction.deduction_type;
+            document.querySelector('select[name="calc_type"]').value = deduction.calc_type;
+            document.querySelector('input[name="deduction_value"]').value = deduction.deduction_value || '';
+            document.querySelector('select[name="status"]').value = deduction.status;
+        } else {
+            alert('Error loading sales deduction data');
+            window.location.href = 'deduction sales Display.html';
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+        window.location.href = 'deduction sales Display.html';
+    }
+}
+
+async function updateSalesDeduction(event) {
+    event.preventDefault();
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const id = urlParams.get('id');
+
+    const formData = {
+        name: document.querySelector('input[name="name"]').value.trim(),
+        print_name: document.querySelector('input[name="print_name"]').value,
+        adjust_with_sales: document.querySelector('select[name="adjust_with_sales"]').value,
+        account_head: document.querySelector('input[name="account_head"]').value,
+        deduction_type: document.querySelector('select[name="deduction_type"]').value,
+        calc_type: document.querySelector('select[name="calc_type"]').value,
+        deduction_value: parseFloat(document.querySelector('input[name="deduction_value"]').value) || 0,
+        status: document.querySelector('select[name="status"]').value
+    };
+
+    if (!formData.name) {
+        alert('Deduction name is required');
+        return;
+    }
+
+    try {
+        const response = await fetch(`http://localhost:3000/api/masters/sales_deduction_master/${id}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(formData)
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            alert('Sales deduction updated successfully');
+            window.location.href = 'deduction sales Display.html';
+        } else {
+            alert('Error: ' + result.message);
+        }
+    } catch (error) {
+        alert('Error updating sales deduction: ' + error.message);
+    }
+}
+
+function cancelUpdate() {
+    window.location.href = 'deduction sales Display.html';
+}
+
+document.addEventListener('DOMContentLoaded', loadSalesDeduction);
+</script>
+
+</body>
+</html>
+
+

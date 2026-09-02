@@ -1,0 +1,38 @@
+body {
+  font-family: Arial;
+  background: #eef3fb;
+}
+
+h2 {
+  background: #4a6fc2;
+  color: white;
+  padding: 10px;
+}
+
+table {
+  width: 90%;
+  margin: 20px auto;
+  border-collapse: collapse;
+  background: white;
+}
+
+th, td {
+  border: 1px solid #b6c9ec;
+  padding: 8px;
+  text-align: center;
+}
+
+th {
+  background: #c7d8f6;
+}
+
+.back {
+  display: block;
+  width: 200px;
+  margin: auto;
+  text-align: center;
+  background: #4a6fc2;
+  color: white;
+  padding: 8px;
+  text-decoration: none;
+}

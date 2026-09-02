@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Supplier Display</title>
+    <link rel="stylesheet" href="supplier-display.css">
+    <script>
+        async function loadSuppliers() {
+            try {
+                const response = await fetch('http://localhost:3000/api/masters/supplier_master');
+                const suppliers = await response.json();
+
+                const tbody = document.querySelector('.grid-table tbody');
+                tbody.innerHTML = '';
+
+                suppliers.forEach((supplier, index) => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${index + 1}</td>
+                        <td>${supplier.name}</td>
+                        <td>${supplier.contact_person || ''}</td>
+                        <td>${supplier.area || ''}</td>
+                        <td>${supplier.mobile1 || ''}</td>
+                        <td>${supplier.opening_balance || 0}</td>
+                        <td>${supplier.gst_number ? 'GST' : 'Non-GST'}</td>
+                        <td>Active</td>
+                        <td>
+                            <button onclick="editSupplier(${supplier.id})">Edit</button>
+                            <button onclick="deleteSupplier(${supplier.id})">Delete</button>
+                        </td>
+                    `;
+                    tbody.appendChild(row);
+                });
+
+                document.querySelector('.footer-bar').innerHTML = `Rows: ${suppliers.length} <span class="footer-right">Options</span>`;
+            } catch (error) {
+                console.error('Error loading suppliers:', error);
+            }
+        }
+
+        async function deleteSupplier(id) {
+            if (!confirm('Are you sure you want to delete this supplier?')) return;
+
+            try {
+                const response = await fetch(`http://localhost:3000/api/masters/supplier_master/${id}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    alert('Supplier deleted successfully');
+                    loadSuppliers();
+                } else {
+                    const result = await response.json();
+                    alert('Error: ' + result.message);
+                }
+            } catch (error) {
+                alert('Error deleting supplier: ' + error.message);
+            }
+        }
+
+        function editSupplier(id) {
+            alert('Edit functionality would be implemented here for supplier ID: ' + id);
+        }
+
+        document.addEventListener('DOMContentLoaded', loadSuppliers);
+    </script>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">Supplier Display</div>
+
+    <div class="table-wrapper">
+        <table class="grid-table">
+            <thead>
+                <tr>
+                    <th>S.No</th>
+                    <th>Supplier</th>
+                    <th>Cont. Person</th>
+                    <th>Area</th>
+                    <th>Mobile</th>
+                    <th>Opening Balance</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Data will be loaded here -->
+            </tbody>
+        </table>
+    </div>
+
+    <div class="footer-bar">
+        Rows: 0
+        <span class="footer-right">Options</span>
+    </div>
+</div>
+
+</body>
+</html>

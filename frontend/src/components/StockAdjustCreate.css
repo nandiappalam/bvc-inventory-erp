@@ -1,0 +1,103 @@
+body{
+    margin:0;
+    font-family:Tahoma, Arial;
+   background:white;
+}
+
+/* ===== TOP SOFTWARE BAR ===== */
+.top-bar{
+    background:#1f4fb2;
+    color:#fff;
+    padding:6px 10px;
+    font-size:13px;
+    display:flex;
+    justify-content:space-between;
+}
+
+/* ===== MAIN WINDOW ===== */
+.window{
+    margin:8px;
+    border:1px solid #6c8f8a;
+     background:#dfe9ff;
+}
+
+/* ===== FORM TITLE ===== */
+.form-title{
+    background:#2f6fd6;
+    color:white;
+    padding:6px 10px;
+    font-weight:bold;
+    font-size:14px;
+}
+
+/* ===== ENTRY DETAILS ===== */
+.details{
+    padding:10px;
+}
+
+.row{
+    display:flex;
+    margin-bottom:6px;
+}
+
+.label{
+    width:110px;
+    font-size:15px;
+	font-weight:bold;
+}
+
+input{
+    height:22px;
+    border:1px solid #6c8f8a;
+    background:#fff;
+    width:250px;
+}
+
+.space{ width:30px; }
+
+/* ===== GRID ===== */
+.grid{
+    border-top:1px solid #6c8f8a;
+    border-bottom:1px solid #6c8f8a;
+     background:#dfe9ff;
+    height:700px;
+}
+
+table{
+    width:100%;
+    border:1px;
+    font-size:15px;
+}
+
+th{
+    background:#2f6fd6;
+    color:white;
+    border:1px solid #6c8f8a;
+    height:24px;
+}
+
+td{
+    border:1px solid #6c8f8a;
+    height:22px;
+}
+
+td input{
+    width:100%;
+    height:20px;
+    border:none;
+}
+
+/* ===== BOTTOM BAR ===== */
+.bottom-bar{
+    background:#2f6fd6;
+    padding:6px 10px;
+    text-align:right;
+}
+
+.save-btn{
+    padding:4px 20px;
+    background:green;
+    color:white;
+    border:1px solid #2f4f4f;
+    cursor:pointer;
+}
