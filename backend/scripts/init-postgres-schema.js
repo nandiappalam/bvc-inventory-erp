@@ -5,6 +5,7 @@
 const { Pool } = require('pg');
 const { MASTER_TABLES } = require('../database/masterSchema');
 const { COMPANY_TABLES, DEFAULT_LEDGER_CHART, DEFAULT_TAX_RATES } = require('../database/companySchema');
+const { orderTablesByDependencies } = require('../utils/schemaOrderer');
 const bcrypt = require('bcryptjs');
 
 async function initPostgresSchema() {
@@ -62,7 +63,7 @@ async function initPostgresSchema() {
     await client.query('CREATE SCHEMA IF NOT EXISTS company_1;');
     await client.query('SET search_path TO company_1, public;');
 
-    for (const tblSql of COMPANY_TABLES) {
+    for (const tblSql of orderTablesByDependencies(COMPANY_TABLES)) {
       let pgSql = tblSql
         .replace(/INTEGER PRIMARY KEY AUTOINCREMENT/gi, 'SERIAL PRIMARY KEY')
         .replace(/DATETIME DEFAULT CURRENT_TIMESTAMP/gi, 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP')

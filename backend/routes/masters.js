@@ -351,7 +351,12 @@ const getTableConfig = (type) => {
 // GENERIC API: Get Active records only, ordered by name ASC
 // Returns: [{ id: 1, name: "ABC" }]
 // ============================================================================
-router.get('/:type', async (req, res) => {
+router.get('/:type', async (req, res, next) => {
+  // Let the more specific legacy routes below handle /all/* and /record/*.
+  if (req.params.type === 'all' || req.params.type === 'record') {
+    return next();
+  }
+
   try {
     const type = validateMasterType(req.params.type)
     

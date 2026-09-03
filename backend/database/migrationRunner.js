@@ -1,6 +1,7 @@
 const db = require('../config/database');
 const { MASTER_TABLES } = require('./masterSchema');
 const { COMPANY_TABLES, DEFAULT_LEDGER_CHART, DEFAULT_TAX_RATES } = require('./companySchema');
+const { orderTablesByDependencies } = require('../utils/schemaOrderer');
 const bcrypt = require('bcryptjs');
 
 async function runAllPendingMigrations() {
@@ -67,7 +68,7 @@ async function runAllPendingMigrations() {
         const compDb = db.forCompany(comp.id);
         
         // Ensure all ERP tables exist in this company database
-        for (const tableSql of COMPANY_TABLES) {
+        for (const tableSql of orderTablesByDependencies(COMPANY_TABLES)) {
           await compDb.run(tableSql);
         }
 

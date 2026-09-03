@@ -5,6 +5,7 @@ const fs = require('fs');
 const { AsyncLocalStorage } = require('async_hooks');
 const { MASTER_TABLES, MASTER_TABLE_NAMES } = require('../database/masterSchema');
 const { COMPANY_TABLES, DEFAULT_LEDGER_CHART, DEFAULT_TAX_RATES } = require('../database/companySchema');
+const { orderTablesByDependencies } = require('../utils/schemaOrderer');
 
 // Context storage for multi-tenant requests
 const asyncLocalStorage = new AsyncLocalStorage();
@@ -662,7 +663,7 @@ async function createCompanyDatabase(companyId, companyCode) {
       await client.query(`SET search_path TO ${schemaName}, public`);
 
       // 1. Create all ERP tables
-      for (const tableSql of COMPANY_TABLES) {
+      for (const tableSql of orderTablesByDependencies(COMPANY_TABLES)) {
         const pgSql = translateSqlForPostgres(tableSql, cId);
         await client.query(pgSql);
       }
