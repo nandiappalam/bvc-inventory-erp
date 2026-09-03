@@ -30,6 +30,8 @@
     "test:all": "npx playwright test",
     "test:report": "npx playwright show-report playwright-report",
     "test:isolation": "node backend/tests/company_isolation.test.js",
+    "predeploy": "node scripts/predeploy.js",
+    "test:postgres": "node backend/scripts/api-smoke-test.js",
     "db:init-pg": "node backend/scripts/init-postgres-schema.js",
     "db:migrate-pg": "node backend/scripts/migrate-sqlite-to-postgres.js",
     "db:validate-pg": "node backend/scripts/validate-migration.js",

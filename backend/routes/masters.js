@@ -633,19 +633,16 @@ router.put('/:table/:id', async (req, res) => {
       return res.status(400).json({ success: false, message: "No fields to update" });
     }
 
-    values.push(req.params.id) // Add ID for WHERE clause
-
     const setClause = keys.map(field => `${field} = ?`).join(', ')
-    const query = `UPDATE ${tableName} SET ${setClause} WHERE id = ?`
-
-    let result = await db.run(query, values)
-
-    if (result.changes === 0 && tableConfig?.uniqueField) {
-      const queryFallback = `UPDATE ${tableName} SET ${setClause} WHERE ${tableConfig.uniqueField} = ?`
-      const resultFallback = await db.run(queryFallback, values)
-      if (resultFallback.changes > 0) {
-        result = resultFallback
-      }
+    const reference = req.params.id
+    const isNumericId = /^\d+$/.test(String(reference))
+    let result
+    if (isNumericId) {
+      result = await db.run(`UPDATE ${tableName} SET ${setClause} WHERE id = ?`, [...values, Number(reference)])
+    } else if (tableConfig?.uniqueField && tableConfig.uniqueField !== 'id') {
+      result = await db.run(`UPDATE ${tableName} SET ${setClause} WHERE ${tableConfig.uniqueField} = ?`, [...values, reference])
+    } else {
+      return res.status(400).json({ success: false, message: 'A numeric record ID is required' })
     }
 
     if (result.changes > 0) {
@@ -655,7 +652,8 @@ router.put('/:table/:id', async (req, res) => {
     }
   } catch (error) {
     console.error('Error updating master record:', error)
-    res.status(500).json({ message: 'Error updating record', error: error.message })
+    const duplicate = error.code === '23505' || /unique constraint|duplicate key/i.test(error.message)
+    res.status(duplicate ? 409 : 500).json({ success: false, message: duplicate ? 'A record with this unique value already exists' : 'Error updating record', error: error.message })
   }
 })
 

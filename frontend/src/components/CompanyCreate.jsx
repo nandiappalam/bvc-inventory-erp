@@ -66,7 +66,7 @@ const CompanyCreate = () => {
       }
     } catch (error) {
       console.error('Error fetching company:', error);
-      setError('Error connecting to server');
+      setError(error?.message || error?.response?.data?.message || 'Error saving company');
     } finally {
       setLoading(false);
     }
@@ -117,9 +117,8 @@ const CompanyCreate = () => {
         msg = 'Company created successfully!';
       }
       
-      // Verify API response indicates success before showing success message
-      if (!response) {
-        throw new Error('No response from server');
+      if (!response || response.success === false) {
+        throw new Error(response?.message || 'Server rejected the company request');
       }
       
       setSuccess(msg);

@@ -43,6 +43,13 @@ router.post('/', async (req, res) => {
     }
 
     const trimmedName = name.trim();
+    const duplicate = await db.master.query(
+      'SELECT id FROM companies WHERE LOWER(name) = LOWER(?) OR (gst_number IS NOT NULL AND gst_number = ?)',
+      [trimmedName, gst_number || null]
+    );
+    if (duplicate.rows.length > 0) {
+      return res.status(409).json({ success: false, message: 'A company with this name or GST number already exists' });
+    }
     const code = `COMP_${Date.now().toString(36).toUpperCase()}`;
     const dbName = `company_${Date.now()}`;
 
@@ -79,7 +86,8 @@ router.post('/', async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Error creating company:', error);
-    res.status(500).json({ message: 'Error creating company', error: error.message });
+    const duplicate = error.code === '23505' || /unique constraint|duplicate key/i.test(error.message);
+    res.status(duplicate ? 409 : 500).json({ success: false, message: duplicate ? 'Company name, code, or GST number already exists' : 'Error creating company', error: error.message });
   }
 });
 

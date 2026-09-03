@@ -9,6 +9,26 @@ const descriptionsAggregate = db.isPostgres
   ? "STRING_AGG(NULLIF(description, '')::text, ', ')"
   : "GROUP_CONCAT(NULLIF(description, ''), ', ')";
 
+const nullableInteger = (value) => {
+  if (value === null || value === undefined || String(value).trim() === '') return null;
+  const numberValue = Number(value);
+  return Number.isInteger(numberValue) ? numberValue : null;
+};
+
+const normalizeRequestItem = (item) => ({
+  ...item,
+  item_id: nullableInteger(item.item_id),
+  requested_qty: Number.isFinite(Number(item.requested_qty)) ? Number(item.requested_qty) : 0,
+  approved_qty: Number.isFinite(Number(item.approved_qty)) ? Number(item.approved_qty) : 0,
+  current_stock: Number.isFinite(Number(item.current_stock)) ? Number(item.current_stock) : 0,
+  current_stock_rm: Number.isFinite(Number(item.current_stock_rm ?? item.current_stock)) ? Number(item.current_stock_rm ?? item.current_stock) : 0,
+  current_stock_fg: Number.isFinite(Number(item.current_stock_fg)) ? Number(item.current_stock_fg) : 0,
+  minimum_stock: Number.isFinite(Number(item.minimum_stock)) ? Number(item.minimum_stock) : 0,
+  suggested_qty: Number.isFinite(Number(item.suggested_qty)) ? Number(item.suggested_qty) : 0,
+  estimated_rate: Number.isFinite(Number(item.estimated_rate)) ? Number(item.estimated_rate) : 0,
+  estimated_amount: Number.isFinite(Number(item.estimated_amount)) ? Number(item.estimated_amount) : 0
+});
+
 // Initialize Purchase Request tables
 const initTables = async () => {
   try {
@@ -523,6 +543,16 @@ router.get('/', async (req, res) => {
     query += ` ORDER BY pr.id DESC`;
 
     const result = await db.query(query, params);
+    for (const request of (result.rows || [])) {
+      const itemsResult = await db.query(`
+        SELECT pri.*, COALESCE(im.item_name, pri.item_name) AS resolved_item_name
+        FROM purchase_request_items pri
+        LEFT JOIN item_master im ON pri.item_id = im.id
+        WHERE pri.purchase_request_id = ?
+        ORDER BY pri.id ASC
+      `, [request.id]);
+      request.items = itemsResult.rows || [];
+    }
     res.json(result.rows || []);
   } catch (err) {
     console.error('Error fetching purchase requests:', err);
@@ -600,6 +630,7 @@ router.get('/:id', async (req, res) => {
 
 // POST Create Purchase Request
 router.post('/', async (req, res) => {
+  let connection;
   try {
     const {
       pr_no,
@@ -631,7 +662,10 @@ router.post('/', async (req, res) => {
     }
     const reqDate = request_date || new Date().toISOString().split('T')[0];
 
-    const prResult = await db.run(`
+    connection = await db.getConnection();
+    await connection.beginTransaction();
+
+    const prResult = await connection.run(`
       INSERT INTO purchase_requests (
         pr_no, request_date, required_date, department, department_id,
         requested_by, supplier_id, supplier_name, godown_id, godown_name,
@@ -647,7 +681,18 @@ router.post('/', async (req, res) => {
 
     // Insert Items
     if (Array.isArray(items) && items.length > 0) {
-      for (const item of items) {
+      for (const rawItem of items) {
+        const item = normalizeRequestItem(rawItem);
+        if (item.item_id === null && item.item_code) {
+          const itemLookup = await connection.query(
+            'SELECT id, item_name FROM item_master WHERE item_code = ? LIMIT 1',
+            [item.item_code]
+          );
+          if (itemLookup.rows[0]) {
+            item.item_id = itemLookup.rows[0].id;
+            item.item_name = item.item_name || itemLookup.rows[0].item_name;
+          }
+        }
         if (!item.item_name && !item.item_id) continue;
         let finalItemName = item.item_name || '';
         
@@ -678,7 +723,7 @@ router.post('/', async (req, res) => {
         const curStockRm = parseFloat(item.current_stock_rm !== undefined ? item.current_stock_rm : item.current_stock) || 0;
         const curStockFg = parseFloat(item.current_stock_fg) || 0;
 
-        await db.run(`
+        await connection.run(`
           INSERT INTO purchase_request_items (
             purchase_request_id, item_id, item_code, item_name, weight, description,
             requested_qty, approved_qty, unit, current_stock, current_stock_rm, current_stock_fg, minimum_stock,
@@ -708,12 +753,13 @@ router.post('/', async (req, res) => {
 
     // Insert Approval History Entry
     const initialAction = status === 'Submitted' ? 'Submitted' : 'Created';
-    await db.run(`
+    await connection.run(`
       INSERT INTO purchase_request_approval_history (
         purchase_request_id, action, performed_by, remarks
       ) VALUES (?, ?, ?, ?)
     `, [prId, initialAction, requested_by || 'Admin', remarks || `PR ${initialAction}`]);
 
+    await connection.commit();
     res.status(201).json({
       success: true,
       id: prId,
@@ -721,13 +767,19 @@ router.post('/', async (req, res) => {
       message: `Purchase Request ${prNumber} created successfully as ${status}`
     });
   } catch (err) {
+    if (connection) {
+      try { await connection.rollback(); } catch (rollbackError) {}
+    }
     console.error('Error creating purchase request:', err);
     res.status(500).json({ error: err.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 // PUT Update Purchase Request (Draft or Returned)
 router.put('/:id', async (req, res) => {
+  let connection;
   try {
     const { id } = req.params;
     const {
@@ -759,7 +811,10 @@ router.put('/:id', async (req, res) => {
 
     const newStatus = status || currentStatus;
 
-    await db.run(`
+    connection = await db.getConnection();
+    await connection.beginTransaction();
+
+    await connection.run(`
       UPDATE purchase_requests SET
         request_date = COALESCE(?, request_date),
         required_date = COALESCE(?, required_date),
@@ -782,10 +837,21 @@ router.put('/:id', async (req, res) => {
     ]);
 
     // Replace items
-    await db.run(`DELETE FROM purchase_request_items WHERE purchase_request_id = ?`, [id]);
+    await connection.run(`DELETE FROM purchase_request_items WHERE purchase_request_id = ?`, [id]);
 
     if (Array.isArray(items) && items.length > 0) {
-      for (const item of items) {
+      for (const rawItem of items) {
+        const item = normalizeRequestItem(rawItem);
+        if (item.item_id === null && item.item_code) {
+          const itemLookup = await connection.query(
+            'SELECT id, item_name FROM item_master WHERE item_code = ? LIMIT 1',
+            [item.item_code]
+          );
+          if (itemLookup.rows[0]) {
+            item.item_id = itemLookup.rows[0].id;
+            item.item_name = item.item_name || itemLookup.rows[0].item_name;
+          }
+        }
         if (!item.item_name && !item.item_id) continue;
         let finalItemName = item.item_name || '';
 
@@ -815,7 +881,7 @@ router.put('/:id', async (req, res) => {
         const curStockRm = parseFloat(item.current_stock_rm !== undefined ? item.current_stock_rm : item.current_stock) || 0;
         const curStockFg = parseFloat(item.current_stock_fg) || 0;
 
-        await db.run(`
+        await connection.run(`
           INSERT INTO purchase_request_items (
             purchase_request_id, item_id, item_code, item_name, weight, description,
             requested_qty, approved_qty, unit, current_stock, current_stock_rm, current_stock_fg, minimum_stock,
@@ -845,16 +911,22 @@ router.put('/:id', async (req, res) => {
 
     // Add history
     const actionName = newStatus === 'Submitted' ? 'Submitted' : 'Updated';
-    await db.run(`
+    await connection.run(`
       INSERT INTO purchase_request_approval_history (
         purchase_request_id, action, performed_by, remarks
       ) VALUES (?, ?, ?, ?)
     `, [id, actionName, requested_by || 'Admin', remarks || `PR ${actionName}`]);
 
+    await connection.commit();
     res.json({ success: true, message: `Purchase Request updated successfully (${newStatus})` });
   } catch (err) {
+    if (connection) {
+      try { await connection.rollback(); } catch (rollbackError) {}
+    }
     console.error('Error updating purchase request:', err);
     res.status(500).json({ error: err.message });
+  } finally {
+    if (connection) connection.release();
   }
 });
 

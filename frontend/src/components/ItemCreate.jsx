@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import api from '../services/api.js';
 
 import { MASTER_CONFIG } from '../utils/masterConfig.js';
@@ -18,12 +19,25 @@ const ItemCreate = () => {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState('success');
+  const [searchParams] = useSearchParams();
+  const editReference = searchParams.get('edit');
 
   const handleChange = (name, value) => {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
   useEffect(() => {
+    if (editReference) {
+      api(`/masters/record/item_master/${encodeURIComponent(editReference)}`)
+        .then((result) => setFormData(result?.data || result || {}))
+        .catch((err) => {
+          console.error('Item load failed', err);
+          setMessage('Unable to load item for editing');
+          setMessageType('error');
+        });
+      return;
+    }
+
     // Generate next item code
     api('/masters/items').then((res) => {
       const count = Array.isArray(res?.data) ? res.data.length : 0;
@@ -41,7 +55,7 @@ const ItemCreate = () => {
       });
     });
     setFormData(initialData);
-  }, []);
+  }, [editReference]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -54,7 +68,10 @@ const ItemCreate = () => {
     setLoading(true);
     setMessage('');
     try {
-      const result = await api('/masters/item_master', { method: 'POST', body: formData });
+      const endpoint = editReference
+        ? `/masters/item_master/${encodeURIComponent(editReference)}`
+        : '/masters/item_master';
+      const result = await api(endpoint, { method: editReference ? 'PUT' : 'POST', body: formData });
 
       if (!result) {
         console.error("❌ API failed (null response)");
@@ -63,7 +80,7 @@ const ItemCreate = () => {
         return;
       }
       if (result.success) {
-        setMessage('Item saved successfully!');
+        setMessage(editReference ? 'Item updated successfully!' : 'Item saved successfully!');
         setMessageType('success');
         // Reset form
         const resetData = {};
