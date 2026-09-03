@@ -437,20 +437,28 @@ router.post(['/submit', '/purchase-lab-testing'], asyncHandler(async (req, res) 
       );
     }
 
-    let savedQcId = qcId;
+    let savedQcId = qcId ? parseInt(qcId, 10) : null;
 
-    if (qcId) {
-      // Update existing qc_inspections record
-      await connection.run(
-        `UPDATE qc_inspections 
-         SET purchase_id = ?, rm_lot_no = ?, inspection_date = ?, inspector = ?, overall_result = ?, remarks = ?, updated_at = CURRENT_TIMESTAMP
-         WHERE id = ?`,
-        [resolvedPurchaseId, lotNo, new Date().toISOString().split('T')[0], analyst, overallResult, remarks, qcId]
-      );
+    if (savedQcId && !isNaN(savedQcId)) {
+      const existingQc = await connection.query('SELECT id FROM qc_inspections WHERE id = ? LIMIT 1', [savedQcId]);
+      if (existingQc.rows && existingQc.rows.length > 0) {
+        // Update existing qc_inspections record
+        await connection.run(
+          `UPDATE qc_inspections 
+           SET purchase_id = ?, rm_lot_no = ?, inspection_date = ?, inspector = ?, overall_result = ?, remarks = ?, updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?`,
+          [resolvedPurchaseId, lotNo, new Date().toISOString().split('T')[0], analyst, overallResult, remarks, savedQcId]
+        );
 
-      // Clear existing params to rewrite them
-      await connection.run(`DELETE FROM qc_inspection_params WHERE qc_id = ?`, [qcId]);
-    } else {
+        // Clear existing params to rewrite them
+        await connection.run(`DELETE FROM qc_inspection_params WHERE qc_id = ?`, [savedQcId]);
+      } else {
+        // Did not exist with this id, reset to create new
+        savedQcId = null;
+      }
+    }
+
+    if (!savedQcId) {
       // Insert new qc_inspections record
       const qc_no = `QC-${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 8)}-${Math.floor(1000 + Math.random() * 9000)}`;
       const result = await connection.run(
@@ -458,7 +466,17 @@ router.post(['/submit', '/purchase-lab-testing'], asyncHandler(async (req, res) 
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [qc_no, resolvedPurchaseId, lotNo, new Date().toISOString().split('T')[0], analyst || 'QC Engineer', overallResult, remarks]
       );
-      savedQcId = result.lastID;
+      savedQcId = result.lastID || result.lastInsertRowid || result.rows?.[0]?.id;
+      if (!savedQcId) {
+        const qLookup = await connection.query('SELECT id FROM qc_inspections WHERE qc_no = ? ORDER BY id DESC LIMIT 1', [qc_no]);
+        if (qLookup.rows && qLookup.rows.length > 0) {
+          savedQcId = qLookup.rows[0].id;
+        }
+      }
+    }
+
+    if (!savedQcId) {
+      throw new Error('Failed to create or resolve a valid QC inspection record');
     }
 
     // 2. Insert params

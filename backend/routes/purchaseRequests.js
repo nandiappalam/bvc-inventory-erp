@@ -672,12 +672,22 @@ router.post('/', async (req, res) => {
         priority, status, remarks, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `, [
-      prNumber, reqDate, required_date, department, department_id,
-      requested_by || 'Admin', supplier_id, supplier_name, godown_id, godown_name,
+      prNumber, reqDate, required_date, department, nullableInteger(department_id),
+      requested_by || 'Admin', nullableInteger(supplier_id), supplier_name, nullableInteger(godown_id), godown_name,
       priority, status, remarks
     ]);
 
-    const prId = prResult.lastID || prResult.lastInsertRowid;
+    let prId = prResult.lastID || prResult.lastInsertRowid || prResult.rows?.[0]?.id;
+    if (!prId) {
+      const prLookup = await connection.query('SELECT id FROM purchase_requests WHERE pr_no = ? ORDER BY id DESC LIMIT 1', [prNumber]);
+      if (prLookup.rows && prLookup.rows.length > 0) {
+        prId = prLookup.rows[0].id;
+      }
+    }
+
+    if (!prId) {
+      throw new Error(`Failed to resolve created purchase request ID for ${prNumber}`);
+    }
 
     // Insert Items
     if (Array.isArray(items) && items.length > 0) {
@@ -701,11 +711,11 @@ router.post('/', async (req, res) => {
           const lookupId = item.item_id || finalItemName;
           if (lookupId) {
             try {
-              const imCheck = await db.query(`SELECT item_name, name FROM item_master WHERE id = ? OR LOWER(item_name) = LOWER(?) LIMIT 1`, [lookupId, lookupId]);
+              const imCheck = await connection.query(`SELECT item_name, name FROM item_master WHERE id = ? OR LOWER(item_name) = LOWER(?) LIMIT 1`, [lookupId, lookupId]);
               if (imCheck.rows && imCheck.rows.length > 0) {
                 finalItemName = imCheck.rows[0].item_name || imCheck.rows[0].name || finalItemName;
               } else {
-                const itCheck = await db.query(`SELECT item_name, name FROM items WHERE id = ? LIMIT 1`, [lookupId]);
+                const itCheck = await connection.query(`SELECT item_name, name FROM items WHERE id = ? LIMIT 1`, [lookupId]);
                 if (itCheck.rows && itCheck.rows.length > 0) {
                   finalItemName = itCheck.rows[0].item_name || itCheck.rows[0].name || finalItemName;
                 }
@@ -831,8 +841,8 @@ router.put('/:id', async (req, res) => {
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `, [
-      request_date, required_date, department, department_id,
-      requested_by, supplier_id, supplier_name, godown_id, godown_name,
+      request_date, required_date, department, nullableInteger(department_id),
+      requested_by, nullableInteger(supplier_id), supplier_name, nullableInteger(godown_id), godown_name,
       priority, newStatus, remarks, id
     ]);
 

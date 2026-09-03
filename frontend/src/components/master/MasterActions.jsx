@@ -14,6 +14,8 @@ import React from 'react';
 export const MasterActions = ({
   onSave = () => {},
   onCancel = () => {},
+  onPrint = null,
+  showPrint = false,
   showSave = true,
   saving = false,
   mode = 'create',
@@ -48,6 +50,12 @@ export const MasterActions = ({
     color: 'white',
   };
 
+  const printButtonStyle = {
+    ...buttonStyle,
+    backgroundColor: '#059669',
+    color: 'white',
+  };
+
   return (
     <div style={buttonContainerStyle}>
       <button
@@ -58,6 +66,16 @@ export const MasterActions = ({
       >
         Cancel
       </button>
+      {showPrint && onPrint && (
+        <button
+          type="button"
+          onClick={onPrint}
+          style={printButtonStyle}
+          className="action-btn print-preview-btn"
+        >
+          🖨 Print Preview
+        </button>
+      )}
       {showSave && (
         <button
           type="button"

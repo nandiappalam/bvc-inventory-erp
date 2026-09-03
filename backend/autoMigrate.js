@@ -879,6 +879,7 @@ module.exports = async function autoMigrate() {
   await safeAddColumn('stock_lots', 'rejection_reason', "TEXT");
   await safeAddColumn('stock_lots', 'unloading_status', "TEXT DEFAULT 'PENDING_DECISION'");
   await safeAddColumn('stock_lots', 'godown_id', "INTEGER");
+  await safeAddColumn('stock_lots', 'godown_name', "TEXT");
 
   try {
     await db.run(`
@@ -1036,6 +1037,7 @@ module.exports = async function autoMigrate() {
   await safeAddColumn('vehicle_movements', 'lot_no', 'TEXT');
   await safeAddColumn('vehicle_movements', 'analyzing_team', 'TEXT');
   await safeAddColumn('vehicle_movements', 'analyzing_area', 'TEXT');
+  await safeAddColumn('vehicle_movements', 'transporter_name', 'TEXT');
 
   // Ensure sales compatibility with deductions and ERP fields
   await safeAddColumn('sales', 'deductions_json', 'TEXT');

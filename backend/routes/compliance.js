@@ -127,6 +127,8 @@ async function initComplianceTables() {
 
     // Clean up sample and seed documents/records if any exist
     await cleanupSeedComplianceData();
+    // Seed default controlled document manuals (D1 to D13) if table is empty
+    await seedDefaultComplianceData();
   } catch (err) {
     console.error('Error initializing compliance tables:', err);
   }
@@ -134,30 +136,29 @@ async function initComplianceTables() {
 
 async function cleanupSeedComplianceData() {
   try {
-    await db.run(`
-      DELETE FROM compliance_documents 
-      WHERE doc_number IN ('WI-GRD-001', 'HACCP-BVC-001', 'MTR-URD-2026', 'TRN-2026-004', 'SOP-SAN-003', 'RCCA-2026-002', 'MED-2026-012', 'FOSTAC-FSSAI-88912', 'REC-MOCK-2026-01', 'HALAL-DEC-2026', 'PFC-MFG-001')
-         OR prepared_by IN ('Quality Supervisor', 'HACCP Lead', 'QA Executive', 'HR & QA Trainer', 'Plant Sanitation Lead', 'Lead Investigator', 'Authorized Medical Officer', 'FSSAI Lead Auditor', 'Recall Committee Head', 'Quality Manager', 'Process Engineer')
-    `);
+    // Purge any example, mock or old Tauri production records so user only sees real operational records
+    await db.run(`DELETE FROM compliance_production_records`);
 
-    await db.run(`
-      DELETE FROM compliance_production_records 
-      WHERE record_no IN ('P1-2026-001', 'P2-2026-001', 'P2-2026-002', 'P4-2026-018')
-         OR supplier_name IN ('Sri Amman Traders', 'Royal Foods Exporters', 'PolyPack Industries')
-         OR lot_no IN ('LOT0003', 'LOT0016', 'LOT0007', 'LOT0014')
-    `);
-
+    // Purge mock cleaning records
     await db.run(`
       DELETE FROM compliance_cleaning_records 
       WHERE record_no IN ('C1-2026-0816', 'C2-2026-0801', 'C3-2026-0816', 'C4-2026-0815', 'C5-2026-0816', 'C6-2026-0816', 'C7-2026-0805', 'C8-2026-0814', 'C9-2026-0816', 'C10-2026-0801')
+         OR prepared_by = 'Ramesh QA'
+         OR inspector_name LIKE '%QA%'
     `);
+    console.log('✓ Purged example/mock production and cleaning records.');
   } catch (err) {
     console.error('Error cleaning up seed compliance data:', err.message);
   }
 }
 
 async function seedDefaultComplianceData() {
-  console.log('Seeding initial quality & compliance documents & records...');
+  // Only seed default controlled documents if the table is completely empty
+  const docCount = await db.query('SELECT COUNT(*) as count FROM compliance_documents');
+  if (docCount.rows && Number(docCount.rows[0].count) > 0) {
+    return;
+  }
+  console.log('Seeding default controlled compliance manuals & SOPs (D1 to D13)...');
   
   // D1: Work Instruction
   await db.run(`
@@ -395,308 +396,38 @@ async function seedDefaultComplianceData() {
     'Official engineering process flow diagram with embedded CCP/OPRP control gates.'
   ]);
 
-  // Seed sample Production Records (P1 to P8)
-  const pCount = await db.query('SELECT COUNT(*) as count FROM compliance_production_records');
-  if (pCount.rows && pCount.rows[0].count === 0) {
-    await db.run(`
-      INSERT INTO compliance_production_records 
-      (record_code, record_type, record_no, record_date, frequency, item_name, lot_no, supplier_name, status, checked_by, findings_json, remarks)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
-      'P1', 'INCOMING_QUALITY', 'P1-2026-001', '2026-08-16', 'RM Receiving', 'Urad Gotta', 'LOT0003', 'Sri Amman Traders', 'COMPLETED', 'Kavitha M',
-      JSON.stringify({ moisture: '10.8%', foreign_matter: '0.4%', broken_grain: '1.2%', weevils: '0%', decision: 'PASSED' }),
-      'Sample conforms to MTR-URD-2026 specification.'
-    ]);
+  // D12: Supplier Quality Assurance
+  await db.run(`
+    INSERT INTO compliance_documents 
+    (doc_code, doc_type, doc_number, title, department, version, status, effective_date, review_date, prepared_by, approved_by, details_json, remarks)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `, [
+    'D12', 'SUPPLIER_QA', 'SQA-AVL-2026', 'Approved Vendor List (AVL) & Supplier Quality Assurance Manual', 'Purchase & Quality', '1.0', 'APPROVED',
+    '2026-01-01', '2026-12-31', 'QA Lead', 'Managing Director',
+    JSON.stringify({
+      objective: 'Vendor qualification criteria, annual audits, incoming CoA verification, pesticide and heavy metal compliance standards.',
+      standards: 'FSSAI Schedule 4, ISO 22000 Approved Supplier Program'
+    }),
+    'Master controlled Approved Vendor List & Supplier Quality Manual.'
+  ]);
 
-    await db.run(`
-      INSERT INTO compliance_production_records 
-      (record_code, record_type, record_no, record_date, frequency, item_name, lot_no, vehicle_no, customer_name, status, checked_by, findings_json, remarks)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
-      'P2', 'FUMIGATION', 'P2-2026-001', '2026-08-15', 'Loading', 'Rice Flour (BRF)', 'LOT0016', 'TN-58-AX-9912', 'Royal Foods Exporters', 'COMPLETED', 'Sundar R',
-      JSON.stringify({ chemical_used: 'Aluminium Phosphide (ALP)', dosage: '3g/cu.m', exposure_hrs: '72 hrs', degassed_at: '2026-08-15 08:00', gas_clearance: '0 ppm (Safe)' }),
-      'Fumigation certificate issued for export container loading.'
-    ]);
+  // D13: Water Testing & Potability
+  await db.run(`
+    INSERT INTO compliance_documents 
+    (doc_code, doc_type, doc_number, title, department, version, status, effective_date, review_date, prepared_by, approved_by, details_json, remarks)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `, [
+    'D13', 'WATER_TEST', 'WTR-POT-2026', 'Factory Water Potability, Microbial & Chemical Testing Protocol (IS 10500)', 'Sanitation & QA', '1.0', 'APPROVED',
+    '2026-01-01', '2026-12-31', 'Lab Analyst', 'Quality Head',
+    JSON.stringify({
+      standard: 'IS 10500:2012 Drinking Water Specification',
+      frequency: 'Monthly external NABL accredited testing, daily in-house chlorine & TDS check.',
+      parameters: 'E.coli: Absent, Coliforms: Absent, Total Hardness < 300 mg/L, TDS < 500 mg/L'
+    }),
+    'Controlled water potability and treatment testing protocol.'
+  ]);
 
-    await db.run(`
-      INSERT INTO compliance_production_records 
-      (record_code, record_type, record_no, record_date, frequency, item_name, lot_no, stage_name, status, checked_by, findings_json, remarks)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
-      'P4', 'CCP_MONITORING', 'P4-2026-018', '2026-08-16', 'Daily / 2-Hourly', 'Urad Flour', 'LOT0007', 'Milling & Bagging Line', 'COMPLETED', 'Murugan K',
-      JSON.stringify({ magnet_gauss: '10,250 Gauss (Pass)', metal_detector_fe: 'Pass (1.5mm test piece)', metal_detector_ss: 'Pass (2.5mm test piece)', sieve_condition: 'Intact' }),
-      'Hourly CCP checkpoints logged with zero deviation.'
-    ]);
-  }
-
-  // Seed sample Cleaning & Control Records (C1 to C10)
-  const cCount = await db.query('SELECT COUNT(*) as count FROM compliance_cleaning_records');
-  if (cCount.rows && cCount.rows[0].count === 0) {
-    // C1: Production Area Cleaning (Daily)
-    await db.run(`
-      INSERT INTO compliance_cleaning_records
-      (record_code, record_type, record_no, record_date, area_location, frequency, company_name, financial_year, inspector_name, supervisor_name, prepared_by, verified_by, overall_status, status, checklist_json, corrective_action, remarks)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
-      'C1', 'AREA_CLEANING', 'C1-2026-0816', '2026-08-16', 'Main Milling & Packing Hall', 'Daily', 'BVC Exports Pvt. Ltd.', '2026-2027',
-      'Ramesh QA', 'Plant Supervisor', 'Ramesh QA', 'Plant Manager', 'PASS', 'COMPLETED',
-      JSON.stringify({
-        shift: 'Morning (Shift 1)',
-        cleaning_points: [
-          { point: 'Floor', status: 'OK', remarks: 'Swept, scrubbed and dried' },
-          { point: 'Walls', status: 'OK', remarks: 'Free of flour dust & cobwebs' },
-          { point: 'Working Area', status: 'OK', remarks: 'Disinfected with food-grade sanitizer' },
-          { point: 'Equipment Area', status: 'OK', remarks: 'Destoner & Hammer mill hoppers clear' },
-          { point: 'Drainage Area', status: 'OK', remarks: 'Drain covers in place, zero stagnation' },
-          { point: 'Waste Area', status: 'OK', remarks: 'Segregated and moved to outer yard' },
-          { point: 'Storage Area', status: 'OK', remarks: 'Aisle demarcations clear, 18-inch wall gap maintained' }
-        ]
-      }),
-      'None required. All points verified compliant.',
-      'Daily pre-operational and post-shift sanitation signed off.'
-    ]);
-
-    // C2: Wooden Pallet Control (15 Days Once)
-    await db.run(`
-      INSERT INTO compliance_cleaning_records
-      (record_code, record_type, record_no, record_date, area_location, frequency, company_name, financial_year, inspector_name, supervisor_name, prepared_by, verified_by, overall_status, status, checklist_json, corrective_action, remarks)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
-      'C2', 'PALLET_CONTROL', 'C2-2026-0801', '2026-08-01', 'RM & Finished Goods Godown', '15 Days Once', 'BVC Exports Pvt. Ltd.', '2026-2027',
-      'Karthik S (Warehouse Lead)', 'QA Manager', 'Karthik S', 'QA Manager', 'PASS', 'COMPLETED',
-      JSON.stringify({
-        pallet_id: 'PLT-BAY-04',
-        location: 'Finished Goods Bay B',
-        quantity: 85,
-        condition: 'Good / Heat-Treated (ISPM-15)',
-        parameters: [
-          { parameter: 'Pallet condition', result: 'OK', remarks: 'Structurally sound' },
-          { parameter: 'Broken pallet', result: 'No', remarks: '0 broken pallets found' },
-          { parameter: 'Splintering', result: 'No', remarks: 'Planed smooth' },
-          { parameter: 'Moisture', result: 'No', remarks: 'Moisture meter reading 11.2%' },
-          { parameter: 'Contamination', result: 'No', remarks: 'No chemical or dirt stains' },
-          { parameter: 'Pest evidence', result: 'No', remarks: 'Zero wood borer or termite sign' },
-          { parameter: 'Cleanliness', result: 'OK', remarks: 'Clean and dry' }
-        ],
-        action: 'Accepted'
-      }),
-      '2 minor chipped pallets segregated for repair.',
-      'Bi-weekly wooden pallet structural and hygiene inspection passed.'
-    ]);
-
-    // C3: Glass & Plastic Control (15 Days Once)
-    await db.run(`
-      INSERT INTO compliance_cleaning_records
-      (record_code, record_type, record_no, record_date, area_location, frequency, company_name, financial_year, inspector_name, supervisor_name, prepared_by, verified_by, overall_status, status, checklist_json, corrective_action, remarks)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
-      'C3', 'GLASS_PLASTIC', 'C3-2026-0801', '2026-08-01', 'Milling Hall, Sifter Bay & Packaging Line', '15 Days Once', 'BVC Exports Pvt. Ltd.', '2026-2027',
-      'Venkatesh M', 'QA Lead', 'Venkatesh M', 'QA Lead', 'PASS', 'COMPLETED',
-      JSON.stringify({
-        objects_checked: [
-          { s_no: 1, location: 'Milling Line 1', object_item: 'Window Glazing', material_type: 'Polycarbonate Shielded', condition: 'OK', damage_found: 'No', action: '-', remarks: 'Film intact' },
-          { s_no: 2, location: 'Sifter Bay', object_item: 'Sifter View Glass', material_type: 'Toughened Glass', condition: 'OK', damage_found: 'No', action: '-', remarks: 'No cracks or chips' },
-          { s_no: 3, location: 'Packaging Line', object_item: 'Overhead Tube Light Diffusers', material_type: 'Hard Acrylic', condition: 'OK', damage_found: 'No', action: '-', remarks: 'Shatter-proof sleeves in place' },
-          { s_no: 4, location: 'Air Compressor Room', object_item: 'Pressure Gauge Cover', material_type: 'Rigid Acrylic', condition: 'OK', damage_found: 'No', action: '-', remarks: 'Zero hairline cracks' },
-          { s_no: 5, location: 'Quality Lab', object_item: 'Moisture Balance Cover', material_type: 'Heat-resistant Glass', condition: 'OK', damage_found: 'No', action: '-', remarks: 'Clean and calibrated' }
-        ],
-        overall_result: 'ACCEPTED'
-      }),
-      'Zero glass or brittle plastic breakage observed in food zones.',
-      'Fortnightly Glass & Brittle Plastic Register updated.'
-    ]);
-
-    // C4: Pest Control Monitoring (Daily)
-    await db.run(`
-      INSERT INTO compliance_cleaning_records
-      (record_code, record_type, record_no, record_date, area_location, frequency, company_name, financial_year, inspector_name, supervisor_name, prepared_by, verified_by, overall_status, status, checklist_json, corrective_action, remarks)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
-      'C4', 'PEST_CONTROL', 'C4-2026-0816', '2026-08-16', 'Perimeter Rodent Bait Stations & Fly Catchers', 'Daily', 'BVC Exports Pvt. Ltd.', '2026-2027',
-      'Pest Guard Services / Murugan QA', 'QA Head', 'Murugan QA', 'QA Head', 'PASS', 'COMPLETED',
-      JSON.stringify({
-        inspection_time: '08:30 AM',
-        pest_status: 'No Pest Evidence',
-        monitoring_points: [
-          { s_no: 1, location: 'External Perimeter West', trap_no: 'RB-01 to RB-06', observation: 'Intact, locked', pest_found: 'No', droppings: 'No', evidence: 'None', action_taken: 'Bait replenished' },
-          { s_no: 2, location: 'RM Godown Entrance', trap_no: 'EFC-01 (Fly Catcher)', observation: 'UV tube working', pest_found: 'Yes (2 Houseflies)', droppings: 'No', evidence: 'Flies on sticky pad', action_taken: 'Pad replaced' },
-          { s_no: 3, location: 'Milling Line Clean Zone', trap_no: 'GT-01 (Glue Trap)', observation: 'Clear', pest_found: 'No', droppings: 'No', evidence: 'None', action_taken: 'None' },
-          { s_no: 4, location: 'Finished Goods Bay', trap_no: 'RB-07 to RB-12', observation: 'Intact', pest_found: 'No', droppings: 'No', evidence: 'None', action_taken: 'Inspected' }
-        ]
-      }),
-      'Sticky pad replaced on EFC-01. Bait boxes secured.',
-      'Zero rodent or crawling pest evidence inside production area.'
-    ]);
-
-    // C5: Vehicle Loading / Unloading (Loading)
-    await db.run(`
-      INSERT INTO compliance_cleaning_records
-      (record_code, record_type, record_no, record_date, area_location, frequency, company_name, financial_year, inspector_name, supervisor_name, customer_name, vehicle_no, prepared_by, verified_by, overall_status, status, checklist_json, remarks)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
-      'C5', 'VEHICLE_INSPECTION', 'C5-2026-0815', '2026-08-15', 'Dispatch Dock Bay 1', 'Loading', 'BVC Exports Pvt. Ltd.', '2026-2027',
-      'Sundar R (Loading Incharge)', 'QA Lead', 'Royal Foods Exporters', 'TN-58-AX-9912', 'Sundar R', 'QA Lead', 'PASS', 'COMPLETED',
-      JSON.stringify({
-        customer: 'Royal Foods Exporters',
-        quantity: '500 Bags (25 MT)',
-        vehicle_no: 'TN-58-AX-9912',
-        movement_type: 'Loading (Finished Goods Dispatch)',
-        checklist: [
-          { s_no: 1, check_point: 'Cleanliness of truck — Dust/Dirt', ok: true, not_ok: false, remarks: 'Swept clean, floor dry' },
-          { s_no: 2, check_point: 'No Pest/Pest Droppings', ok: true, not_ok: false, remarks: 'No insect or rodent evidence' },
-          { s_no: 3, check_point: 'No Foreign Material/Moisture', ok: true, not_ok: false, remarks: 'Completely dry and oil-free' },
-          { s_no: 4, check_point: 'Doors Intact / Good Condition', ok: true, not_ok: false, remarks: 'Rubber gasket sealed tight' },
-          { s_no: 5, check_point: 'No Corrosion', ok: true, not_ok: false, remarks: 'Interior floor painted & lined' },
-          { s_no: 6, check_point: 'Truck Sealing — Empty/After Loading', ok: true, not_ok: false, remarks: 'Numbered seal #BVC-SL-9014' },
-          { s_no: 7, check_point: 'Unwanted Odour', ok: true, not_ok: false, remarks: 'Neutral, zero chemical/diesel smell' },
-          { s_no: 8, check_point: 'Tarpaulin — Clean/Damaged', ok: true, not_ok: false, remarks: 'Heavy-duty water-tight tarp verified' },
-          { s_no: 9, check_point: 'General Acceptance of Truck', ok: true, not_ok: false, remarks: 'Accepted for food transport' }
-        ]
-      }),
-      'Vehicle inspected and cleared for export dispatch of Urad Flour.'
-    ]);
-
-    // C6: Toilet Cleaning Checklist (Daily)
-    await db.run(`
-      INSERT INTO compliance_cleaning_records
-      (record_code, record_type, record_no, record_date, area_location, frequency, company_name, financial_year, inspector_name, supervisor_name, prepared_by, verified_by, overall_status, status, checklist_json, corrective_action, remarks)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
-      'C6', 'TOILET_CLEANING', 'C6-2026-0816', '2026-08-16', 'Factory Restrooms & Handwash Stations', 'Daily', 'BVC Exports Pvt. Ltd.', '2026-2027',
-      'Mani K (Sanitation Staff)', 'Sanitation Supervisor', 'Mani K', 'Sanitation Supervisor', 'PASS', 'COMPLETED',
-      JSON.stringify({
-        inspection_time: '07:30 AM & 01:30 PM',
-        checklist: [
-          { item: 'Floor', status: 'OK', remarks: 'Disinfected and dry' },
-          { item: 'Toilet bowl', status: 'OK', remarks: 'Sanitized with cleaner' },
-          { item: 'Wash basin', status: 'OK', remarks: 'Clean, no stains' },
-          { item: 'Doors', status: 'OK', remarks: 'Handles disinfected' },
-          { item: 'Walls', status: 'OK', remarks: 'Tiled walls wiped' },
-          { item: 'Water availability', status: 'OK', remarks: 'Uninterrupted 24/7 supply' },
-          { item: 'Cleaning material / Liquid Soap', status: 'OK', remarks: 'Soap dispenser refilled' },
-          { item: 'Waste bin', status: 'OK', remarks: 'Pedal bin lined and cleared' },
-          { item: 'Odour', status: 'OK', remarks: 'Ventilation exhaust functional' },
-          { item: 'Overall cleanliness', status: 'OK', remarks: 'Sanitary standards met' }
-        ]
-      }),
-      'Soap dispenser refilled at 07:30 AM.',
-      'Daily 2-shift restroom hygiene verification completed.'
-    ]);
-
-    // C7: Visitor Declaration (Monthly Once / Per Visit)
-    await db.run(`
-      INSERT INTO compliance_cleaning_records
-      (record_code, record_type, record_no, record_date, area_location, frequency, company_name, financial_year, inspector_name, supervisor_name, prepared_by, verified_by, overall_status, status, checklist_json, remarks)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
-      'C7', 'VISITOR_DECLARATION', 'C7-2026-0805', '2026-08-05', 'Production Hall & QA Testing Lab', 'Monthly Once', 'BVC Exports Pvt. Ltd.', '2026-2027',
-      'Security Officer & HR', 'QA Head', 'HR Desk', 'QA Head', 'PASS', 'COMPLETED',
-      JSON.stringify({
-        visitor_name: 'Dr. S. Narayanan',
-        visitor_company: 'FSSAI Third-Party Audit Agency',
-        contact_no: '+91 98410 44321',
-        purpose: 'Annual Food Safety & Hygiene Surveillance Audit',
-        area_to_visit: 'Raw Material Godown, Milling & Bagging Lines, QC Lab',
-        declaration_questions: [
-          { question: 'Suffering from any communicable disease, flu, cough, or diarrhea?', answer: 'No' },
-          { question: 'Recent exposure to contamination or infectious outbreak?', answer: 'No' },
-          { question: 'Agreed to follow factory GMP & hygiene rules (No jewelry, watch, perfume)?', answer: 'Yes' },
-          { question: 'Protective clothing (Hairnet, Coat, Shoe Covers) issued & worn?', answer: 'Yes' },
-          { question: 'Visitor safety guidelines briefing provided?', answer: 'Yes' }
-        ],
-        declaration_status: 'ACCEPTED',
-        visitor_signature_ack: 'Signed physically on visitor register'
-      }),
-      'Official auditor visitor entry cleared in compliance with FSSAI Section 16.'
-    ]);
-
-    // C8: Packing Material Inspection (PM Receiving)
-    await db.run(`
-      INSERT INTO compliance_cleaning_records
-      (record_code, record_type, record_no, record_date, area_location, frequency, company_name, financial_year, inspector_name, supervisor_name, supplier_name, prepared_by, verified_by, overall_status, status, checklist_json, remarks)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
-      'C8', 'PM_INSPECTION', 'C8-2026-0814', '2026-08-14', 'Packaging Material Inward Bay', 'PM Receiving', 'BVC Exports Pvt. Ltd.', '2026-2027',
-      'Kavitha M (QC Executive)', 'QA Head', 'PolyPack Industries', 'Kavitha M', 'QA Head', 'PASS', 'COMPLETED',
-      JSON.stringify({
-        supplier: 'PolyPack Industries',
-        purchase_no: 'PO-2026-PM-089',
-        packing_material: '25kg HDPE Woven Sacks with Food-grade Liner',
-        lot_batch_no: 'PP-HD-8812',
-        quantity_received: '5,000 Bags',
-        parameters: [
-          { parameter: 'Material identity', requirement: 'Virgin HDPE, Food-grade printed', observed: 'Conforms to spec', result: 'Pass', remarks: 'Food grade mark present' },
-          { parameter: 'Quantity', requirement: '5,000 Bags', observed: '5,000 Bags (10 bundles)', result: 'Pass', remarks: 'Count verified' },
-          { parameter: 'Packaging condition', requirement: 'Wrapped in waterproof stretch film', observed: 'Intact, no tearing', result: 'Pass', remarks: 'Well protected' },
-          { parameter: 'Cleanliness', requirement: 'Dust-free, dry, no grease', observed: 'Clean and odorless', result: 'Pass', remarks: 'No chemical smell' },
-          { parameter: 'Damage', requirement: 'Zero cuts, pinholes or tears', observed: 'Zero defects in 50 sample pull', result: 'Pass', remarks: 'AQL 1.0 passed' },
-          { parameter: 'Moisture', requirement: 'Dry storage condition', observed: 'Dry', result: 'Pass', remarks: 'Moisture nil' },
-          { parameter: 'Foreign material', requirement: 'Zero dirt, insect, foreign matter', observed: 'Clean interior liner', result: 'Pass', remarks: 'Virgin LDPE liner clean' },
-          { parameter: 'Print / labelling', requirement: 'BVC Exports Pvt. Ltd., FSSAI, Batch, Net Wt', observed: 'Sharp legible print', result: 'Pass', remarks: 'Text and barcode crisp' },
-          { parameter: 'Specification compliance', requirement: 'GSM 120 ± 5%, Bursting 18 kg/cm2', observed: 'GSM 122, Bursting 19.4', result: 'Pass', remarks: 'Tested in QC lab' }
-        ],
-        final_result: 'ACCEPT'
-      }),
-      'Consignment LOT PP-HD-8812 passed all food contact packaging compliance tests.'
-    ]);
-
-    // C9: Food Handler Personal Hygiene (Daily)
-    await db.run(`
-      INSERT INTO compliance_cleaning_records
-      (record_code, record_type, record_no, record_date, area_location, frequency, company_name, financial_year, inspector_name, supervisor_name, prepared_by, verified_by, overall_status, status, checklist_json, remarks)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
-      'C9', 'HYGIENE', 'C9-2026-0816', '2026-08-16', 'Production Floor & Bagging Section', 'Daily', 'BVC Exports Pvt. Ltd.', '2026-2027',
-      'Anand R (Hygiene Inspector)', 'Plant HR & QA Lead', 'Anand R', 'QA Lead', 'PASS', 'COMPLETED',
-      JSON.stringify({
-        shift: 'Morning Shift (08:00 - 16:30)',
-        department: 'Milling, Sifting & Packing',
-        total_employees: 12,
-        checked: 12,
-        passed: 12,
-        failed: 0,
-        employees: [
-          { s_no: 1, emp_name: 'Murugan K', emp_id: 'EMP-012', uniform: 'Yes', hairnet: 'Yes', clean_hands: 'Yes', trimmed_nails: 'Yes', no_jewelry: 'Yes', footwear: 'Yes', health: 'Fit', status: 'PASS', remarks: 'Good' },
-          { s_no: 2, emp_name: 'Suresh P', emp_id: 'EMP-019', uniform: 'Yes', hairnet: 'Yes', clean_hands: 'Yes', trimmed_nails: 'Yes', no_jewelry: 'Yes', footwear: 'Yes', health: 'Fit', status: 'PASS', remarks: 'Good' },
-          { s_no: 3, emp_name: 'Anand R', emp_id: 'EMP-023', uniform: 'Yes', hairnet: 'Yes', clean_hands: 'Yes', trimmed_nails: 'Yes', no_jewelry: 'Yes', footwear: 'Yes', health: 'Fit', status: 'PASS', remarks: 'Good' },
-          { s_no: 4, emp_name: 'Kavitha M', emp_id: 'EMP-031', uniform: 'Yes', hairnet: 'Yes', clean_hands: 'Yes', trimmed_nails: 'Yes', no_jewelry: 'Yes', footwear: 'Yes', health: 'Fit', status: 'PASS', remarks: 'Good' },
-          { s_no: 5, emp_name: 'Govindan V', emp_id: 'EMP-044', uniform: 'Yes', hairnet: 'Yes', clean_hands: 'Yes', trimmed_nails: 'Yes', no_jewelry: 'Yes', footwear: 'Yes', health: 'Fit', status: 'PASS', remarks: 'Good' }
-        ]
-      }),
-      'All 12 food handlers verified in clean uniforms, trimmed nails and mandatory PPE.'
-    ]);
-
-    // C10: Machinery Checklist (Monthly Once)
-    await db.run(`
-      INSERT INTO compliance_cleaning_records
-      (record_code, record_type, record_no, record_date, area_location, frequency, company_name, financial_year, inspector_name, supervisor_name, prepared_by, verified_by, overall_status, status, checklist_json, corrective_action, remarks)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
-      'C10', 'MACHINERY', 'C10-2026-0801', '2026-08-01', 'Pulse Processing Section', 'Monthly Once', 'BVC Exports Pvt. Ltd.', '2026-2027',
-      'Muthu S (Maintenance Engineer)', 'Technical Manager', 'Muthu S', 'Technical Manager', 'PASS', 'COMPLETED',
-      JSON.stringify({
-        machine_name: 'Pulse Hammer Mill #01 (50 HP Heavy Duty)',
-        machine_id: 'MCH-MIL-01',
-        location: 'Milling Line 1',
-        operator: 'Murugan K',
-        parameters: [
-          { check_point: 'Machine cleanliness', result: 'Acceptable', remarks: 'Casing and hopper cleaned' },
-          { check_point: 'Food residue', result: 'Acceptable', remarks: 'Zero old meal buildup' },
-          { check_point: 'Foreign material', result: 'Acceptable', remarks: 'Magnetic guard cleared' },
-          { check_point: 'Lubrication condition', result: 'Acceptable', remarks: 'Food grade grease (NSF H1) topped' },
-          { check_point: 'Guard condition', result: 'Acceptable', remarks: 'Belt drive guards secure' },
-          { check_point: 'Electrical condition', result: 'Acceptable', remarks: 'Earthing & conduit intact' },
-          { check_point: 'Physical damage', result: 'Acceptable', remarks: 'Hammer beaters wear < 5%' },
-          { check_point: 'Abnormal noise / vibration', result: 'Acceptable', remarks: 'Bearing temp 48°C (Normal)' },
-          { check_point: 'Safety condition', result: 'Acceptable', remarks: 'Emergency stop tested functional' },
-          { check_point: 'General condition', result: 'Acceptable', remarks: 'Good for continuous production' }
-        ],
-        machine_status: 'Acceptable'
-      }),
-      'Routine monthly lubrication completed. No abnormal vibration.',
-      'Monthly preventive maintenance and hygiene audit signed off.'
-    ]);
-  }
+  console.log('✓ Default controlled compliance documents (D1 to D13) verified.');
 }
 
 // Call table initialization on module load
@@ -1386,38 +1117,16 @@ async function syncAllProductionRecords() {
       }
     }
 
-    // 4. Sync P2: Godown Fumigation Records
-    const p2Exist = await db.query(`SELECT id FROM compliance_production_records WHERE record_code = 'P2'`);
-    if (!p2Exist.rows || p2Exist.rows.length === 0) {
-      const fumigations = [
-        { no: 'P2-2026-001', godown: 'KNJ Godown (Godown 2)', item: 'Raw Broken Rice & Urad Stacks', date: '2026-08-01', chem: 'Aluminium Phosphide (AlP 56%)', dose: '3 Tablets / Ton (9g/MT)', exp: '7 Days airtight tarp', aer: '24 Hours forced aeration', residue: '0.01 ppm (Limit <0.1 ppm)', cert: 'PASS / FREE FROM INFESTATION' },
-        { no: 'P2-2026-002', godown: 'KTH Godown (Godown 1)', item: 'Pulse Whole Grain Stacks', date: '2026-07-20', chem: 'Aluminium Phosphide', dose: '3 Tablets / Ton', exp: '7 Days', aer: '24 Hours', residue: '0.00 ppm', cert: 'PASS / CLEARED' }
-      ];
-      for (const f of fumigations) {
-        await db.run(`
-          INSERT INTO compliance_production_records
-          (record_code, record_type, record_no, record_date, frequency, item_name, stage_name, status, checked_by, findings_json, remarks)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [
-          'P2', 'FUMIGATION', f.no, f.date, 'Loading',
-          f.item, f.godown, 'COMPLETED', 'Certified Pest Control Agency',
-          JSON.stringify(f), `Fumigation treatment completed with ${f.chem}. Safety clearance signed.`
-        ]);
-      }
-    }
+    // 4. Godown Fumigation Records are user-managed or created explicitly
   } catch (err) {
     console.error('Error in syncAllProductionRecords:', err);
   }
 }
 
-// Automatically sync on initial load
-syncAllProductionRecords();
+// NOTE: Do NOT auto-run syncAllProductionRecords on startup or GET requests to prevent polluting production records with example/Tauri data!
 
 router.get('/production-records', async (req, res) => {
   try {
-    // Ensure records are synchronized
-    await syncAllProductionRecords();
-
     const { record_code, lot_no } = req.query;
     let query = `SELECT * FROM compliance_production_records WHERE 1=1`;
     const params = [];
@@ -1455,6 +1164,25 @@ router.post('/production-records/sync', async (req, res) => {
   try {
     await syncAllProductionRecords();
     res.json({ success: true, message: 'Production records synchronized with ERP transactions.' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.delete('/production-records/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await db.run('DELETE FROM compliance_production_records WHERE id = ?', [id]);
+    res.json({ success: true, message: 'Production record deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.post('/production-records/purge-all', async (req, res) => {
+  try {
+    await db.run('DELETE FROM compliance_production_records');
+    res.json({ success: true, message: 'All production records have been cleared successfully.' });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -1719,6 +1447,15 @@ router.delete('/cleaning-records/:id', async (req, res) => {
   }
 });
 
+router.post('/cleaning-records/purge-all', async (req, res) => {
+  try {
+    await db.run('DELETE FROM compliance_cleaning_records');
+    res.json({ success: true, message: 'All cleaning records cleared successfully' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Schedule status overview for C1 to C10
 router.get('/cleaning-schedule-summary', async (req, res) => {
   try {
@@ -1969,9 +1706,7 @@ router.get('/traceability/:lotNo', async (req, res) => {
   try {
     let lotNo = (req.params.lotNo || '').trim();
 
-    // Ensure production compliance records are synchronized
-    await syncAllProductionRecords();
-
+    // Traceability inspection
     // If 'latest' or empty, resolve the most recent active lot
     if (!lotNo || lotNo.toLowerCase() === 'latest' || lotNo.toLowerCase() === 'default') {
       const latestLotRes = await db.query(`

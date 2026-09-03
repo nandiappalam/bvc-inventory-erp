@@ -147,7 +147,7 @@ router.get(['/', '/list', '/purchase-list'], async (req, res) => {
       COALESCE(p.lorry_no, p.vehicle_no, vm.vehicle_no, '') AS lorry_no,
       COALESCE(p.driver_name, p.driver, vm.driver_name, '') AS driver,
       COALESCE(p.driver_name, p.driver, vm.driver_name, '') AS driver_name,
-      COALESCE(vm.gate_in_time, vm.created_at, 'Done') AS gate_in,
+      COALESCE(CAST(vm.gate_in_time AS TEXT), CAST(vm.created_at AS TEXT), 'Done') AS gate_in,
       COALESCE(p.godown, '') AS godown,
 
       COALESCE(im.item_name, pi.item_name, '') AS item,

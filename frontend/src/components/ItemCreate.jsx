@@ -4,6 +4,8 @@ import api from '../services/api.js';
 
 import { MASTER_CONFIG } from '../utils/masterConfig.js';
 import { safeArray } from '../utils/safeArray.js';
+import { printHtml } from '../utils/printHelper.js';
+import { buildItemPrintHtml } from '../utils/itemPrintHelper.js';
 import MasterFormLayout from './master/MasterFormLayout';
 import { FormSection, SmartField } from './master';
 import MasterActions from './master/MasterActions';
@@ -124,6 +126,11 @@ const ItemCreate = () => {
     setMessage('');
   };
 
+  const handlePrintPreview = () => {
+    const html = buildItemPrintHtml(formData, formData.item_group || formData.group_name || '');
+    printHtml(html, `Item - ${formData.item_name || formData.item_code || 'Preview'}`);
+  };
+
   return (
     <MasterFormLayout title="Item Creation" onSave={handleSubmit} onCancel={handleCancel}>
       {message && <div className={`message ${messageType}`}>{message}</div>}
@@ -144,9 +151,11 @@ const ItemCreate = () => {
       <MasterActions
         onSave={handleSubmit}
         onCancel={handleCancel}
+        onPrint={handlePrintPreview}
+        showPrint={true}
         showSave={true}
         saving={loading}
-        mode="create"
+        mode={editReference ? 'update' : 'create'}
       />
     </MasterFormLayout>
   );

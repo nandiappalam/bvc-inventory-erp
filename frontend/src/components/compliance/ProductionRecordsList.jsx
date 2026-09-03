@@ -41,6 +41,8 @@ import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import PrintIcon from '@mui/icons-material/Print';
 import VerifiedIcon from '@mui/icons-material/Verified';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 
 const PROD_RECORDS = [
   { code: 'ALL', label: 'All Records (P1–P8)', freq: '', docRef: 'BVC/QA/ALL/00' },

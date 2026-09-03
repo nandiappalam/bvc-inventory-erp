@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api.js';
+import { printHtml } from '../utils/printHelper.js';
+import { buildItemPrintHtml } from '../utils/itemPrintHelper.js';
 import './ItemDisplay.css';
 
 // Default laboratory parameters template
@@ -221,10 +223,17 @@ const ItemDisplay = () => {
   const handleOpenPrintPreview = (item) => {
     setPrintItem(item);
     setPrintModalOpen(true);
+    const html = buildItemPrintHtml(item, getGroupName(item.item_group));
+    printHtml(html, `Item - ${item.item_name || item.item_code}`);
   };
 
   const handlePrintAction = () => {
-    window.print();
+    if (printItem) {
+      const html = buildItemPrintHtml(printItem, getGroupName(printItem.item_group));
+      printHtml(html, `Item - ${printItem.item_name || printItem.item_code}`);
+    } else {
+      window.print();
+    }
   };
 
   // Robust delete handler with foreign key constraint checks

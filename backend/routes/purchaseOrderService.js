@@ -326,8 +326,21 @@ exports.updatePurchaseOrder = async (id, formData, items = [], deductions = []) 
             } catch (e) {}
         }
 
-        const purchase_request_id = formData.purchase_request_id || formData.purchaseRequestId || formData.pr_id || null;
+        const purchaseRequestReference = formData.purchase_request_id || formData.purchaseRequestId || formData.pr_id || null;
+        let purchase_request_id = purchaseRequestReference && /^\d+$/.test(String(purchaseRequestReference))
+            ? Number(purchaseRequestReference)
+            : null;
         const pr_no = formData.pr_no || formData.prNo || null;
+
+        if (purchaseRequestReference && purchase_request_id === null) {
+            const prLookup = await client.query(
+                'SELECT id FROM purchase_requests WHERE pr_no = ? LIMIT 1',
+                [purchaseRequestReference]
+            );
+            if (prLookup.rows[0]) {
+                purchase_request_id = prLookup.rows[0].id;
+            }
+        }
 
         const updateResult = await client.run(
             `UPDATE purchase_orders SET
