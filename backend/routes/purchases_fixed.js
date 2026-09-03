@@ -130,7 +130,7 @@ router.get(['/', '/list', '/purchase-list'], async (req, res) => {
       p.s_no AS s_no,
       p.inv_no AS inv_no,
       p.inv_no AS invoice_no,
-      COALESCE(NULLIF(p.po_no, ''), NULLIF(p.source_order_no, ''), NULLIF(po.inv_no, ''), NULLIF(CAST(po.s_no AS TEXT), ''), CASE WHEN p.purchase_order_id IS NOT NULL AND p.purchase_order_id != '' THEN 'PO-' || p.purchase_order_id ELSE '' END, '') AS po_no,
+      COALESCE(NULLIF(p.po_no, ''), NULLIF(p.source_order_no, ''), NULLIF(po.inv_no, ''), NULLIF(CAST(po.s_no AS TEXT), ''), CASE WHEN p.purchase_order_id IS NOT NULL THEN 'PO-' || CAST(p.purchase_order_id AS TEXT) ELSE '' END, '') AS po_no,
       COALESCE(p.purchase_order_id, p.source_order_id, po.id) AS purchase_order_id,
       p.date AS purchase_date,
       p.date,

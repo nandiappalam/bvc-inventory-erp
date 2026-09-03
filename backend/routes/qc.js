@@ -351,6 +351,33 @@ router.post(['/submit', '/purchase-lab-testing'], asyncHandler(async (req, res) 
   try {
     await connection.beginTransaction();
 
+    // The UI may submit a business reference such as PUR-7. QC relations use purchases.id.
+    let resolvedPurchaseId = null;
+    if (purchaseId !== undefined && purchaseId !== null && String(purchaseId).trim() !== '') {
+      const purchaseReference = String(purchaseId).trim();
+      if (/^\d+$/.test(purchaseReference)) {
+        const purchaseResult = await connection.query(
+          'SELECT id FROM purchases WHERE id = ? LIMIT 1',
+          [Number(purchaseReference)]
+        );
+        resolvedPurchaseId = purchaseResult.rows[0]?.id || null;
+      } else {
+        const purchaseResult = await connection.query(
+          `SELECT id FROM purchases
+           WHERE inv_no = ?
+              OR ('PUR-' || CAST(s_no AS TEXT)) = ?
+              OR CAST(s_no AS TEXT) = ?
+           LIMIT 1`,
+          [purchaseReference, purchaseReference, purchaseReference]
+        );
+        resolvedPurchaseId = purchaseResult.rows[0]?.id || null;
+      }
+      if (resolvedPurchaseId === null) {
+        await connection.rollback();
+        return res.status(400).json({ success: false, message: `Purchase not found for reference ${purchaseReference}.` });
+      }
+    }
+
     // 1. Update or Insert stock_lots table in the database
     let usable_for_production = 0;
     let approval_status = 'PENDING_APPROVAL';
@@ -391,7 +418,7 @@ router.post(['/submit', '/purchase-lab-testing'], asyncHandler(async (req, res) 
         [
           item || 'Manual Material',
           lotNo,
-          purchaseId ? Number(purchaseId) : null,
+          resolvedPurchaseId,
           autoQty,
           autoQty,
           qcHeader.rate ? Number(qcHeader.rate) : 0,
@@ -418,7 +445,7 @@ router.post(['/submit', '/purchase-lab-testing'], asyncHandler(async (req, res) 
         `UPDATE qc_inspections 
          SET purchase_id = ?, rm_lot_no = ?, inspection_date = ?, inspector = ?, overall_result = ?, remarks = ?, updated_at = CURRENT_TIMESTAMP
          WHERE id = ?`,
-        [purchaseId, lotNo, new Date().toISOString().split('T')[0], analyst, overallResult, remarks, qcId]
+        [resolvedPurchaseId, lotNo, new Date().toISOString().split('T')[0], analyst, overallResult, remarks, qcId]
       );
 
       // Clear existing params to rewrite them
@@ -429,7 +456,7 @@ router.post(['/submit', '/purchase-lab-testing'], asyncHandler(async (req, res) 
       const result = await connection.run(
         `INSERT INTO qc_inspections (qc_no, purchase_id, rm_lot_no, inspection_date, inspector, overall_result, remarks)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [qc_no, purchaseId, lotNo, new Date().toISOString().split('T')[0], analyst || 'QC Engineer', overallResult, remarks]
+        [qc_no, resolvedPurchaseId, lotNo, new Date().toISOString().split('T')[0], analyst || 'QC Engineer', overallResult, remarks]
       );
       savedQcId = result.lastID;
     }

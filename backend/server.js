@@ -687,6 +687,10 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
       console.log('🔧 Ensuring PostgreSQL master schema...');
       await db.ensurePostgresMasterSchema();
       console.log('✓ PostgreSQL master schema verified');
+      if (typeof db.ensurePostgresCompanySequences === 'function') {
+        await db.ensurePostgresCompanySequences(1);
+        console.log('✓ PostgreSQL company sequences synchronized');
+      }
     }
     const { runAllPendingMigrations } = require('./database/migrationRunner')
     await runAllPendingMigrations()

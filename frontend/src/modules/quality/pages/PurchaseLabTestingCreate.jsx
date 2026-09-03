@@ -51,6 +51,11 @@ function parseNum(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+function normalizeDateInput(value) {
+  if (!value) return '';
+  return String(value).slice(0, 10);
+}
+
 function evaluateBySpec({ min, max, actual, specification }) {
   if (actual === null || actual === undefined) return 'PENDING';
   const actStr = String(actual).trim().toUpperCase();
@@ -162,8 +167,8 @@ export default function PurchaseLabTestingCreate() {
               quantity: data.quantity || '',
               unitWeight: data.unit_weight || '',
               totalWeight: data.total_weight || '',
-              receiptDate: data.receipt_date || '',
-              invoiceDate: data.invoice_date || '',
+              receiptDate: normalizeDateInput(data.receipt_date),
+              invoiceDate: normalizeDateInput(data.invoice_date),
             });
             setQcResults(data.qcResults || []);
             setLabRemarks(data.remarks || '');
@@ -202,8 +207,8 @@ export default function PurchaseLabTestingCreate() {
       quantity: lot.received_qty || '',
       unitWeight: lot.unit_weight || '',
       totalWeight: lot.total_weight || '',
-      receiptDate: lot.receipt_date || '',
-      invoiceDate: lot.invoice_date || '',
+      receiptDate: normalizeDateInput(lot.receipt_date),
+      invoiceDate: normalizeDateInput(lot.invoice_date),
     });
 
     // Initialize qcResults from the product template

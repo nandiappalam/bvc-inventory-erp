@@ -541,6 +541,19 @@ async function resyncPostgresSequences(clientOrPool, schemaName = null) {
   }
 }
 
+async function ensurePostgresCompanySequences(companyId = 1) {
+  if (!isPostgres || !pgPool) return;
+  const client = await pgPool.connect();
+  try {
+    const schemaName = `company_${parseInt(companyId, 10) || 1}`;
+    await client.query(`CREATE SCHEMA IF NOT EXISTS ${schemaName}`);
+    await client.query(`SET search_path TO ${schemaName}, public`);
+    await resyncPostgresSequences(client, schemaName);
+  } finally {
+    client.release();
+  }
+}
+
 // ============================================================================
 // POSTGRESQL MULTI-TENANT QUERY RUNNER
 // ============================================================================
@@ -1085,6 +1098,7 @@ module.exports = {
   createCompanyDatabase,
   restoreDatabase,
   ensurePostgresMasterSchema,
+  ensurePostgresCompanySequences,
 
   // Primary Query function (routes automatically based on context & SQL)
   query: async (text, params = [], explicitCompanyId = null) => {

@@ -2,6 +2,13 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
 
+const itemNamesAggregate = db.isPostgres
+  ? "STRING_AGG(item_name::text, ', ')"
+  : "GROUP_CONCAT(item_name, ', ')";
+const descriptionsAggregate = db.isPostgres
+  ? "STRING_AGG(NULLIF(description, '')::text, ', ')"
+  : "GROUP_CONCAT(NULLIF(description, ''), ', ')";
+
 // Initialize Purchase Request tables
 const initTables = async () => {
   try {
@@ -217,7 +224,7 @@ router.get('/approved-list', async (req, res) => {
       FROM purchase_requests pr
       LEFT JOIN supplier_master sm ON pr.supplier_id = sm.id
       LEFT JOIN (
-        SELECT purchase_request_id, COUNT(*) as total_items, SUM(requested_qty) as total_qty, SUM(estimated_amount) as total_amount, GROUP_CONCAT(item_name, ', ') as item_names
+        SELECT purchase_request_id, COUNT(*) as total_items, SUM(requested_qty) as total_qty, SUM(estimated_amount) as total_amount, ${itemNamesAggregate} as item_names
         FROM purchase_request_items GROUP BY purchase_request_id
       ) pri_agg ON pr.id = pri_agg.purchase_request_id
       WHERE LOWER(COALESCE(pr.status, 'approved')) IN ('approved', 'partially converted', 'converted', 'pending po', 'submitted', 'active')
@@ -281,7 +288,7 @@ const getDashboardMetricsHandler = async (req, res) => {
         (SELECT COUNT(*) FROM purchase_request_items WHERE purchase_request_id = pr.id) as total_items,
         (SELECT COALESCE(SUM(requested_qty), 0) FROM purchase_request_items WHERE purchase_request_id = pr.id) as total_qty,
         (SELECT COALESCE(SUM(estimated_amount), 0) FROM purchase_request_items WHERE purchase_request_id = pr.id) as total_amount,
-        (SELECT GROUP_CONCAT(item_name, ', ') FROM purchase_request_items WHERE purchase_request_id = pr.id) as item_names
+        (SELECT ${itemNamesAggregate} FROM purchase_request_items WHERE purchase_request_id = pr.id) as item_names
       FROM purchase_requests pr
       ORDER BY pr.id DESC
       LIMIT 10
@@ -443,7 +450,7 @@ router.get('/reports', async (req, res) => {
         pri_agg.item_names as item_names
       FROM purchase_requests pr
       LEFT JOIN (
-        SELECT purchase_request_id, COUNT(*) as total_items, SUM(requested_qty) as total_qty, SUM(estimated_amount) as total_amount, GROUP_CONCAT(item_name, ', ') as item_names
+        SELECT purchase_request_id, COUNT(*) as total_items, SUM(requested_qty) as total_qty, SUM(estimated_amount) as total_amount, ${itemNamesAggregate} as item_names
         FROM purchase_request_items GROUP BY purchase_request_id
       ) pri_agg ON pr.id = pri_agg.purchase_request_id
       ${whereClause}
@@ -472,7 +479,7 @@ router.get('/', async (req, res) => {
         pri_agg.descriptions as descriptions
       FROM purchase_requests pr
       LEFT JOIN (
-        SELECT purchase_request_id, COUNT(*) as total_items, SUM(requested_qty) as total_qty, SUM(estimated_amount) as total_amount, GROUP_CONCAT(item_name, ', ') as item_names, GROUP_CONCAT(NULLIF(description, ''), ', ') as descriptions
+        SELECT purchase_request_id, COUNT(*) as total_items, SUM(requested_qty) as total_qty, SUM(estimated_amount) as total_amount, ${itemNamesAggregate} as item_names, ${descriptionsAggregate} as descriptions
         FROM purchase_request_items GROUP BY purchase_request_id
       ) pri_agg ON pr.id = pri_agg.purchase_request_id
       WHERE 1=1

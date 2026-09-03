@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
+const currentDateExpression = db.isPostgres ? 'CURRENT_DATE::text' : "DATE('now')";
 
 // ============================================================================
 // INITIALIZE DATABASE TABLES FOR QUALITY & COMPLIANCE
@@ -718,7 +719,7 @@ router.get('/dashboard', async (req, res) => {
     const prodRecordCounts = await db.query(`
       SELECT 
         COUNT(*) as total_prod_records,
-        SUM(CASE WHEN record_date = DATE('now') THEN 1 ELSE 0 END) as today_prod_records
+        SUM(CASE WHEN record_date = ${currentDateExpression} THEN 1 ELSE 0 END) as today_prod_records
       FROM compliance_production_records
     `);
 
@@ -2576,7 +2577,7 @@ router.get('/today-required', async (req, res) => {
     const prodToday = await db.query(`
       SELECT record_code, COUNT(*) as count, MAX(record_no) as last_no
       FROM compliance_production_records
-      WHERE record_date = ? OR record_date = DATE('now')
+      WHERE record_date = ? OR record_date = ${currentDateExpression}
       GROUP BY record_code
     `, [today]);
     const prodMap = {};
@@ -2585,7 +2586,7 @@ router.get('/today-required', async (req, res) => {
     const cleanToday = await db.query(`
       SELECT record_code, COUNT(*) as count, MAX(record_no) as last_no, MAX(overall_status) as status
       FROM compliance_cleaning_records
-      WHERE record_date = ? OR record_date = DATE('now')
+      WHERE record_date = ? OR record_date = ${currentDateExpression}
       GROUP BY record_code
     `, [today]);
     const cleanMap = {};
