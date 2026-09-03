@@ -27,7 +27,7 @@ router.get('/', async (req, res) => {
     const result = await db.query(`
       SELECT a.*, COALESCE(pcm.name, a.papad_company) AS papad_company_name 
       FROM advances a 
-      LEFT JOIN papad_company_master pcm ON (pcm.id = CAST(a.papad_company AS INTEGER) OR pcm.name = a.papad_company)
+      LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(a.papad_company AS TEXT) OR pcm.name = a.papad_company)
       ORDER BY a.id DESC
     `)
     res.json(result.rows)
@@ -43,9 +43,9 @@ router.get('/:id', async (req, res) => {
     const result = await db.query(`
       SELECT a.*, COALESCE(pcm.name, a.papad_company) AS papad_company_name 
       FROM advances a 
-      LEFT JOIN papad_company_master pcm ON (pcm.id = CAST(a.papad_company AS INTEGER) OR pcm.name = a.papad_company)
-      WHERE a.id = ?
-    `, [req.params.id])
+      LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(a.papad_company AS TEXT) OR pcm.name = a.papad_company)
+      WHERE CAST(a.id AS TEXT) = ?
+    `, [String(req.params.id)])
 
     if (result.rows.length === 0) {
       return res.status(404).json({ message: 'Advance not found' })

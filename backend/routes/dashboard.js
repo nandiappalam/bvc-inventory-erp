@@ -286,9 +286,9 @@ router.get('/stats', async (req, res) => {
     try {
       const pRecent = await db.query(`
         SELECT p.id, p.s_no, p.date, p.created_at, COALESCE(p.grand_total, p.total_amount, 0) as amount,
-          COALESCE(sm.name, p.supplier, 'Supplier') as party_name
+          COALESCE(sm.print_name, sm.name, p.supplier, 'Supplier') as party_name
         FROM purchases p
-        LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = p.supplier)
+        LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = CAST(p.supplier AS TEXT) OR sm.print_name = CAST(p.supplier AS TEXT))
         ORDER BY p.id DESC LIMIT 4
       `);
       for (const r of pRecent.rows) {

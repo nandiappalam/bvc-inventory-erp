@@ -76,9 +76,9 @@ router.get('/purchase-list', async (req, res) => {
       0 AS total_deduction,
       COALESCE(pi.amount, 0) AS grand_total
     FROM purchases p
-    LEFT JOIN supplier_master s ON s.id = p.supplier
-    LEFT JOIN purchase_items pi ON pi.purchase_id = p.id
-    LEFT JOIN item_master im ON im.id = pi.item_id
+    LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(p.supplier AS TEXT) OR s.name = CAST(p.supplier AS TEXT) OR s.print_name = CAST(p.supplier AS TEXT))
+    LEFT JOIN purchase_items pi ON CAST(pi.purchase_id AS TEXT) = CAST(p.id AS TEXT)
+    LEFT JOIN item_master im ON (CAST(im.id AS TEXT) = CAST(pi.item_id AS TEXT) OR im.item_name = CAST(pi.item_name AS TEXT))
     ORDER BY p.id DESC`;
  
     const result = await db.query(sql);

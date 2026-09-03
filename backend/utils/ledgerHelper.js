@@ -134,13 +134,15 @@ async function getNextVoucherNumber(prefix) {
     let nextNum = maxNum + 1
     let candidate = `${voucherPrefix}${String(nextNum).padStart(5, '0')}`
 
-    while (true) {
+    let isUnique = false
+    while (!isUnique) {
       const check = await db.query('SELECT id FROM voucher WHERE voucher_no = ? LIMIT 1', [candidate])
       if (!check.rows || check.rows.length === 0) {
-        break
+        isUnique = true
+      } else {
+        nextNum++
+        candidate = `${voucherPrefix}${String(nextNum).padStart(5, '0')}`
       }
-      nextNum++
-      candidate = `${voucherPrefix}${String(nextNum).padStart(5, '0')}`
     }
 
     return candidate

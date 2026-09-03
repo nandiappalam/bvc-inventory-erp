@@ -61,53 +61,71 @@ export async function api(endpoint, options = {}) {
     }
   } catch (e) {}
 
-  try {
-    const res = await fetch(url, {
-      method: options.method || 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        ...authHeaders,
-        ...(options.headers || {})
-      },
-      body: options.body ? JSON.stringify(options.body) : undefined
-    });
+  const maxRetries = options.method && options.method !== 'GET' ? 1 : 3;
+  let lastErr = null;
 
-    const text = await res.text();
-
-    // ✅ Null-safe JSON parse
-    if (!res.ok) {
-      console.error("❌ API HTTP error:", res.status, res.statusText);
-      console.error("❌ Response body:", text);
-      let errorMsg = `HTTP ${res.status}: ${res.statusText}`;
-      try {
-        const parsed = JSON.parse(text);
-        if (parsed && (parsed.message || parsed.error)) {
-          errorMsg = parsed.message || parsed.error;
-        }
-      } catch (e) {}
-      return { success: false, data: null, message: errorMsg };
-    }
-
-    let json = null;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      json = text ? JSON.parse(text) : {};
-    } catch (parseErr) {
-      console.warn("⚠️ Response body is not valid JSON:", text.substring(0, 100));
-      return { success: false, data: null, message: "Invalid JSON from server" };
-    }
+      const res = await fetch(url, {
+        method: options.method || 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeaders,
+          ...(options.headers || {})
+        },
+        body: options.body ? JSON.stringify(options.body) : undefined
+      });
 
-    const isReportOrAccount = endpoint.startsWith("/reports") || endpoint.startsWith("/accounts") || endpoint.startsWith("/api/reports") || endpoint.startsWith("/api/accounts");
-    if (isReportOrAccount) {
-      if (json && typeof json === 'object' && 'success' in json) {
-        return json;
+      // If backend is still initializing (503 from proxy), retry if attempts remain
+      if (res.status === 503 && attempt < maxRetries) {
+        await new Promise((r) => setTimeout(r, 400 * attempt));
+        continue;
       }
-      return { success: true, data: json };
+
+      const text = await res.text();
+
+      // ✅ Null-safe JSON parse
+      if (!res.ok) {
+        console.error("❌ API HTTP error:", res.status, res.statusText);
+        console.error("❌ Response body:", text);
+        let errorMsg = `HTTP ${res.status}: ${res.statusText}`;
+        try {
+          const parsed = JSON.parse(text);
+          if (parsed && (parsed.message || parsed.error)) {
+            errorMsg = parsed.message || parsed.error;
+          }
+        } catch (e) {}
+        return { success: false, data: null, message: errorMsg };
+      }
+
+      let json = null;
+      try {
+        json = text ? JSON.parse(text) : {};
+      } catch (parseErr) {
+        console.warn("⚠️ Response body is not valid JSON:", text.substring(0, 100));
+        return { success: false, data: null, message: "Invalid JSON from server" };
+      }
+
+      const isReportOrAccount = endpoint.startsWith("/reports") || endpoint.startsWith("/accounts") || endpoint.startsWith("/api/reports") || endpoint.startsWith("/api/accounts");
+      if (isReportOrAccount) {
+        if (json && typeof json === 'object' && 'success' in json) {
+          return json;
+        }
+        return { success: true, data: json };
+      }
+      return json;
+    } catch (err) {
+      lastErr = err;
+      if (attempt < maxRetries) {
+        await new Promise((r) => setTimeout(r, 400 * attempt));
+        continue;
+      }
+      console.error("🔥 API FAILED:", err.message);
+      return { success: false, data: null, message: err.message };
     }
-    return json;
-  } catch (err) {
-    console.error("🔥 API FAILED:", err.message);
-    return { success: false, data: null, message: err.message };
   }
+
+  return { success: false, data: null, message: lastErr?.message || 'Network request failed' };
 }
 
 // Generic getMasters

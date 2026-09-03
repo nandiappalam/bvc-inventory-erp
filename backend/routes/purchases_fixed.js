@@ -182,10 +182,10 @@ router.get(['/', '/list', '/purchase-list'], async (req, res) => {
       qci.id AS qc_id
     FROM purchases p
     LEFT JOIN purchase_orders po ON (CAST(po.id AS TEXT) = CAST(p.purchase_order_id AS TEXT) OR CAST(po.id AS TEXT) = CAST(p.source_order_id AS TEXT) OR (p.po_no IS NOT NULL AND CAST(p.po_no AS TEXT) != '' AND (po.inv_no = p.po_no OR CAST(po.s_no AS TEXT) = CAST(p.po_no AS TEXT))))
-    LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(p.supplier AS TEXT) OR s.name = p.supplier OR s.print_name = p.supplier)
-    LEFT JOIN purchase_items pi ON pi.purchase_id = p.id
-    LEFT JOIN item_master im ON im.id = pi.item_id
-    LEFT JOIN vehicle_movements vm ON (CAST(vm.reference_id AS TEXT) = CAST(p.id AS TEXT) OR vm.reference_id = p.inv_no OR (vm.lot_no IS NOT NULL AND vm.lot_no != '' AND vm.lot_no = pi.lot_no))
+    LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(p.supplier AS TEXT) OR s.name = CAST(p.supplier AS TEXT) OR s.print_name = CAST(p.supplier AS TEXT))
+    LEFT JOIN purchase_items pi ON CAST(pi.purchase_id AS TEXT) = CAST(p.id AS TEXT)
+    LEFT JOIN item_master im ON (CAST(im.id AS TEXT) = CAST(pi.item_id AS TEXT) OR im.item_name = CAST(pi.item_name AS TEXT))
+    LEFT JOIN vehicle_movements vm ON (CAST(vm.reference_id AS TEXT) = CAST(p.id AS TEXT) OR CAST(vm.reference_id AS TEXT) = CAST(p.inv_no AS TEXT) OR (vm.lot_no IS NOT NULL AND CAST(vm.lot_no AS TEXT) != '' AND CAST(vm.lot_no AS TEXT) = CAST(pi.lot_no AS TEXT)))
     LEFT JOIN (
       SELECT 
         purchase_id,
@@ -193,8 +193,8 @@ router.get(['/', '/list', '/purchase-list'], async (req, res) => {
         SUM(CASE WHEN UPPER(COALESCE(type, 'LESS')) = 'LESS' THEN amount ELSE 0 END) AS less_deduction_amount
       FROM purchase_deductions
       GROUP BY purchase_id
-    ) pad ON pad.purchase_id = p.id
-    LEFT JOIN qc_inspections qci ON (CAST(qci.purchase_id AS TEXT) = CAST(p.id AS TEXT) OR ('PUR-' || CAST(p.id AS TEXT)) = CAST(qci.purchase_id AS TEXT) OR ('PUR-' || CAST(p.s_no AS TEXT)) = CAST(qci.purchase_id AS TEXT)) AND qci.rm_lot_no = pi.lot_no
+    ) pad ON CAST(pad.purchase_id AS TEXT) = CAST(p.id AS TEXT)
+    LEFT JOIN qc_inspections qci ON (CAST(qci.purchase_id AS TEXT) = CAST(p.id AS TEXT) OR ('PUR-' || CAST(p.id AS TEXT)) = CAST(qci.purchase_id AS TEXT) OR ('PUR-' || CAST(p.s_no AS TEXT)) = CAST(qci.purchase_id AS TEXT)) AND CAST(qci.rm_lot_no AS TEXT) = CAST(pi.lot_no AS TEXT)
     ORDER BY p.date DESC, p.id DESC`
 
     const rows = await db.query(sql)
@@ -322,10 +322,31 @@ router.post('/', async (req, res) => {
     const vehicle_no = formData.vehicle_no || formData.lorry_no || '';
     const driver_name = formData.driver_name || formData.driver || '';
 
+    let finalSno = parseInt(formData.sno || formData.s_no, 10);
+    if (!finalSno || isNaN(finalSno)) {
+      try {
+        const snoRes = await db.query('SELECT COALESCE(MAX(s_no), 0) + 1 AS next_sno FROM purchases');
+        finalSno = parseInt(snoRes.rows[0]?.next_sno, 10) || 1;
+      } catch (e) {
+        finalSno = 1;
+      }
+    }
+
+    let finalInvNo = (formData.invNo || formData.inv_no || '').trim();
+    if (!finalInvNo) {
+      finalInvNo = `PUR-${finalSno}`;
+    }
+    try {
+      const invCheck = await db.query('SELECT id FROM purchases WHERE inv_no = ? LIMIT 1', [finalInvNo]);
+      if (invCheck.rows && invCheck.rows.length > 0) {
+        finalInvNo = `${finalInvNo}-${Date.now().toString().slice(-4)}`;
+      }
+    } catch (e) {}
+
     const insertValues = [
-      parseInt(formData.sno || formData.s_no) || 1,
+      finalSno,
       formData.date || new Date().toISOString().slice(0, 10),
-      formData.invNo || formData.inv_no || '',
+      finalInvNo,
       formData.supplier || '',
       formData.payType || formData.pay_type || 'Credit',
       formData.invDate || formData.inv_date || null,

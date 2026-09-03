@@ -85,6 +85,202 @@ function isMasterTableQuery(sql) {
 }
 
 // ============================================================================
+// PAREN-AWARE SQL EXPRESSION REPLACERS
+// ============================================================================
+function replaceGroupConcat(sql) {
+  const marker = 'GROUP_CONCAT';
+  let result = '';
+  let i = 0;
+  while (i < sql.length) {
+    const idx = sql.toUpperCase().indexOf(marker, i);
+    if (idx === -1) {
+      result += sql.slice(i);
+      break;
+    }
+    if (idx > 0 && /[a-zA-Z0-9_]/.test(sql[idx - 1])) {
+      result += sql.slice(i, idx + marker.length);
+      i = idx + marker.length;
+      continue;
+    }
+    result += sql.slice(i, idx);
+    let cur = idx + marker.length;
+    while (cur < sql.length && /\s/.test(sql[cur])) cur++;
+    if (sql[cur] !== '(') {
+      result += marker;
+      i = idx + marker.length;
+      continue;
+    }
+    cur++;
+    let depth = 1;
+    let inSingleQuote = false;
+    let inDoubleQuote = false;
+    let args = [];
+    let curArg = '';
+
+    while (cur < sql.length && depth > 0) {
+      const char = sql[cur];
+      if (char === "'" && !inDoubleQuote) {
+        if (inSingleQuote && sql[cur + 1] === "'") {
+          curArg += "''";
+          cur += 2;
+          continue;
+        }
+        inSingleQuote = !inSingleQuote;
+        curArg += char;
+        cur++;
+        continue;
+      }
+      if (char === '"' && !inSingleQuote) {
+        inDoubleQuote = !inDoubleQuote;
+        curArg += char;
+        cur++;
+        continue;
+      }
+      if (!inSingleQuote && !inDoubleQuote) {
+        if (char === '(') {
+          depth++;
+          curArg += char;
+        } else if (char === ')') {
+          depth--;
+          if (depth === 0) {
+            args.push(curArg.trim());
+            curArg = '';
+          } else {
+            curArg += char;
+          }
+        } else if (char === ',' && depth === 1) {
+          args.push(curArg.trim());
+          curArg = '';
+        } else {
+          curArg += char;
+        }
+      } else {
+        curArg += char;
+      }
+      cur++;
+    }
+
+    if (depth !== 0 || args.length === 0) {
+      result += marker;
+      i = idx + marker.length;
+      continue;
+    }
+
+    let expr = args[0] || '';
+    let delimiter = args[1] || "', '";
+    let isDistinct = false;
+    if (/^DISTINCT\s+/i.test(expr)) {
+      isDistinct = true;
+      expr = expr.replace(/^DISTINCT\s+/i, '').trim();
+    }
+
+    result += `STRING_AGG(${isDistinct ? 'DISTINCT ' : ''}(${expr})::text, ${delimiter})`;
+    i = cur;
+  }
+  return result;
+}
+
+function replaceStrftime(sql) {
+  const marker = 'STRFTIME';
+  let result = '';
+  let i = 0;
+  while (i < sql.length) {
+    const idx = sql.toUpperCase().indexOf(marker, i);
+    if (idx === -1) {
+      result += sql.slice(i);
+      break;
+    }
+    if (idx > 0 && /[a-zA-Z0-9_]/.test(sql[idx - 1])) {
+      result += sql.slice(i, idx + marker.length);
+      i = idx + marker.length;
+      continue;
+    }
+    result += sql.slice(i, idx);
+    let cur = idx + marker.length;
+    while (cur < sql.length && /\s/.test(sql[cur])) cur++;
+    if (sql[cur] !== '(') {
+      result += marker;
+      i = idx + marker.length;
+      continue;
+    }
+    cur++;
+    let depth = 1;
+    let inSingleQuote = false;
+    let inDoubleQuote = false;
+    let args = [];
+    let curArg = '';
+
+    while (cur < sql.length && depth > 0) {
+      const char = sql[cur];
+      if (char === "'" && !inDoubleQuote) {
+        if (inSingleQuote && sql[cur + 1] === "'") {
+          curArg += "''";
+          cur += 2;
+          continue;
+        }
+        inSingleQuote = !inSingleQuote;
+        curArg += char;
+        cur++;
+        continue;
+      }
+      if (char === '"' && !inSingleQuote) {
+        inDoubleQuote = !inDoubleQuote;
+        curArg += char;
+        cur++;
+        continue;
+      }
+      if (!inSingleQuote && !inDoubleQuote) {
+        if (char === '(') {
+          depth++;
+          curArg += char;
+        } else if (char === ')') {
+          depth--;
+          if (depth === 0) {
+            args.push(curArg.trim());
+            curArg = '';
+          } else {
+            curArg += char;
+          }
+        } else if (char === ',' && depth === 1) {
+          args.push(curArg.trim());
+          curArg = '';
+        } else {
+          curArg += char;
+        }
+      } else {
+        curArg += char;
+      }
+      cur++;
+    }
+
+    if (depth !== 0 || args.length < 2) {
+      result += marker;
+      i = idx + marker.length;
+      continue;
+    }
+
+    const fmt = args[0].replace(/['"]/g, '').trim();
+    const colExpr = args[1].trim();
+
+    if (fmt === '%Y-%m') {
+      result += `SUBSTRING((${colExpr})::text FROM 1 FOR 7)`;
+    } else if (fmt === '%Y') {
+      result += `SUBSTRING((${colExpr})::text FROM 1 FOR 4)`;
+    } else if (fmt === '%m') {
+      result += `SUBSTRING((${colExpr})::text FROM 6 FOR 2)`;
+    } else if (fmt === '%d') {
+      result += `SUBSTRING((${colExpr})::text FROM 9 FOR 2)`;
+    } else if (fmt === '%Y-%m-%d') {
+      result += `SUBSTRING((${colExpr})::text FROM 1 FOR 10)`;
+    } else {
+      result += `SUBSTRING((${colExpr})::text FROM 1 FOR 10)`;
+    }
+    i = cur;
+  }
+  return result;
+}
+
+// ============================================================================
 // SQL NORMALIZER & TRANSLATOR (SQLite <-> PostgreSQL)
 // ============================================================================
 function translateSqlForPostgres(sql, companyId = 1) {
@@ -109,16 +305,22 @@ function translateSqlForPostgres(sql, companyId = 1) {
   }
 
   if (/^PRAGMA\s+/i.test(transformed)) {
-    // Non-applicable SQLite pragmas (foreign_keys, journal_mode, synchronous, busy_timeout, wal_checkpoint) become safe no-ops
+    // Non-applicable SQLite pragmas become safe no-ops
     return 'SELECT 1 AS pragma_result';
   }
 
-  // 1. Convert sqlite_master checks to information_schema.tables
-  if (transformed.toLowerCase().includes('sqlite_master')) {
-    transformed = transformed.replace(/FROM\s+sqlite_master\s+WHERE\s+type\s*=\s*'table'/gi, 
-      `FROM information_schema.tables WHERE table_schema = 'public' OR table_schema = 'company_${companyId}'`);
-    transformed = transformed.replace(/SELECT\s+name\s+FROM/gi, 'SELECT table_name AS name FROM');
-    transformed = transformed.replace(/SELECT\s+sql\s+FROM/gi, "SELECT '' AS sql FROM");
+  // 1. Convert sqlite_master queries safely with virtual table subquery
+  if (/\bsqlite_master\b/i.test(transformed)) {
+    const virtualMaster = `(
+      SELECT tablename AS name, tablename AS table_name, 'table' AS type, tablename AS tbl_name, '' AS sql 
+      FROM pg_tables 
+      WHERE schemaname IN ('public', 'company_${companyId}')
+      UNION ALL
+      SELECT indexname AS name, indexname AS table_name, 'index' AS type, tablename AS tbl_name, '' AS sql
+      FROM pg_indexes
+      WHERE schemaname IN ('public', 'company_${companyId}')
+    ) AS sqlite_master`;
+    transformed = transformed.replace(/\bsqlite_master\b/gi, virtualMaster);
   }
 
   // 2. Convert INSERT OR IGNORE to INSERT ... ON CONFLICT DO NOTHING
@@ -142,21 +344,23 @@ function translateSqlForPostgres(sql, companyId = 1) {
   transformed = transformed.replace(/DATETIME\s+DEFAULT\s+CURRENT_TIMESTAMP/gi, 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
   transformed = transformed.replace(/DATETIME/gi, 'TIMESTAMP');
 
-  // 4b. Translate SQLite SQL functions for PostgreSQL
-  transformed = transformed.replace(/GROUP_CONCAT\s*\(\s*DISTINCT\s+([^,\)]+)\s*,\s*([^)]+)\s*\)/gi, 'STRING_AGG(DISTINCT ($1)::text, $2)');
-  transformed = transformed.replace(/GROUP_CONCAT\s*\(\s*DISTINCT\s+([^)]+)\s*\)/gi, "STRING_AGG(DISTINCT ($1)::text, ', ')");
-  transformed = transformed.replace(/GROUP_CONCAT\s*\(\s*([^,\)]+)\s*,\s*([^)]+)\s*\)/gi, 'STRING_AGG(($1)::text, $2)');
-  transformed = transformed.replace(/GROUP_CONCAT\s*\(\s*([^)]+)\s*\)/gi, "STRING_AGG(($1)::text, ', ')");
+  // 4b. Translate SQLite SQL functions for PostgreSQL using paren-matching parsers
+  transformed = replaceGroupConcat(transformed);
+  transformed = replaceStrftime(transformed);
+
   transformed = transformed.replace(/DATE\s*\(\s*['"]now['"]\s*\)/gi, 'CURRENT_DATE');
-  transformed = transformed.replace(/DATETIME\s*\(\s*['"]now['"]\s*\)/gi, 'CURRENT_TIMESTAMP');
-  transformed = transformed.replace(/STRFTIME\s*\(\s*['"]%Y-%m['"]\s*,\s*([^)]+)\)/gi, 'SUBSTRING(($1)::text FROM 1 FOR 7)');
-  transformed = transformed.replace(/STRFTIME\s*\(\s*['"]%Y['"]\s*,\s*([^)]+)\)/gi, 'SUBSTRING(($1)::text FROM 1 FOR 4)');
-  transformed = transformed.replace(/STRFTIME\s*\(\s*['"]%m['"]\s*,\s*([^)]+)\)/gi, 'SUBSTRING(($1)::text FROM 6 FOR 2)');
-  transformed = transformed.replace(/STRFTIME\s*\(\s*['"]%d['"]\s*,\s*([^)]+)\)/gi, 'SUBSTRING(($1)::text FROM 9 FOR 2)');
+  transformed = transformed.replace(/DATETIME\s*\(\s*['"]now['"]\s*(?:,\s*['"][^'"]*['"])?\s*\)/gi, 'CURRENT_TIMESTAMP');
   transformed = transformed.replace(/IFNULL\s*\(/gi, 'COALESCE(');
   transformed = transformed.replace(/ROUND\s*\(\s*([^,]+?)\s*,\s*(\d+)\s*\)/gi, 'ROUND(($1)::numeric, $2)');
 
-  // 4c. Translate SQLite GLOB operator to PostgreSQL regex / LIKE
+  // 4c. Prevent empty IN () / NOT IN () syntax errors
+  transformed = transformed.replace(/\bIN\s*\(\s*\)/gi, 'IN (NULL)');
+  transformed = transformed.replace(/\bNOT\s+IN\s*\(\s*\)/gi, 'NOT IN (NULL)');
+
+  // 4d. Ensure ADD COLUMN uses IF NOT EXISTS for PostgreSQL
+  transformed = transformed.replace(/ADD\s+COLUMN\s+(?!IF\s+NOT\s+EXISTS\b)(\w+)/gi, 'ADD COLUMN IF NOT EXISTS $1');
+
+  // 4e. Translate SQLite GLOB operator to PostgreSQL regex / LIKE
   transformed = transformed.replace(/\bGLOB\s+'\[0-9\]\*'/gi, "~ '^[0-9]'");
   transformed = transformed.replace(/\bGLOB\s+'([^']+)'/gi, (match, pattern) => {
     if (pattern.includes('[') || pattern.includes('?')) {
@@ -167,10 +371,10 @@ function translateSqlForPostgres(sql, companyId = 1) {
     return `LIKE '${likePattern}'`;
   });
 
-  // 4d. Fix double-quoted default string literals: DEFAULT "value" -> DEFAULT 'value'
+  // 4f. Fix double-quoted default string literals: DEFAULT "value" -> DEFAULT 'value'
   transformed = transformed.replace(/DEFAULT\s+"([^"]+)"/gi, "DEFAULT '$1'");
 
-  // 4e. Handle reserved keyword current_date when used as column definition or assignment
+  // 4g. Handle reserved keyword current_date when used as column definition or assignment
   transformed = transformed.replace(/\bcurrent_date\s+TEXT\b/gi, '"current_date" TEXT');
   transformed = transformed.replace(/,\s*current_date\s*,/gi, ', "current_date",');
   transformed = transformed.replace(/\bcurrent_date\s*=\s*excluded\.current_date\b/gi, '"current_date" = excluded."current_date"');
@@ -298,6 +502,46 @@ function resolveTargetDatabase(sql, explicitCompanyId = null) {
 }
 
 // ============================================================================
+// POSTGRESQL SEQUENCE RESYNCHRONIZATION
+// ============================================================================
+async function resyncPostgresSequences(clientOrPool, schemaName = null) {
+  try {
+    const q = clientOrPool.query ? clientOrPool : pgPool;
+    if (!q) return;
+
+    const sql = `
+      SELECT 
+        n.nspname AS schema_name,
+        c.relname AS table_name,
+        a.attname AS column_name,
+        s.relname AS sequence_name
+      FROM pg_class s
+      JOIN pg_depend d ON d.objid = s.oid
+      JOIN pg_class c ON d.refobjid = c.oid
+      JOIN pg_attribute a ON (d.refobjid = a.attrelid AND d.refobjsubid = a.attnum)
+      JOIN pg_namespace n ON n.oid = s.relnamespace
+      WHERE s.relkind = 'S' AND c.relkind = 'r'
+        ${schemaName ? 'AND n.nspname = $1' : "AND n.nspname IN ('public', 'company_1')"}
+    `;
+    const params = schemaName ? [schemaName] : [];
+    const res = await q.query(sql, params);
+    for (const row of (res.rows || [])) {
+      try {
+        await q.query(`
+          SELECT setval(
+            '"' || $1 || '"."' || $2 || '"', 
+            COALESCE((SELECT MAX("${row.column_name}") FROM "${row.schema_name}"."${row.table_name}"), 0) + 1, 
+            false
+          )
+        `, [row.schema_name, row.sequence_name]);
+      } catch (e) {}
+    }
+  } catch (err) {
+    console.warn('⚠️ [PostgreSQL] Sequence resync warning:', err.message);
+  }
+}
+
+// ============================================================================
 // POSTGRESQL MULTI-TENANT QUERY RUNNER
 // ============================================================================
 async function executePgQuery(sql, params = [], companyId = 1, isMaster = false) {
@@ -318,8 +562,21 @@ async function executePgQuery(sql, params = [], companyId = 1, isMaster = false)
       await client.query(`SET search_path TO public;`);
     }
 
-    const transformedSql = translateSqlForPostgres(sql, cId);
-    const result = await client.query(transformedSql, params);
+    let transformedSql = translateSqlForPostgres(sql, cId);
+    let result;
+    try {
+      result = await client.query(transformedSql, params);
+    } catch (queryErr) {
+      if (queryErr.code === '42703' && /RETURNING id/i.test(transformedSql)) {
+        const withoutReturning = transformedSql.replace(/\s+RETURNING\s+id\b/gi, '');
+        result = await client.query(withoutReturning, params);
+      } else if (queryErr.code === '23505' && /duplicate key value violates unique constraint/i.test(queryErr.message)) {
+        await resyncPostgresSequences(client, schemaName);
+        result = await client.query(transformedSql, params);
+      } else {
+        throw queryErr;
+      }
+    }
 
     // Normalize result object for compatibility
     let lastID = null;
@@ -699,7 +956,8 @@ async function ensurePostgresMasterSchema() {
         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     `);
 
-    console.log('✓ PostgreSQL public master schema verified successfully');
+    await resyncPostgresSequences(client);
+    console.log('✓ PostgreSQL public master schema and sequences verified successfully');
   } catch (err) {
     console.error('⚠️ [PostgreSQL] Master schema check notice:', err.message);
   } finally {
@@ -737,8 +995,23 @@ class PgDbConnection {
   }
 
   async query(text, params = []) {
-    const transformed = translateSqlForPostgres(text, this.companyId);
-    const result = await this.client.query(transformed, params);
+    let transformed = translateSqlForPostgres(text, this.companyId);
+    const schemaName = this.isMaster ? 'public' : `company_${this.companyId}`;
+    let result;
+    try {
+      result = await this.client.query(transformed, params);
+    } catch (queryErr) {
+      if (queryErr.code === '42703' && /RETURNING id/i.test(transformed)) {
+        const withoutReturning = transformed.replace(/\s+RETURNING\s+id\b/gi, '');
+        result = await this.client.query(withoutReturning, params);
+      } else if (queryErr.code === '23505' && /duplicate key value violates unique constraint/i.test(queryErr.message)) {
+        await resyncPostgresSequences(this.client, schemaName);
+        result = await this.client.query(transformed, params);
+      } else {
+        throw queryErr;
+      }
+    }
+
     let lastID = null;
     if (result.rows && result.rows.length > 0 && result.rows[0].id !== undefined) {
       lastID = result.rows[0].id;

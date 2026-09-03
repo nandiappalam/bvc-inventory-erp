@@ -51,12 +51,12 @@ router.get('/pending', asyncHandler(async (req, res) => {
     FROM stock_lots sl
     LEFT JOIN purchase_items pi ON sl.lot_no = pi.lot_no
     LEFT JOIN purchases p ON (
-      p.id = pi.purchase_id 
+      CAST(p.id AS TEXT) = CAST(pi.purchase_id AS TEXT) 
       OR CAST(p.id AS TEXT) = CAST(sl.purchase_id AS TEXT) 
-      OR ('PUR-' || p.id) = CAST(sl.purchase_id AS TEXT) 
-      OR ('PUR-' || p.s_no) = CAST(sl.purchase_id AS TEXT)
+      OR ('PUR-' || CAST(p.id AS TEXT)) = CAST(sl.purchase_id AS TEXT) 
+      OR ('PUR-' || CAST(p.s_no AS TEXT)) = CAST(sl.purchase_id AS TEXT)
     )
-    LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = p.supplier OR sm.print_name = p.supplier)
+    LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = CAST(p.supplier AS TEXT) OR sm.print_name = CAST(p.supplier AS TEXT))
   `;
 
   if (!showAll) {
@@ -90,13 +90,13 @@ router.get(['/history', '/purchase-lab-testing'], asyncHandler(async (req, res) 
     LEFT JOIN stock_lots sl ON qi.rm_lot_no = sl.lot_no
     LEFT JOIN purchase_items pi ON qi.rm_lot_no = pi.lot_no
     LEFT JOIN purchases p ON (
-      p.id = pi.purchase_id 
+      CAST(p.id AS TEXT) = CAST(pi.purchase_id AS TEXT) 
       OR CAST(p.id AS TEXT) = CAST(qi.purchase_id AS TEXT) 
-      OR ('PUR-' || p.id) = CAST(qi.purchase_id AS TEXT) 
-      OR ('PUR-' || p.s_no) = CAST(qi.purchase_id AS TEXT)
+      OR ('PUR-' || CAST(p.id AS TEXT)) = CAST(qi.purchase_id AS TEXT) 
+      OR ('PUR-' || CAST(p.s_no AS TEXT)) = CAST(qi.purchase_id AS TEXT)
       OR CAST(p.id AS TEXT) = CAST(sl.purchase_id AS TEXT)
     )
-    LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = p.supplier OR sm.print_name = p.supplier)
+    LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = CAST(p.supplier AS TEXT) OR sm.print_name = CAST(p.supplier AS TEXT))
     ORDER BY qi.inspection_date DESC, qi.id DESC
   `);
   res.json({ success: true, data: history.rows });
@@ -110,6 +110,9 @@ router.get('/registers', asyncHandler(async (req, res) => {
   } catch (e) {}
   try {
     await db.run("ALTER TABLE stock_lots ADD COLUMN godown_id INTEGER");
+  } catch (e) {}
+  try {
+    await db.run("ALTER TABLE stock_lots ADD COLUMN godown_name TEXT");
   } catch (e) {}
 
   const qcList = await db.query(`
@@ -132,14 +135,14 @@ router.get('/registers', asyncHandler(async (req, res) => {
     LEFT JOIN stock_lots sl ON qi.rm_lot_no = sl.lot_no
     LEFT JOIN purchase_items pi ON qi.rm_lot_no = pi.lot_no
     LEFT JOIN purchases p ON (
-      p.id = pi.purchase_id 
+      CAST(p.id AS TEXT) = CAST(pi.purchase_id AS TEXT) 
       OR CAST(p.id AS TEXT) = CAST(qi.purchase_id AS TEXT) 
-      OR ('PUR-' || p.id) = CAST(qi.purchase_id AS TEXT) 
-      OR ('PUR-' || p.s_no) = CAST(qi.purchase_id AS TEXT)
+      OR ('PUR-' || CAST(p.id AS TEXT)) = CAST(qi.purchase_id AS TEXT) 
+      OR ('PUR-' || CAST(p.s_no AS TEXT)) = CAST(qi.purchase_id AS TEXT)
       OR CAST(p.id AS TEXT) = CAST(sl.purchase_id AS TEXT)
     )
-    LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = p.supplier OR sm.print_name = p.supplier)
-    LEFT JOIN godown_master g ON sl.godown_id = g.id
+    LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = CAST(p.supplier AS TEXT) OR sm.print_name = CAST(p.supplier AS TEXT))
+    LEFT JOIN godown_master g ON (CAST(g.id AS TEXT) = CAST(sl.godown_id AS TEXT) OR g.godown_name = CAST(sl.godown_id AS TEXT))
     ORDER BY qi.inspection_date DESC, qi.id DESC
   `);
 
@@ -147,7 +150,7 @@ router.get('/registers', asyncHandler(async (req, res) => {
     const isReturned = await db.query(`
       SELECT pr.id, pr.return_inv_no 
       FROM purchase_return_items pri
-      INNER JOIN purchase_returns pr ON pri.purchase_return_id = pr.id
+      INNER JOIN purchase_returns pr ON CAST(pri.purchase_return_id AS TEXT) = CAST(pr.id AS TEXT)
       WHERE pri.lot_no = ?
     `, [row.rm_lot_no]);
     
@@ -160,7 +163,7 @@ router.get('/registers', asyncHandler(async (req, res) => {
     const allocs = await db.query(`
       SELECT sl.id, sl.godown_id, sl.quantity, sl.remaining_quantity, sl.unloading_status, g.godown_name
       FROM stock_lots sl
-      LEFT JOIN godown_master g ON sl.godown_id = g.id
+      LEFT JOIN godown_master g ON (CAST(g.id AS TEXT) = CAST(sl.godown_id AS TEXT) OR g.godown_name = CAST(sl.godown_id AS TEXT))
       WHERE sl.lot_no = ?
     `, [row.rm_lot_no]);
     row.allocations = allocs.rows || [];
@@ -193,18 +196,17 @@ router.get('/registers', asyncHandler(async (req, res) => {
       COALESCE(sl.unloading_status, 'PENDING_DECISION') as unloading_status,
       COALESCE(sm.print_name, sm.name, p.supplier, '') as supplier_name
     FROM incoming_quality_reports iqr
-    LEFT JOIN qc_inspections qi ON iqr.qc_id = qi.id
+    LEFT JOIN qc_inspections qi ON CAST(iqr.qc_id AS TEXT) = CAST(qi.id AS TEXT)
     LEFT JOIN stock_lots sl ON iqr.rm_lot_no = sl.lot_no
     LEFT JOIN purchase_items pi ON (iqr.rm_lot_no = pi.lot_no OR (qi.rm_lot_no IS NOT NULL AND qi.rm_lot_no = pi.lot_no))
     LEFT JOIN purchases p ON (
-      p.id = pi.purchase_id 
+      CAST(p.id AS TEXT) = CAST(pi.purchase_id AS TEXT) 
       OR CAST(p.id AS TEXT) = CAST(qi.purchase_id AS TEXT) 
-      OR ('PUR-' || p.id) = CAST(qi.purchase_id AS TEXT) 
-      OR ('PUR-' || p.s_no) = CAST(qi.purchase_id AS TEXT)
+      OR ('PUR-' || CAST(p.id AS TEXT)) = CAST(qi.purchase_id AS TEXT) 
+      OR ('PUR-' || CAST(p.s_no AS TEXT)) = CAST(qi.purchase_id AS TEXT)
       OR CAST(p.id AS TEXT) = CAST(sl.purchase_id AS TEXT)
     )
-    LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = p.supplier OR sm.print_name = p.supplier)
-    GROUP BY iqr.id
+    LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = CAST(p.supplier AS TEXT) OR sm.print_name = CAST(p.supplier AS TEXT))
     ORDER BY iqr.uploaded_date DESC, iqr.id DESC
   `);
 
@@ -220,6 +222,13 @@ router.get('/registers', asyncHandler(async (req, res) => {
 // GET /api/qc/inspection/:id or /api/quality/purchase-lab-testing/:id
 router.get(['/inspection/:id', '/purchase-lab-testing/:id'], asyncHandler(async (req, res) => {
   const { id } = req.params;
+  try {
+    await db.run("ALTER TABLE stock_lots ADD COLUMN godown_id INTEGER");
+  } catch (e) {}
+  try {
+    await db.run("ALTER TABLE stock_lots ADD COLUMN godown_name TEXT");
+  } catch (e) {}
+
   const inspectionResult = await db.query(`
     SELECT 
       qi.id,
@@ -247,14 +256,14 @@ router.get(['/inspection/:id', '/purchase-lab-testing/:id'], asyncHandler(async 
     LEFT JOIN stock_lots sl ON qi.rm_lot_no = sl.lot_no
     LEFT JOIN purchase_items pi ON qi.rm_lot_no = pi.lot_no
     LEFT JOIN purchases p ON (
-      p.id = pi.purchase_id 
+      CAST(p.id AS TEXT) = CAST(pi.purchase_id AS TEXT) 
       OR CAST(p.id AS TEXT) = CAST(qi.purchase_id AS TEXT) 
-      OR ('PUR-' || p.id) = CAST(qi.purchase_id AS TEXT) 
-      OR ('PUR-' || p.s_no) = CAST(qi.purchase_id AS TEXT)
+      OR ('PUR-' || CAST(p.id AS TEXT)) = CAST(qi.purchase_id AS TEXT) 
+      OR ('PUR-' || CAST(p.s_no AS TEXT)) = CAST(qi.purchase_id AS TEXT)
       OR CAST(p.id AS TEXT) = CAST(sl.purchase_id AS TEXT)
     )
-    LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = p.supplier OR sm.print_name = p.supplier)
-    LEFT JOIN godown_master g ON sl.godown_id = g.id
+    LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = CAST(p.supplier AS TEXT) OR sm.print_name = CAST(p.supplier AS TEXT))
+    LEFT JOIN godown_master g ON (CAST(sl.godown_id AS TEXT) = CAST(g.id AS TEXT) OR g.godown_name = CAST(sl.godown_id AS TEXT))
     WHERE qi.id = ? OR qi.qc_no = ?
   `, [id, id]);
 

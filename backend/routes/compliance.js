@@ -156,7 +156,6 @@ async function cleanupSeedComplianceData() {
 }
 
 async function seedDefaultComplianceData() {
-  return;
   console.log('Seeding initial quality & compliance documents & records...');
   
   // D1: Work Instruction

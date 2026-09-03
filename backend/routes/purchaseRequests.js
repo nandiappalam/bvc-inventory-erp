@@ -100,23 +100,30 @@ const getNextPrNo = async () => {
     const res = await db.query(`
       SELECT pr_no, id FROM purchase_requests
     `);
-    let maxNum = res.rows ? res.rows.length : 0;
+    let maxNum = 0;
+    const existingNos = new Set();
     if (res.rows && res.rows.length > 0) {
       for (const row of res.rows) {
         if (row.pr_no) {
-          const numPart = parseInt(row.pr_no.replace(/[^0-9]/g, ''), 10);
+          existingNos.add(row.pr_no);
+          const numPart = parseInt(String(row.pr_no).replace(/[^0-9]/g, ''), 10);
           if (!isNaN(numPart) && numPart > maxNum) {
             maxNum = numPart;
           }
         }
-        if (row.id && row.id > maxNum) {
-          maxNum = row.id;
+        if (row.id && Number(row.id) > maxNum) {
+          maxNum = Number(row.id);
         }
       }
     }
-    return `PR${String(maxNum + 1).padStart(6, '0')}`;
+    let candidate = `PR${String(maxNum + 1).padStart(6, '0')}`;
+    while (existingNos.has(candidate)) {
+      maxNum++;
+      candidate = `PR${String(maxNum + 1).padStart(6, '0')}`;
+    }
+    return candidate;
   } catch (e) {
-    return 'PR000001';
+    return `PR${String(Date.now()).slice(-6)}`;
   }
 };
 
@@ -604,7 +611,17 @@ router.post('/', async (req, res) => {
       items = []
     } = req.body;
 
-    const prNumber = pr_no || (await getNextPrNo());
+    let prNumber = (pr_no || '').trim();
+    if (!prNumber) {
+      prNumber = await getNextPrNo();
+    } else {
+      try {
+        const checkPr = await db.query('SELECT id FROM purchase_requests WHERE pr_no = ? LIMIT 1', [prNumber]);
+        if (checkPr.rows && checkPr.rows.length > 0) {
+          prNumber = await getNextPrNo();
+        }
+      } catch (e) {}
+    }
     const reqDate = request_date || new Date().toISOString().split('T')[0];
 
     const prResult = await db.run(`

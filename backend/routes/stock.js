@@ -833,8 +833,8 @@ router.get('/available-lots', async (req, res) => {
           0
         ) AS per_unit_weight
       FROM stock_lots sl
-      LEFT JOIN purchases p ON p.id = sl.purchase_id
-      LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = p.supplier)
+      LEFT JOIN purchases p ON CAST(p.id AS TEXT) = CAST(sl.purchase_id AS TEXT)
+      LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = CAST(p.supplier AS TEXT) OR sm.print_name = CAST(p.supplier AS TEXT))
       WHERE COALESCE(sl.remaining_quantity, sl.quantity, 0) > 0
         AND (sl.unloading_status IS NULL OR sl.unloading_status != 'RETURNED')
         AND sl.lot_no NOT IN (
@@ -945,8 +945,8 @@ router.get('/available/:itemId', async (req, res) => {
           0
         ) AS per_unit_weight
       FROM stock_lots sl
-      LEFT JOIN purchases p ON p.id = sl.purchase_id
-      LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = p.supplier)
+      LEFT JOIN purchases p ON CAST(p.id AS TEXT) = CAST(sl.purchase_id AS TEXT)
+      LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = CAST(p.supplier AS TEXT) OR sm.print_name = CAST(p.supplier AS TEXT))
       WHERE (
         CAST(sl.item_id AS TEXT) = ? 
         OR LOWER(sl.item_name) = LOWER(?)
@@ -1038,8 +1038,8 @@ router.get('/available-item-name/:itemName', async (req, res) => {
           0
         ) AS per_unit_weight
       FROM stock_lots sl
-      LEFT JOIN purchases p ON p.id = sl.purchase_id
-      LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = p.supplier)
+      LEFT JOIN purchases p ON CAST(p.id AS TEXT) = CAST(sl.purchase_id AS TEXT)
+      LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = CAST(p.supplier AS TEXT) OR sm.print_name = CAST(p.supplier AS TEXT))
       WHERE (
         LOWER(sl.item_name) = LOWER(?)
         OR sl.item_name LIKE ?

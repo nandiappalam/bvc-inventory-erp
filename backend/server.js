@@ -37,7 +37,7 @@ app.use(cors({
     callback(null, true); // permissive during development
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Company-Id', 'X-User-Id', 'Accept', 'Origin'],
   credentials: true,
   preflightContinue: false,
   optionsSuccessStatus: 204,

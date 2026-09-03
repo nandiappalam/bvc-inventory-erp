@@ -33,8 +33,8 @@ router.get('/reference-options/:type', async (req, res) => {
         SELECT p.id, p.inv_no as reference_id, s.name as party_name,
                pi.item_name, pi.qty, pi.per_unit_weight as weight, pi.lot_no
         FROM purchases p
-        LEFT JOIN supplier_master s ON p.supplier = s.id
-        LEFT JOIN purchase_items pi ON pi.purchase_id = p.id
+        LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(p.supplier AS TEXT) OR s.name = p.supplier OR s.print_name = p.supplier)
+        LEFT JOIN purchase_items pi ON CAST(pi.purchase_id AS TEXT) = CAST(p.id AS TEXT)
       `)
       return res.json(result.rows)
     } else if (type === 'SALES') {
@@ -43,8 +43,8 @@ router.get('/reference-options/:type', async (req, res) => {
         SELECT s.id, s.s_no as reference_id, c.name as party_name,
                si.item_name, si.qty, si.weight, si.lot_no
         FROM sales s
-        LEFT JOIN customer_master c ON s.customer = c.id
-        LEFT JOIN sales_items si ON si.sales_id = s.id
+        LEFT JOIN customer_master c ON (CAST(c.id AS TEXT) = CAST(s.customer AS TEXT) OR c.name = s.customer OR c.print_name = s.customer)
+        LEFT JOIN sales_items si ON CAST(si.sales_id AS TEXT) = CAST(s.id AS TEXT)
       `)
       return res.json(result.rows)
     } else {
@@ -80,25 +80,25 @@ async function autoTrackMovementStatus(db, movement) {
     const lotToMatch = movement.lot_no || details.lot_no;
     if (lotToMatch) {
       pRes = await db.query(`
-        SELECT p.id as purchase_id, p.inv_no, s.name as party_name,
+        SELECT p.id as purchase_id, p.inv_no, COALESCE(s.print_name, s.name, p.supplier) as party_name,
                pi.item_name, pi.qty, pi.per_unit_weight as weight, pi.lot_no
         FROM purchases p
-        LEFT JOIN supplier_master s ON p.supplier = s.id
-        LEFT JOIN purchase_items pi ON pi.purchase_id = p.id
-        WHERE (p.inv_no = ? OR p.id = ? OR CAST(p.id AS TEXT) = ?) AND pi.lot_no = ?
-      `, [movement.reference_id, movement.reference_id, movement.reference_id, lotToMatch]);
+        LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(p.supplier AS TEXT) OR s.name = p.supplier OR s.print_name = p.supplier)
+        LEFT JOIN purchase_items pi ON CAST(pi.purchase_id AS TEXT) = CAST(p.id AS TEXT)
+        WHERE (p.inv_no = ? OR CAST(p.id AS TEXT) = ? OR CAST(p.s_no AS TEXT) = ?) AND pi.lot_no = ?
+      `, [String(movement.reference_id), String(movement.reference_id), String(movement.reference_id), lotToMatch]);
     }
 
     // Fallback if no specific lot row found or if no lot was provided
     if (!pRes || pRes.rows.length === 0) {
       pRes = await db.query(`
-        SELECT p.id as purchase_id, p.inv_no, s.name as party_name,
+        SELECT p.id as purchase_id, p.inv_no, COALESCE(s.print_name, s.name, p.supplier) as party_name,
                pi.item_name, pi.qty, pi.per_unit_weight as weight, pi.lot_no
         FROM purchases p
-        LEFT JOIN supplier_master s ON p.supplier = s.id
-        LEFT JOIN purchase_items pi ON pi.purchase_id = p.id
-        WHERE p.inv_no = ? OR p.id = ? OR CAST(p.id AS TEXT) = ?
-      `, [movement.reference_id, movement.reference_id, movement.reference_id]);
+        LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(p.supplier AS TEXT) OR s.name = p.supplier OR s.print_name = p.supplier)
+        LEFT JOIN purchase_items pi ON CAST(pi.purchase_id AS TEXT) = CAST(p.id AS TEXT)
+        WHERE p.inv_no = ? OR CAST(p.id AS TEXT) = ? OR CAST(p.s_no AS TEXT) = ?
+      `, [String(movement.reference_id), String(movement.reference_id), String(movement.reference_id)]);
     }
 
     if (pRes.rows.length > 0) {
@@ -236,13 +236,13 @@ async function autoTrackMovementStatus(db, movement) {
   } else if (movement.reference_type === 'SALES' && movement.reference_id) {
     // Check sales details
     const sRes = await db.query(`
-      SELECT s.id, s.s_no as reference_id, c.name as party_name,
+      SELECT s.id, s.s_no as reference_id, COALESCE(c.print_name, c.name, s.customer) as party_name,
              si.item_name, si.qty, si.weight, si.lot_no
       FROM sales s
-      LEFT JOIN customer_master c ON s.customer = c.id
-      LEFT JOIN sales_items si ON si.sales_id = s.id
-      WHERE s.s_no = ? OR s.id = ?
-    `, [movement.reference_id, movement.reference_id]);
+      LEFT JOIN customer_master c ON (CAST(c.id AS TEXT) = CAST(s.customer AS TEXT) OR c.name = s.customer OR c.print_name = s.customer)
+      LEFT JOIN sales_items si ON CAST(si.sales_id AS TEXT) = CAST(s.id AS TEXT)
+      WHERE s.s_no = ? OR CAST(s.id AS TEXT) = ?
+    `, [String(movement.reference_id), String(movement.reference_id)]);
 
     if (sRes.rows.length > 0) {
       const row = sRes.rows[0];
@@ -375,11 +375,15 @@ router.get('/track-status', async (req, res) => {
 // GET /api/vehicle-movements - List all with transporter join
 router.get('/', async (req, res) => {
   try {
+    try {
+      await db.run("ALTER TABLE vehicle_movements ADD COLUMN transporter_name TEXT");
+    } catch (e) {}
+
     const result = await db.query(`
       SELECT vm.*, 
-             tm.name as transporter_name
+             COALESCE(tm.name, '') as transporter_name
       FROM vehicle_movements vm 
-      LEFT JOIN transport_master tm ON vm.transporter_id = tm.id 
+      LEFT JOIN transport_master tm ON (CAST(tm.id AS TEXT) = CAST(vm.transporter_id AS TEXT) OR tm.name = CAST(vm.transporter_id AS TEXT))
       ORDER BY vm.created_at DESC
     `)
     
@@ -400,13 +404,17 @@ router.get('/', async (req, res) => {
 // GET /api/vehicle-movements/:id
 router.get('/:id', async (req, res) => {
   try {
+    try {
+      await db.run("ALTER TABLE vehicle_movements ADD COLUMN transporter_name TEXT");
+    } catch (e) {}
+
     const result = await db.query(`
       SELECT vm.*, 
-             tm.name as transporter_name
+             COALESCE(tm.name, '') as transporter_name
       FROM vehicle_movements vm 
-      LEFT JOIN transport_master tm ON vm.transporter_id = tm.id 
-      WHERE vm.id = ?
-    `, [req.params.id])
+      LEFT JOIN transport_master tm ON (CAST(tm.id AS TEXT) = CAST(vm.transporter_id AS TEXT) OR tm.name = CAST(vm.transporter_id AS TEXT))
+      WHERE CAST(vm.id AS TEXT) = ?
+    `, [String(req.params.id)])
     
     if (result.rows.length === 0) {
       return res.status(404).json({ message: 'Vehicle movement not found' })

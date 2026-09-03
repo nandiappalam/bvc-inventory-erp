@@ -35,7 +35,7 @@ db.serialize(() => {
       .map(idx => {
         return new Promise((resolve) => {
           console.log('\n2. Dropping old index:', idx.name);
-          db.run(DROP INDEX IF EXISTS , (err) => {
+          db.run(`DROP INDEX IF EXISTS ${idx.name}`, (err) => {
             if (err) console.error('Error dropping index:', err.message);
             resolve();
           });

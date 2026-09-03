@@ -16,8 +16,20 @@ exports.createPurchaseOrder = async (formData, items = [], deductions = []) => {
     try {
         await client.beginTransaction();
 
-        const s_no = formData.s_no || formData.sNo || await exports.generateNextPurchaseOrderSNo();
-        const inv_no = formData.inv_no || formData.invNo || `PO-${s_no}`;
+        let s_no = parseInt(formData.s_no || formData.sNo, 10);
+        if (!s_no || isNaN(s_no)) {
+            s_no = await exports.generateNextPurchaseOrderSNo();
+        }
+        let inv_no = (formData.inv_no || formData.invNo || '').trim();
+        if (!inv_no) {
+            inv_no = `PO-${s_no}`;
+        }
+        try {
+            const checkInv = await client.query('SELECT id FROM purchase_orders WHERE inv_no = ? LIMIT 1', [inv_no]);
+            if (checkInv.rows && checkInv.rows.length > 0) {
+                inv_no = `${inv_no}-${Date.now().toString().slice(-4)}`;
+            }
+        } catch (e) {}
         
         let supplier_id = formData.supplier_id || formData.supplierId || null;
         let supplier_name = formData.supplier_name || formData.supplierName || '';

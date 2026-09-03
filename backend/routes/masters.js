@@ -150,7 +150,6 @@ const masterTypeAliases = {
   employees: { table: 'employee_master', displayField: 'name', hasStatus: true },
   employee_master: { table: 'employee_master', displayField: 'name', hasStatus: true },
   // Legacy table names also supported
-  item_master: { table: 'item_master', displayField: 'item_name', hasStatus: true },
   customer_master: { table: 'customer_master', displayField: 'name', hasStatus: true },
   supplier_master: { table: 'supplier_master', displayField: 'name', hasStatus: true },
   flour_mill_master: { table: 'flour_mill_master', displayField: 'flourmill', hasStatus: true },
@@ -483,10 +482,24 @@ router.get('/record/:table/:id', async (req, res) => {
       return res.status(400).json({ message: 'Invalid master table' })
     }
 
-    let result = await db.query(`SELECT * FROM ${tableName} WHERE id = ?`, [req.params.id])
+    const paramId = req.params.id
 
-    if (result.rows.length === 0 && tableConfig?.uniqueField) {
-      result = await db.query(`SELECT * FROM ${tableName} WHERE ${tableConfig.uniqueField} = ?`, [req.params.id])
+    // Try finding by id (with cast), then by unique field or display field
+    let result = { rows: [] }
+    try {
+      result = await db.query(`SELECT * FROM ${tableName} WHERE CAST(id AS TEXT) = ?`, [String(paramId)])
+    } catch (e1) {}
+
+    if (result.rows.length === 0 && tableConfig?.uniqueField && tableConfig.uniqueField !== 'id') {
+      try {
+        result = await db.query(`SELECT * FROM ${tableName} WHERE CAST(${tableConfig.uniqueField} AS TEXT) = ?`, [String(paramId)])
+      } catch (e2) {}
+    }
+
+    if (result.rows.length === 0 && tableConfig?.displayField) {
+      try {
+        result = await db.query(`SELECT * FROM ${tableName} WHERE ${tableConfig.displayField} = ?`, [String(paramId)])
+      } catch (e3) {}
     }
 
     if (result.rows.length === 0) {
