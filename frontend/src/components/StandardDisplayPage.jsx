@@ -34,10 +34,11 @@ const StandardDisplayPage = ({
   };
 
   const handlePrintList = () => {
+    const currentFY = (new Date().getMonth() >= 3 ? `${new Date().getFullYear()}-${new Date().getFullYear() + 1}` : `${new Date().getFullYear() - 1}-${new Date().getFullYear()}`);
     const colObjects = columns.map(col => typeof col === 'string' ? { key: col.toLowerCase().replace(/\s+/g, '_').replace(/\./g, ''), title: col } : col);
     printTableList(pageTitle, colObjects, filteredRecords, {
       company: selectedCompany?.name || 'BVC Company',
-      fy: financialYear || '2024-2025'
+      fy: financialYear || currentFY
     });
   };
   // State Management

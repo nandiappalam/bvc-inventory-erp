@@ -53,13 +53,12 @@ router.get(['/', '/list'], async (req, res) => {
         ) as deduction_amount
       FROM purchase_returns pr
       LEFT JOIN supplier_master sm ON (CAST(pr.supplier AS TEXT) = CAST(sm.id AS TEXT) OR pr.supplier = sm.name)
-      GROUP BY pr.id
       ORDER BY pr.id DESC
     `)
     res.json(result.rows)
   } catch (error) {
     console.error('Error fetching purchase returns:', error)
-    res.status(500).json({ message: 'Error fetching purchase returns' })
+    res.status(500).json({ message: 'Error fetching purchase returns', error: error.message })
   }
 })
 
@@ -100,10 +99,19 @@ router.get('/pending-returns', async (req, res) => {
         AND sl.lot_no NOT IN (
           SELECT DISTINCT lot_no FROM purchase_return_items WHERE lot_no IS NOT NULL AND lot_no != ''
         )
-      GROUP BY sl.lot_no
       ORDER BY sl.id DESC
     `);
-    res.json(result.rows || []);
+    const uniqueRows = [];
+    const seenLots = new Set();
+    for (const r of (result.rows || [])) {
+      if (r.lot_no && !seenLots.has(r.lot_no)) {
+        seenLots.add(r.lot_no);
+        uniqueRows.push(r);
+      } else if (!r.lot_no) {
+        uniqueRows.push(r);
+      }
+    }
+    res.json(uniqueRows);
   } catch (error) {
     console.error('Error fetching pending returns:', error);
     res.status(500).json([]);

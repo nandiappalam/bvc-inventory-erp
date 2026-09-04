@@ -260,9 +260,10 @@ const EntryDisplay = ({
   };
 
   const handlePrintList = () => {
+    const currentFY = (new Date().getMonth() >= 3 ? `${new Date().getFullYear()}-${new Date().getFullYear() + 1}` : `${new Date().getFullYear() - 1}-${new Date().getFullYear()}`);
     printTableList(title, columns, filteredData, {
       company: selectedCompany?.name || 'BVC Company',
-      fy: financialYear || '2024-2025'
+      fy: financialYear || currentFY
     });
   };
 

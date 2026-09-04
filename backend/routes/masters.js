@@ -552,22 +552,55 @@ router.post("/:table", async (req, res) => {
     const placeholders = keys.map(() => "?").join(",");
     const query = `INSERT INTO ${tableName} (${keys.join(",")}) VALUES (${placeholders})`;
 
+    // Check if record with unique field already exists (e.g. name, ledgermaster.name)
+    const uniqueCol = tableConfig?.uniqueField || 'name';
+    if (filteredData[uniqueCol]) {
+      try {
+        const checkQuery = `SELECT id FROM ${tableName} WHERE LOWER(TRIM(${uniqueCol})) = LOWER(TRIM(?)) LIMIT 1`;
+        const existingCheck = await db.query(checkQuery, [String(filteredData[uniqueCol]).trim()]);
+        if (existingCheck.rows && existingCheck.rows.length > 0) {
+          const existingId = existingCheck.rows[0].id;
+          const updateKeys = keys.filter(k => k !== 'id');
+          const updateSet = updateKeys.map(k => `${k} = ?`).join(', ');
+          const updateVals = updateKeys.map(k => filteredData[k]);
+          await db.run(`UPDATE ${tableName} SET ${updateSet} WHERE id = ?`, [...updateVals, existingId]);
+          return res.status(200).json({
+            success: true,
+            id: existingId,
+            message: 'Record updated successfully'
+          });
+        }
+      } catch (checkErr) {
+        console.warn(`Notice checking existing ${uniqueCol} in ${tableName}:`, checkErr.message);
+      }
+    }
+
     try {
       const result = await db.run(query, values);
       res.json({
         success: true,
-        id: result.lastID,
+        id: result.lastID || result.lastInsertRowid || result.rows?.[0]?.id,
+        message: 'Record created successfully'
       });
     } catch (err) {
       console.error("❌ DB ERROR:", err);
+      const isDuplicate = err.code === '23505' || /unique constraint|duplicate key/i.test(err.message);
+      if (isDuplicate) {
+        return res.status(409).json({
+          success: false,
+          message: `A record with this ${uniqueCol} already exists in ${tableName}.`,
+          error: `A record with this ${uniqueCol} already exists in ${tableName}.`
+        });
+      }
       return res.status(500).json({
         success: false,
+        message: err.message,
         error: err.message,
       });
     }
   } catch (err) {
     console.error("❌ SERVER ERROR:", err);
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, message: err.message, error: err.message });
   }
 });
 
@@ -593,20 +626,62 @@ router.post('/record/:table', async (req, res) => {
       return res.status(400).json({ success: false, message: "No valid fields to insert" });
     }
 
+    // Check if record with unique field already exists (e.g. name, ledgermaster.name)
+    const uniqueCol = tableConfig?.uniqueField || 'name';
+    if (filteredData[uniqueCol]) {
+      try {
+        const checkQuery = `SELECT id FROM ${tableName} WHERE LOWER(TRIM(${uniqueCol})) = LOWER(TRIM(?)) LIMIT 1`;
+        const existingCheck = await db.query(checkQuery, [String(filteredData[uniqueCol]).trim()]);
+        if (existingCheck.rows && existingCheck.rows.length > 0) {
+          const existingId = existingCheck.rows[0].id;
+          const updateKeys = keys.filter(k => k !== 'id');
+          const updateSet = updateKeys.map(k => `${k} = ?`).join(', ');
+          const updateVals = updateKeys.map(k => filteredData[k]);
+          await db.run(`UPDATE ${tableName} SET ${updateSet} WHERE id = ?`, [...updateVals, existingId]);
+          return res.status(200).json({
+            success: true,
+            data: { id: existingId },
+            id: existingId,
+            message: 'Record updated successfully'
+          });
+        }
+      } catch (checkErr) {
+        console.warn(`Notice checking existing ${uniqueCol} in ${tableName}:`, checkErr.message);
+      }
+    }
+
     const placeholders = keys.map(() => '?').join(', ')
     const query = `INSERT INTO ${tableName} (${keys.join(', ')}) VALUES (${placeholders})`
 
-    const result = await db.run(query, values)
-
-    res.status(201).json({
-      success: true,
-      data: { id: result.lastID },
-      message: 'Record created successfully'
-    })
+    try {
+      const result = await db.run(query, values)
+      res.status(201).json({
+        success: true,
+        data: { id: result.lastID || result.lastInsertRowid || result.rows?.[0]?.id },
+        id: result.lastID || result.lastInsertRowid || result.rows?.[0]?.id,
+        message: 'Record created successfully'
+      })
+    } catch (err) {
+      console.error("❌ DB INSERT ERROR:", err.message);
+      const isDuplicate = err.code === '23505' || /unique constraint|duplicate key/i.test(err.message);
+      if (isDuplicate) {
+        return res.status(409).json({
+          success: false,
+          message: `A record with this ${uniqueCol} already exists in ${tableName}.`,
+          error: `A record with this ${uniqueCol} already exists in ${tableName}.`
+        });
+      }
+      return res.status(500).json({
+        success: false,
+        message: err.message,
+        error: err.message
+      });
+    }
   } catch (error) {
-    console.error("❌ DB INSERT ERROR:", error.message);
+    console.error("❌ SERVER ERROR:", error.message);
     return res.status(500).json({
       success: false,
+      message: error.message,
       error: error.message
     });
   }

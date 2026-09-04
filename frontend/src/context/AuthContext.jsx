@@ -107,13 +107,20 @@ export const getAllModules = () => Object.values(MODULE_CATEGORIES).flat();
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
+  const getCurrentFY = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth(); // 0 = Jan, 3 = Apr
+    return month >= 3 ? `${year}-${year + 1}` : `${year - 1}-${year}`;
+  };
+
   const [company, setCompany] = useState(null);
   const [selectedCompany, setSelectedCompany] = useState(null);
   const [permissions, setPermissions] = useState([]);
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loginHistoryId, setLoginHistoryId] = useState(null);
-const [financialYear, setFinancialYear] = useState('2024-2025');
+  const [financialYear, setFinancialYear] = useState(getCurrentFY());
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   const toggleSidebar = () => {

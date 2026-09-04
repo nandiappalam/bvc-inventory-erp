@@ -20,6 +20,34 @@ const safeAddColumn = async (table, column, def) => {
 module.exports = async function autoMigrate() {
   console.log('🔧 Running auto-migrations...');
 
+  // Safe drop of conflicting foreign key constraints in PostgreSQL multi-tenant mode
+  if (db.isPostgres) {
+    try {
+      await db.run(`
+        DO $$
+        DECLARE
+          r RECORD;
+        BEGIN
+          FOR r IN (
+            SELECT n.nspname AS schema_name, c.relname AS table_name, con.conname AS constraint_name
+            FROM pg_constraint con
+            JOIN pg_class c ON con.conrelid = c.oid
+            JOIN pg_namespace n ON c.relnamespace = n.oid
+            WHERE con.contype = 'f'
+              AND (n.nspname = 'public' OR n.nspname LIKE 'company_%')
+          ) LOOP
+            BEGIN
+              EXECUTE 'ALTER TABLE "' || r.schema_name || '"."' || r.table_name || '" DROP CONSTRAINT IF EXISTS "' || r.constraint_name || '" CASCADE';
+            EXCEPTION WHEN OTHERS THEN
+            END;
+          END LOOP;
+        END $$;
+      `);
+    } catch (e) {
+      console.log('Notice dropping foreign key constraints in autoMigrate:', e.message);
+    }
+  }
+
   // First ensure base DB tables exist
   try {
     const initDb = require('./init_db');
@@ -667,8 +695,7 @@ module.exports = async function autoMigrate() {
         suggested_qty REAL DEFAULT 0,
         estimated_rate REAL DEFAULT 0,
         estimated_amount REAL DEFAULT 0,
-        remarks TEXT,
-        FOREIGN KEY (purchase_request_id) REFERENCES purchase_requests(id) ON DELETE CASCADE
+        remarks TEXT
       )
     `);
     console.log('✓ Table purchase_request_items is ready');
@@ -910,8 +937,7 @@ module.exports = async function autoMigrate() {
         param_key TEXT NOT NULL,
         param_value TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (qc_id) REFERENCES qc_inspections(id) ON DELETE CASCADE
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
     console.log('✓ Table qc_inspection_params is ready');

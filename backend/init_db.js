@@ -347,8 +347,7 @@ async function initializeDatabase() {
         tax_percent REAL DEFAULT 0,
         tax_amount REAL DEFAULT 0,
         amount REAL DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (purchase_id) REFERENCES purchases(id) ON DELETE CASCADE
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP REFERENCES purchases(id) ON DELETE CASCADE
       )`
     },
     {
@@ -366,8 +365,7 @@ async function initializeDatabase() {
         debit_side_adjust TEXT,
         account_head_id INTEGER,
         remarks TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (purchase_id) REFERENCES purchases(id) ON DELETE CASCADE
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP REFERENCES purchases(id) ON DELETE CASCADE
       )`
     },
     {
@@ -412,8 +410,7 @@ async function initializeDatabase() {
         suggested_qty REAL DEFAULT 0,
         estimated_rate REAL DEFAULT 0,
         estimated_amount REAL DEFAULT 0,
-        remarks TEXT,
-        FOREIGN KEY (purchase_request_id) REFERENCES purchase_requests(id) ON DELETE CASCADE
+        remarks TEXT REFERENCES purchase_requests(id) ON DELETE CASCADE
       )`
     },
     {
@@ -424,8 +421,7 @@ async function initializeDatabase() {
         action TEXT NOT NULL,
         performed_by TEXT,
         remarks TEXT,
-        performed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (purchase_request_id) REFERENCES purchase_requests(id) ON DELETE CASCADE
+        performed_at DATETIME DEFAULT CURRENT_TIMESTAMP REFERENCES purchase_requests(id) ON DELETE CASCADE
       )`
     },
     {
@@ -456,8 +452,7 @@ async function initializeDatabase() {
         disc_perc REAL DEFAULT 0,
         tax_perc REAL DEFAULT 0,
         total_amt REAL DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (sales_id) REFERENCES sales(id)
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP REFERENCES sales(id)
       )`
     },
     {
@@ -540,8 +535,7 @@ async function initializeDatabase() {
         total_wt REAL DEFAULT 0,
         wages_kg REAL DEFAULT 0,
         total_wages REAL DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (grain_id) REFERENCES grains(id) ON DELETE CASCADE
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP REFERENCES grains(id) ON DELETE CASCADE
       )`
     },
     {
@@ -554,8 +548,7 @@ async function initializeDatabase() {
         weight REAL DEFAULT 0,
         qty REAL DEFAULT 0,
         total_wt REAL DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (grain_id) REFERENCES grains(id) ON DELETE CASCADE
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP REFERENCES grains(id) ON DELETE CASCADE
       )`
     },
     {
@@ -568,8 +561,7 @@ async function initializeDatabase() {
         weight REAL DEFAULT 0,
         qty REAL DEFAULT 0,
         total_wt REAL DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (grain_id) REFERENCES grains(id) ON DELETE CASCADE
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP REFERENCES grains(id) ON DELETE CASCADE
       )`
     },
     {
@@ -599,8 +591,7 @@ async function initializeDatabase() {
         total_wt REAL DEFAULT 0,
         papad_kg REAL DEFAULT 0,
         wages_bag REAL DEFAULT 0,
-        wages REAL DEFAULT 0,
-        FOREIGN KEY (flour_out_id) REFERENCES flour_out(id)
+        wages REAL DEFAULT 0 REFERENCES flour_out(id)
       )`
     },
     {
@@ -631,8 +622,7 @@ async function initializeDatabase() {
         cost REAL DEFAULT 0,
         wages_bag REAL DEFAULT 0,
         wages REAL DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (flour_out_return_id) REFERENCES flour_out_returns(id) ON DELETE CASCADE
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP REFERENCES flour_out_returns(id) ON DELETE CASCADE
       )`
     },
     {
@@ -684,8 +674,7 @@ async function initializeDatabase() {
         tot_wt REAL DEFAULT 0,
         discount_percent REAL,
         tax_percent REAL,
-        ed_percent REAL DEFAULT 0,
-        FOREIGN KEY (purchase_order_id) REFERENCES purchase_orders(id) ON DELETE CASCADE
+        ed_percent REAL DEFAULT 0 REFERENCES purchase_orders(id) ON DELETE CASCADE
       )`
     },
     {
@@ -748,8 +737,7 @@ async function initializeDatabase() {
         disc_percent REAL DEFAULT 0,
         tax_percent REAL DEFAULT 0,
         amount REAL DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (purchase_return_id) REFERENCES purchase_returns(id) ON DELETE CASCADE
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP REFERENCES purchase_returns(id) ON DELETE CASCADE
       )`
     },
     {
@@ -783,8 +771,7 @@ async function initializeDatabase() {
         disc_perc REAL DEFAULT 0,
         tax_perc REAL DEFAULT 0,
         total_amt REAL DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (sales_return_id) REFERENCES sales_return(id)
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP REFERENCES sales_return(id)
       )`
     },
     {
@@ -838,8 +825,7 @@ async function initializeDatabase() {
         rate REAL DEFAULT 0,
         disc REAL DEFAULT 0,
         tax REAL DEFAULT 0,
-        amount REAL DEFAULT 0,
-        FOREIGN KEY (quotation_id) REFERENCES quotations(id) ON DELETE CASCADE
+        amount REAL DEFAULT 0 REFERENCES quotations(id) ON DELETE CASCADE
       )`
     },
     {
@@ -870,8 +856,7 @@ async function initializeDatabase() {
         tot_wt REAL DEFAULT 0,
         rate REAL DEFAULT 0,
         remarks TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (stock_adjustment_id) REFERENCES stock_adjustments(id) ON DELETE CASCADE
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP REFERENCES stock_adjustments(id) ON DELETE CASCADE
       )`
     },
     {
@@ -896,8 +881,7 @@ async function initializeDatabase() {
         weight REAL,
         qty REAL,
         total_wt REAL,
-        type TEXT DEFAULT 'input',
-        FOREIGN KEY (weight_conversion_id) REFERENCES weight_conversion(id) ON DELETE CASCADE
+        type TEXT DEFAULT 'input' REFERENCES weight_conversion(id) ON DELETE CASCADE
       )`
     },
     {
@@ -952,8 +936,7 @@ async function initializeDatabase() {
         usd_rate REAL,
         conv_rate REAL,
         usd_amt REAL,
-        inr_amt REAL,
-        FOREIGN KEY (sales_export_order_id) REFERENCES sales_export_orders(id) ON DELETE CASCADE
+        inr_amt REAL REFERENCES sales_export_orders(id) ON DELETE CASCADE
       )`
     },
     {
@@ -1039,9 +1022,7 @@ async function initializeDatabase() {
         config_id INTEGER NOT NULL,
         contact_id INTEGER NOT NULL,
         is_primary INTEGER DEFAULT 0,
-        is_cc INTEGER DEFAULT 1,
-        FOREIGN KEY (config_id) REFERENCES stock_alert_config(id) ON DELETE CASCADE,
-        FOREIGN KEY (contact_id) REFERENCES stock_alert_contacts(id) ON DELETE CASCADE
+        is_cc INTEGER DEFAULT 1 REFERENCES stock_alert_config(id) ON DELETE CASCADE REFERENCES stock_alert_contacts(id) ON DELETE CASCADE
       )`
     },
     {

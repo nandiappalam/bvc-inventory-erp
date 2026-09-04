@@ -155,7 +155,8 @@ export function printTableList(title = 'Table Report', columns = [], data = [], 
   }
 
   const companyName = metadata.company || 'BVC Company';
-  const fy = metadata.fy || '2024-2025';
+  const defaultFY = (new Date().getMonth() >= 3 ? `${new Date().getFullYear()}-${new Date().getFullYear() + 1}` : `${new Date().getFullYear() - 1}-${new Date().getFullYear()}`);
+  const fy = metadata.fy || defaultFY;
   const currentDate = new Date().toLocaleString();
 
   // Resolve active columns (exclude action buttons column)

@@ -27,7 +27,8 @@ const StockReport = () => {
   
   // Custom enhanced states
   const [selectedCategory, setSelectedCategory] = useState('All') // 'All', 'RM', 'FG', 'Wastage'
-  const [selectedFY, setSelectedFY] = useState('2024-2025')
+  const [selectedFY, setSelectedFY] = useState('All')
+  const [purging, setPurging] = useState(false)
   const [expandedLot, setExpandedLot] = useState(null)
   const [selectedLotNoFilter, setSelectedLotNoFilter] = useState('')
   const [isFGModalOpen, setIsFGModalOpen] = useState(false)
@@ -57,15 +58,15 @@ const StockReport = () => {
 
   // Sync with global financial year on mount
   useEffect(() => {
-    if (financialYear) {
+    if (financialYear && financialYear !== '2024-2025' && financialYear !== 'All') {
       setSelectedFY(financialYear);
       const dates = getDatesForFinancialYear(financialYear);
       setFromDate(dates.start);
       setToDate(dates.end);
     } else {
-      const dates = getDatesForFinancialYear('2026-2027');
-      setFromDate(dates.start);
-      setToDate(dates.end);
+      setSelectedFY('All');
+      setFromDate('');
+      setToDate('');
     }
   }, [financialYear]);
 
@@ -132,6 +133,25 @@ const StockReport = () => {
   const handleRefresh = () => {
     fetchReport()
   }
+
+  const handlePurgeLegacyData = async () => {
+    if (!window.confirm("Are you sure you want to purge old legacy Tauri test records (prior to April 2025) and recalculate stock balances? This will clear stale historical data.")) {
+      return;
+    }
+    setPurging(true);
+    try {
+      const res = await axios.post('/api/stock/purge-legacy-data', { cutoffDate: '2025-04-01' });
+      alert(res.data?.message || 'Legacy Tauri records purged successfully.');
+      setSelectedFY('All');
+      setFromDate('');
+      setToDate('');
+      fetchReport();
+    } catch (err) {
+      alert('Failed to purge legacy data: ' + (err.response?.data?.message || err.message));
+    } finally {
+      setPurging(false);
+    }
+  };
 
   const handleFGClick = async (row) => {
     setSelectedFGItem(row);
@@ -343,6 +363,19 @@ const StockReport = () => {
           )}
 
           <button onClick={handleRefresh} style={styles.searchBtn}>Search</button>
+          <button
+            onClick={handlePurgeLegacyData}
+            disabled={purging}
+            title="Purge legacy test data from previous Tauri environment and recalculate live stock"
+            style={{
+              ...styles.searchBtn,
+              backgroundColor: '#dc2626',
+              color: '#ffffff',
+              marginLeft: '6px'
+            }}
+          >
+            {purging ? 'Purging...' : 'Purge Old Tauri Data'}
+          </button>
         </div>
       </div>
 

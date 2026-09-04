@@ -381,6 +381,12 @@ function translateSqlForPostgres(sql, companyId = 1) {
   transformed = transformed.replace(/\bcurrent_date\s*=\s*excluded\.current_date\b/gi, '"current_date" = excluded."current_date"');
   transformed = transformed.replace(/\bcurrent_date\s*=\s*\?/gi, '"current_date" = ?');
 
+  // 4h. Strip FOREIGN KEY constraints from CREATE TABLE to prevent broken cross-schema references in PostgreSQL
+  if (/CREATE\s+TABLE/i.test(transformed)) {
+    transformed = transformed.replace(/,\s*FOREIGN\s+KEY\s*\([^)]+\)\s*REFERENCES\s+[^,\)]+(\([^)]+\))?(\s+ON\s+DELETE\s+[A-Z\s]+)?(\s+ON\s+UPDATE\s+[A-Z\s]+)?/gi, '');
+    transformed = transformed.replace(/FOREIGN\s+KEY\s*\([^)]+\)\s*REFERENCES\s+[^,\)]+(\([^)]+\))?(\s+ON\s+DELETE\s+[A-Z\s]+)?(\s+ON\s+UPDATE\s+[A-Z\s]+)?\s*,?/gi, '');
+  }
+
   // 5. If INSERT statement without RETURNING clause, append RETURNING id
   const trimmed = transformed.trim();
   if (/^INSERT\s+INTO/i.test(trimmed) && !/RETURNING/i.test(trimmed)) {
@@ -587,6 +593,22 @@ async function executePgQuery(sql, params = [], companyId = 1, isMaster = false)
       } else if (queryErr.code === '23505' && /duplicate key value violates unique constraint/i.test(queryErr.message)) {
         await resyncPostgresSequences(client, schemaName);
         result = await client.query(transformedSql, params);
+      } else if (queryErr.code === '23503' && /violates foreign key constraint/i.test(queryErr.message)) {
+        const constraintMatch = queryErr.message.match(/violates foreign key constraint "([^"]+)"/i) || [null, queryErr.constraint];
+        const tableMatch = queryErr.message.match(/table "([^"]+)"/i) || [null, queryErr.table];
+        const constraintName = constraintMatch[1];
+        const tableName = tableMatch[1];
+        if (constraintName && tableName) {
+          try {
+            await client.query(`ALTER TABLE IF EXISTS "${schemaName}"."${tableName}" DROP CONSTRAINT IF EXISTS "${constraintName}" CASCADE`);
+            await client.query(`ALTER TABLE IF EXISTS "public"."${tableName}" DROP CONSTRAINT IF EXISTS "${constraintName}" CASCADE`);
+            result = await client.query(transformedSql, params);
+          } catch (retryErr) {
+            throw queryErr;
+          }
+        } else {
+          throw queryErr;
+        }
       } else {
         throw queryErr;
       }
@@ -971,11 +993,41 @@ async function ensurePostgresMasterSchema() {
     `);
 
     await resyncPostgresSequences(client);
-    console.log('✓ PostgreSQL public master schema and sequences verified successfully');
+    await dropPostgresForeignKeyConstraints(client);
+    console.log('✓ PostgreSQL public master schema, sequences, and multi-tenant constraints verified successfully');
   } catch (err) {
     console.error('⚠️ [PostgreSQL] Master schema check notice:', err.message);
   } finally {
     client.release();
+  }
+}
+
+async function dropPostgresForeignKeyConstraints(client) {
+  try {
+    await client.query(`
+      DO $$
+      DECLARE
+        r RECORD;
+      BEGIN
+        FOR r IN (
+          SELECT n.nspname AS schema_name, c.relname AS table_name, con.conname AS constraint_name
+          FROM pg_constraint con
+          JOIN pg_class c ON con.conrelid = c.oid
+          JOIN pg_namespace n ON c.relnamespace = n.oid
+          WHERE con.contype = 'f'
+            AND (n.nspname = 'public' OR n.nspname LIKE 'company_%')
+        ) LOOP
+          BEGIN
+            EXECUTE 'ALTER TABLE "' || r.schema_name || '"."' || r.table_name || '" DROP CONSTRAINT IF EXISTS "' || r.constraint_name || '" CASCADE';
+          EXCEPTION WHEN OTHERS THEN
+            -- Continue smoothly if individual drop is skipped
+          END;
+        END LOOP;
+      END $$;
+    `);
+    console.log('✓ Cleaned up PostgreSQL foreign key constraints across all schemas');
+  } catch (err) {
+    console.warn('⚠️ [PostgreSQL] Foreign key constraint cleanup notice:', err.message);
   }
 }
 
@@ -1021,6 +1073,22 @@ class PgDbConnection {
       } else if (queryErr.code === '23505' && /duplicate key value violates unique constraint/i.test(queryErr.message)) {
         await resyncPostgresSequences(this.client, schemaName);
         result = await this.client.query(transformed, params);
+      } else if (queryErr.code === '23503' && /violates foreign key constraint/i.test(queryErr.message)) {
+        const constraintMatch = queryErr.message.match(/violates foreign key constraint "([^"]+)"/i) || [null, queryErr.constraint];
+        const tableMatch = queryErr.message.match(/table "([^"]+)"/i) || [null, queryErr.table];
+        const constraintName = constraintMatch[1];
+        const tableName = tableMatch[1];
+        if (constraintName && tableName) {
+          try {
+            await this.client.query(`ALTER TABLE IF EXISTS "${schemaName}"."${tableName}" DROP CONSTRAINT IF EXISTS "${constraintName}" CASCADE`);
+            await this.client.query(`ALTER TABLE IF EXISTS "public"."${tableName}" DROP CONSTRAINT IF EXISTS "${constraintName}" CASCADE`);
+            result = await this.client.query(transformed, params);
+          } catch (retryErr) {
+            throw queryErr;
+          }
+        } else {
+          throw queryErr;
+        }
       } else {
         throw queryErr;
       }

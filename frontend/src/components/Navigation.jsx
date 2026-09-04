@@ -535,7 +535,7 @@ const Navigation = () => {
               <strong>Company:</strong> {selectedCompany?.name || 'BVC Company'}
             </Typography>
             <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.95)', fontSize: '13px' }}>
-              <strong>FY:</strong> {financialYear || '2024-2025'}
+              <strong>FY:</strong> {financialYear || (new Date().getMonth() >= 3 ? `${new Date().getFullYear()}-${new Date().getFullYear() + 1}` : `${new Date().getFullYear() - 1}-${new Date().getFullYear()}`)}
             </Typography>
             <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.95)', fontSize: '13px' }}>
               <strong>User:</strong> {user?.username || 'admin'} ({user?.role || 'Admin'})

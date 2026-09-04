@@ -1449,4 +1449,93 @@ router.delete('/:id', async (req, res) => {
   }
 })
 
+// ============================================================================
+// PURGE LEGACY / TAURI DATA
+// Clears out old test/Tauri records before a specified date (default '2025-04-01')
+// and rebuilds the stock ledger & lots.
+// ============================================================================
+router.post('/purge-legacy-data', async (req, res) => {
+  try {
+    const { cutoffDate = '2025-04-01' } = req.body;
+    let deletedCounts = {};
+
+    // 1. Delete old stock ledger entries before cutoff
+    try {
+      const stockDel = await db.run(`DELETE FROM stock WHERE date < ?`, [cutoffDate]);
+      deletedCounts.stock = stockDel.changes || stockDel.rowCount || 0;
+    } catch (e) {}
+
+    // 2. Delete old purchases before cutoff
+    try {
+      const purItemsDel = await db.run(`
+        DELETE FROM purchase_items 
+        WHERE purchase_id IN (SELECT id FROM purchases WHERE date < ?)
+      `, [cutoffDate]);
+      const purDel = await db.run(`DELETE FROM purchases WHERE date < ?`, [cutoffDate]);
+      deletedCounts.purchases = purDel.changes || purDel.rowCount || 0;
+      deletedCounts.purchase_items = purItemsDel.changes || purItemsDel.rowCount || 0;
+    } catch (e) {}
+
+    // 3. Delete old sales before cutoff
+    try {
+      const saleItemsDel = await db.run(`
+        DELETE FROM sales_items 
+        WHERE sales_id IN (SELECT id FROM sales WHERE date < ?)
+      `, [cutoffDate]);
+      const salesDel = await db.run(`DELETE FROM sales WHERE date < ?`, [cutoffDate]);
+      deletedCounts.sales = salesDel.changes || salesDel.rowCount || 0;
+      deletedCounts.sales_items = saleItemsDel.changes || saleItemsDel.rowCount || 0;
+    } catch (e) {}
+
+    // 4. Delete old production records / grains before cutoff
+    try {
+      await db.run(`DELETE FROM grain_input_items WHERE grain_id IN (SELECT id FROM grains WHERE date < ?)`, [cutoffDate]);
+      await db.run(`DELETE FROM grain_output_items WHERE grain_id IN (SELECT id FROM grains WHERE date < ?)`, [cutoffDate]);
+      await db.run(`DELETE FROM grain_wastage_items WHERE grain_id IN (SELECT id FROM grains WHERE date < ?)`, [cutoffDate]);
+      const grainsDel = await db.run(`DELETE FROM grains WHERE date < ?`, [cutoffDate]);
+      deletedCounts.grains = grainsDel.changes || grainsDel.rowCount || 0;
+    } catch (e) {}
+
+    // 5. Delete old flour out before cutoff
+    try {
+      await db.run(`DELETE FROM flour_out_items WHERE flour_out_id IN (SELECT id FROM flour_out WHERE date < ?)`, [cutoffDate]);
+      const flourDel = await db.run(`DELETE FROM flour_out WHERE date < ?`, [cutoffDate]);
+      deletedCounts.flour_out = flourDel.changes || flourDel.rowCount || 0;
+    } catch (e) {}
+
+    // 6. Delete old papad in before cutoff
+    try {
+      await db.run(`DELETE FROM papad_in_items WHERE papad_in_id IN (SELECT id FROM papad_in WHERE date < ?)`, [cutoffDate]);
+      const papadDel = await db.run(`DELETE FROM papad_in WHERE date < ?`, [cutoffDate]);
+      deletedCounts.papad_in = papadDel.changes || papadDel.rowCount || 0;
+    } catch (e) {}
+
+    // 7. Delete old packing before cutoff
+    try {
+      await db.run(`DELETE FROM packing_items WHERE packing_id IN (SELECT id FROM packing WHERE date < ?)`, [cutoffDate]);
+      const packingDel = await db.run(`DELETE FROM packing WHERE date < ?`, [cutoffDate]);
+      deletedCounts.packing = packingDel.changes || packingDel.rowCount || 0;
+    } catch (e) {}
+
+    // 8. Rebuild stock ledger & stock lots cleanly
+    try {
+      const { rebuildStockLedger } = require('../utils/stockRebuilder');
+      if (typeof rebuildStockLedger === 'function') {
+        await rebuildStockLedger();
+      }
+    } catch (rebuildErr) {
+      console.warn('Notice rebuilding stock ledger:', rebuildErr.message);
+    }
+
+    res.json({
+      success: true,
+      message: `Successfully purged legacy Tauri test records before ${cutoffDate} and re-synchronized stock ledger.`,
+      deletedCounts
+    });
+  } catch (error) {
+    console.error('Error purging legacy data:', error);
+    res.status(500).json({ success: false, message: 'Failed to purge legacy data', error: error.message });
+  }
+});
+
 module.exports = router

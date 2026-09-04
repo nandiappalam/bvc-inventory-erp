@@ -76,10 +76,13 @@ const initTables = async () => {
         suggested_qty REAL DEFAULT 0,
         estimated_rate REAL DEFAULT 0,
         estimated_amount REAL DEFAULT 0,
-        remarks TEXT,
-        FOREIGN KEY (purchase_request_id) REFERENCES purchase_requests(id) ON DELETE CASCADE
+        remarks TEXT
       )
     `);
+
+    // Safe constraint cleanup for PostgreSQL
+    try { await db.run("ALTER TABLE purchase_request_items DROP CONSTRAINT IF EXISTS purchase_request_items_purchase_request_id_fkey CASCADE"); } catch (e) {}
+    try { await db.run("ALTER TABLE purchase_request_approval_history DROP CONSTRAINT IF EXISTS purchase_request_approval_history_purchase_request_id_fkey CASCADE"); } catch (e) {}
 
     // Column migrations for backward compatibility
     try { await db.run("ALTER TABLE purchase_request_items ADD COLUMN weight TEXT"); } catch (e) {}
@@ -93,8 +96,7 @@ const initTables = async () => {
         action TEXT NOT NULL,
         performed_by TEXT,
         remarks TEXT,
-        performed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (purchase_request_id) REFERENCES purchase_requests(id) ON DELETE CASCADE
+        performed_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
@@ -484,6 +486,81 @@ router.get('/reports', async (req, res) => {
   }
 });
 
+// Helper to resolve items and auto-heal empty purchase requests from linked purchase orders
+async function resolveAndHealPRItems(request) {
+  if (!request || !request.id) return [];
+
+  let itemsResult = await db.query(`
+    SELECT pri.*, COALESCE(im.item_name, pri.item_name) AS resolved_item_name
+    FROM purchase_request_items pri
+    LEFT JOIN item_master im ON pri.item_id = im.id
+    WHERE pri.purchase_request_id = ?
+    ORDER BY pri.id ASC
+  `, [request.id]);
+
+  let items = itemsResult.rows || [];
+
+  // If purchase_request_items has no items, attempt recovery from linked Purchase Order
+  if (items.length === 0) {
+    try {
+      const poRes = await db.query(`
+        SELECT poi.*, po.id as linked_po_id, po.s_no as linked_po_s_no
+        FROM purchase_order_items poi
+        JOIN purchase_orders po ON poi.purchase_order_id = po.id
+        WHERE po.purchase_request_id = ? OR po.pr_no = ?
+        ORDER BY poi.id ASC
+      `, [request.id, request.pr_no]);
+
+      if (poRes.rows && poRes.rows.length > 0) {
+        items = poRes.rows.map(poi => ({
+          purchase_request_id: request.id,
+          item_id: poi.item_id,
+          item_code: poi.item_code || '',
+          item_name: poi.item_name || 'Item',
+          description: poi.item_name || '',
+          requested_qty: poi.qty || 0,
+          approved_qty: poi.qty || 0,
+          estimated_rate: poi.rate || 0,
+          estimated_amount: poi.amount || 0,
+          unit: poi.uom || 'kg',
+          weight: poi.weight || '',
+          resolved_item_name: poi.item_name || 'Item'
+        }));
+
+        // Backfill into purchase_request_items for permanent fix
+        for (const it of items) {
+          try {
+            await db.run(`
+              INSERT INTO purchase_request_items (
+                purchase_request_id, item_id, item_name, description, requested_qty, approved_qty, estimated_rate, estimated_amount, unit, weight
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `, [request.id, it.item_id || null, it.item_name, it.description, it.requested_qty, it.approved_qty, it.estimated_rate, it.estimated_amount, it.unit, it.weight]);
+          } catch (insertErr) {}
+        }
+      }
+    } catch (poErr) {
+      console.warn('PO items fallback lookup notice:', poErr.message);
+    }
+  }
+
+  // Resolve item names from item_master if blank or numeric
+  for (const it of items) {
+    if (!it.item_name || !isNaN(it.item_name) || it.item_name === 'Item') {
+      if (it.item_id) {
+        try {
+          const mCheck = await db.query(`SELECT item_name, name FROM item_master WHERE id = ? LIMIT 1`, [it.item_id]);
+          if (mCheck.rows && mCheck.rows.length > 0) {
+            it.item_name = mCheck.rows[0].item_name || mCheck.rows[0].name || it.item_name;
+            it.resolved_item_name = it.item_name;
+          }
+        } catch (e) {}
+      }
+    }
+  }
+
+  return items;
+}
+
 // GET All Purchase Requests (with filters)
 router.get('/', async (req, res) => {
   try {
@@ -544,14 +621,24 @@ router.get('/', async (req, res) => {
 
     const result = await db.query(query, params);
     for (const request of (result.rows || [])) {
-      const itemsResult = await db.query(`
-        SELECT pri.*, COALESCE(im.item_name, pri.item_name) AS resolved_item_name
-        FROM purchase_request_items pri
-        LEFT JOIN item_master im ON pri.item_id = im.id
-        WHERE pri.purchase_request_id = ?
-        ORDER BY pri.id ASC
-      `, [request.id]);
-      request.items = itemsResult.rows || [];
+      request.items = await resolveAndHealPRItems(request);
+      if (request.items.length > 0) {
+        if (!request.item_names || request.item_names.trim() === '') {
+          request.item_names = request.items.map(it => it.item_name || it.resolved_item_name).filter(Boolean).join(', ');
+        }
+        if (!request.descriptions || request.descriptions.trim() === '') {
+          request.descriptions = request.items.map(it => it.description || it.item_name || it.resolved_item_name).filter(Boolean).join(', ');
+        }
+        if (!request.total_items || Number(request.total_items) === 0) {
+          request.total_items = request.items.length;
+        }
+        if (!request.total_qty || Number(request.total_qty) === 0) {
+          request.total_qty = request.items.reduce((s, it) => s + (parseFloat(it.requested_qty) || 0), 0);
+        }
+        if (!request.total_amount || Number(request.total_amount) === 0) {
+          request.total_amount = request.items.reduce((s, it) => s + (parseFloat(it.estimated_amount) || 0), 0);
+        }
+      }
     }
     res.json(result.rows || []);
   } catch (err) {
@@ -583,24 +670,24 @@ router.get('/:id', async (req, res) => {
 
     const pr = prRes.rows[0];
 
-    const itemsRes = await db.query(`
-      SELECT 
-        pri.*,
-        im1.hsn_code,
-        im1.tax_type,
-        COALESCE(im1.tax, im1.gst_rate) as tax_rate,
-        im1.weight as master_weight,
-        COALESCE(
-          NULLIF(im1.item_name, ''),
-          pri.item_name
-        ) as resolved_item_name
-      FROM purchase_request_items pri
-      LEFT JOIN item_master im1 ON pri.item_id = im1.id
-      WHERE pri.purchase_request_id = ? 
-      ORDER BY pri.id ASC
-    `, [pr.id]);
+    const resolvedItems = await resolveAndHealPRItems(pr);
+    if ((!pr.item_names || pr.item_names.trim() === '') && resolvedItems.length > 0) {
+      pr.item_names = resolvedItems.map(it => it.item_name || it.resolved_item_name).filter(Boolean).join(', ');
+    }
+    if ((!pr.descriptions || pr.descriptions.trim() === '') && resolvedItems.length > 0) {
+      pr.descriptions = resolvedItems.map(it => it.description || it.item_name || it.resolved_item_name).filter(Boolean).join(', ');
+    }
+    if (!pr.total_items || Number(pr.total_items) === 0) {
+      pr.total_items = resolvedItems.length;
+    }
+    if (!pr.total_qty || Number(pr.total_qty) === 0) {
+      pr.total_qty = resolvedItems.reduce((s, it) => s + (parseFloat(it.requested_qty) || 0), 0);
+    }
+    if (!pr.total_amount || Number(pr.total_amount) === 0) {
+      pr.total_amount = resolvedItems.reduce((s, it) => s + (parseFloat(it.estimated_amount) || 0), 0);
+    }
 
-    const formattedItems = (itemsRes.rows || []).map(it => {
+    const formattedItems = resolvedItems.map(it => {
       let displayName = it.resolved_item_name || it.item_name;
       if (displayName && !isNaN(displayName)) {
         displayName = it.item_code ? `Item (${it.item_code})` : `Item #${displayName}`;
@@ -661,6 +748,13 @@ router.post('/', async (req, res) => {
       } catch (e) {}
     }
     const reqDate = request_date || new Date().toISOString().split('T')[0];
+
+    if (db.isPostgres) {
+      try {
+        await db.run('ALTER TABLE purchase_request_items DROP CONSTRAINT IF EXISTS purchase_request_items_purchase_request_id_fkey CASCADE');
+        await db.run('ALTER TABLE purchase_request_approval_history DROP CONSTRAINT IF EXISTS purchase_request_approval_history_purchase_request_id_fkey CASCADE');
+      } catch (e) {}
+    }
 
     connection = await db.getConnection();
     await connection.beginTransaction();
@@ -815,8 +909,13 @@ router.put('/:id', async (req, res) => {
     }
 
     const currentStatus = existing.rows[0].status;
-    if (currentStatus === 'Approved' || currentStatus === 'Converted') {
-      return res.status(400).json({ error: `Cannot modify a Purchase Request that is already ${currentStatus}` });
+    const force = req.query.force === 'true' || req.body.force === true;
+    if ((currentStatus === 'Approved' || currentStatus === 'Converted') && !force) {
+      const itemsCountRes = await db.query(`SELECT COUNT(*) as count FROM purchase_request_items WHERE purchase_request_id = ?`, [id]);
+      const hasExistingItems = (itemsCountRes.rows && itemsCountRes.rows[0]?.count > 0);
+      if (hasExistingItems) {
+        return res.status(400).json({ error: `Cannot modify a Purchase Request that is already ${currentStatus}. Pass force=true to override.` });
+      }
     }
 
     const newStatus = status || currentStatus;

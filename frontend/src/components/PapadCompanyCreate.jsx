@@ -172,18 +172,20 @@ const PapadCompanyCreate = () => {
 
       const result = await response.json();
 
-      if (result.success) {
-        setMessage(editId ? 'Papad Company updated successfully!' : 'Papad Company saved successfully!');
+      if (response.ok && (result.success || result.id)) {
+        const succMsg = editId ? 'Papad Company updated successfully!' : 'Papad Company saved successfully!';
+        setMessage(succMsg);
         setMessageType('success');
-        alert(editId ? 'Papad Company updated successfully!' : 'Papad Company saved successfully!');
+        alert(succMsg);
         navigate('/master/papad-company-display');
       } else {
-        setMessage('Error: ' + (result.message || 'Unknown error'));
+        const errMsg = result.message || (typeof result.error === 'string' ? result.error : result.error?.message) || 'Failed to save Papad Company';
+        setMessage('Error: ' + errMsg);
         setMessageType('error');
       }
     } catch (error) {
       console.error('Save error:', error);
-      setMessage('Error saving papad company');
+      setMessage('Error saving papad company: ' + (error.message || 'Network error'));
       setMessageType('error');
     } finally {
       setLoading(false);

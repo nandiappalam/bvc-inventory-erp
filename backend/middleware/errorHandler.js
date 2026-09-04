@@ -34,6 +34,7 @@ function globalErrorHandler(err, req, res, next) {
   
   res.status(classification.status).json({
     success: false,
+    message: classification.userMessage,
     error: {
       code: classification.type,
       message: classification.userMessage,
