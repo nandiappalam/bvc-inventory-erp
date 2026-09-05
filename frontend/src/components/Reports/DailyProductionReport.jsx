@@ -735,7 +735,7 @@ const DailyProductionReport = ({ hideHeader = false, reportType: propReportType 
                         <TableCell><Chip label={row.lot_no} size="small" variant="outlined" sx={{ fontFamily: 'monospace', fontSize: '10px' }} /></TableCell>
                         <TableCell sx={{ fontWeight: '600' }}>{row.item_name}</TableCell>
                         <TableCell sx={{ fontWeight: '500' }}>
-                          {row.supplier_name && row.supplier_name !== 'N/A' ? row.supplier_name : (row.supplier || 'Kandiga / Velmurugan')}
+                          {row.supplier_name && row.supplier_name !== 'N/A' ? row.supplier_name : (row.supplier || 'K')}
                         </TableCell>
                         <TableCell align="right" sx={{ fontWeight: 'bold' }}>{row.input_qty} bags</TableCell>
                         <TableCell align="right">{row.bag_weight} kg</TableCell>

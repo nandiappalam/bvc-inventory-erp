@@ -2498,17 +2498,17 @@ router.get('/daily-production', async (req, res) => {
             try {
               const vmRes = await db.query(`SELECT party_name FROM vehicle_movements WHERE lot_no = ? AND party_name IS NOT NULL AND party_name != '' LIMIT 1`, [inp.lot_no]);
               if (vmRes.rows && vmRes.rows[0]?.party_name) supp = vmRes.rows[0].party_name;
-            } catch (e) {}
+            } catch (e) {}K
           }
 
           if (!supp) {
             const l = String(inp.lot_no);
-            if (l.includes('11188') || l.includes('11496') || l.includes('11497') || l.includes('11183')) supp = 'Kandiga / Velmurugan';
-            else if (l.includes('10603') || l.includes('10604')) supp = 'Amrut';
-            else if (l.includes('11320') || l.includes('11566')) supp = 'Srish';
-            else if (l.includes('10991') || l.includes('11326') || l.includes('11333')) supp = 'Shiridi Sai';
-            else if (l.includes('11347')) supp = 'Nithya';
-            else if (l.includes('11372') || l.includes('11408')) supp = 'Chudamani';
+            if (l.includes('11188') || l.includes('11496') || l.includes('11497') || l.includes('11183')) supp = '';
+            else if (l.includes('10603') || l.includes('10604')) supp = 'A';
+            else if (l.includes('11320') || l.includes('11566')) supp = 'S';
+            else if (l.includes('10991') || l.includes('11326') || l.includes('11333')) supp = 'S';
+            else if (l.includes('11347')) supp = 'N';
+            else if (l.includes('11372') || l.includes('11408')) supp = 'C';
           }
         }
         if (supp) resolvedSuppliers.push(supp);
@@ -2527,7 +2527,7 @@ router.get('/daily-production', async (req, res) => {
         flour_mill: g.flour_mill_name || g.flour_mill,
         lot_no: inputLotsStr || 'N/A',
         item_name: inputItemsStr || 'N/A',
-        supplier_name: suppliersStr || 'Kandiga / Velmurugan',
+        supplier_name: suppliersStr || 'K',
         source: g.flour_mill_name || g.flour_mill || 'In-House',
         bag_weight: inputs[0]?.weight || 50,
         input_qty: inputQty,
@@ -2561,9 +2561,9 @@ router.get('/daily-production', async (req, res) => {
           voucher: '3108',
           date: '2026-07-16',
           flour_mill: 'BVC MILL',
-          lot_no: '11188 / 11496 / 11497',
+          lot_no: '17',
           item_name: 'GN',
-          supplier_name: 'Kandiga / Velmurugan',
+          supplier_name: 'K',
           source: 'BVC MILL',
           bag_weight: 50,
           input_qty: 560,
@@ -2593,9 +2593,9 @@ router.get('/daily-production', async (req, res) => {
           voucher: '3109',
           date: '2026-07-16',
           flour_mill: 'BVC MILL',
-          lot_no: '10603 / 10604',
+          lot_no: '14',
           item_name: 'Bengal Gram split',
-          supplier_name: 'Amrut',
+          supplier_name: 'A',
           source: 'BVC MILL',
           bag_weight: 50,
           input_qty: 600,
@@ -2625,9 +2625,9 @@ router.get('/daily-production', async (req, res) => {
           voucher: '3110',
           date: '2026-07-16',
           flour_mill: 'BVC MILL',
-          lot_no: '11320 / 11566',
+          lot_no: '16',
           item_name: 'split',
-          supplier_name: 'Srish',
+          supplier_name: 'S',
           source: 'BVC MILL',
           bag_weight: 50,
           input_qty: 87,
