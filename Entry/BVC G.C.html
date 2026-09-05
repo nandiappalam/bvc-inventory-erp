@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Grind Creation</title>
+
+<style>
+
+    body {
+        font-family: Calibri, Arial;
+        background: #C1F0B1;
+        margin: 0;
+        padding: 0;
+    }
+
+    .window {
+        width: 98%;
+        margin: 10px auto;
+        background: #e0e0ea;
+        border: 2px solid #666;
+        padding: 10px;
+    }
+
+    .titlebar {
+        background: #66B4E3;
+        padding: 6px 10px;
+        color: white;
+        font-size: 20px;
+        font-weight: bold;
+    }
+
+    .section {
+        border: 1px solid #777;
+        padding: 10px;
+        background: #66B4E3;
+        margin-top: 10px;
+    }
+
+    .row {
+        display: flex;
+        align-items: center;
+        margin-bottom: 8px;
+    }
+
+    .label {
+        width: 120px;
+        font-weight: bold;
+        color: #333;
+    }
+
+    input, select {
+        padding: 5px;
+        width: 100px;
+        margin-right: 20px;
+        border: 1px solid #777;
+        background: white;
+    }
+
+    .table-container {
+        margin-top: 10px;
+        border: 1px solid #555;
+        background: #f1f1f8;
+		padding: 80px;
+    }
+
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        background: #fff;
+    }
+
+    th, td {
+        border: 1px solid #888;
+        padding: 6px;
+        text-align: center;
+        font-size: 14px;
+    }
+
+    th {
+        background: #66B4E3;
+        font-weight: bold;
+    }
+
+    .add-btn {
+        margin: 10px 0;
+        padding: 8px 16px;
+        background: #66B4E3;
+        color: white;
+        border: none;
+        cursor: pointer;
+        font-size: 14px;
+        border-radius: 4px;
+    }
+
+    .add-btn:hover {
+        background: #559dcc;
+    }
+
+    .save-btn {
+        margin-top: 15px;
+        padding: 10px 30px;
+        background: #d0d0d8;
+        border: 1px solid #444;
+        font-size: 16px;
+        cursor: pointer;
+        float: right;
+    }
+
+    .save-btn:hover {
+        background: #005bbb;
+    }
+
+    /* DELETE BUTTON */
+    .del-btn {
+        cursor: pointer;
+        color: red;
+        font-size: 20px;
+        font-weight: bold;
+    }
+
+</style>
+
+</head>
+<body>
+
+<div class="window">
+
+    <!-- Title Bar -->
+    <div class="titlebar">Grind Creation</div>
+
+    <!-- TOP SECTION -->
+    <div class="section">
+
+        <div class="row">
+            <div class="label">S.No</div>
+            <input type="text">
+            
+            <div class="label">Flour Mill</div>
+            <input type="text">
+        </div>
+
+        <div class="row">
+            <div class="label">Date</div>
+            <input type="date">
+
+            <div class="label">Remarks</div>
+            <input type="text" style="width:260px;">
+        </div>
+
+    </div>
+
+    <!-- FIRST TABLE -->
+    <div class="table-container">
+        <button class="add-btn" onclick="addRow1()">+ Add Row</button>
+
+        <table id="table1">
+            <thead>
+                <tr>
+                    <th>S.No</th>
+                    <th>Item Name</th>
+                    <th>Lot No</th>
+                    <th>Weight</th>
+                    <th>Qty</th>
+                    <th>Total Wt</th>
+                    <th>Wages / Kg</th>
+                    <th>Total Wages</th>
+                    <th>❌</th>
+                </tr>
+            </thead>
+
+            <tbody>
+                <tr>
+                    <td><input type="text" value="1"></td>
+                    <td><input type="text" style="width:200px;"></td>
+                    <td><input type="text"></td>
+                    <td><input type="number" oninput="calc1(this)"></td>
+                    <td><input type="number" oninput="calc1(this)"></td>
+                    <td><input type="number" readonly></td>
+                    <td><input type="number" oninput="calc1(this)"></td>
+                    <td><input type="number" readonly></td>
+                    <td class="del-btn" onclick="deleteRow(this)">❌</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- SECOND TABLE -->
+    <div class="table-container">
+
+        <button class="add-btn" onclick="addRow2()">+ Add Row</button>
+
+        <table id="table2">
+            <thead>
+                <tr>
+                    <th>L.No</th>
+                    <th>Item Name</th>
+                    <th>Weight</th>
+                    <th>Qty</th>
+                    <th>Total Wt</th>
+                    <th>❌</th>
+                </tr>
+            </thead>
+
+            <tbody>
+                <tr>
+                    <td><input type="text" value="1"></td>
+                    <td><input type="text" style="width:150px;"></td>
+                    <td><input type="number" oninput="calc2(this)"></td>
+                    <td><input type="number" oninput="calc2(this)"></td>
+                    <td><input type="number" readonly></td>
+                    <td class="del-btn" onclick="deleteRow(this)">❌</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- SAVE BUTTON -->
+    <button class="save-btn">Save</button>
+
+</div>
+
+
+
+
+<script>
+
+// --------------------------- //
+//   DELETE ROW (COMMON)       //
+// --------------------------- //
+function deleteRow(btn) {
+    btn.parentNode.remove();
+}
+
+
+
+// --------------------------- //
+//   ADD ROW FOR TABLE 1       //
+// --------------------------- //
+function addRow1() {
+    let table = document.getElementById("table1").children[1];
+    let rowCount = table.rows.length + 1;
+
+    let row = `
+        <tr>
+            <td><input type="text" value="${rowCount}"></td>
+            <td><input type="text" style="width:200px;"></td>
+            <td><input type="text"></td>
+            <td><input type="number" oninput="calc1(this)"></td>
+            <td><input type="number" oninput="calc1(this)"></td>
+            <td><input type="number" readonly></td>
+            <td><input type="number" oninput="calc1(this)"></td>
+            <td><input type="number" readonly></td>
+            <td class="del-btn" onclick="deleteRow(this)">❌</td>
+        </tr>
+    `;
+
+    table.insertAdjacentHTML("beforeend", row);
+}
+
+
+
+// --------------------------- //
+//   CALCULATE TABLE-1         //
+// --------------------------- //
+function calc1(elem) {
+    let row = elem.parentNode.parentNode;
+    let weight = Number(row.children[3].children[0].value);
+    let qty = Number(row.children[4].children[0].value);
+    let wage = Number(row.children[6].children[0].value);
+
+    let totalWt = weight * qty;
+    row.children[5].children[0].value = totalWt;
+
+    let totalWages = totalWt * wage;
+    row.children[7].children[0].value = totalWages;
+}
+
+
+
+// --------------------------- //
+//   ADD ROW FOR TABLE 2       //
+// --------------------------- //
+function addRow2() {
+    let table = document.getElementById("table2").children[1];
+    let rowCount = table.rows.length + 1;
+
+    let row = `
+        <tr>
+            <td><input type="text" value="${rowCount}"></td>
+            <td><input type="text" style="width:150px;"></td>
+            <td><input type="number" oninput="calc2(this)"></td>
+            <td><input type="number" oninput="calc2(this)"></td>
+            <td><input type="number" readonly></td>
+            <td class="del-btn" onclick="deleteRow(this)">❌</td>
+        </tr>
+    `;
+
+    table.insertAdjacentHTML("beforeend", row);
+}
+
+
+
+// --------------------------- //
+//   CALCULATE TABLE-2         //
+// --------------------------- //
+function calc2(elem) {
+    let row = elem.parentNode.parentNode;
+    let weight = Number(row.children[2].children[0].value);
+    let qty = Number(row.children[3].children[0].value);
+
+    row.children[4].children[0].value = weight * qty;
+}
+
+</script>
+
+</body>
+</html>

@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Opening Creation</title>
+
+<style>
+body{
+    margin:0;
+    font-family:Tahoma, Arial;
+    font-size:17px;
+    background:#eef3ff;
+}
+
+/* HEADER */
+.header{
+    background:#1f4fb2;
+    color:white;
+    padding:6px 10px;
+    display:flex;
+    justify-content:space-between;
+}
+
+/* MENU */
+.menu{
+    background:white;
+    border-bottom:1px solid #9db7e8;
+    padding:6px 10px;
+}
+.menu span{
+    margin-right:16px;
+    color:#1f4fb2;
+}
+
+/* TITLE */
+.title{
+    background:#3b6fd8;
+    color:white;
+    padding:6px 10px;
+    font-weight:bold;
+}
+
+/* MAIN */
+.container{
+    background:#eaf1ff;
+    padding:10px;
+    min-height:430px;
+}
+
+/* FORM ROWS */
+.form-row{
+    display:flex;
+    align-items:center;
+    margin-bottom:8px;
+}
+.form-row label{
+    width:120px;
+}
+.form-row input, select{
+    height:22px;
+    border:1px solid #9db7e8;
+    padding:2px 6px;
+}
+
+/* TABLE */
+table{
+    width:100%;
+    border-collapse:collapse;
+    background:white;
+    margin-top:8px;
+}
+th{
+    background:#dce8ff;
+    border:1px solid #9db7e8;
+    padding:5px;
+    font-weight:normal;
+}
+td{
+    border:1px solid #9db7e8;
+    height:36px;
+}
+
+/* FOOTER */
+.footer{
+    background:white;
+    border-top:1px solid #9db7e8;
+    padding:6px 10px;
+    display:flex;
+    justify-content:flex-end;
+	margin-top:300px;
+}
+
+.btn{
+    background:#3b6fd8;
+    color:white;
+    border:1px solid #1f4fb2;
+    padding:4px 18px;
+    cursor:pointer;
+}
+</style>
+</head>
+
+<body>
+
+<!-- HEADER -->
+<div class="header">
+    <div>Inventory Management System</div>
+    <div>A.S. MOORTHY & CO</div>
+</div>
+
+<!-- MENU 
+<div class="menu">
+    <span>Entry</span>
+    <span>Master</span>
+    <span>Report</span>
+    <span>Accounts</span>
+    <span>Features</span>
+    <span>Company</span>
+    <span>Quit</span>
+</div>
+-->
+<!-- TITLE -->
+<div class="title">Opening Creation</div>
+
+<!-- CONTENT -->
+<div class="container">
+
+    <div class="form-row">
+        <label>S. No</label>
+        <input type="text" value="" style="width:80px;">
+    </div>
+
+    <div class="form-row">
+        <label>Type</label>
+        <select style="width:120px;">
+            <option></option>
+        </select>
+    </div>
+
+    <div class="form-row">
+        <label>Papad Comp</label>
+        <input type="text" style="width:300px;">
+    </div>
+    <div class="form-row">
+        <label>Godown</label>
+        <input type="text" style="width:300px;">
+	<div class="form-row">
+	
+        <label>Mill</label>
+        <input type="text" style="width:300px;">
+    </div>	
+    </div>
+    <!-- ITEM TABLE -->
+    <table>
+        <tr>
+            <th>Item Name</th>
+			<th>Lot.No</th>
+            <th>Weight</th>
+            <th>Qty</th>
+            <th>Tot Wt</th>
+            <th>Cost</th>
+        </tr>
+        <tr>
+            <td><input></td><td><input></td><td><input></td><td><input></td><td><input></td>
+<td><input></td>
+        </tr>
+    </table>
+
+</div>
+
+<!-- FOOTER -->
+<div class="footer">
+    <button class="btn">Save</button>
+</div>
+
+</body>
+</html>

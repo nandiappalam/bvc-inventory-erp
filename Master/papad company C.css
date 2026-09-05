@@ -1,0 +1,100 @@
+body {
+  margin: 0;
+  background: #dfe8f8;
+  font-family: Tahoma, Arial, sans-serif;
+}
+
+.window {
+  width: 98%;
+  margin: 10px auto;
+  background: white;
+  border: 1px solid #9db4e2;
+}
+
+/* Header */
+.top-bar {
+  background: #4a6fc2;
+  color: white;
+  padding: 6px 10px;
+  display: flex;
+  justify-content: space-between;
+  font-weight: bold;
+}
+
+
+/* Layout */
+.content {
+  display: flex;
+  padding: 48px;
+
+}
+
+/* Left Form */
+.left-form {
+  width: 35%;
+  padding-right: 10px;
+  height:100%;
+}
+
+.form-row {
+  display: flex;
+  margin-bottom: 35px;
+  margin-top: 15px;
+  font-weight: bold;
+}
+
+.form-row label {
+  width: 120px;
+  font-size: 17px;
+  color: #1e3c72;
+  font-weight: bold;
+}
+
+.form-row input,
+.form-row textarea,
+.form-row select {
+  flex: 1;
+  border: 1px solid #b9cbee;
+  height: 22px;
+  font-size: 17px;
+}
+
+textarea {
+  height: 45px;
+}
+
+/* Right Section */
+.right-section {
+  width: 65%;
+}
+
+/* Tables */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 17px;
+}
+
+thead th {
+  background: #c7d8f6;
+  border: 1px solid #b3c7ec;
+  padding: 20px;
+}
+
+tbody td {
+  height: 24px;
+  border: 1px solid #d4def3;
+}
+
+.gap {
+  margin-top: 70px;
+}
+
+.gap1 {
+  margin-top: 100px;
+}
+
+
+tbody tr:nth-child(even) {
+  background: #f5f8ff;
+}

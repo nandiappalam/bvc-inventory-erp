@@ -1,0 +1,99 @@
+* {
+    box-sizing: border-box;
+    font-family: Tahoma, Arial, sans-serif;
+}
+
+body {
+    margin: 0;
+    background-color: #e9f0fb;
+}
+
+/* Top bar */
+.title-bar {
+    background: linear-gradient(#2f5fa5, #1f4f8f);
+    color: white;
+    padding: 6px 12px;
+    font-weight: bold;
+}
+
+.company {
+    float: right;
+}
+
+/* Overlay */
+.overlay {
+    height: calc(100vh - 70px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+/* Form box */
+.form-box {
+    width: 420px;
+    background-color: white;
+    border: 1px solid #2f5fa5;
+    box-shadow: 0 0 10px rgba(0,0,0,0.25);
+}
+
+/* Form header */
+.form-title {
+    background-color: #2f5fa5;
+    color: white;
+    padding: 6px 10px;
+    font-weight: bold;
+}
+
+/* Body */
+.form-body {
+    padding: 20px;
+}
+
+.form-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+label {
+    width: 100px;
+    font-size: 14px;
+}
+
+input, select {
+    flex: 1;
+    padding: 5px;
+    border: 1px solid #7fa1d6;
+    font-size: 14px;
+}
+
+/* Footer */
+.form-footer {
+    text-align: right;
+    padding: 10px 20px;
+    border-top: 1px solid #ccc;
+}
+
+button {
+    padding: 6px 18px;
+    background-color: #2f5fa5;
+    color: white;
+    border: none;
+    cursor: pointer;
+}
+
+button:hover {
+    background-color: #1f4f8f;
+}
+
+/* Status bar */
+.status-bar {
+    background-color: #dbe6f7;
+    padding: 5px 10px;
+    font-size: 13px;
+    border-top: 1px solid #999;
+}
+
+.status-bar .right {
+    float: right;
+}

@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Inventory Management System</title>
+
+<style>
+body {
+    margin: 0;
+    font-family: Tahoma, Arial, sans-serif;
+    background: #e9f1fb;
+}
+
+/* ===== TOP TITLE BAR ===== */
+.top-bar {
+    background: #0b5394;
+    color: #fff;
+    padding: 8px 15px;
+    display: flex;
+    justify-content: space-between;
+    font-size: 25px;
+    font-weight: bold;
+}
+
+/* ===== MAIN FRAME ===== */
+.container {
+    padding: 8px;
+}
+
+/* ===== PAGE TITLE ===== */
+.page-title {
+    background: #0b5394;
+    color: white;
+    padding: 6px 10px;
+    font-weight: bold;
+    margin-bottom: 6px;
+	font-size: 20px;
+}
+
+
+/* ===== MIDDLE GRID (EXCEL STYLE) ===== */
+.grid-frame {
+    margin-top: 8px;
+    border: 1px solid #0b5394;
+    background: #fff;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+}
+
+th {
+    background: #d9e8fb;
+    border: 1px solid #0b5394;
+    padding: 6px;
+    font-size: 13px;
+}
+
+td {
+    height: 26px;
+    border: 1px solid #0b5394;
+}
+
+/* ===== BOTTOM FRAME ===== */
+.bottom-frame {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.bottom-box {
+    border: 1px solid #0b5394;
+    background: #f5f9ff;
+    padding: 6px;
+}
+
+.bottom-box table th {
+    background: #e6eef9;
+}
+
+/* ===== FOOTER ===== */
+.footer {
+    margin-top: 500px;
+    background: #e6eef9;
+    border-top: 2px solid #0b5394;
+    padding: 6px 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+/* ===== BUTTONS ===== */
+button {
+    background: #0b5394;
+    color: white;
+    border: none;
+    padding: 6px 14px;
+    margin-left: 6px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+button:hover {
+    background: #073763;
+}
+</style>
+</head>
+
+<body>
+
+<!-- TOP BAR -->
+<div class="top-bar">
+    <div>Inventory Management System</div>
+    <div>A.S. MOORTHY & CO</div>
+</div>
+
+
+<div class="container">
+
+<!-- PAGE TITLE -->
+<div class="page-title">Sales Export Display</div>
+
+
+<!-- MIDDLE GRID -->
+<div class="grid-frame">
+<table>
+    <tr>
+        <th>Kind of Package</th>
+        <th>Description</th>
+        <th>Lot No</th>
+        <th>Qty</th>
+        <th>USD Rate</th>
+        <th>Conv Rate</th>
+        <th>USD Amt</th>
+        <th>INR Amt</th>
+		<th>Tax %</th>
+        <th>Amount</th>
+        <th>Bill Amt</th>
+        <th>Tax Amt</th>
+        <th>Total</th>
+		
+		
+    </tr>
+
+    <!-- Empty rows like desktop software -->
+    <tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+    <tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+    <tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+</table>
+</div>
+
+<!-- FOOTER -->
+<div class="footer">
+    <div></div>
+    <div>
+        <button>Print</button>
+        <button>Edit</button>
+        <button>Update</button>
+    </div>
+</div>
+
+</div>
+</body>
+</html>

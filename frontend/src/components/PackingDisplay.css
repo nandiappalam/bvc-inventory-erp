@@ -1,0 +1,153 @@
+/* Packing Display Styles */
+
+.packing-display {
+  font-family: Arial, sans-serif;
+  margin: 0;
+  padding: 0;
+  background-color: #f0f6ff;
+  min-height: 100vh;
+}
+
+/* Header */
+.header {
+  background-color: #1f4fb2;
+  color: white;
+  padding: 10px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 18px;
+  font-weight: bold;
+}
+
+/* Window */
+.window {
+  margin: 20px;
+  background-color: white;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+/* Title */
+.title {
+  background-color: #3b6fd8;
+  color: white;
+  padding: 10px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 16px;
+  font-weight: bold;
+}
+
+/* Filter Bar */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.filter-bar label {
+  color: white;
+  font-weight: bold;
+}
+
+.filter-bar input[type="date"] {
+  padding: 5px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+}
+
+/* Table Area */
+.table-area {
+  padding: 20px;
+  overflow-x: auto;
+}
+
+.table-area table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0;
+}
+
+.table-area th {
+  background-color: #e8f0ff;
+  border: 1px solid #ddd;
+  padding: 12px 8px;
+  text-align: left;
+  font-weight: bold;
+  color: #333;
+}
+
+.table-area td {
+  border: 1px solid #ddd;
+  padding: 10px 8px;
+  color: #555;
+}
+
+.table-area tr:nth-child(even) {
+  background-color: #f9f9f9;
+}
+
+.table-area tr:hover {
+  background-color: #f0f8ff;
+}
+
+/* Footer */
+.footer {
+  background-color: #e8f0ff;
+  padding: 15px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-top: 2px solid #1f4fb2;
+}
+
+.buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.buttons button {
+  background-color: #1f4fb2;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  cursor: pointer;
+  border-radius: 3px;
+  font-weight: bold;
+}
+
+.buttons button:hover {
+  background-color: #0d3a8a;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .header, .title {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .filter-bar {
+    margin-top: 10px;
+  }
+
+  .footer {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .table-area {
+    padding: 10px;
+  }
+
+  .table-area table {
+    font-size: 14px;
+  }
+
+  .table-area th, .table-area td {
+    padding: 8px 4px;
+  }
+}

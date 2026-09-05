@@ -1,0 +1,73 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        :root {
+            --win-blue: #2c3e50;
+            --field-blue: #3498db;
+            --border-light: #dcdde1;
+        }
+        body { font-family: sans-serif; background-color: #f5f6fa; padding: 20px; }
+        
+        .window {
+            width: 550px;
+            background: #fff;
+            border: 1px solid #7f8c8d;
+            box-shadow: 4px 4px 10px rgba(0,0,0,0.2);
+            margin: auto;
+        }
+        .header {
+            background-color: var(--win-blue);
+            color: white;
+            padding: 5px 10px;
+            display: flex;
+            justify-content: space-between;
+            font-size: 14px;
+        }
+        .form-container { padding: 25px 40px; }
+        .row { display: flex; margin-bottom: 5px; align-items: center; }
+        .row label { width: 140px; font-size: 13px; color: #2f3640; }
+        .row input, .row select, .row textarea {
+            flex: 1;
+            border: 1px solid var(--border-light);
+            padding: 3px 5px;
+            outline-color: var(--field-blue);
+        }
+        .row input:focus { background-color: #f0f7ff; }
+        .footer { padding: 10px 40px 20px; text-align: right; }
+        .btn {
+            background: #f1f2f6;
+            border: 1px solid #7f8c8d;
+            padding: 3px 25px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="window">
+        <div class="header">
+            <span>Creation Form</span>
+            <span>[X]</span>
+        </div>
+        <div class="form-container">
+            <div class="row"><label>Name</label><input type="text"></div>
+            <div class="row"><label>(Print Name)</label><input type="text"></div>
+            <div class="row"><label>Cont. Person</label><input type="text"></div>
+            <div class="row"><label>Address</label><textarea rows="3"></textarea></div>
+            <div style="height:15px"></div> <div class="row"><label>Area</label><input type="text"></div>
+            <div class="row"><label>Phone (Res)</label><input type="text"></div>
+            <div class="row"><label>Phone (Off)</label><input type="text"></div>
+            <div class="row"><label>Mobile</label><input type="text"></div>
+            <div class="row"><label>EMail ID</label><input type="email"></div>
+            <div class="row"><label>TIN No</label><input type="text"></div>
+            <div class="row"><label>Status</label>
+                <select><option>Active</option><option>Inactive</option></select>
+            </div>
+        </div>
+        <div class="footer"><button class="btn">Save</button></div>
+    </div>
+</body>
+</html>

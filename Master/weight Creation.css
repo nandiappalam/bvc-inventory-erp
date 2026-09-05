@@ -1,0 +1,73 @@
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+}
+
+/* Background like desktop software */
+.app-bg {
+  height: 100vh;
+  background: linear-gradient(#5b67b2, #8f96d6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* White form box */
+.form-container {
+  width: 520px;
+  background: #ffffff;
+  border: 1px solid #3b4aa0;
+  box-shadow: 0 0 12px rgba(0,0,0,0.3);
+}
+
+/* Blue title bar */
+.form-title {
+  background: #3b4aa0;
+  color: white;
+  padding: 8px 12px;
+  font-size: 14px;
+}
+
+/* Form body */
+.form-body {
+  padding: 20px;
+}
+
+/* Label-input row */
+.row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+label {
+  width: 160px;
+  font-size: 13px;
+  color: #1d2d6b;
+}
+
+input, select {
+  width: 260px;
+  height: 24px;
+  border: 1px solid #7f9db9;
+  padding: 2px 5px;
+  font-size: 13px;
+}
+
+/* Footer button */
+.form-footer {
+  padding: 10px 20px;
+  text-align: right;
+}
+
+button {
+  width: 80px;
+  height: 28px;
+  background: #e6e6e6;
+  border: 1px solid #7f9db9;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #d0d8ff;
+}

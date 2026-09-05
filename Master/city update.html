@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>City Update</title>
+    <link rel="stylesheet" href="city-create.css">
+</head>
+<body>
+
+
+
+<!-- Overlay background -->
+<div class="overlay">
+
+    <!-- Form Box -->
+    <div class="form-box">
+        <div class="form-title">City Update</div>
+
+        <div class="form-body">
+            <div class="form-row">
+                <label>City</label>
+                <input type="text" name="city" required>
+            </div>
+
+            <div class="form-row">
+                <label>Print Name</label>
+                <input type="text" name="print_name">
+            </div>
+
+            <div class="form-row">
+                <label>Status</label>
+                <select name="status">
+                    <option>Active</option>
+                    <option>Inactive</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="form-footer">
+            <button onclick="updateCity(event)">Update</button>
+            <button onclick="cancelUpdate()">Cancel</button>
+        </div>
+    </div>
+
+</div>
+
+<!-- Bottom Status Bar -->
+<div class="status-bar">
+    Ready
+    <span class="right">27-01-2025</span>
+</div>
+
+<script>
+async function loadCity() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const id = urlParams.get('id');
+
+    if (!id) {
+        alert('No city ID provided');
+        window.location.href = 'city display.html';
+        return;
+    }
+
+    try {
+        const response = await fetch(`http://localhost:3000/api/masters/city_master/${id}`);
+        const city = await response.json();
+
+        if (response.ok) {
+            document.querySelector('input[name="city"]').value = city.name;
+            document.querySelector('input[name="print_name"]').value = city.print_name || '';
+            document.querySelector('select[name="status"]').value = city.status;
+        } else {
+            alert('Error loading city data');
+            window.location.href = 'city display.html';
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+        window.location.href = 'city display.html';
+    }
+}
+
+async function updateCity(event) {
+    event.preventDefault();
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const id = urlParams.get('id');
+
+    const cityName = document.querySelector('input[name="city"]').value.trim();
+    const printName = document.querySelector('input[name="print_name"]').value;
+    const status = document.querySelector('select[name="status"]').value;
+
+    if (!cityName) {
+        alert('City name is required');
+        return;
+    }
+
+    try {
+        const response = await fetch(`http://localhost:3000/api/masters/city_master/${id}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                name: cityName,
+                print_name: printName,
+                status: status
+            })
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            alert('City updated successfully');
+            window.location.href = 'city display.html';
+        } else {
+            alert('Error: ' + result.message);
+        }
+    } catch (error) {
+        alert('Error updating city: ' + error.message);
+    }
+}
+
+function cancelUpdate() {
+    window.location.href = 'city display.html';
+}
+
+document.addEventListener('DOMContentLoaded', loadCity);
+</script>
+
+</body>
+</html>
+
+

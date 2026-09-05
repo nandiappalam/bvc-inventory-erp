@@ -1,0 +1,294 @@
+/*============================================================================
+  StandardCreatePage.css - ERP Unified Blue & White Theme
+  Complete UI Standardization for All Create/Update Pages
+  ============================================================================*/
+
+/* Import ERP Theme Variables */
+@import './erp-theme.css';
+
+* {
+  box-sizing: border-box;
+  font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+}
+
+body {
+  margin: 0;
+  background-color: var(--bg-content);
+  color: var(--text-primary);
+}
+
+.standard-create-container {
+  min-height: 100vh;
+  background-color: var(--bg-content);
+  display: flex;
+  flex-direction: column;
+}
+
+/* Top Bar - Blue Theme */
+.top-bar {
+  background: linear-gradient(135deg, var(--primary-blue) 0%, var(--secondary-blue) 100%);
+  color: var(--text-white);
+  padding: var(--spacing-sm) var(--spacing-xl);
+  font-weight: bold;
+  font-size: var(--font-lg);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: var(--shadow-md);
+}
+
+.top-bar span:last-child {
+  font-size: var(--font-md);
+  font-weight: normal;
+}
+
+/* Page Title - Blue Theme */
+.page-title {
+  background: linear-gradient(135deg, var(--secondary-blue) 0%, var(--primary-blue-dark) 100%);
+  color: var(--text-white);
+  padding: var(--spacing-lg) var(--spacing-xl);
+  font-size: var(--font-xxl);
+  font-weight: bold;
+  border-bottom: 3px solid var(--primary-blue);
+  margin: 0;
+}
+
+/* Form Wrapper */
+.form-wrapper {
+  background: var(--bg-content);
+  padding: var(--spacing-xl);
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  min-height: calc(100vh - 120px);
+  overflow-y: auto;
+}
+
+/* Entry Form - Card Style */
+.entry-form {
+  background: var(--bg-white);
+  width: 500px;
+  padding: var(--spacing-xl);
+  border: 2px solid var(--border-medium);
+  box-shadow: var(--shadow-lg);
+  margin-top: var(--spacing-xl);
+  border-radius: var(--radius-lg);
+}
+
+/* Form Row - Standardized */
+.row {
+  display: flex;
+  align-items: center;
+  margin-bottom: var(--spacing-lg);
+  gap: var(--spacing-sm);
+}
+
+.row label {
+  width: 140px;
+  font-size: var(--font-lg);
+  font-weight: bold;
+  color: var(--primary-blue);
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.row span {
+  color: var(--primary-blue);
+  font-weight: bold;
+}
+
+.row input,
+.row select {
+  flex: 1;
+  height: 34px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-sm);
+  background: var(--bg-white);
+  font-size: 13px;
+  color: var(--text-primary);
+  font-family: Arial, sans-serif;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.row textarea {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid var(--border-dark);
+  border-radius: var(--radius-sm);
+  background: var(--bg-white);
+  font-size: 13px;
+  color: var(--text-primary);
+  font-family: Arial, sans-serif;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.row input:focus,
+.row textarea:focus,
+.row select:focus {
+  outline: none;
+  border: 2px solid var(--primary-blue);
+  background-color: var(--bg-light);
+  box-shadow: 0 0 4px var(--primary-blue);
+}
+
+.row textarea {
+  resize: vertical;
+  min-height: 60px;
+}
+
+/* Button Row */
+.btn-row {
+  display: flex;
+  justify-content: center;
+  margin-top: var(--spacing-xl);
+  gap: var(--spacing-sm);
+}
+
+/* SAVE Button - Blue - Standardized */
+.save-btn {
+  background: var(--btn-save-bg);
+  color: var(--text-white);
+  border: none;
+  padding: var(--spacing-lg) 30px;
+  font-size: var(--font-lg);
+  font-weight: bold;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-normal) ease;
+  box-shadow: var(--shadow-md);
+}
+
+.save-btn:hover:not(:disabled) {
+  background: var(--btn-save-hover);
+  box-shadow: var(--shadow-lg);
+  transform: translateY(-2px);
+}
+
+.save-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* CANCEL Button - Grey - Standardized */
+.cancel-btn {
+  background: var(--btn-cancel-bg);
+  color: var(--text-white);
+  border: none;
+  padding: var(--spacing-lg) 30px;
+  font-size: var(--font-lg);
+  font-weight: bold;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-normal) ease;
+}
+
+.cancel-btn:hover:not(:disabled) {
+  background: var(--btn-cancel-hover);
+  transform: translateY(-2px);
+}
+
+/* Message Box - Standardized */
+.message-box {
+  padding: var(--spacing-lg) var(--spacing-xl);
+  margin-bottom: var(--spacing-xl);
+  border-radius: var(--radius-md);
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.message-box.success {
+  background-color: var(--success-bg);
+  color: #155724;
+  border: 1px solid var(--success-border);
+}
+
+.message-box.error {
+  background-color: var(--error-bg);
+  color: #721c24;
+  border: 1px solid var(--error-border);
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-content);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-dark);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--primary-blue);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .entry-form {
+    width: 95%;
+    min-width: 280px;
+  }
+
+  .row {
+    flex-wrap: wrap;
+  }
+
+  .row label {
+    width: 100%;
+    text-align: left;
+    margin-bottom: var(--spacing-xs);
+  }
+
+  .row input,
+  .row textarea,
+  .row select {
+    width: 100%;
+  }
+
+  .top-bar {
+    flex-direction: column;
+    gap: var(--spacing-xs);
+    text-align: center;
+  }
+}
+
+/* Print Styles - Clean Invoice Format */
+@media print {
+  .page-title {
+    break-after: avoid;
+    color: var(--text-primary);
+    background: none;
+    border-bottom: 2px solid var(--primary-blue);
+  }
+
+  .form-wrapper {
+    background: var(--bg-white);
+    padding: 0;
+    min-height: auto;
+  }
+
+  .entry-form {
+    box-shadow: none;
+    border: 1px solid var(--grey-400);
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .save-btn,
+  .cancel-btn {
+    display: none;
+  }
+
+  .message-box {
+    display: none;
+  }
+}

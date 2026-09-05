@@ -1,0 +1,22 @@
+node_modules/
+.env
+.env.*
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+dist/
+build/
+.vite
+*.log
+
+src-tauri/target
+target
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/

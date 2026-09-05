@@ -1,0 +1,93 @@
+html, body, #root {
+  min-height: 100vh;
+  overflow-y: auto !important;
+  font-family: 'Segoe UI', 'Tahoma', Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Uniform Application Page Title Styling (Blue & White Theme) */
+.screen-title, 
+.page-title, 
+.screen-title-bar,
+.screen-title-text {
+  background: linear-gradient(135deg, #1f4fb2 0%, #2a5ea0 100%) !important;
+  color: #ffffff !important;
+  padding: 12px 20px !important;
+  font-size: 20px !important;
+  font-weight: bold !important;
+  font-family: 'Segoe UI', 'Tahoma', Arial, sans-serif !important;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1) !important;
+  border-radius: 4px 4px 0 0 !important;
+  margin-bottom: 12px !important;
+  box-sizing: border-box !important;
+  letter-spacing: 0.5px !important;
+}
+
+/* Universal Action Button Styles for All Display & List Tables */
+.action-btn,
+button.action-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background-color: #1976d2 !important;
+  color: #ffffff !important;
+  border: 1px solid transparent !important;
+  padding: 5px 11px !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  border-radius: 4px !important;
+  cursor: pointer !important;
+  margin: 2px 3px !important;
+  text-decoration: none !important;
+  transition: all 0.15s ease-in-out !important;
+  white-space: nowrap !important;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.1) !important;
+}
+
+.action-btn:hover,
+button.action-btn:hover {
+  opacity: 0.9 !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.15) !important;
+}
+
+.action-btn.update-btn,
+button.action-btn.update-btn,
+.action-btn-update {
+  background-color: #1976d2 !important;
+  color: #ffffff !important;
+}
+
+.action-btn.print-btn,
+button.action-btn.print-btn,
+.action-btn-print {
+  background-color: #0288d1 !important;
+  color: #ffffff !important;
+}
+
+.action-btn.delete-btn,
+.action-btn.danger,
+button.action-btn.delete-btn,
+button.action-btn.danger,
+.action-btn-delete {
+  background-color: #d32f2f !important;
+  color: #ffffff !important;
+}
+
+.action-btn.success,
+.action-btn.qc-btn,
+button.action-btn.success {
+  background-color: #2e7d32 !important;
+  color: #ffffff !important;
+}
+
+.action-btn.warning,
+button.action-btn.warning {
+  background-color: #ed6c02 !important;
+  color: #ffffff !important;
+}
+
+

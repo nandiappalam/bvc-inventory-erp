@@ -1,0 +1,9 @@
+node_modules
+dist
+.vite
+.env
+*.log
+
+# Tauri / Rust build files
+src-tauri/target
+target

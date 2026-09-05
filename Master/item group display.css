@@ -1,0 +1,57 @@
+body {
+    font-family: "Segoe UI", Arial, sans-serif;
+    margin: 0;
+    background: #eaf2fb;
+}
+
+/* Top Header */
+.app-header {
+    background: #1e5ed8;
+    color: white;
+    padding: 10px;
+    font-size: 18px;
+}
+
+/* Page Title */
+.page-title {
+    padding: 10px 15px;
+    font-weight: bold;
+    color: #1e5ed8;
+}
+
+/* Table Container */
+.table-container {
+    padding: 10px 15px;
+}
+
+/* Excel-like Grid */
+.grid-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+}
+
+.grid-table th {
+    background: #dbe7fb;
+    border: 1px solid #9fb8e8;
+    padding: 6px;
+    text-align: left;
+    font-weight: bold;
+}
+
+.grid-table td {
+    border: 1px solid #c7d6f3;
+    height: 28px;
+    padding: 4px;
+}
+
+/* Footer */
+.footer-bar {
+    position: fixed;
+    bottom: 0;
+    width: 100%;
+    background: #dbe7fb;
+    border-top: 1px solid #9fb8e8;
+    padding: 6px 10px;
+    font-size: 14px;
+}

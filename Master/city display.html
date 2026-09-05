@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>City Display</title>
+    <link rel="stylesheet" href="city-display.css">
+    <script>
+        async function loadCities() {
+            try {
+                const response = await fetch('http://localhost:3000/api/masters/city_master');
+                const cities = await response.json();
+
+                const tbody = document.querySelector('.grid-table tbody');
+                tbody.innerHTML = '';
+
+                cities.forEach((city, index) => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${index + 1}</td>
+                        <td>${city.name}</td>
+                        <td>${city.print_name || ''}</td>
+                        <td>${city.status}</td>
+                        <td>
+                            <button onclick="editCity(${city.id})">Edit</button>
+                            <button onclick="deleteCity(${city.id})">Delete</button>
+                        </td>
+                    `;
+                    tbody.appendChild(row);
+                });
+
+                document.querySelector('.footer-bar').innerHTML = `Rows: ${cities.length} <span class="footer-right">Options</span>`;
+            } catch (error) {
+                console.error('Error loading cities:', error);
+            }
+        }
+
+        async function deleteCity(id) {
+            if (!confirm('Are you sure you want to delete this city?')) return;
+
+            try {
+                const response = await fetch(`http://localhost:3000/api/masters/city_master/${id}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    alert('City deleted successfully');
+                    loadCities();
+                } else {
+                    const result = await response.json();
+                    alert('Error: ' + result.message);
+                }
+            } catch (error) {
+                alert('Error deleting city: ' + error.message);
+            }
+        }
+
+        function editCity(id) {
+            alert('Edit functionality would be implemented here for city ID: ' + id);
+        }
+
+        document.addEventListener('DOMContentLoaded', loadCities);
+    </script>
+</head>
+<body>
+
+<!-- Top Title Bar -->
+<div class="title-bar">
+    Inventory Management System
+    <span class="company">A.S. MOORTHY & CO</span>
+</div>
+
+<!-- Overlay background -->
+<div class="overlay">
+
+    <!-- Table Area -->
+    <div class="table-wrapper">
+        <table class="grid-table">
+            <thead>
+                <tr>
+                    <th>S.No</th>
+                    <th>City</th>
+                    <th>Print Name</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Data will be loaded here -->
+            </tbody>
+        </table>
+    </div>
+
+</div>
+
+<!-- Bottom Status Bar -->
+<div class="status-bar">
+    Rows: 0
+    <span class="right">27-01-2025</span>
+</div>
+
+</body>
+</html>
