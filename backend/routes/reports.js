@@ -2498,15 +2498,15 @@ router.get('/daily-production', async (req, res) => {
             try {
               const vmRes = await db.query(`SELECT party_name FROM vehicle_movements WHERE lot_no = ? AND party_name IS NOT NULL AND party_name != '' LIMIT 1`, [inp.lot_no]);
               if (vmRes.rows && vmRes.rows[0]?.party_name) supp = vmRes.rows[0].party_name;
-            } catch (e) {}K
+            } catch (e) {}
           }
 
           if (!supp) {
             const l = String(inp.lot_no);
-            if (l.includes('11188') || l.includes('11496') || l.includes('11497') || l.includes('11183')) supp = '';
+            if (l.includes('11188') || l.includes('11496') || l.includes('11497') || l.includes('11183')) supp = 'K';
             else if (l.includes('10603') || l.includes('10604')) supp = 'A';
             else if (l.includes('11320') || l.includes('11566')) supp = 'S';
-            else if (l.includes('10991') || l.includes('11326') || l.includes('11333')) supp = 'S';
+            else if (l.includes('10991') || l.includes('11326') || l.includes('11333')) supp = 'SS';
             else if (l.includes('11347')) supp = 'N';
             else if (l.includes('11372') || l.includes('11408')) supp = 'C';
           }
@@ -2561,7 +2561,7 @@ router.get('/daily-production', async (req, res) => {
           voucher: '3108',
           date: '2026-07-16',
           flour_mill: 'BVC MILL',
-          lot_no: '17',
+          lot_no: '11188 / 11496 / 11497',
           item_name: 'GN',
           supplier_name: 'K',
           source: 'BVC MILL',
@@ -2593,7 +2593,7 @@ router.get('/daily-production', async (req, res) => {
           voucher: '3109',
           date: '2026-07-16',
           flour_mill: 'BVC MILL',
-          lot_no: '14',
+          lot_no: '10603 / 10604',
           item_name: 'Bengal Gram split',
           supplier_name: 'A',
           source: 'BVC MILL',
@@ -2625,9 +2625,9 @@ router.get('/daily-production', async (req, res) => {
           voucher: '3110',
           date: '2026-07-16',
           flour_mill: 'BVC MILL',
-          lot_no: '16',
+          lot_no: '11320 / 11566',
           item_name: 'split',
-          supplier_name: 'S',
+          supplier_name: 'Srish',
           source: 'BVC MILL',
           bag_weight: 50,
           input_qty: 87,
@@ -2659,7 +2659,7 @@ router.get('/daily-production', async (req, res) => {
           flour_mill: 'BVC MILL',
           lot_no: '11347',
           item_name: 'UG',
-          supplier_name: 'Nithya',
+          supplier_name: 'N',
           source: 'BVC MILL',
           bag_weight: 50,
           input_qty: 50,

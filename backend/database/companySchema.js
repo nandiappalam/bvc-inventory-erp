@@ -129,8 +129,16 @@ const DEFAULT_TAX_RATES = [
   { tax_name: "GST 28% (14% + 14%)", tax_percent: 28, cgst: 14, sgst: 14, igst: 28 }
 ];
 
+const SANITIZED_COMPANY_TABLES = COMPANY_TABLES.map(sql => {
+  let s = (sql || '').trim();
+  if (!s.endsWith(')')) {
+    s += ')';
+  }
+  return s;
+});
+
 module.exports = {
-  COMPANY_TABLES,
+  COMPANY_TABLES: SANITIZED_COMPANY_TABLES,
   DEFAULT_LEDGER_CHART,
   DEFAULT_TAX_RATES
 };
