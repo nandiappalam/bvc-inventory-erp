@@ -124,7 +124,10 @@ export const createPurchaseOrder = async (payload) => {
     method: 'POST',
     body: formattedPayload
   });
-  return result?.success ? toForm(result.data) : null;
+  if (!result?.success || !result.data?.id) {
+    throw new Error(result?.message || 'Purchase Order was not saved');
+  }
+  return toForm(result.data);
 };
 
 export const updatePurchaseOrder = async (id, payload) => {

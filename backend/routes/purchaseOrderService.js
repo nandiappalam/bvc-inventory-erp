@@ -182,7 +182,15 @@ exports.createPurchaseOrder = async (formData, items = [], deductions = []) => {
         }
 
         await client.commit();
-        return { id: purchaseOrderId, s_no, inv_no, ...formData, items, deductions };
+        if (!purchaseOrderId) {
+            throw new Error('Purchase Order was committed without a database ID');
+        }
+
+        const savedPurchaseOrder = await exports.getPurchaseOrderById(purchaseOrderId);
+        if (!savedPurchaseOrder) {
+            throw new Error(`Purchase Order ${purchaseOrderId} was saved but could not be read back`);
+        }
+        return savedPurchaseOrder;
     } catch (error) {
         try { await client.rollback(); } catch (e) {}
         console.error('Error in createPurchaseOrder transaction:', error);

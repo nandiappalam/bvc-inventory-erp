@@ -587,7 +587,8 @@ const PurchaseOrderCreate = () => {
       };
 
       if (editingId) {
-        await purchaseOrderService.update(editingId, payload);
+        const savedOrder = await purchaseOrderService.update(editingId, payload);
+        if (!savedOrder) throw new Error('Purchase Order update was not saved');
       } else {
         await purchaseOrderService.create(payload);
         clearModuleDraft('po_create');

@@ -17,6 +17,9 @@ exports.createPurchaseOrder = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Missing form data or items' });
         }
         const newPurchaseOrder = await purchaseOrderService.createPurchaseOrder(formData, items, deductions);
+        if (!newPurchaseOrder || !newPurchaseOrder.id) {
+            return res.status(500).json({ success: false, message: 'Purchase Order was not saved or could not be read back' });
+        }
         res.status(201).json({ success: true, message: 'Purchase Order created successfully', data: newPurchaseOrder });
     } catch (error) {
         console.error('Error creating Purchase Order:', error);
