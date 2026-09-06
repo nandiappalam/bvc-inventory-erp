@@ -2527,7 +2527,7 @@ router.get('/daily-production', async (req, res) => {
         flour_mill: g.flour_mill_name || g.flour_mill,
         lot_no: inputLotsStr || 'N/A',
         item_name: inputItemsStr || 'N/A',
-        supplier_name: suppliersStr || 'K',
+        supplier_name: suppliersStr || 'Kandiga / Velmurugan',
         source: g.flour_mill_name || g.flour_mill || 'In-House',
         bag_weight: inputs[0]?.weight || 50,
         input_qty: inputQty,
