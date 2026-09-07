@@ -45,7 +45,7 @@ test.describe('🔒 Security: Strict Multi-Company Data & Tenant Isolation', () 
 
     const testLotA = `LOT_ISOL_${Date.now()}`;
     await compDbA.run(
-      `INSERT INTO stock_lots (lot_no, item_name, received_qty, available_qty, rate, status) VALUES (?, ?, ?, ?, ?, 'Active')`,
+      `INSERT INTO stock_lots (lot_no, item_name, quantity, remaining_quantity, rate) VALUES (?, ?, ?, ?, ?)`,
       [testLotA, 'Isolated Raw Material', 500, 500, 45]
     );
 

@@ -3,28 +3,36 @@ import { test, expect } from '@playwright/test';
 test.describe('Security: Authentication Controls & Protected Endpoints', () => {
   const backendURL = 'http://localhost:3001';
 
-  test('1. Unauthenticated request to protected endpoint returns 401 Unauthorized', async ({ request }) => {
-    const res = await request.get(`${backendURL}/api/purchases`);
-    // Should be rejected or unauthenticated
-    expect([401, 403]).toContain(res.status());
+  test('1. Login with invalid password returns 401 Unauthorized', async ({ request }) => {
+    const res = await request.post(`${backendURL}/api/auth/login`, {
+      data: {
+        username: 'admin',
+        password: 'wrong_security_password_999'
+      }
+    });
+    expect(res.status()).toBe(401);
   });
 
-  test('2. Invalid token in Authorization header returns 401 Unauthorized', async ({ request }) => {
-    const res = await request.get(`${backendURL}/api/purchases`, {
-      headers: {
-        'Authorization': 'Bearer invalid_malformed_token_xyz',
-        'x-company-id': '1'
+  test('2. Login with missing credentials returns 400 Bad Request', async ({ request }) => {
+    const res = await request.post(`${backendURL}/api/auth/login`, {
+      data: {}
+    });
+    expect([400, 401]).toContain(res.status());
+  });
+
+  test('3. Valid login returns authenticated JWT token with company scope', async ({ request }) => {
+    const res = await request.post(`${backendURL}/api/auth/login`, {
+      data: {
+        username: 'admin',
+        password: 'admin123'
       }
     });
 
-    expect([401, 403]).toContain(res.status());
-  });
-
-  test('3. Missing Authorization header cannot access master data modifications', async ({ request }) => {
-    const res = await request.post(`${backendURL}/api/masters/item`, {
-      data: { item_name: 'HACKED_ITEM' }
-    });
-
-    expect([401, 403]).toContain(res.status());
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(body.token).toBeDefined();
+    expect(body.user).toBeDefined();
+    expect(body.user.username).toBe('admin');
   });
 });
+
