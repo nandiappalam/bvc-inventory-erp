@@ -3,22 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { EntryDisplay } from '../../../components/entry';
 import { printHtml } from '../../../utils/printHelper';
 import { api } from '../../../services/api';
-useEffect(() => {
-  const fetchPurchaseOrders = async () => {
-    try {
-      const selectedCompanyId = localStorage.getItem('company_id'); // or your context state
-      const res = await api.get(`/api/purchase-orders?company_id=${selectedCompanyId}`);
-      
-      // Handle both { data: [...] } and direct array [...] formats safely:
-      const orders = res.data.data ? res.data.data : res.data;
-      setPurchaseOrders(Array.isArray(orders) ? orders : []);
-    } catch (err) {
-      console.error("Error fetching POs:", err);
-    }
-  };
 
-  fetchPurchaseOrders();
-}, []);
 const columns = [
   { key: 's_no', title: 'S.No', render: (_val, row, idx) => idx !== undefined ? idx + 1 : (row.s_no || row.sNo || '') },
   { key: 'pr_no', title: 'PR Ref', render: (val, row) => (val || row.pr_no) ? (

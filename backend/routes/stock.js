@@ -748,40 +748,8 @@ router.get('/lots', async (req, res) => {
 // ============================================================================
 router.get('/next-lot-no', async (req, res) => {
   try {
-    let maxLotNum = 0;
-    
-    // Check stock_lots
-    try {
-      const lotResult = await db.query(`
-        SELECT MAX(CAST(REPLACE(lot_no, 'LOT', '') AS INTEGER)) AS maxLot
-        FROM stock_lots WHERE lot_no LIKE 'LOT%'
-      `);
-      const num = parseInt(lotResult.rows[0]?.maxLot) || 0;
-      if (num > maxLotNum) maxLotNum = num;
-    } catch (e) {}
-
-    // Check purchase_items
-    try {
-      const lotResult2 = await db.query(`
-        SELECT MAX(CAST(REPLACE(lot_no, 'LOT', '') AS INTEGER)) AS maxLot
-        FROM purchase_items WHERE lot_no LIKE 'LOT%'
-      `);
-      const num2 = parseInt(lotResult2.rows[0]?.maxLot) || 0;
-      if (num2 > maxLotNum) maxLotNum = num2;
-    } catch (e) {}
-
-    // Check packing_items
-    try {
-      const lotResult3 = await db.query(`
-        SELECT MAX(CAST(REPLACE(lot_no, 'LOT', '') AS INTEGER)) AS maxLot
-        FROM packing_items WHERE lot_no LIKE 'LOT%'
-      `);
-      const num3 = parseInt(lotResult3.rows[0]?.maxLot) || 0;
-      if (num3 > maxLotNum) maxLotNum = num3;
-    } catch (e) {}
-
-    const nextLotNum = maxLotNum + 1;
-    const nextLotNo = `LOT${String(nextLotNum).padStart(4, '0')}`;
+    const { previewNextLotNumber } = require('../utils/lotHelper');
+    const nextLotNo = await previewNextLotNumber();
     res.json({ success: true, lot_no: nextLotNo, next_lot_no: nextLotNo });
   } catch (error) {
     console.error('Error generating next lot no:', error);

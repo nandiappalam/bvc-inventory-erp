@@ -590,7 +590,7 @@ const Navigation = () => {
           {/* Dashboard Link */}
           <ListItemButton 
             component={Link} 
-            to="/" 
+            to="/dashboard" 
             onClick={toggleDrawer}
             sx={{ 
               justifyContent: 'flex-start',

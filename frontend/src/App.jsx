@@ -211,14 +211,9 @@ const AppLayout = () => {
     return null
   }
 
-  // If not logged in, redirect to login page
-  if (!user) {
-    return <Navigate to="/login" replace />
-  }
-
-  // If logged in but no company (shouldn't happen with proper login), redirect to login
-  if (!selectedCompany) {
-    return <Navigate to="/login" replace />
+  // If not logged in or no company selected, redirect to company selection
+  if (!user || !selectedCompany) {
+    return <Navigate to="/company-select" replace />
   }
 
   // Otherwise show the main app with navigation
@@ -236,7 +231,7 @@ const AppLayout = () => {
           }
         }}>
         <Routes>
-          <Route path="/" element={<Dashboard />} />
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/city-update" element={<CityUpdate />} />
           <Route path="/ptrans-update" element={<PTransUpdate />} />
@@ -500,7 +495,8 @@ function App() {
         <AuthProvider>
           <Router>
             <Routes>
-              {/* Public Routes */}
+              {/* Default & Public Routes */}
+              <Route path="/" element={<Navigate to="/company-select" replace />} />
               <Route path="/company-select" element={<CompanySelection />} />
               <Route path="/company-create" element={<CompanyCreate />} />
               <Route path="/company-alter/:id" element={<CompanyCreate />} />

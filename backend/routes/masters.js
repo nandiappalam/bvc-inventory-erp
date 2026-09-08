@@ -784,33 +784,55 @@ router.put('/record/:table/:id', async (req, res) => {
 // ============================================================================
 router.delete('/:table/:id', async (req, res) => {
   try {
-    const tableNameParam = req.params.table
-    const { tableName, tableConfig } = resolveTableConfig(tableNameParam)
+    const tableNameParam = req.params.table;
+    const { tableName, tableConfig } = resolveTableConfig(tableNameParam);
 
     if (!tableName) {
-      return res.status(400).json({ message: 'Invalid master table' })
+      return res.status(400).json({ success: false, message: 'Invalid master table' });
     }
 
     const tableColumnsResult = await db.query(`PRAGMA table_info(${tableName})`);
     const actualColumns = new Set(tableColumnsResult.rows.map(col => col.name));
     
-    let query = `DELETE FROM ${tableName} WHERE id = ?`;
-    let pkCol = 'id';
-    if (!actualColumns.has('id')) {
-      pkCol = tableConfig?.uniqueField || (tableColumnsResult.rows.find(col => col.pk === 1)?.name) || tableColumnsResult.rows[0]?.name;
-      if (pkCol) {
-        query = `DELETE FROM ${tableName} WHERE ${pkCol} = ?`;
-      }
+    const rawId = String(req.params.id).trim();
+    const isNumericId = /^\d+$/.test(rawId);
+
+    // Determine target primary/unique key column for deletion
+    let targetCol = null;
+    let targetVal = rawId;
+
+    if (isNumericId && actualColumns.has('id')) {
+      targetCol = 'id';
+      targetVal = parseInt(rawId, 10);
+    } else if (tableConfig?.uniqueField && actualColumns.has(tableConfig.uniqueField)) {
+      targetCol = tableConfig.uniqueField;
+    } else if (actualColumns.has('item_code')) {
+      targetCol = 'item_code';
+    } else if (actualColumns.has('code')) {
+      targetCol = 'code';
+    } else if (actualColumns.has('id')) {
+      targetCol = 'id';
+      targetVal = parseInt(rawId, 10) || 0;
     }
 
+    if (!targetCol) {
+      targetCol = tableColumnsResult.rows[0]?.name || 'id';
+    }
+
+    // Save to recycle bin safely without causing type errors
     try {
-      const existingRes = await db.query(`SELECT * FROM ${tableName} WHERE ${pkCol} = ? OR id = ?`, [req.params.id, req.params.id]);
-      if (existingRes.rows && existingRes.rows.length > 0) {
+      let existingRes;
+      if (targetCol === 'id' && isNumericId) {
+        existingRes = await db.query(`SELECT * FROM ${tableName} WHERE id = ? LIMIT 1`, [targetVal]);
+      } else if (targetCol) {
+        existingRes = await db.query(`SELECT * FROM ${tableName} WHERE ${targetCol} = ? LIMIT 1`, [targetVal]);
+      }
+      if (existingRes && existingRes.rows && existingRes.rows.length > 0) {
         const row = existingRes.rows[0];
-        const titleName = row.name || row.item_name || row.group_name || row.supplier_name || row.customer_name || row.city_name || row.area_name || row.company_name || row.godown_name || `${tableName} #${req.params.id}`;
+        const titleName = row.name || row.item_name || row.group_name || row.supplier_name || row.customer_name || row.city_name || row.area_name || row.company_name || row.godown_name || `${tableName} #${rawId}`;
         await recycleBinService.saveToRecycleBin({
           moduleName: `${tableName.replace('_master', '').replace('_', ' ').toUpperCase()} Master`,
-          recordId: req.params.id,
+          recordId: rawId,
           title: titleName,
           recordData: {
             tableName,
@@ -823,116 +845,125 @@ router.delete('/:table/:id', async (req, res) => {
       console.warn('Recycle bin save error in masters:', e.message);
     }
 
-    let result = await db.run(query, [req.params.id])
+    let result = await db.run(`DELETE FROM ${tableName} WHERE ${targetCol} = ?`, [targetVal]);
 
-    if (result.changes === 0 && tableConfig?.uniqueField) {
-      const queryFallback = `DELETE FROM ${tableName} WHERE ${tableConfig.uniqueField} = ?`
-      const resultFallback = await db.run(queryFallback, [req.params.id])
+    // Fallback: If 0 changes, try alternative identifier (uniqueField vs id)
+    if (result.changes === 0 && targetCol === 'id' && tableConfig?.uniqueField && actualColumns.has(tableConfig.uniqueField)) {
+      const queryFallback = `DELETE FROM ${tableName} WHERE ${tableConfig.uniqueField} = ?`;
+      const resultFallback = await db.run(queryFallback, [rawId]);
       if (resultFallback.changes > 0) {
-        result = resultFallback
+        result = resultFallback;
+      }
+    } else if (result.changes === 0 && targetCol !== 'id' && actualColumns.has('id') && !isNumericId) {
+      // Find id from uniqueField and delete by id
+      const findRes = await db.query(`SELECT id FROM ${tableName} WHERE ${targetCol} = ? LIMIT 1`, [rawId]);
+      if (findRes && findRes.rows && findRes.rows.length > 0) {
+        const fallbackResult = await db.run(`DELETE FROM ${tableName} WHERE id = ?`, [findRes.rows[0].id]);
+        if (fallbackResult.changes > 0) {
+          result = fallbackResult;
+        }
       }
     }
 
     if (result.changes > 0) {
-      res.json({ success: true, message: 'Record deleted successfully' })
+      res.json({ success: true, message: 'Record deleted successfully' });
     } else {
-      res.status(404).json({ success: false, message: 'Record not found' })
+      res.status(404).json({ success: false, message: 'Record not found' });
     }
   } catch (error) {
-    console.error('Error deleting master record:', error)
-    res.status(500).json({ message: 'Error deleting record', error: error.message })
+    console.error('Error deleting master record:', error);
+    const isConstraint = error.code === '23503' || /foreign key|constraint|referenced/i.test(error.message);
+    const statusCode = isConstraint ? 409 : 500;
+    const msg = isConstraint 
+      ? 'This record cannot be deleted because it is referenced in transactions or other master records.'
+      : (error.message || 'Error deleting record');
+    res.status(statusCode).json({ success: false, message: msg, error: error.message });
   }
-})
+});
 
 // ============================================================================
 // DELETE RECORD - Legacy form /record/:table/:id
 // ============================================================================
 router.delete('/record/:table/:id', async (req, res) => {
   try {
-    const tableNameParam = req.params.table
-    const { tableName, tableConfig } = resolveTableConfig(tableNameParam)
+    const tableNameParam = req.params.table;
+    const { tableName, tableConfig } = resolveTableConfig(tableNameParam);
 
     if (!tableName) {
-      return res.status(400).json({ message: 'Invalid master table' })
+      return res.status(400).json({ success: false, message: 'Invalid master table' });
     }
 
     const tableColumnsResult = await db.query(`PRAGMA table_info(${tableName})`);
     const actualColumns = new Set(tableColumnsResult.rows.map(col => col.name));
     
-    let query = `DELETE FROM ${tableName} WHERE id = ?`;
-    if (!actualColumns.has('id')) {
-      const pkCol = tableConfig?.uniqueField || (tableColumnsResult.rows.find(col => col.pk === 1)?.name) || tableColumnsResult.rows[0]?.name;
-      if (pkCol) {
-        query = `DELETE FROM ${tableName} WHERE ${pkCol} = ?`;
-      }
+    const rawId = String(req.params.id).trim();
+    const isNumericId = /^\d+$/.test(rawId);
+
+    let targetCol = null;
+    let targetVal = rawId;
+
+    if (isNumericId && actualColumns.has('id')) {
+      targetCol = 'id';
+      targetVal = parseInt(rawId, 10);
+    } else if (tableConfig?.uniqueField && actualColumns.has(tableConfig.uniqueField)) {
+      targetCol = tableConfig.uniqueField;
+    } else if (actualColumns.has('item_code')) {
+      targetCol = 'item_code';
+    } else if (actualColumns.has('code')) {
+      targetCol = 'code';
+    } else if (actualColumns.has('id')) {
+      targetCol = 'id';
+      targetVal = parseInt(rawId, 10) || 0;
     }
 
-    let result = await db.run(query, [req.params.id])
+    if (!targetCol) {
+      targetCol = tableColumnsResult.rows[0]?.name || 'id';
+    }
 
-    if (result.changes === 0 && tableConfig?.uniqueField) {
-      const queryFallback = `DELETE FROM ${tableName} WHERE ${tableConfig.uniqueField} = ?`
-      const resultFallback = await db.run(queryFallback, [req.params.id])
+    let result = await db.run(`DELETE FROM ${tableName} WHERE ${targetCol} = ?`, [targetVal]);
+
+    if (result.changes === 0 && targetCol === 'id' && tableConfig?.uniqueField && actualColumns.has(tableConfig.uniqueField)) {
+      const queryFallback = `DELETE FROM ${tableName} WHERE ${tableConfig.uniqueField} = ?`;
+      const resultFallback = await db.run(queryFallback, [rawId]);
       if (resultFallback.changes > 0) {
-        result = resultFallback
+        result = resultFallback;
+      }
+    } else if (result.changes === 0 && targetCol !== 'id' && actualColumns.has('id') && !isNumericId) {
+      const findRes = await db.query(`SELECT id FROM ${tableName} WHERE ${targetCol} = ? LIMIT 1`, [rawId]);
+      if (findRes && findRes.rows && findRes.rows.length > 0) {
+        const fallbackResult = await db.run(`DELETE FROM ${tableName} WHERE id = ?`, [findRes.rows[0].id]);
+        if (fallbackResult.changes > 0) {
+          result = fallbackResult;
+        }
       }
     }
 
     if (result.changes > 0) {
-      res.json({ message: 'Record deleted successfully' })
+      res.json({ success: true, message: 'Record deleted successfully' });
     } else {
-      res.status(404).json({ message: 'Record not found' })
+      res.status(404).json({ success: false, message: 'Record not found' });
     }
   } catch (error) {
-    console.error('Error deleting master record:', error)
-    res.status(500).json({ message: 'Error deleting record', error: error.message })
+    console.error('Error deleting master record:', error);
+    const isConstraint = error.code === '23503' || /foreign key|constraint|referenced/i.test(error.message);
+    const statusCode = isConstraint ? 409 : 500;
+    const msg = isConstraint 
+      ? 'This record cannot be deleted because it is referenced in transactions or other master records.'
+      : (error.message || 'Error deleting record');
+    res.status(statusCode).json({ success: false, message: msg, error: error.message });
   }
-})
+});
+
+const { previewNextLotNumber } = require('../utils/lotHelper');
 
 // /lots/next - Lot generator returns sequential LOT numbers based on existing lots
 // Required response shape: { lot_no: "LOT0007" }
 router.get('/lots/next', async (req, res) => {
   try {
-    let maxNum = 0;
-    const tables = [
-      { name: 'stock_lots', col: 'lot_no' },
-      { name: 'purchase_items', col: 'lot_no' },
-      { name: 'grain_input_items', col: 'lot_no' },
-      { name: 'grain_output_items', col: 'lot_no' },
-      { name: 'grain_wastage_items', col: 'lot_no' }
-    ];
-
-    for (const t of tables) {
-      try {
-        const check = await db.query(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, [t.name]);
-        if (check.rows.length > 0) {
-          const resMax = await db.query(`
-            SELECT MAX(CAST(REPLACE(${t.col}, 'LOT', '') AS INTEGER)) AS maxNum
-            FROM ${t.name}
-            WHERE ${t.col} LIKE 'LOT%'
-          `);
-          const num = parseInt(resMax.rows[0]?.maxNum) || 0;
-          if (num > maxNum) maxNum = num;
-        }
-      } catch (e) {
-        console.error(`Error querying max lot in /lots/next from ${t.name}:`, e);
-      }
-    }
-
-    try {
-      const seqCheck = await db.query(`SELECT name FROM sqlite_master WHERE type='table' AND name='lot_sequence'`);
-      if (seqCheck.rows.length > 0) {
-        const resSeq = await db.query(`SELECT last_lot_no FROM lot_sequence WHERE id = 1`);
-        const num = parseInt(resSeq.rows[0]?.last_lot_no) || 0;
-        if (num > maxNum) maxNum = num;
-      }
-    } catch (e) {
-      console.error(`Error querying max lot in /lots/next from lot_sequence:`, e);
-    }
-
-    const nextLot = `LOT${String(maxNum + 1).padStart(4, '0')}`;
+    const nextLot = await previewNextLotNumber();
     return res.json({ lot_no: nextLot });
   } catch (err) {
-    console.error('Error generating next lot number:', err)
+    console.error('Error generating next lot number:', err);
     res.status(500).json({ error: err.message });
   }
 });

@@ -1,11 +1,5 @@
 const purchaseOrderService = require('./purchaseOrderService');
 
-// Force numeric integer conversion
-const companyId = parseInt(req.companyId || req.query.company_id || req.body.company_id, 10);
-
-if (isNaN(companyId)) {
-  return res.status(400).json({ success: false, message: 'Invalid or missing company_id' });
-}
 exports.getNextPurchaseOrderSNo = async (req, res) => {
     try {
         const nextSNo = await purchaseOrderService.generateNextPurchaseOrderSNo();
@@ -30,51 +24,6 @@ exports.createPurchaseOrder = async (req, res) => {
     }
 };
 
-const db = require('../config/database');
-
-async function createPurchaseOrder(req, res) {
-  const companyId = req.companyId || req.body.company_id;
-  
-  if (!companyId) {
-    return res.status(400).json({ success: false, message: 'Company context is required.' });
-  }
-
-  const { po_number, supplier_id, order_date, total_amount, items, pr_id } = req.body;
-
-  try {
-    // 1. Insert Parent Purchase Order
-    const parentSql = `
-      INSERT INTO purchase_orders (company_id, po_number, supplier_id, order_date, total_amount, purchase_request_id)
-      VALUES ($1, $2, $3, $4, $5, $6)
-    `;
-    const parentParams = [companyId, po_number, supplier_id, order_date, total_amount, pr_id || null];
-
-    // CRITICAL FIX: Use insertAndGetId to capture the REAL numeric database primary key
-    const poId = await db.insertAndGetId(parentSql, parentParams, 'id');
-
-    // 2. Insert Line Items using the valid poId
-    if (items && items.length > 0) {
-      for (const item of items) {
-        const itemSql = `
-          INSERT INTO purchase_order_items (purchase_order_id, item_id, quantity, unit_price, line_total)
-          VALUES ($1, $2, $3, $4, $5)
-        `;
-        await db.query(itemSql, [poId, item.item_id, item.quantity, item.unit_price, item.line_total]);
-      }
-    }
-
-    // 3. Return HTTP 201 with created PO ID
-    return res.status(201).json({
-      success: true,
-      message: 'Purchase Order created successfully',
-      data: { id: poId, po_number }
-    });
-
-  } catch (error) {
-    console.error('[PO Create Error]:', error.message);
-    return res.status(500).json({ success: false, message: error.message });
-  }
-}
 exports.getPurchaseOrders = async (req, res) => {
     try {
         const { id } = req.params;
@@ -93,27 +42,7 @@ exports.getPurchaseOrders = async (req, res) => {
         res.status(500).json({ success: false, message: 'Failed to fetch Purchase Orders', error: error.message });
     }
 };
-async function getPurchaseOrders(req, res) {
-  const companyId = req.companyId || req.query.company_id;
 
-  try {
-    const sql = `
-      SELECT po.*, s.supplier_name 
-      FROM purchase_orders po
-      LEFT JOIN supplier_master s ON po.supplier_id = s.id
-      WHERE po.company_id = $1
-      ORDER BY po.id DESC
-    `;
-    const orders = await db.query(sql, [companyId]);
-
-    return res.status(200).json({
-      success: true,
-      data: orders
-    });
-  } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
-  }
-}
 exports.updatePurchaseOrder = async (req, res) => {
     try {
         const { id } = req.params;

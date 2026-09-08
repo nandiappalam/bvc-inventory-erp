@@ -240,16 +240,15 @@ const ItemDisplay = () => {
   const handleDeleteItem = async (item) => {
     setDeleting(true);
     try {
-      // Direct raw fetch call allows us to read the error body when HTTP Status is 500
-      const response = await fetch(`/api/masters/item_master/${item.item_code}`, { method: 'DELETE' });
-      const result = await response.json();
+      const identifier = item.item_code || item.id;
+      const result = await api.deleteMaster('item_master', identifier);
 
-      if (response.ok && result.success) {
+      if (result && result.success) {
         showNotification(`Item "${item.item_name}" deleted successfully.`);
-        setItems(prev => prev.filter(it => it.item_code !== item.item_code));
+        setItems(prev => prev.filter(it => it.item_code !== item.item_code && it.id !== item.id));
       } else {
-        let errMsg = result?.message || result?.error || 'Unknown error occurred';
-        if (errMsg.includes('SQLITE_CONSTRAINT') || errMsg.includes('foreign')) {
+        let errMsg = result?.message || result?.error || 'Failed to delete item';
+        if (errMsg.includes('SQLITE_CONSTRAINT') || errMsg.includes('foreign') || errMsg.includes('23503')) {
           errMsg = 'This item cannot be deleted because it is referenced in transactions (such as Purchases, Stock, or Sales entries).';
         }
         showNotification(`Error deleting item: ${errMsg}`, 'error');

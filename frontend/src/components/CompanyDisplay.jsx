@@ -33,13 +33,16 @@ const CompanyDisplay = () => {
 
   const handleDelete = async (company) => {
     try {
-      await api.delete(`/companies/${company.id}`)
-      loadCompanies()
+      const result = await api.delete(`/companies/${company.id}`);
+      if (result && result.success === false) {
+        throw new Error(result.message || 'Failed to delete company');
+      }
+      await loadCompanies();
     } catch (error) {
-      console.error('Error deleting company:', error)
-      throw error
+      console.error('Error deleting company:', error);
+      throw error;
     }
-  }
+  };
 
 
   const handleOpen = (company) => {

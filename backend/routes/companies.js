@@ -10,7 +10,7 @@ const bcrypt = require('bcryptjs');
 // GET all companies
 router.get(['/', '/list'], async (req, res) => {
   try {
-    const result = await db.master.query('SELECT * FROM companies ORDER BY name ASC');
+    const result = await db.master.query("SELECT * FROM companies WHERE status != 'Inactive' OR status IS NULL ORDER BY name ASC");
     res.json(result.rows || []);
   } catch (error) {
     console.error('Error fetching companies:', error);
@@ -109,16 +109,65 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// DELETE company (soft-deactivate to prevent accidental data loss)
+// DELETE company
 router.delete('/:id', async (req, res) => {
   try {
-    const companyId = req.params.id;
-    // Mark as inactive rather than immediately dropping data
-    await db.master.run(`UPDATE companies SET status = 'Inactive', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [companyId]);
-    res.json({ message: 'Company deactivated successfully' });
+    const companyId = parseInt(req.params.id, 10);
+    if (!companyId || isNaN(companyId)) {
+      return res.status(400).json({ success: false, message: 'Invalid company ID' });
+    }
+
+    console.log(`🗑️ Deleting company ${companyId}...`);
+
+    // 1. Delete associated users for this company
+    try {
+      await db.master.run('DELETE FROM users WHERE company_id = ?', [companyId]);
+    } catch (e) {
+      console.warn(`Notice cleaning up users for company ${companyId}:`, e.message);
+    }
+
+    // 2. Delete database registry entry
+    try {
+      await db.master.run('DELETE FROM database_registry WHERE company_id = ?', [companyId]);
+    } catch (e) {
+      console.warn(`Notice cleaning up database_registry for company ${companyId}:`, e.message);
+    }
+
+    // 3. Delete login history
+    try {
+      await db.master.run('DELETE FROM login_history WHERE company_id = ?', [companyId]);
+    } catch (e) {
+      console.warn(`Notice cleaning up login_history for company ${companyId}:`, e.message);
+    }
+
+    // 4. In PostgreSQL, drop company tenant schema
+    if (db.isPostgres) {
+      try {
+        const poolClient = await db.master.getConnection();
+        await poolClient.query(`DROP SCHEMA IF EXISTS company_${companyId} CASCADE;`);
+        poolClient.release();
+        console.log(`✓ PostgreSQL schema company_${companyId} dropped`);
+      } catch (schemaErr) {
+        console.warn(`Notice dropping PostgreSQL schema company_${companyId}:`, schemaErr.message);
+      }
+    }
+
+    // 5. Delete company record from master DB
+    const result = await db.master.run('DELETE FROM companies WHERE id = ?', [companyId]);
+
+    // 6. Close and remove local sqlite connection if exists
+    if (db.companyDbPool && db.companyDbPool.has(companyId)) {
+      try {
+        const d = db.companyDbPool.get(companyId);
+        d.close();
+      } catch (e) {}
+      db.companyDbPool.delete(companyId);
+    }
+
+    res.json({ success: true, message: 'Company deleted successfully' });
   } catch (error) {
-    console.error('Error deactivating company:', error);
-    res.status(500).json({ message: 'Error deactivating company', error: error.message });
+    console.error('Error deleting company:', error);
+    res.status(500).json({ success: false, message: 'Error deleting company', error: error.message });
   }
 });
 

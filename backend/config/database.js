@@ -24,16 +24,6 @@ const companyDbPool = new Map();
 let masterDb = null;
 let pgPool = null;
 
-function normalizeQuery(sql, params = []) {
-  const isPg = (process.env.DB_ENGINE || '').toLowerCase().trim() === 'postgres';
-  if (isPg) {
-    let paramIndex = 1;
-    // Converts "WHERE company_id = ? AND status = ?" -> "WHERE company_id = $1 AND status = $2"
-    const pgSql = sql.replace(/\?/g, () => `$${paramIndex++}`);
-    return { sql: pgSql, params };
-  }
-  return { sql, params };
-}
 if (isPostgres) {
   // MODE 2: Render / Cloud - Neon PostgreSQL ONLY
   console.log('================================================================');
@@ -80,39 +70,6 @@ if (isPostgres) {
   masterDbPath = path.join(dbDir, 'master.db');
 }
 
-
-/**
- * Inserts a row and safely retrieves the generated numeric Primary Key (ID)
- * across both Neon PostgreSQL (using RETURNING id) and local SQLite (using lastID).
- */
-async function insertAndGetId(sql, params = [], primaryKey = 'id', client = null) {
-  const isPg = (process.env.DB_ENGINE || '').toLowerCase().trim() === 'postgres';
-
-  if (isPg) {
-    // Clean trailing semicolon if present and append RETURNING
-    const pgSql = `${sql.trim().replace(/;$/, '')} RETURNING ${primaryKey}`;
-    
-    let res;
-    if (client) {
-      res = await client.query(pgSql, params);
-    } else {
-      res = await pgPool.query(pgSql, params);
-    }
-
-    if (res.rows && res.rows.length > 0) {
-      return res.rows[0][primaryKey];
-    }
-    throw new Error(`[DB Error] Failed to retrieve inserted '${primaryKey}' from PostgreSQL.`);
-  } else {
-    // Standard SQLite lastID behavior
-    return new Promise((resolve, reject) => {
-      sqliteDb.run(sql, params, function (err) {
-        if (err) return reject(err);
-        resolve(this.lastID);
-      });
-    });
-  }
-}
 // ============================================================================
 // HELPER: IS MASTER TABLE QUERY
 // ============================================================================
@@ -426,8 +383,8 @@ function translateSqlForPostgres(sql, companyId = 1) {
 
   // 4h. Strip FOREIGN KEY constraints from CREATE TABLE to prevent broken cross-schema references in PostgreSQL
   if (/CREATE\s+TABLE/i.test(transformed)) {
-    transformed = transformed.replace(/,\s*FOREIGN\s+KEY\s*\([^)]+\)\s*REFERENCES\s+[^,\)]+(\([^)]+\))?(\s+ON\s+DELETE\s+[A-Z\s]+)?(\s+ON\s+UPDATE\s+[A-Z\s]+)?/gi, '');
-    transformed = transformed.replace(/FOREIGN\s+KEY\s*\([^)]+\)\s*REFERENCES\s+[^,\)]+(\([^)]+\))?(\s+ON\s+DELETE\s+[A-Z\s]+)?(\s+ON\s+UPDATE\s+[A-Z\s]+)?\s*,?/gi, '');
+    transformed = transformed.replace(/,\s*FOREIGN\s+KEY\s*\([^)]+\)\s*REFERENCES\s+[a-zA-Z0-9_\".]+(?:\s*\([^)]+\))?(?:\s+ON\s+(?:DELETE|UPDATE)\s+[A-Za-z\s]+)*/gi, '');
+    transformed = transformed.replace(/FOREIGN\s+KEY\s*\([^)]+\)\s*REFERENCES\s+[a-zA-Z0-9_\".]+(?:\s*\([^)]+\))?(?:\s+ON\s+(?:DELETE|UPDATE)\s+[A-Za-z\s]+)*\s*,?/gi, '');
   }
 
   // 5. If INSERT statement without RETURNING clause, append RETURNING id

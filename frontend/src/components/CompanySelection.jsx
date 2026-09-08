@@ -2,7 +2,28 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api.js';
-import { Box, Card, CardContent, Typography, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, IconButton, CircularProgress, Alert } from '@mui/material';
+import { 
+  Box, 
+  Card, 
+  CardContent, 
+  Typography, 
+  Button, 
+  Table, 
+  TableBody, 
+  TableCell, 
+  TableContainer, 
+  TableHead, 
+  TableRow, 
+  Paper, 
+  IconButton, 
+  CircularProgress, 
+  Alert,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogContentText,
+  DialogActions
+} from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import PrintIcon from '@mui/icons-material/Print';
@@ -19,6 +40,10 @@ const CompanySelection = () => {
   const [companies, setCompanies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [companyToDelete, setCompanyToDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => { fetchCompanies(); }, []);
 
@@ -42,13 +67,32 @@ const CompanySelection = () => {
 
   const handleSelectCompany = (company) => { selectCompany(company); navigate('/auth-choice'); };
   const handleUpdate = (company) => { navigate(`/company-alter/${company.id}`); };
-  const handleDelete = async (company) => {
-    if (window.confirm(`Are you sure you want to delete "${company.name}"?`)) {
-      try { 
-        await api(`companies/${company.id}`, { method: 'DELETE' });
-        fetchCompanies(); 
+
+  const handleDeleteClick = (company) => {
+    setCompanyToDelete(company);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!companyToDelete) return;
+    setDeleting(true);
+    setError('');
+    setSuccessMsg('');
+    try { 
+      const res = await api(`companies/${companyToDelete.id}`, { method: 'DELETE' });
+      if (res && res.success === false) {
+        setError(res.message || 'Failed to delete company');
+      } else {
+        setSuccessMsg(`Company "${companyToDelete.name}" deleted successfully.`);
+        await fetchCompanies();
       }
-      catch (error) { console.error('Error deleting company:', error); alert('Failed to delete company'); }
+    } catch (err) { 
+      console.error('Error deleting company:', err); 
+      setError(err.message || 'Failed to delete company'); 
+    } finally {
+      setDeleting(false);
+      setDeleteDialogOpen(false);
+      setCompanyToDelete(null);
     }
   };
   const handlePrint = (company) => {
@@ -85,7 +129,8 @@ const CompanySelection = () => {
             </Box>
             <Button variant="contained" startIcon={<AddIcon/>} onClick={()=>navigate('/company-create')} sx={{backgroundColor:themeColors.primary,'&:hover':{backgroundColor:themeColors.secondary}}}>Add Company</Button>
           </Box>
-          {error && <Alert severity="error" sx={{mb:2}}>{error}</Alert>}
+          {error && <Alert severity="error" sx={{mb:2}} onClose={()=>setError('')}>{error}</Alert>}
+          {successMsg && <Alert severity="success" sx={{mb:2}} onClose={()=>setSuccessMsg('')}>{successMsg}</Alert>}
           {companies.length===0 ? (<Box sx={{textAlign:'center',py:4}}><Typography variant="body1" color="textSecondary" sx={{mb:2}}>No companies found. Please create a company first.</Typography><Button variant="contained" onClick={()=>navigate('/company-create')} sx={{backgroundColor:themeColors.primary,'&:hover':{backgroundColor:themeColors.secondary}}}>Create Company</Button></Box>) : (
             <TableContainer component={Paper} sx={{boxShadow:'none',border:`1px solid ${themeColors.lightBlue}`}}>
               <Table>
@@ -111,7 +156,7 @@ const CompanySelection = () => {
                         <Box sx={{display:'flex',justifyContent:'center',gap:1}}>
                           <IconButton size="small" onClick={()=>handleSelectCompany(company)} sx={{color:themeColors.primary,'&:hover':{backgroundColor:themeColors.lightBlue}}} title="Open"><LoginIcon fontSize="small"/></IconButton>
                           <IconButton size="small" onClick={()=>handleUpdate(company)} sx={{color:themeColors.primary,'&:hover':{backgroundColor:themeColors.lightBlue}}} title="Update"><EditIcon fontSize="small"/></IconButton>
-                          <IconButton size="small" onClick={()=>handleDelete(company)} sx={{color:'#d32f2f','&:hover':{backgroundColor:'#ffebee'}}} title="Delete"><DeleteIcon fontSize="small"/></IconButton>
+                          <IconButton size="small" onClick={()=>handleDeleteClick(company)} sx={{color:'#d32f2f','&:hover':{backgroundColor:'#ffebee'}}} title="Delete"><DeleteIcon fontSize="small"/></IconButton>
                           <IconButton size="small" onClick={()=>handlePrint(company)} sx={{color:'#388e3c','&:hover':{backgroundColor:'#e8f5e9'}}} title="Print"><PrintIcon fontSize="small"/></IconButton>
                         </Box>
                       </TableCell>
@@ -123,6 +168,42 @@ const CompanySelection = () => {
           )}
         </CardContent>
       </Card>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog 
+        open={deleteDialogOpen} 
+        onClose={() => !deleting && setDeleteDialogOpen(false)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle sx={{ fontWeight: 'bold', color: '#d32f2f' }}>
+          Delete Company
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Are you sure you want to delete <strong>{companyToDelete?.name}</strong>?
+            This will permanently delete the company profile and its associated data.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button 
+            onClick={() => setDeleteDialogOpen(false)} 
+            disabled={deleting}
+            color="inherit"
+          >
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleConfirmDelete} 
+            disabled={deleting}
+            variant="contained" 
+            color="error"
+            startIcon={deleting ? <CircularProgress size={18} color="inherit" /> : <DeleteIcon />}
+          >
+            {deleting ? 'Deleting...' : 'Delete Company'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

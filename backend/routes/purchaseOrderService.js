@@ -1,17 +1,98 @@
-// Backend service for handling purchase orders using SQLite DbConnection wrapper
+// Backend service for handling purchase orders using SQLite / PostgreSQL DbConnection wrapper
 const db = require('../config/database');
+
+let schemaEnsured = false;
+async function ensurePurchaseOrderSchema() {
+    if (schemaEnsured) return;
+    try {
+        await db.run(`
+            CREATE TABLE IF NOT EXISTS purchase_orders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                s_no INTEGER,
+                supplier_id INTEGER,
+                supplier_name TEXT,
+                date TEXT,
+                inv_no TEXT,
+                inv_date TEXT,
+                po_date TEXT,
+                godown_id INTEGER,
+                pay_type TEXT DEFAULT 'Cash',
+                tax_type TEXT DEFAULT 'Exclusive',
+                tax_rate REAL DEFAULT 0,
+                type TEXT,
+                terms TEXT,
+                fob TEXT,
+                ship_via TEXT,
+                sign TEXT,
+                address TEXT,
+                sender TEXT,
+                remarks TEXT,
+                tax_percent REAL DEFAULT 0,
+                amount REAL DEFAULT 0,
+                bill_amt REAL DEFAULT 0,
+                tax_amt REAL DEFAULT 0,
+                total_amt REAL DEFAULT 0,
+                status TEXT DEFAULT 'Active',
+                purchase_request_id INTEGER,
+                pr_no TEXT,
+                inward_purchase_id INTEGER,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        await db.run(`
+            CREATE TABLE IF NOT EXISTS purchase_order_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                purchase_order_id INTEGER NOT NULL,
+                item_id INTEGER,
+                item_name TEXT,
+                qty REAL DEFAULT 0,
+                rate REAL DEFAULT 0,
+                amount REAL DEFAULT 0,
+                uom TEXT,
+                weight_id INTEGER,
+                weight REAL DEFAULT 0,
+                tot_wt REAL DEFAULT 0,
+                discount_percent REAL DEFAULT 0,
+                tax_percent REAL DEFAULT 0,
+                ed_percent REAL DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        await db.run(`
+            CREATE TABLE IF NOT EXISTS purchase_order_deductions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                purchase_order_id INTEGER NOT NULL,
+                deduction_name TEXT,
+                type TEXT DEFAULT 'less',
+                value REAL DEFAULT 0,
+                amount REAL DEFAULT 0,
+                remarks TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        schemaEnsured = true;
+    } catch (e) {
+        console.warn('Notice ensuring purchase order tables:', e.message);
+    }
+}
+
+// Auto-run schema check once at module startup
+ensurePurchaseOrderSchema().catch(() => {});
 
 exports.generateNextPurchaseOrderSNo = async () => {
     try {
+        await ensurePurchaseOrderSchema();
         const result = await db.query('SELECT COALESCE(MAX(s_no), 0) + 1 AS next_sno FROM purchase_orders');
-        return result.rows[0]?.next_sno || 1;
+        return (result.rows && result.rows[0]?.next_sno) || 1;
     } catch (error) {
         console.error('Error generating next Purchase Order S.No:', error);
-        throw error;
+        return 1;
     }
 };
 
 exports.createPurchaseOrder = async (formData, items = [], deductions = []) => {
+    await ensurePurchaseOrderSchema();
     const client = await db.getConnection();
     try {
         await client.beginTransaction();
@@ -50,13 +131,15 @@ exports.createPurchaseOrder = async (formData, items = [], deductions = []) => {
         const pr_no = formData.pr_no || formData.prNo || null;
 
         if (purchaseRequestReference && purchase_request_id === null) {
-            const prLookup = await client.query(
-                'SELECT id FROM purchase_requests WHERE pr_no = ? LIMIT 1',
-                [purchaseRequestReference]
-            );
-            if (prLookup.rows[0]) {
-                purchase_request_id = prLookup.rows[0].id;
-            }
+            try {
+                const prLookup = await client.query(
+                    'SELECT id FROM purchase_requests WHERE pr_no = ? LIMIT 1',
+                    [purchaseRequestReference]
+                );
+                if (prLookup.rows && prLookup.rows[0]) {
+                    purchase_request_id = prLookup.rows[0].id;
+                }
+            } catch (e) {}
         }
 
         const purchaseOrderResult = await client.run(
@@ -145,23 +228,6 @@ exports.createPurchaseOrder = async (formData, items = [], deductions = []) => {
             );
         }
 
-        // Ensure purchase_order_deductions table exists
-        try {
-            await client.run(`
-                CREATE TABLE IF NOT EXISTS purchase_order_deductions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    purchase_order_id INTEGER NOT NULL,
-                    deduction_name TEXT,
-                    type TEXT DEFAULT 'less',
-                    value REAL DEFAULT 0,
-                    amount REAL DEFAULT 0,
-                    remarks TEXT,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (purchase_order_id) REFERENCES purchase_orders(id) ON DELETE CASCADE
-                )
-            `);
-        } catch (e) {}
-
         if (Array.isArray(deductions)) {
             for (const ded of deductions) {
                 if (!ded.deduction && !ded.deduction_name) continue;
@@ -187,49 +253,62 @@ exports.createPurchaseOrder = async (formData, items = [], deductions = []) => {
         try { await client.rollback(); } catch (e) {}
         console.error('Error in createPurchaseOrder transaction:', error);
         throw error;
+    } finally {
+        if (client && typeof client.release === 'function') {
+            try { client.release(); } catch (e) {}
+        }
     }
 };
 
 exports.getAllPurchaseOrders = async () => {
     try {
+        await ensurePurchaseOrderSchema();
         const purchaseOrdersRes = await db.query(`
             SELECT po.*, COALESCE(s.name, po.supplier_name) as supplier_name, g.godown_name,
                    COALESCE(po.pr_no, pr.pr_no) as pr_no
             FROM purchase_orders po
-            LEFT JOIN supplier_master s ON po.supplier_id = s.id
-            LEFT JOIN godown_master g ON po.godown_id = g.id
-            LEFT JOIN purchase_requests pr ON po.purchase_request_id = pr.id
+            LEFT JOIN supplier_master s ON CAST(po.supplier_id AS TEXT) = CAST(s.id AS TEXT)
+            LEFT JOIN godown_master g ON CAST(po.godown_id AS TEXT) = CAST(g.id AS TEXT)
+            LEFT JOIN purchase_requests pr ON CAST(po.purchase_request_id AS TEXT) = CAST(pr.id AS TEXT)
             ORDER BY po.date DESC, po.s_no DESC
         `);
 
-        const purchaseOrders = [];
-        for (const po of (purchaseOrdersRes.rows || [])) {
+        const rows = purchaseOrdersRes.rows || [];
+        if (rows.length === 0) return [];
+
+        let allItems = [];
+        try {
             const itemsRes = await db.query(`
                 SELECT poi.*, COALESCE(i.item_name, poi.item_name) as item_name
                 FROM purchase_order_items poi
-                LEFT JOIN item_master i ON poi.item_id = i.id
-                WHERE poi.purchase_order_id = ?
-            `, [po.id]);
+                LEFT JOIN item_master i ON CAST(poi.item_id AS TEXT) = CAST(i.id AS TEXT)
+            `);
+            allItems = itemsRes.rows || [];
+        } catch (e) {}
 
-            let dedRes;
-            try {
-                dedRes = await db.query(`
-                    SELECT * FROM purchase_order_deductions WHERE purchase_order_id = ?
-                `, [po.id]);
-            } catch (e) {
-                dedRes = { rows: [] };
-            }
+        let allDeductions = [];
+        try {
+            const dedRes = await db.query('SELECT * FROM purchase_order_deductions');
+            allDeductions = dedRes.rows || [];
+        } catch (e) {}
 
-            if (!dedRes || !dedRes.rows || dedRes.rows.length === 0) {
-                try {
-                    dedRes = await db.query(`
-                        SELECT * FROM purchase_deductions WHERE purchase_id = ?
-                    `, [po.id]);
-                } catch (e) {}
-            }
+        const itemsByPo = {};
+        for (const item of allItems) {
+            const poId = item.purchase_order_id;
+            if (!itemsByPo[poId]) itemsByPo[poId] = [];
+            itemsByPo[poId].push(item);
+        }
 
-            const items = itemsRes.rows || [];
-            const deductions = dedRes?.rows || [];
+        const dedsByPo = {};
+        for (const ded of allDeductions) {
+            const poId = ded.purchase_order_id;
+            if (!dedsByPo[poId]) dedsByPo[poId] = [];
+            dedsByPo[poId].push(ded);
+        }
+
+        return rows.map(po => {
+            const items = itemsByPo[po.id] || [];
+            const deductions = dedsByPo[po.id] || [];
 
             const totalQty = items.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0);
             const totalAmount = items.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
@@ -237,7 +316,7 @@ exports.getAllPurchaseOrders = async () => {
             const mainRate = items.length > 0 ? (items[0].rate || 0) : 0;
             const taxPct = po.tax_percent || po.tax_rate || (items.length > 0 ? items[0].tax_percent : 0) || 0;
 
-            purchaseOrders.push({
+            return {
                 ...po,
                 inv_no: po.inv_no || `PO-${po.s_no}`,
                 item_name: mainItemName,
@@ -249,10 +328,8 @@ exports.getAllPurchaseOrders = async () => {
                 total_amt: po.total_amt || po.bill_amt || (totalAmount + (po.tax_amt || 0)),
                 items,
                 deductions
-            });
-        }
-
-        return purchaseOrders;
+            };
+        });
     } catch (error) {
         console.error('Error fetching all Purchase Orders:', error);
         throw error;
@@ -261,44 +338,40 @@ exports.getAllPurchaseOrders = async () => {
 
 exports.getPurchaseOrderById = async (id) => {
     try {
+        await ensurePurchaseOrderSchema();
         const purchaseOrderResult = await db.query(`
             SELECT po.*, COALESCE(s.name, po.supplier_name) as supplier_name, g.godown_name
             FROM purchase_orders po
-            LEFT JOIN supplier_master s ON po.supplier_id = s.id
-            LEFT JOIN godown_master g ON po.godown_id = g.id
+            LEFT JOIN supplier_master s ON CAST(po.supplier_id AS TEXT) = CAST(s.id AS TEXT)
+            LEFT JOIN godown_master g ON CAST(po.godown_id AS TEXT) = CAST(g.id AS TEXT)
             WHERE po.id = ?
         `, [id]);
         if (!purchaseOrderResult.rows || purchaseOrderResult.rows.length === 0) return null;
 
         const purchaseOrder = purchaseOrderResult.rows[0];
-        const itemsResult = await db.query(`
-            SELECT poi.*, COALESCE(i.item_name, poi.item_name) as item_name
-            FROM purchase_order_items poi
-            LEFT JOIN item_master i ON poi.item_id = i.id
-            WHERE poi.purchase_order_id = ?
-        `, [id]);
-
-        let dedResult;
+        let items = [];
         try {
-            dedResult = await db.query(`
+            const itemsResult = await db.query(`
+                SELECT poi.*, COALESCE(i.item_name, poi.item_name) as item_name
+                FROM purchase_order_items poi
+                LEFT JOIN item_master i ON CAST(poi.item_id AS TEXT) = CAST(i.id AS TEXT)
+                WHERE poi.purchase_order_id = ?
+            `, [id]);
+            items = itemsResult.rows || [];
+        } catch (e) {}
+
+        let deductions = [];
+        try {
+            const dedResult = await db.query(`
                 SELECT * FROM purchase_order_deductions WHERE purchase_order_id = ?
             `, [id]);
-        } catch (e) {
-            dedResult = { rows: [] };
-        }
-
-        if (!dedResult || !dedResult.rows || dedResult.rows.length === 0) {
-            try {
-                dedResult = await db.query(`
-                    SELECT * FROM purchase_deductions WHERE purchase_id = ?
-                `, [id]);
-            } catch (e) {}
-        }
+            deductions = dedResult.rows || [];
+        } catch (e) {}
 
         return { 
             ...purchaseOrder, 
-            items: itemsResult.rows || [],
-            deductions: dedResult?.rows || []
+            items,
+            deductions
         };
     } catch (error) {
         console.error('Error fetching Purchase Order by ID:', error);
@@ -307,6 +380,7 @@ exports.getPurchaseOrderById = async (id) => {
 };
 
 exports.updatePurchaseOrder = async (id, formData, items = [], deductions = []) => {
+    await ensurePurchaseOrderSchema();
     const client = await db.getConnection();
     try {
         await client.beginTransaction();
@@ -333,13 +407,15 @@ exports.updatePurchaseOrder = async (id, formData, items = [], deductions = []) 
         const pr_no = formData.pr_no || formData.prNo || null;
 
         if (purchaseRequestReference && purchase_request_id === null) {
-            const prLookup = await client.query(
-                'SELECT id FROM purchase_requests WHERE pr_no = ? LIMIT 1',
-                [purchaseRequestReference]
-            );
-            if (prLookup.rows[0]) {
-                purchase_request_id = prLookup.rows[0].id;
-            }
+            try {
+                const prLookup = await client.query(
+                    'SELECT id FROM purchase_requests WHERE pr_no = ? LIMIT 1',
+                    [purchaseRequestReference]
+                );
+                if (prLookup.rows && prLookup.rows[0]) {
+                    purchase_request_id = prLookup.rows[0].id;
+                }
+            } catch (e) {}
         }
 
         const updateResult = await client.run(
@@ -360,14 +436,14 @@ exports.updatePurchaseOrder = async (id, formData, items = [], deductions = []) 
                 formData.godown_id || formData.godownId || null, 
                 formData.pay_type || formData.payType || 'Cash', 
                 formData.tax_type || formData.taxType || 'Exclusive', 
-                parseFloat(formData.tax_rate || formData.taxRate || 0),
+                parseFloat(formData.tax_rate || formData.taxRate || 0), 
                 formData.type || null, 
-                formData.terms || '',
-                formData.fob || '',
-                formData.ship_via || formData.shipVia || '',
-                formData.sign || '',
-                formData.address || '',
-                formData.sender || '',
+                formData.terms || '', 
+                formData.fob || '', 
+                formData.ship_via || formData.shipVia || '', 
+                formData.sign || '', 
+                formData.address || '', 
+                formData.sender || '', 
                 formData.remarks || '', 
                 parseFloat(formData.tax_percent || formData.taxPercent || 0),
                 parseFloat(formData.amount || 0),
@@ -376,7 +452,7 @@ exports.updatePurchaseOrder = async (id, formData, items = [], deductions = []) 
                 parseFloat(formData.total_amt || formData.totAmt || 0),
                 purchase_request_id,
                 pr_no,
-                id,
+                id
             ]
         );
 
@@ -423,26 +499,7 @@ exports.updatePurchaseOrder = async (id, formData, items = [], deductions = []) 
         }
 
         try {
-            await client.run(`
-                CREATE TABLE IF NOT EXISTS purchase_order_deductions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    purchase_order_id INTEGER NOT NULL,
-                    deduction_name TEXT,
-                    type TEXT DEFAULT 'less',
-                    value REAL DEFAULT 0,
-                    amount REAL DEFAULT 0,
-                    remarks TEXT,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (purchase_order_id) REFERENCES purchase_orders(id) ON DELETE CASCADE
-                )
-            `);
-        } catch (e) {}
-
-        try {
             await client.run('DELETE FROM purchase_order_deductions WHERE purchase_order_id = ?', [id]);
-        } catch (e) {}
-        try {
-            await client.run('DELETE FROM purchase_deductions WHERE purchase_id = ?', [id]);
         } catch (e) {}
 
         if (Array.isArray(deductions)) {
@@ -470,6 +527,10 @@ exports.updatePurchaseOrder = async (id, formData, items = [], deductions = []) 
         try { await client.rollback(); } catch (e) {}
         console.error('Error in updatePurchaseOrder transaction:', error);
         throw error;
+    } finally {
+        if (client && typeof client.release === 'function') {
+            try { client.release(); } catch (e) {}
+        }
     }
 };
 
@@ -479,9 +540,6 @@ exports.deletePurchaseOrder = async (id) => {
         try {
             await db.run('DELETE FROM purchase_order_deductions WHERE purchase_order_id = ?', [id]);
         } catch (e) {}
-        try {
-            await db.run('DELETE FROM purchase_deductions WHERE purchase_id = ?', [id]);
-        } catch (e) {}
         const result = await db.run('DELETE FROM purchase_orders WHERE id = ?', [id]);
         return result.changes > 0;
     } catch (error) {
@@ -489,4 +547,3 @@ exports.deletePurchaseOrder = async (id) => {
         throw error;
     }
 };
-

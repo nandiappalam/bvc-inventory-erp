@@ -124,7 +124,10 @@ export const createPurchaseOrder = async (payload) => {
     method: 'POST',
     body: formattedPayload
   });
-  return result?.success ? toForm(result.data) : null;
+  if (!result || result.success === false) {
+    throw new Error(result?.message || 'Failed to save purchase order');
+  }
+  return toForm(result.data);
 };
 
 export const updatePurchaseOrder = async (id, payload) => {
@@ -133,7 +136,10 @@ export const updatePurchaseOrder = async (id, payload) => {
     method: 'PUT',
     body: formattedPayload
   });
-  return result?.success ? toForm(result.data) : null;
+  if (!result || result.success === false) {
+    throw new Error(result?.message || 'Failed to update purchase order');
+  }
+  return toForm(result.data);
 };
 
 export const deletePurchaseOrder = async (id) => {
