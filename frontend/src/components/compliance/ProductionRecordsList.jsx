@@ -73,9 +73,9 @@ export default function ProductionRecordsList({ onRefresh, onNavigateToTrace, on
     frequency: 'RM Receiving',
     item_name: 'Broken Rice',
     lot_no: 'LOT0014',
-    supplier_name: 'KTH',
+    supplier_name: '',
     customer_name: '',
-    vehicle_no: 'TN-58-AX-9912',
+    vehicle_no: 'TN-00-AX-0000',
     checked_by: 'QA Officer',
     status: 'COMPLETED',
     remarks: 'Complies with quality specifications.',
@@ -141,9 +141,9 @@ export default function ProductionRecordsList({ onRefresh, onNavigateToTrace, on
       frequency: selectedMeta.freq || 'Daily',
       item_name: 'Broken Rice',
       lot_no: 'LOT0014',
-      supplier_name: 'KTH',
+      supplier_name: '',
       customer_name: '',
-      vehicle_no: 'TN-58-AX-9912',
+      vehicle_no: 'TN-00-AX-0000',
       checked_by: 'QA Officer',
       status: 'COMPLETED',
       remarks: `Operational compliance record logged under ${code}.`,
@@ -350,7 +350,7 @@ export default function ProductionRecordsList({ onRefresh, onNavigateToTrace, on
               </Grid>
               <Grid item xs={12} sm={4}>
                 <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 700 }}>FLOUR MILL / LINE</Typography>
-                <Typography variant="body2" sx={{ fontWeight: 700 }}>{findings.flour_mill || 'KTH Mill (Line 1)'}</Typography>
+                <Typography variant="body2" sx={{ fontWeight: 700 }}>{findings.flour_mill || ' (Line 1)'}</Typography>
               </Grid>
               <Grid item xs={12} sm={4}>
                 <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 700 }}>MILLING DATE</Typography>

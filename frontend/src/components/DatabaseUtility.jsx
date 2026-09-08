@@ -122,12 +122,11 @@ const DatabaseUtility = () => {
 
       <Alert severity="warning" sx={{ mb: 3, borderRadius: 2 }}>
         <Typography variant="subtitle2" sx={{ fontWeight: 'bold' }}>
-          Ephemeral Environment Warning
+          Ephemeral Environment
         </Typography>
-        This application runs in an ephemeral sandbox environment. Every time the application updates or the dev server restarts, the local database file is reset back to its default state. 
         <br />
         <br />
-        <strong>Please use this utility to export your database before completing tasks with the AI agent, and restore it afterward to avoid losing your work!</strong>
+        <strong>Please use this utility to export your database </strong>
       </Alert>
 
       {status.message && (
