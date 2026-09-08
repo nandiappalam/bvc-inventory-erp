@@ -1,5 +1,11 @@
 const purchaseOrderService = require('./purchaseOrderService');
 
+// Force numeric integer conversion
+const companyId = parseInt(req.companyId || req.query.company_id || req.body.company_id, 10);
+
+if (isNaN(companyId)) {
+  return res.status(400).json({ success: false, message: 'Invalid or missing company_id' });
+}
 exports.getNextPurchaseOrderSNo = async (req, res) => {
     try {
         const nextSNo = await purchaseOrderService.generateNextPurchaseOrderSNo();

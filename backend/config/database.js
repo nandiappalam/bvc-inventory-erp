@@ -24,6 +24,16 @@ const companyDbPool = new Map();
 let masterDb = null;
 let pgPool = null;
 
+function normalizeQuery(sql, params = []) {
+  const isPg = (process.env.DB_ENGINE || '').toLowerCase().trim() === 'postgres';
+  if (isPg) {
+    let paramIndex = 1;
+    // Converts "WHERE company_id = ? AND status = ?" -> "WHERE company_id = $1 AND status = $2"
+    const pgSql = sql.replace(/\?/g, () => `$${paramIndex++}`);
+    return { sql: pgSql, params };
+  }
+  return { sql, params };
+}
 if (isPostgres) {
   // MODE 2: Render / Cloud - Neon PostgreSQL ONLY
   console.log('================================================================');
@@ -69,6 +79,7 @@ if (isPostgres) {
 
   masterDbPath = path.join(dbDir, 'master.db');
 }
+
 
 /**
  * Inserts a row and safely retrieves the generated numeric Primary Key (ID)
