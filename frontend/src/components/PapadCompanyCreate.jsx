@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MASTER_CONFIG } from '../utils/masterConfig.js';
 import { safeArray } from '../utils/safeArray.js';
+import api from '../services/api.js';
 import SmartField from './master/SmartField';
 import './PapadCompanyCreate.css';
 
@@ -44,10 +45,9 @@ const PapadCompanyCreate = () => {
       }
       try {
         setLoading(true);
-        const res = await fetch(`/api/papad-companies/${editId}`);
-        const result = await res.json();
-        if (result.success && result.data) {
-          const company = result.data;
+        const result = await api(`/papad-companies/${editId}`);
+        if (result && (result.success || result.id) && (result.data || result)) {
+          const company = result.data || result;
           // map both address/address1 and mobile/mobile1 for edit form compatibility
           const initialForm = {
             ...company,
@@ -160,26 +160,23 @@ const PapadCompanyCreate = () => {
       }))
     };
 
-    const url = editId ? `/api/papad-companies/${editId}` : '/api/papad-companies';
+    const url = editId ? `/papad-companies/${editId}` : '/papad-companies';
     const method = editId ? 'PUT' : 'POST';
 
     try {
-      const response = await fetch(url, {
+      const result = await api(url, {
         method: method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: payload
       });
 
-      const result = await response.json();
-
-      if (response.ok && (result.success || result.id)) {
+      if (result && (result.success || result.id)) {
         const succMsg = editId ? 'Papad Company updated successfully!' : 'Papad Company saved successfully!';
         setMessage(succMsg);
         setMessageType('success');
         alert(succMsg);
         navigate('/master/papad-company-display');
       } else {
-        const errMsg = result.message || (typeof result.error === 'string' ? result.error : result.error?.message) || 'Failed to save Papad Company';
+        const errMsg = result?.message || (typeof result?.error === 'string' ? result.error : result?.error?.message) || 'Failed to save Papad Company';
         setMessage('Error: ' + errMsg);
         setMessageType('error');
       }

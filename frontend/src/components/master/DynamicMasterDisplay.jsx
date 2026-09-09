@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { MASTER_CONFIG } from "../../utils/masterConfig.js";
 import { safeArray } from "../../utils/safeArray.js";
-import { getAllMasters, deleteMaster } from "../../services/masterservice.js";
+import { getAllMasters, deleteMaster, api } from "../../services/masterservice.js";
 import { printHtml } from "../../utils/printHelper";
 import MasterTableLayout from "./MasterTableLayout";
 import "./master.css";
 
 export const DynamicMasterDisplay = ({ configKey }) => {
   const navigate = useNavigate();
+  const location = useLocation();
   const normalizedKey = configKey ? configKey.replace(/-/g, "_") : "";
   const config = MASTER_CONFIG[normalizedKey] || MASTER_CONFIG[configKey] || {};
   const title = config.title || (configKey || "").replace(/[_-]/g, " ").toUpperCase();
@@ -49,7 +50,17 @@ export const DynamicMasterDisplay = ({ configKey }) => {
   const loadData = async () => {
     try {
       setLoading(true);
-      const result = await getAllMasters(tableName);
+      let result = await getAllMasters(tableName);
+
+      // Dedicated fallback for papad company master to ensure entries and custom properties load
+      if ((!result || (Array.isArray(result) && result.length === 0)) && (tableName === 'papad_company_master' || tableName === 'papad_company')) {
+        try {
+          const res = await api('/papad-companies');
+          if (res && res.success && Array.isArray(res.data) && res.data.length > 0) {
+            result = res.data;
+          }
+        } catch (e) {}
+      }
       
       // Bidirectional field normalization to resolve frontend <-> backend differences
       const normalized = safeArray(result).map((row) => {
@@ -91,9 +102,13 @@ export const DynamicMasterDisplay = ({ configKey }) => {
   };
 
   useEffect(() => {
-    setData([]);
     loadData();
-  }, [tableName]);
+    const handleCompanyChange = () => {
+      loadData();
+    };
+    window.addEventListener('erp_company_changed', handleCompanyChange);
+    return () => window.removeEventListener('erp_company_changed', handleCompanyChange);
+  }, [tableName, location.key]);
 
   const handleDelete = async (row) => {
     try {

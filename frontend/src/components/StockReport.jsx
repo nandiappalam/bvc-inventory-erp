@@ -125,9 +125,17 @@ const StockReport = () => {
     }
   }
 
-  // Fetch on mount and when filters change
+  // Fetch on mount and when filters change, or company switches
   useEffect(() => {
     fetchReport()
+
+    const handleCompanyChange = () => {
+      fetchReport();
+    };
+    window.addEventListener('erp_company_changed', handleCompanyChange);
+    return () => {
+      window.removeEventListener('erp_company_changed', handleCompanyChange);
+    };
   }, [reportMode, selectedItem, fromDate, toDate])
 
   const handleRefresh = () => {

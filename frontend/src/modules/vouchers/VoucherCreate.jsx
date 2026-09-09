@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Container,
   Paper,
@@ -391,7 +391,7 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
   };
 
   // Fetch all pending bills for Quick Search
-  useEffect(() => {
+  const loadSearchableBills = useCallback(() => {
     fetch('/api/reports/outstanding-details')
       .then(r => r.json())
       .then(data => {
@@ -402,8 +402,20 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
         }));
         setSearchableBills(mapped);
       })
-      .catch(err => console.error('Failed to load searchable bills:', err));
+      .catch(err => {
+        console.error('Failed to load searchable bills:', err);
+        setSearchableBills([]);
+      });
   }, []);
+
+  useEffect(() => {
+    loadSearchableBills();
+    const handleCompanyChange = () => {
+      loadSearchableBills();
+    };
+    window.addEventListener('erp_company_changed', handleCompanyChange);
+    return () => window.removeEventListener('erp_company_changed', handleCompanyChange);
+  }, [loadSearchableBills]);
 
   // Load ledgers and existing voucher if editing/duplicating or settling bill
   useEffect(() => {

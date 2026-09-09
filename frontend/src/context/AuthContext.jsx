@@ -220,6 +220,10 @@ export const AuthProvider = ({ children }) => {
       localStorage.setItem('erp_isAdmin', String(loginData.isAdmin || loginData.role === 'Admin' || loginData.role === 'admin'));
       localStorage.setItem('erp_login_history_id', String(loginData.login_history_id || ''));
 
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('erp_company_changed', { detail: companyData }));
+      }
+
       return { success: true };
     } catch (error) {
       console.error('Login error in context:', error);
@@ -263,10 +267,19 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem('erp_login_history_id');
   };
 
-  // Select company (before login)
+  // Select or switch company
   const selectCompany = (companyData) => {
     setSelectedCompany(companyData);
+    setCompany(companyData);
     localStorage.setItem('erp_selected_company', JSON.stringify(companyData));
+    localStorage.setItem('erp_company', JSON.stringify(companyData));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('erp_company_changed', { detail: companyData }));
+    }
+  };
+
+  const switchCompany = (companyData) => {
+    selectCompany(companyData);
   };
 
   // Helper to normalize action keys
@@ -396,6 +409,7 @@ const value = {
     login,
     logout,
     selectCompany,
+    switchCompany,
     hasPermission,
     getPermittedModules,
     getModulePermissions,

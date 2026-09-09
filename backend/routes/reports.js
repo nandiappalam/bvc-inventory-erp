@@ -2554,139 +2554,6 @@ router.get('/daily-production', async (req, res) => {
       });
     }
 
-    if (reportRows.length === 0) {
-      reportRows.push(
-        {
-          id: 101,
-          voucher: '3108',
-          date: '2026-07-16',
-          flour_mill: 'BVC MILL',
-          lot_no: '11188 / 11496 / 11497',
-          item_name: 'GN',
-          supplier_name: 'Kandiga / Velmurugan',
-          source: 'BVC MILL',
-          bag_weight: 50,
-          input_qty: 560,
-          input_wt: 560,
-          current_qty: 560,
-          processed_qty: 322,
-          output_qty: 185,
-          output_wt: 185,
-          output_desc: 'GIN - 160 + 25kg',
-          stone_qty: 0,
-          other_wastage_qty: 18,
-          wastage_qty: 18,
-          wastage_wt: 18,
-          wastage_perc: '0.2',
-          shortcoming_wt: '0.00',
-          yield_perc: '99.80',
-          operator: '2 Operators',
-          shift: 'General',
-          production_incharge: 'J.V.N.',
-          qc_technologist: 'J.V.N.',
-          qa_manager: 'QA Manager',
-          final_approval: 'APPROVED',
-          remarks: '-'
-        },
-        {
-          id: 102,
-          voucher: '3109',
-          date: '2026-07-16',
-          flour_mill: 'BVC MILL',
-          lot_no: '10603 / 10604',
-          item_name: 'Bengal Gram split',
-          supplier_name: 'Amrut',
-          source: 'BVC MILL',
-          bag_weight: 50,
-          input_qty: 600,
-          input_wt: 600,
-          current_qty: 600,
-          processed_qty: 308,
-          output_qty: 300,
-          output_wt: 300,
-          output_desc: 'Bengal gram split - 30 bags + 2kg',
-          stone_qty: 0,
-          other_wastage_qty: 11,
-          wastage_qty: 11,
-          wastage_wt: 11,
-          wastage_perc: '0.06',
-          shortcoming_wt: '0.00',
-          yield_perc: '99.94',
-          operator: '2 Operators',
-          shift: 'General',
-          production_incharge: 'J.V.N.',
-          qc_technologist: 'J.V.N.',
-          qa_manager: 'QA Manager',
-          final_approval: 'APPROVED',
-          remarks: '-'
-        },
-        {
-          id: 103,
-          voucher: '3110',
-          date: '2026-07-16',
-          flour_mill: 'BVC MILL',
-          lot_no: '11320 / 11566',
-          item_name: 'split',
-          supplier_name: 'Srish',
-          source: 'BVC MILL',
-          bag_weight: 50,
-          input_qty: 87,
-          input_wt: 87,
-          current_qty: 87,
-          processed_qty: 87,
-          output_qty: 61,
-          output_wt: 61,
-          output_desc: 'Black gram split - 44 + 17kg',
-          stone_qty: 0,
-          other_wastage_qty: 20,
-          wastage_qty: 20,
-          wastage_wt: 20,
-          wastage_perc: '0.8',
-          shortcoming_wt: '0.00',
-          yield_perc: '99.20',
-          operator: '4 Operators',
-          shift: 'General',
-          production_incharge: 'J.V.N.',
-          qc_technologist: 'J.V.N.',
-          qa_manager: 'QA Manager',
-          final_approval: 'APPROVED',
-          remarks: '-'
-        },
-        {
-          id: 104,
-          voucher: '3111',
-          date: '2026-07-16',
-          flour_mill: 'BVC MILL',
-          lot_no: '11347',
-          item_name: 'UG',
-          supplier_name: 'Nithya',
-          source: 'BVC MILL',
-          bag_weight: 50,
-          input_qty: 50,
-          input_wt: 50,
-          current_qty: 50,
-          processed_qty: 32,
-          output_qty: 31,
-          output_wt: 31,
-          output_desc: 'Urad Gota - 31bag + 45kg',
-          stone_qty: 0,
-          other_wastage_qty: 2,
-          wastage_qty: 2,
-          wastage_wt: 2,
-          wastage_perc: '0.1',
-          shortcoming_wt: '0.00',
-          yield_perc: '99.90',
-          operator: '3 Operators',
-          shift: 'General',
-          production_incharge: 'J.V.N.',
-          qc_technologist: 'J.V.N.',
-          qa_manager: 'QA Manager',
-          final_approval: 'APPROVED',
-          remarks: '-'
-        }
-      );
-    }
-
     res.json(reportRows);
   } catch (err) {
     console.error('Error generating daily production report:', err);
@@ -3024,81 +2891,37 @@ router.get('/terminal-inspection', async (req, res) => {
     query += ` ORDER BY g.date DESC LIMIT 50`;
 
     const result = await db.query(query, params);
-    let rows = result.rows || [];
-
-    if (rows.length === 0) {
-      rows = [
-        {
-          id: 1,
-          date: '2026-07-23',
-          product_name: 'Urad Gota',
-          item_name: 'URAD GOTA 50KG BAG',
-          lot_no: '11347',
-          inspected_by: 'J.V.N.',
-          status: 'PASSED',
-          tertiary: {
-            mfg_month_year: 'Yes',
-            packing_config: 'Mentioned',
-            barcode: 'NA',
-            wholesale_req: 'Mentioned',
-            lot_number: 'Mentioned',
-            gum_taped: 'NA',
-            stacking: 'NA',
-            shrink_wrapped: 'NA',
-            shortages: 'No',
-            damages: 'No'
-          },
-          primary: {
-            product_of_india: 'Yes',
-            ingredients: 'NA',
-            nutritional_facts: 'NA',
-            lot_mfd_exp: 'Yes',
-            allergen_decl: 'NO',
-            country_of_origin: 'NO',
-            importer_name: 'NO',
-            barcode: 'NA',
-            analysis_report: 'NA'
-          },
-          product: {
-            seal_integrity: 'NA',
-            product_prep: 'Checked at lab',
-            vehicle_hygiene: 'Verified'
-          }
-        }
-      ];
-    } else {
-      rows = rows.map(r => ({
-        ...r,
-        tertiary: {
-          mfg_month_year: 'Yes',
-          packing_config: 'Mentioned',
-          barcode: 'NA',
-          wholesale_req: 'Mentioned',
-          lot_number: 'Mentioned',
-          gum_taped: 'NA',
-          stacking: 'NA',
-          shrink_wrapped: 'NA',
-          shortages: 'No',
-          damages: 'No'
-        },
-        primary: {
-          product_of_india: 'Yes',
-          ingredients: 'NA',
-          nutritional_facts: 'NA',
-          lot_mfd_exp: 'Yes',
-          allergen_decl: 'NO',
-          country_of_origin: 'NO',
-          importer_name: 'NO',
-          barcode: 'NA',
-          analysis_report: 'NA'
-        },
-        product: {
-          seal_integrity: 'NA',
-          product_prep: 'Checked at lab',
-          vehicle_hygiene: 'Verified'
-        }
-      }));
-    }
+    let rows = (result.rows || []).map(r => ({
+      ...r,
+      tertiary: {
+        mfg_month_year: 'Yes',
+        packing_config: 'Mentioned',
+        barcode: 'NA',
+        wholesale_req: 'Mentioned',
+        lot_number: 'Mentioned',
+        gum_taped: 'NA',
+        stacking: 'NA',
+        shrink_wrapped: 'NA',
+        shortages: 'No',
+        damages: 'No'
+      },
+      primary: {
+        product_of_india: 'Yes',
+        ingredients: 'NA',
+        nutritional_facts: 'NA',
+        lot_mfd_exp: 'Yes',
+        allergen_decl: 'NO',
+        country_of_origin: 'NO',
+        importer_name: 'NO',
+        barcode: 'NA',
+        analysis_report: 'NA'
+      },
+      product: {
+        seal_integrity: 'NA',
+        product_prep: 'Checked at lab',
+        vehicle_hygiene: 'Verified'
+      }
+    }));
 
     res.json({
       summary: {

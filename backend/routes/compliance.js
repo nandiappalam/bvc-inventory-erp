@@ -1718,8 +1718,24 @@ router.get('/traceability/:lotNo', async (req, res) => {
         const latestPurRes = await db.query(`
           SELECT lot_no FROM purchase_items WHERE lot_no IS NOT NULL AND TRIM(lot_no) != '' ORDER BY id DESC LIMIT 1
         `);
-        lotNo = latestPurRes.rows && latestPurRes.rows[0]?.lot_no ? latestPurRes.rows[0].lot_no : 'LOT0018';
+        lotNo = latestPurRes.rows && latestPurRes.rows[0]?.lot_no ? latestPurRes.rows[0].lot_no : null;
       }
+    }
+
+    if (!lotNo) {
+      return res.json({
+        success: true,
+        lotNo: null,
+        lotDetails: null,
+        parentLot: null,
+        activeLots: [],
+        backwardTrace: { purchase: null, supplier: null, iqr: null, allIQRs: [] },
+        productionHistory: { grindBatches: [] },
+        qualityCertificates: { coas: [] },
+        currentStock: [],
+        forwardTrace: { dispatches: [], affectedCustomers: [] },
+        message: 'No lots found for the active company.'
+      });
     }
 
     // 1. Find Lot in stock_lots with godown info
@@ -1894,7 +1910,7 @@ router.get('/traceability/:lotNo', async (req, res) => {
       grindBatches.push({
         grain_id: gid,
         grind_no: `GRD-${String(gRow.s_no || gid).padStart(4, '0')}`,
-        date: gRow.date || '2026-08-04',
+        date: gRow.date || '',
         flour_mill: gRow.mill_name,
         mill_area: gRow.mill_area || 'Factory Milling Floor',
         inputs: (inputs.rows || []).map(i => ({
@@ -1956,23 +1972,23 @@ router.get('/traceability/:lotNo', async (req, res) => {
     });
 
     // Default IQR if not found
-    let primaryIQR = iqrList[0] || {
-      record_no: `P1-2026-${canonicalLotNo}`,
-      record_date: purchaseInfo ? (purchaseInfo.inv_date || purchaseInfo.date) : '2026-08-24',
+    let primaryIQR = iqrList[0] || (purchaseInfo ? {
+      record_no: `P1-${canonicalLotNo}`,
+      record_date: purchaseInfo.inv_date || purchaseInfo.date || '',
       status: 'COMPLETED',
       checked_by: 'QA QC Officer',
       findings: {
-        iqr_no: `IQR-2026-${canonicalLotNo}`,
+        iqr_no: `IQR-${canonicalLotNo}`,
         moisture: '10.8%',
         foreign_matter: '0.4%',
         broken_grain: '1.2%',
         weevils: '0%',
         decision: 'ACCEPTED',
-        inward_bags: purchaseInfo ? (purchaseInfo.inward_qty || purchaseInfo.total_qty) : (lot ? lot.quantity : 100),
-        bag_weight_kg: 50,
-        total_weight_kg: purchaseInfo ? (purchaseInfo.total_weight || (purchaseInfo.inward_qty * 50)) : (lot ? lot.quantity * 50 : 5000)
+        inward_bags: purchaseInfo.inward_qty || purchaseInfo.total_qty || (lot ? lot.quantity : 0),
+        bag_weight_kg: purchaseInfo.per_unit_weight || 50,
+        total_weight_kg: purchaseInfo.total_weight || ((purchaseInfo.inward_qty || (lot ? lot.quantity : 0)) * (purchaseInfo.per_unit_weight || 50))
       }
-    };
+    } : null);
 
     // 5. Certificate of Analysis (COA / P6)
     const coaRecordsRes = await db.query(`
@@ -2027,9 +2043,9 @@ router.get('/traceability/:lotNo', async (req, res) => {
       sold_amount: s.sold_amount,
       terminal_inspection: {
         record_no: s.terminal_inspection_no,
-        vehicle_no: 'TN-58-AX-9912',
+        vehicle_no: s.vehicle_no || s.lorry_no || s.transport || '',
         bag_integrity: 'Verified Double Stitch',
-        seal_no: 'SEAL-88219',
+        seal_no: s.seal_no || '',
         status: 'Pre-Shipment QA Cleared'
       }
     }));
@@ -2069,16 +2085,16 @@ router.get('/traceability/:lotNo', async (req, res) => {
         address: purchaseInfo.supplier_address || '',
         area: purchaseInfo.supplier_area || '',
         gstin: purchaseInfo.supplier_gstin || '',
-        invoice_no: purchaseInfo.invoice_no || purchaseInfo.inv_no || 'INV-2026',
-        invoice_date: purchaseInfo.inv_date || purchaseInfo.date || '2026-08-24',
-        receiving_date: purchaseInfo.date || '2026-08-24',
+        invoice_no: purchaseInfo.invoice_no || purchaseInfo.inv_no || '',
+        invoice_date: purchaseInfo.inv_date || purchaseInfo.date || '',
+        receiving_date: purchaseInfo.date || '',
         inward_qty_bags: inwardBags,
         per_unit_weight_kg: perBagWt,
         total_weight_kg: inwardWeightKg,
         rate_per_unit: purchaseInfo.rate || (lot ? lot.rate : 0),
         pay_type: purchaseInfo.pay_type || 'Cash',
         godown_name: purchaseInfo.godown_name || 'KNJ Godown',
-        vehicle_no: purchaseInfo.lorry_no || purchaseInfo.transport || 'TN-58-AX-9912'
+        vehicle_no: purchaseInfo.lorry_no || purchaseInfo.transport || ''
       };
     }
 
