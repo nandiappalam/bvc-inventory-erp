@@ -407,28 +407,21 @@ const ItemDropdownCell = ({
     }
 
     const isWastageLot = lotMode === 'auto-wastage' || lotMode === 'wastage';
+    let startLot = '';
 
     if (isWastageLot) {
-      if (!ItemDropdownCell._previewWastageStart) {
-        try {
-          const previewRes = await api('/lots/preview-wastage', { method: 'GET' });
-          ItemDropdownCell._previewWastageStart =
-            previewRes?.lot_no || previewRes?.data?.lot_no || 'WST0001';
-        } catch (err) {
-          console.error('Failed to get wastage lot preview start:', err);
-          ItemDropdownCell._previewWastageStart = 'WST0001';
-        }
+      try {
+        const previewRes = await api('/lots/preview-wastage', { method: 'GET' });
+        startLot = previewRes?.lot_no || previewRes?.data?.lot_no || '';
+      } catch (err) {
+        console.error('Failed to get wastage lot preview start:', err);
       }
     } else {
-      if (!ItemDropdownCell._previewStart) {
-        try {
-          const previewRes = await api('/lots/preview', { method: 'GET' });
-          ItemDropdownCell._previewStart =
-            previewRes?.lot_no || previewRes?.data?.lot_no || 'LOT0001';
-        } catch (err) {
-          console.error('Failed to get lot preview start:', err);
-          ItemDropdownCell._previewStart = 'LOT0001';
-        }
+      try {
+        const previewRes = await api('/lots/preview', { method: 'GET' });
+        startLot = previewRes?.lot_no || previewRes?.data?.lot_no || '';
+      } catch (err) {
+        console.error('Failed to get lot preview start:', err);
       }
     }
 
@@ -458,7 +451,6 @@ const ItemDropdownCell = ({
     let offset = 0;
     try {
       let found = false;
-      const startLot = isWastageLot ? (ItemDropdownCell._previewWastageStart || 'WST0001') : (ItemDropdownCell._previewStart || 'LOT0001');
       while (!found) {
         const candidate = computeNextLot(startLot, offset);
         if (!activeLots.has(candidate)) {

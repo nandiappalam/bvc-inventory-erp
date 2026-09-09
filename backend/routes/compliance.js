@@ -857,7 +857,7 @@ async function syncAllProductionRecords() {
 
     for (const g of (grainsRes.rows || [])) {
       const grindNo = `GRD-${String(g.s_no || g.id).padStart(4, '0')}`;
-      const millDisplay = g.mill_name || (g.flour_mill === '1' ? 'Premium Flour Mill' : g.flour_mill === '11' ? '' : `Milling Line ${g.flour_mill}`);
+      const millDisplay = g.mill_name || (g.flour_mill === '1' ? 'Premium Flour Mill' : g.flour_mill === '11' ? 'KTH Mill' : `Milling Line ${g.flour_mill}`);
 
       // Fetch output items for this grind
       const outputsRes = await db.query(`SELECT * FROM grain_output_items WHERE grain_id = ?`, [g.id]);

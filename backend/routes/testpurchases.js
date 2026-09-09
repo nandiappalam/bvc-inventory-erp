@@ -2,6 +2,7 @@ const express = require('express')
 const router = express.Router()
 const db = require('../config/database')
 const { createPurchaseLedgerEntries, deleteLedgerEntries } = require('../utils/ledgerHelper')
+const { reserveNextLotNumber, recordLotNumber } = require('../utils/lotHelper')
 
 // GET all purchases
 router.get('/', async (req, res) => {
@@ -175,8 +176,7 @@ router.post('/', async (req, res) => {
 
     const purchaseId = purchaseResult.lastID;
 
-    const maxItemIdResult = await db.query('SELECT MAX(id) AS maxId FROM purchase_items')
-    let nextLotSeq = (maxItemIdResult.rows[0]?.maxId || 0) + 1
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
 
     for (const item of items) {
       const qty = parseFloat(item.qty) || 0
@@ -193,10 +193,10 @@ router.post('/', async (req, res) => {
 
       let lotNo = item.lotNo
       if (!lotNo || lotNo === '') {
-        lotNo = `LOT${String(nextLotSeq++).padStart(4, '0')}`
+        lotNo = await reserveNextLotNumber(activeCompanyId);
+      } else {
+        await recordLotNumber(lotNo, activeCompanyId);
       }
-      
-      console.log(`[LOT-GEN] Item: ${item.item_name}, Generated lotNo: "${lotNo}", nextLotSeq before: ${nextLotSeq - 1}`)
 
       await db.run(`
         INSERT INTO purchase_items (
@@ -305,8 +305,7 @@ router.put('/:id', async (req, res) => {
     await db.run('DELETE FROM purchase_deductions WHERE purchase_id = ?', [purchaseId]);
 
     // Auto-generate lot numbers sequentially if frontend sends blank lot_no during update
-    const maxItemIdResult = await db.query('SELECT MAX(id) AS maxId FROM purchase_items')
-    let nextLotSeq = (maxItemIdResult.rows[0]?.maxId || 0) + 1
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
 
     // Insert updated items
     for (const item of items) {
@@ -324,7 +323,9 @@ router.put('/:id', async (req, res) => {
 
       let lotNo = item.lotNo
       if (!lotNo || lotNo === '') {
-        lotNo = `LOT${String(nextLotSeq++).padStart(4, '0')}`
+        lotNo = await reserveNextLotNumber(activeCompanyId);
+      } else {
+        await recordLotNumber(lotNo, activeCompanyId);
       }
 
       await db.run(`

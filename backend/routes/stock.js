@@ -748,12 +748,13 @@ router.get('/lots', async (req, res) => {
 // ============================================================================
 router.get('/next-lot-no', async (req, res) => {
   try {
+    const cId = req.companyId || req.headers['x-company-id'] || req.query.company_id;
     const { previewNextLotNumber } = require('../utils/lotHelper');
-    const nextLotNo = await previewNextLotNumber();
-    res.json({ success: true, lot_no: nextLotNo, next_lot_no: nextLotNo });
+    const nextLotNo = await previewNextLotNumber(cId);
+    res.json({ success: true, lot_no: nextLotNo, next_lot_no: nextLotNo, company_id: cId || 1 });
   } catch (error) {
     console.error('Error generating next lot no:', error);
-    res.status(500).json({ success: false, message: 'Error generating next lot no', lot_no: 'LOT0001' });
+    res.status(500).json({ success: false, message: 'Error generating next lot no' });
   }
 });
 

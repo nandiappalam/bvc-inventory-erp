@@ -600,6 +600,7 @@ const VoucherList = () => {
             {/* Tally Terminal Banner */}
             <Box sx={{ bgcolor: '#2e4a36', color: '#fff', p: 1.5, textAlign: 'center', borderBottom: '2px solid #1b3a1e' }}>
               <Typography variant="subtitle2" sx={{ fontWeight: 'bold', letterSpacing: 2, fontSize: '0.8rem', fontFamily: 'monospace' }}>
+                VIVEKA SOFTWARES, TRICHY-621216 | PHONE: 9994360045
               </Typography>
               <Typography variant="caption" sx={{ display: 'block', color: '#a5d6a7', letterSpacing: 1, fontFamily: 'monospace' }}>
                 Inventory Management System & Double Entry Financial Accounting Core

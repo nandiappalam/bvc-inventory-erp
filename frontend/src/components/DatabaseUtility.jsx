@@ -122,11 +122,11 @@ const DatabaseUtility = () => {
 
       <Alert severity="warning" sx={{ mb: 3, borderRadius: 2 }}>
         <Typography variant="subtitle2" sx={{ fontWeight: 'bold' }}>
-          Ephemeral Environment
+          Ephemeral Environment 
         </Typography>
         <br />
         <br />
-        <strong>Please use this utility to export your database </strong>
+        <strong></strong>
       </Alert>
 
       {status.message && (

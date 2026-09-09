@@ -2503,12 +2503,12 @@ router.get('/daily-production', async (req, res) => {
 
           if (!supp) {
             const l = String(inp.lot_no);
-            if (l.includes('11188') || l.includes('11496') || l.includes('11497') || l.includes('11183')) supp = 'K';
-            else if (l.includes('10603') || l.includes('10604')) supp = 'A';
-            else if (l.includes('11320') || l.includes('11566')) supp = 'S';
-            else if (l.includes('10991') || l.includes('11326') || l.includes('11333')) supp = 'S';
-            else if (l.includes('11347')) supp = 'N';
-            else if (l.includes('11372') || l.includes('11408')) supp = 'C';
+            if (l.includes('11188') || l.includes('11496') || l.includes('11497') || l.includes('11183')) supp = 'Kandiga / Velmurugan';
+            else if (l.includes('10603') || l.includes('10604')) supp = 'Amrut';
+            else if (l.includes('11320') || l.includes('11566')) supp = 'Srish';
+            else if (l.includes('10991') || l.includes('11326') || l.includes('11333')) supp = 'Shiridi Sai';
+            else if (l.includes('11347')) supp = 'Nithya';
+            else if (l.includes('11372') || l.includes('11408')) supp = 'Chudamani';
           }
         }
         if (supp) resolvedSuppliers.push(supp);
@@ -2527,7 +2527,7 @@ router.get('/daily-production', async (req, res) => {
         flour_mill: g.flour_mill_name || g.flour_mill,
         lot_no: inputLotsStr || 'N/A',
         item_name: inputItemsStr || 'N/A',
-        supplier_name: suppliersStr || 'K',
+        supplier_name: suppliersStr || 'Kandiga / Velmurugan',
         source: g.flour_mill_name || g.flour_mill || 'In-House',
         bag_weight: inputs[0]?.weight || 50,
         input_qty: inputQty,
@@ -2563,7 +2563,7 @@ router.get('/daily-production', async (req, res) => {
           flour_mill: 'BVC MILL',
           lot_no: '11188 / 11496 / 11497',
           item_name: 'GN',
-          supplier_name: 'K',
+          supplier_name: 'Kandiga / Velmurugan',
           source: 'BVC MILL',
           bag_weight: 50,
           input_qty: 560,
@@ -2595,7 +2595,7 @@ router.get('/daily-production', async (req, res) => {
           flour_mill: 'BVC MILL',
           lot_no: '10603 / 10604',
           item_name: 'Bengal Gram split',
-          supplier_name: 'A',
+          supplier_name: 'Amrut',
           source: 'BVC MILL',
           bag_weight: 50,
           input_qty: 600,
@@ -2627,7 +2627,7 @@ router.get('/daily-production', async (req, res) => {
           flour_mill: 'BVC MILL',
           lot_no: '11320 / 11566',
           item_name: 'split',
-          supplier_name: 'S',
+          supplier_name: 'Srish',
           source: 'BVC MILL',
           bag_weight: 50,
           input_qty: 87,
@@ -2659,7 +2659,7 @@ router.get('/daily-production', async (req, res) => {
           flour_mill: 'BVC MILL',
           lot_no: '11347',
           item_name: 'UG',
-          supplier_name: 'N',
+          supplier_name: 'Nithya',
           source: 'BVC MILL',
           bag_weight: 50,
           input_qty: 50,

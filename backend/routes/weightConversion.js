@@ -1,6 +1,7 @@
 const express = require('express')
 const router = express.Router()
 const db = require('../config/database')
+const { reserveNextLotNumber, recordLotNumber } = require('../utils/lotHelper')
 
 // Revert stock changes for a weight conversion record
 const revertWeightConversionStock = async (conversionId) => {
@@ -78,14 +79,16 @@ const processWeightConversionStock = async (conversionId, date, items) => {
       // Produced item - increase stock
       if (!lotNo) {
         try {
-          const nextLotRes = await db.query(`SELECT MAX(CAST(SUBSTR(lot_no, 4) AS INTEGER)) as max_num FROM stock_lots WHERE lot_no LIKE 'LOT%'`);
-          const nextNum = ((nextLotRes.rows && nextLotRes.rows[0]?.max_num) || 0) + 1;
-          lotNo = `LOT${String(nextNum).padStart(4, '0')}`;
+          const cId = req.companyId || (req.headers && req.headers['x-company-id']) || 1;
+          lotNo = await reserveNextLotNumber(cId);
           // Update lot_no in weight_conversion_items so UI & lot audit display it
           await db.run(`UPDATE weight_conversion_items SET lot_no = ? WHERE weight_conversion_id = ? AND item_name = ? AND type = 'output'`, [lotNo, conversionId, itemName]);
         } catch (e) {
           lotNo = `LOT_WC_${conversionId}`;
         }
+      } else {
+        const cId = req.companyId || (req.headers && req.headers['x-company-id']) || 1;
+        await recordLotNumber(lotNo, cId);
       }
 
       // Check existing stock_lots

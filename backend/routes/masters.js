@@ -960,7 +960,8 @@ const { previewNextLotNumber } = require('../utils/lotHelper');
 // Required response shape: { lot_no: "LOT0007" }
 router.get('/lots/next', async (req, res) => {
   try {
-    const nextLot = await previewNextLotNumber();
+    const cId = req.companyId || req.headers['x-company-id'] || req.query.company_id;
+    const nextLot = await previewNextLotNumber(cId);
     return res.json({ lot_no: nextLot });
   } catch (err) {
     console.error('Error generating next lot number:', err);

@@ -9,6 +9,7 @@ const router = express.Router()
 const db = require('../config/database')
 const recycleBinService = require('../services/RecycleBinService')
 const { createPurchaseLedgerEntries, deleteLedgerEntries } = require('../utils/ledgerHelper')
+const { reserveNextLotNumber, recordLotNumber } = require('../utils/lotHelper')
 
 const normalizePurchaseItem = (item) => {
   return {
@@ -406,8 +407,7 @@ router.post('/', async (req, res) => {
       }
     }
 
-    const maxItemIdResult = await db.query('SELECT MAX(id) AS maxId FROM purchase_items')
-    let nextLotSeq = (maxItemIdResult.rows[0]?.maxId || 0) + 1
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
 
     for (const item of items) {
       const normalizedItem = normalizePurchaseItem(item)
@@ -432,7 +432,9 @@ router.post('/', async (req, res) => {
 
       let lotNo = normalizedItem.lot_no
       if (!lotNo || lotNo === '') {
-        lotNo = `LOT${String(nextLotSeq++).padStart(4, '0')}`
+        lotNo = await reserveNextLotNumber(activeCompanyId);
+      } else {
+        await recordLotNumber(lotNo, activeCompanyId);
       }
 
       await db.run(`
@@ -600,8 +602,7 @@ router.put('/:id', async (req, res) => {
     await db.run('DELETE FROM purchase_items WHERE purchase_id = ?', [purchaseId])
     await db.run('DELETE FROM purchase_deductions WHERE purchase_id = ?', [purchaseId])
 
-    const maxItemIdResult = await db.query('SELECT MAX(id) AS maxId FROM purchase_items')
-    let nextLotSeq = (maxItemIdResult.rows[0]?.maxId || 0) + 1
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
 
     for (const item of items) {
       const normalizedItem = normalizePurchaseItem(item)
@@ -622,7 +623,11 @@ router.put('/:id', async (req, res) => {
 
 
       let lotNo = normalizedItem.lot_no
-      if (!lotNo || lotNo === '') lotNo = `LOT${String(nextLotSeq++).padStart(4, '0')}`
+      if (!lotNo || lotNo === '') {
+        lotNo = await reserveNextLotNumber(activeCompanyId);
+      } else {
+        await recordLotNumber(lotNo, activeCompanyId);
+      }
 
       await db.run(`
         INSERT INTO purchase_items (

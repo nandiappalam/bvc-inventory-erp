@@ -236,26 +236,21 @@ const MasterSelectCell = ({
 
     // Determine next preview lot for this row without consuming backend sequence.
     const isWastageLot = lotMode === 'auto-wastage' || lotMode === 'wastage';
+    let startLot = '';
 
     if (isWastageLot) {
-      if (!MasterSelectCell._previewWastageStart) {
-        try {
-          const previewRes = await api('/lots/preview-wastage', { method: 'GET' });
-          MasterSelectCell._previewWastageStart = previewRes?.lot_no || previewRes?.data?.lot_no || 'WST0001';
-        } catch (err) {
-          console.error('Failed to get wastage lot preview start:', err);
-          MasterSelectCell._previewWastageStart = 'WST0001';
-        }
+      try {
+        const previewRes = await api('/lots/preview-wastage', { method: 'GET' });
+        startLot = previewRes?.lot_no || previewRes?.data?.lot_no || '';
+      } catch (err) {
+        console.error('Failed to get wastage lot preview start:', err);
       }
     } else {
-      if (!MasterSelectCell._previewStart) {
-        try {
-          const previewRes = await api('/lots/preview', { method: 'GET' });
-          MasterSelectCell._previewStart = previewRes?.lot_no || previewRes?.data?.lot_no || 'LOT0001';
-        } catch (err) {
-          console.error('Failed to get lot preview start:', err);
-          MasterSelectCell._previewStart = 'LOT0001';
-        }
+      try {
+        const previewRes = await api('/lots/preview', { method: 'GET' });
+        startLot = previewRes?.lot_no || previewRes?.data?.lot_no || '';
+      } catch (err) {
+        console.error('Failed to get lot preview start:', err);
       }
     }
 
@@ -285,7 +280,6 @@ const MasterSelectCell = ({
     let offset = 0;
     try {
       let found = false;
-      const startLot = isWastageLot ? (MasterSelectCell._previewWastageStart || 'WST0001') : (MasterSelectCell._previewStart || 'LOT0001');
       while (!found) {
         const candidate = computeNextLot(startLot, offset);
         if (!activeLots.has(candidate)) {

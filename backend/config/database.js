@@ -595,9 +595,9 @@ async function executePgQuery(sql, params = [], companyId = 1, isMaster = false)
         result = await client.query(transformedSql, params);
       } else if (queryErr.code === '23503' && /violates foreign key constraint/i.test(queryErr.message)) {
         const constraintMatch = queryErr.message.match(/violates foreign key constraint "([^"]+)"/i) || [null, queryErr.constraint];
-        const tableMatch = queryErr.message.match(/table "([^"]+)"/i) || [null, queryErr.table];
+        const referencingTableMatch = queryErr.message.match(/on table "([^"]+)"/i) || queryErr.message.match(/table "([^"]+)"/i) || [null, queryErr.table];
         const constraintName = constraintMatch[1];
-        const tableName = tableMatch[1];
+        const tableName = referencingTableMatch[1];
         if (constraintName && tableName) {
           try {
             await client.query(`ALTER TABLE IF EXISTS "${schemaName}"."${tableName}" DROP CONSTRAINT IF EXISTS "${constraintName}" CASCADE`);

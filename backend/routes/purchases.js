@@ -4,6 +4,7 @@ const router = express.Router()
 const db = require('../config/database')
 const { createPurchaseLedgerEntries, deleteLedgerEntries } = require('../utils/ledgerHelper')
 const { rebuildStockLedger } = require('../utils/stockRebuilder')
+const { reserveNextLotNumber, recordLotNumber } = require('../utils/lotHelper')
  
 // GET all purchases
 router.get('/', async (req, res) => {
@@ -195,31 +196,8 @@ router.post('/', async (req, res) => {
     //  - Each item in this purchase gets a unique, sequentially incrementing lot.
     // ─────────────────────────────────────────────────────────────────
  
-    // Find the highest existing numeric lot number across ALL tables
-    let maxLotNum = 0;
-    try {
-      const lotResult = await db.query(`
-        SELECT MAX(CAST(REPLACE(lot_no, 'LOT', '') AS INTEGER)) AS maxLot
-        FROM stock_lots
-        WHERE lot_no LIKE 'LOT%'
-      `);
-      maxLotNum = parseInt(lotResult.rows[0]?.maxLot) || 0;
-    } catch (e) {
-      // Fallback: use purchase_items table
-      try {
-        const lotResult2 = await db.query(`
-          SELECT MAX(CAST(REPLACE(lot_no, 'LOT', '') AS INTEGER)) AS maxLot
-          FROM purchase_items
-          WHERE lot_no LIKE 'LOT%'
-        `);
-        maxLotNum = parseInt(lotResult2.rows[0]?.maxLot) || 0;
-      } catch (e2) {
-        maxLotNum = 0;
-      }
-    }
- 
-    let nextLotSeq = maxLotNum + 1; // Start from MAX+1, increment per item
- 
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+
     for (const item of items) {
       const qty = parseFloat(item.qty) || 0
       const rate = parseFloat(item.rate) || 0
@@ -227,7 +205,7 @@ router.post('/', async (req, res) => {
       const taxPercent = parseFloat(item.tax_percent) || 0
       const perUnitWeight = parseFloat(item.per_unit_weight) || 0
       const totalWt = Number((item.total_weight || qty * perUnitWeight).toFixed(3));
- 
+
       const baseAmount = Number((qty * rate).toFixed(2));
       const discountAmount = Number((item.disc_amount || (baseAmount * discPercent / 100)).toFixed(2));
       const taxableAmount = Number((baseAmount - discountAmount).toFixed(2));
@@ -235,21 +213,14 @@ router.post('/', async (req, res) => {
       const effectiveTaxPercent = taxMode === 'Exclusive' ? taxPercent : 0;
       // If tax type is `Without Tax`, GST must be zero (even if frontend sends a tax_amount)
       const taxAmount = effectiveTaxPercent === 0 ? 0 : Number((item.tax_amount || (taxableAmount * effectiveTaxPercent / 100)).toFixed(2));
- 
-      // Use frontend's preview lot if it's a valid LOT#### format.
-      // Otherwise generate a fresh sequential one.
-      let lotNo =
-  item.lot_no ||
-  item.lotNo ||
-  '';
 
-if (!lotNo) {
-  lotNo =
-    `LOT${String(nextLotSeq).padStart(4, '0')}`;
-}
+      let lotNo = item.lot_no || item.lotNo || '';
+      if (!lotNo) {
+        lotNo = await reserveNextLotNumber(activeCompanyId);
+      } else {
+        await recordLotNumber(lotNo, activeCompanyId);
+      }
 
-nextLotSeq++; // always increment so each item in this purchase is unique
- 
       console.log(`[LOT-GEN] Item: ${item.item_name}, Lot: "${lotNo}"`)
  
       await db.run(`
@@ -376,27 +347,8 @@ router.put('/:id', async (req, res) => {
     await db.run('DELETE FROM purchase_deductions WHERE purchase_id = ?', [purchaseId]);
  
     // Get highest existing lot number
-    let maxLotNum = 0;
-    try {
-      const lotResult = await db.query(`
-        SELECT MAX(CAST(REPLACE(lot_no, 'LOT', '') AS INTEGER)) AS maxLot
-        FROM stock_lots WHERE lot_no LIKE 'LOT%'
-      `);
-      maxLotNum = parseInt(lotResult.rows[0]?.maxLot) || 0;
-    } catch (e) {
-      try {
-        const lotResult2 = await db.query(`
-          SELECT MAX(CAST(REPLACE(lot_no, 'LOT', '') AS INTEGER)) AS maxLot
-          FROM purchase_items WHERE lot_no LIKE 'LOT%'
-        `);
-        maxLotNum = parseInt(lotResult2.rows[0]?.maxLot) || 0;
-      } catch (e2) {
-        maxLotNum = 0;
-      }
-    }
- 
-    let nextLotSeq = maxLotNum + 1;
- 
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+
     for (const item of items) {
       const qty = parseFloat(item.qty) || 0
       const rate = parseFloat(item.rate) || 0
@@ -404,25 +356,20 @@ router.put('/:id', async (req, res) => {
       const taxPercent = parseFloat(item.tax_percent) || 0
       const perUnitWeight = parseFloat(item.per_unit_weight) || 0
       const totalWt = parseFloat(item.total_weight || qty * perUnitWeight) || qty * perUnitWeight
- 
+
       const baseAmount = qty * rate
       const discountAmount = item.disc_amount || (baseAmount * discPercent / 100)
       const taxableAmount = baseAmount - discountAmount
       // If tax type is `Without Tax`, GST must be zero (even if frontend sends tax_amount)
       const effectiveTaxPercent = (formData.taxType === 'Exclusive' || formData.tax_type === 'Exclusive') ? taxPercent : 0;
       const taxAmount = effectiveTaxPercent === 0 ? 0 : (item.tax_amount || (taxableAmount * effectiveTaxPercent / 100));
- 
-      let lotNo =
-  item.lot_no ||
-  item.lotNo ||
-  '';
 
-if (!lotNo) {
-  lotNo =
-    `LOT${String(nextLotSeq).padStart(4, '0')}`;
-}
-
-nextLotSeq++;
+      let lotNo = item.lot_no || item.lotNo || '';
+      if (!lotNo) {
+        lotNo = await reserveNextLotNumber(activeCompanyId);
+      } else {
+        await recordLotNumber(lotNo, activeCompanyId);
+      }
  
       await db.run(`
         INSERT INTO purchase_items (

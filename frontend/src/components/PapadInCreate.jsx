@@ -41,7 +41,7 @@ const PapadInCreate = () => {
       s_no: 1, 
       item_name: '', 
       item_id: '',
-      lot_no: 'LOT0001', 
+      lot_no: '', 
       box_papad: '', 
       wt_papad: '', 
       box_empty: '', 
