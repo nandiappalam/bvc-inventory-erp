@@ -28,7 +28,7 @@ router.get('/', async (req, res) => {
         fori.wages_bag as wages_per_kg,
         fori.wages
       FROM flour_out_returns for
-      LEFT JOIN papad_company_master pcm ON (pcm.id = CAST(for.papad_company AS INTEGER) OR pcm.name = for.papad_company)
+      LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(for.papad_company AS TEXT) OR pcm.name = for.papad_company)
       LEFT JOIN flour_out_return_items fori ON for.id = fori.flour_out_return_id
       ORDER BY for.created_at DESC, fori.id ASC
     `)

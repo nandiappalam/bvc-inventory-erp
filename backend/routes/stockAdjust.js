@@ -27,9 +27,9 @@ router.get('/', async (req, res) => {
              COALESCE(pcm.name, sa.papad_comp) as papad_company_name,
              COALESCE(fmm.flourmill, sa.flour_mill) as flour_mill_name
       FROM stock_adjustments sa
-      LEFT JOIN papad_company_master pcm ON (pcm.id = CAST(sa.papad_comp AS INTEGER) OR pcm.name = sa.papad_comp)
-      LEFT JOIN flour_mill_master fmm ON (fmm.id = CAST(sa.flour_mill AS INTEGER) OR fmm.flourmill = sa.flour_mill)
-      ORDER BY CAST(sa.s_no AS INTEGER) DESC, sa.id DESC
+      LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(sa.papad_comp AS TEXT) OR pcm.name = sa.papad_comp)
+      LEFT JOIN flour_mill_master fmm ON (CAST(fmm.id AS TEXT) = CAST(sa.flour_mill AS TEXT) OR fmm.flourmill = sa.flour_mill)
+      ORDER BY sa.id DESC
     `)
     
     const list = []

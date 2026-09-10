@@ -45,7 +45,7 @@ router.get(['/', '/list'], async (req, res) => {
         foi.wages_bag as wagesBag,
         foi.wages
       FROM flour_out fo
-      LEFT JOIN papad_company_master pcm ON (pcm.id = CAST(fo.papad_company AS INTEGER) OR pcm.name = fo.papad_company)
+      LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(fo.papad_company AS TEXT) OR pcm.name = fo.papad_company)
       LEFT JOIN flour_out_items foi ON fo.id = foi.flour_out_id
       ORDER BY fo.created_at DESC, foi.id ASC
     `)

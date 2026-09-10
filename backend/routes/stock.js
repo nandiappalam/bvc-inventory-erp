@@ -346,8 +346,8 @@ router.get('/report', async (req, res) => {
     const params = []
     
     if (item_id) {
-      query += ` AND item_name = (SELECT item_name FROM item_master WHERE id = ?)`
-      params.push(item_id)
+      query += ` AND (s.item_name = (SELECT item_name FROM item_master WHERE CAST(id AS TEXT) = CAST(? AS TEXT) LIMIT 1) OR s.item_name = ?)`
+      params.push(item_id, item_id)
     }
     
     if (from_date) {
@@ -424,8 +424,8 @@ router.get('/lots', async (req, res) => {
     const params = []
     
     if (item_id) {
-      query += ` AND sl.item_id = ?`
-      params.push(item_id)
+      query += ` AND (CAST(sl.item_id AS TEXT) = CAST(? AS TEXT) OR sl.item_name = (SELECT item_name FROM item_master WHERE CAST(id AS TEXT) = CAST(? AS TEXT) LIMIT 1) OR sl.item_name = ?)`
+      params.push(item_id, item_id, item_id)
     }
     
     query += ` ORDER BY sl.item_name, sl.created_at ASC`

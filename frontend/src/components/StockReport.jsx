@@ -74,15 +74,39 @@ const StockReport = () => {
   useEffect(() => {
     const fetchItems = async () => {
       try {
-        const response = await axios.get('/api/masters/items')
-        const itemsData = Array.isArray(response.data) ? response.data : (response.data?.data || [])
-        setItems(itemsData)
+        const response = await axios.get('/api/masters/items');
+        let itemsData = Array.isArray(response.data) ? response.data : (response.data?.data || []);
+        
+        // Also fetch active stock items to ensure all FG (Finished Goods) and custom items appear in the dropdown
+        try {
+          const stockRes = await axios.get('/api/stock/report');
+          const stockItems = Array.isArray(stockRes.data) ? stockRes.data : (stockRes.data?.data || []);
+          const existingNames = new Set(itemsData.map(i => (i.name || i.item_name || '').toLowerCase().trim()));
+          
+          stockItems.forEach((stk, idx) => {
+            const name = (stk.item_name || '').trim();
+            if (name && !existingNames.has(name.toLowerCase())) {
+              existingNames.add(name.toLowerCase());
+              itemsData.push({
+                id: stk.item_id || name,
+                name: name,
+                item_name: name,
+                item_group: stk.item_group || (stk.category === 'FG' ? 'Finished Goods' : 'Raw Materials'),
+                category: stk.category
+              });
+            }
+          });
+        } catch (e) {
+          console.warn('Could not merge stock report items into dropdown:', e.message);
+        }
+
+        setItems(itemsData);
       } catch (err) {
-        console.error('Error fetching items:', err)
+        console.error('Error fetching items:', err);
       }
-    }
-    fetchItems()
-  }, [])
+    };
+    fetchItems();
+  }, []);
 
   // Fetch stock report
   const fetchReport = async () => {
@@ -328,8 +352,10 @@ const StockReport = () => {
               style={styles.filterSelect}
             >
               <option value="">All Items</option>
-              {items.map(item => (
-                <option key={item.id} value={item.id}>{item.name || item.item_name}</option>
+              {items.map((item, idx) => (
+                <option key={item.id || idx} value={item.id || item.item_name || item.name}>
+                  {item.name || item.item_name} {item.category ? `[${item.category}]` : ''}
+                </option>
               ))}
             </select>
           </span>

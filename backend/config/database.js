@@ -384,6 +384,9 @@ function translateSqlForPostgres(sql, companyId = 1) {
   transformed = transformed.replace(/IFNULL\s*\(/gi, 'COALESCE(');
   transformed = transformed.replace(/ROUND\s*\(\s*([^,]+?)\s*,\s*(\d+)\s*\)/gi, 'ROUND(($1)::numeric, $2)');
 
+  // 4b2. Safe integer casting for PostgreSQL to prevent "invalid input syntax for integer" on text columns
+  transformed = transformed.replace(/CAST\s*\(\s*([a-zA-Z0-9_."]+)\s+AS\s+INTEGER\s*\)/gi, "CAST(NULLIF(regexp_replace(CAST($1 AS TEXT), '\\D', '', 'g'), '') AS INTEGER)");
+
   // 4c. Prevent empty IN () / NOT IN () syntax errors
   transformed = transformed.replace(/\bIN\s*\(\s*\)/gi, 'IN (NULL)');
   transformed = transformed.replace(/\bNOT\s+IN\s*\(\s*\)/gi, 'NOT IN (NULL)');

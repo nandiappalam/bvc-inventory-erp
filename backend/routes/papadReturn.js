@@ -21,7 +21,7 @@ router.get('/', async (req, res) => {
         pr.remarks,
         pr.created_at
       FROM papad_return pr
-      LEFT JOIN papad_company_master pcm ON (pcm.id = CAST(pr.papad_company AS INTEGER) OR pcm.name = pr.papad_company)
+      LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(pr.papad_company AS TEXT) OR pcm.name = pr.papad_company)
       ORDER BY pr.id DESC
     `);
     res.json(result.rows || []);

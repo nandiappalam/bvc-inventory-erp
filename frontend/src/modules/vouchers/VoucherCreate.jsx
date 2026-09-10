@@ -396,7 +396,8 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
       .then(r => r.json())
       .then(data => {
         const bills = Array.isArray(data) ? data : (data.data || []);
-        const mapped = bills.map((b, idx) => ({
+        const pendingOnly = bills.filter(b => (parseFloat(b.balance) || 0) > 0.01);
+        const mapped = pendingOnly.map((b, idx) => ({
           ...b,
           key: `${b.ledger_name}_${b.type}_${b.invoice_no}_${idx}`
         }));

@@ -37,7 +37,7 @@ router.get('/', async (req, res) => {
         foi.papad_details,
         foi.empty_details
       FROM flour_out fo
-      LEFT JOIN papad_company_master pcm ON (pcm.id = CAST(fo.papad_company AS INTEGER) OR pcm.name = fo.papad_company)
+      LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(fo.papad_company AS TEXT) OR pcm.name = fo.papad_company)
       LEFT JOIN flour_out_items foi ON fo.id = foi.flour_out_id
       WHERE fo.papad_company IS NOT NULL AND fo.papad_company != ''
       ORDER BY fo.created_at DESC, foi.id ASC

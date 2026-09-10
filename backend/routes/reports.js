@@ -619,7 +619,7 @@ router.get('/purchase-register', async (req, res) => {
         p.remarks as transport
       FROM purchases p
       LEFT JOIN purchase_items pi ON p.id = pi.purchase_id
-      LEFT JOIN supplier_master s ON (s.id = p.supplier OR CAST(p.supplier AS INTEGER) = s.id OR p.supplier = s.name)
+      LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(p.supplier AS TEXT) OR p.supplier = s.name OR p.supplier = s.print_name)
       WHERE 1=1
     `
     const params = []
@@ -834,7 +834,7 @@ router.get('/papad-ledger', async (req, res) => {
         CASE WHEN UPPER(a.dr_cr) = 'CR' THEN 0 ELSE a.amount END as debit,
         CASE WHEN UPPER(a.dr_cr) = 'CR' THEN a.amount ELSE 0 END as credit
       FROM advances a
-      LEFT JOIN papad_company_master pcm ON (pcm.id = CAST(a.papad_company AS INTEGER) OR pcm.name = a.papad_company)
+      LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(a.papad_company AS TEXT) OR pcm.name = a.papad_company)
       WHERE 1=1
     `;
     const advParams = [];
@@ -873,7 +873,7 @@ router.get('/papad-ledger', async (req, res) => {
         0 as debit,
         COALESCE(pi.amount, pi.qty * pi.rate, 0) as credit
       FROM papad_in pi
-      LEFT JOIN papad_company_master pcm ON (pcm.id = CAST(pi.papad_company AS INTEGER) OR pcm.name = pi.papad_company)
+      LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(pi.papad_company AS TEXT) OR pcm.name = pi.papad_company)
       WHERE 1=1
     `;
     const papadInParams = [];
@@ -913,7 +913,7 @@ router.get('/papad-ledger', async (req, res) => {
         0 as credit
       FROM flour_out fo
       LEFT JOIN flour_out_items foi ON fo.id = foi.flour_out_id
-      LEFT JOIN papad_company_master pcm ON (pcm.id = CAST(fo.papad_company AS INTEGER) OR pcm.name = fo.papad_company)
+      LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(fo.papad_company AS TEXT) OR pcm.name = fo.papad_company)
       WHERE 1=1
     `;
     const flourOutParams = [];
@@ -2181,10 +2181,15 @@ router.get('/outstanding-details', async (req, res) => {
 
     let allBills = Object.values(billsMap)
 
+    const cleanPartyKey = (name) => {
+      if (!name) return ''
+      return String(name).replace(/\s*\((Supplier|Customer|Papad Co|Flour Mill|Creditor|Debtor)\)$/i, '').trim().toLowerCase()
+    }
+
     // Filter by ledger_name if provided
     if (ledger_name) {
-      const filterName = String(ledger_name).trim().toLowerCase()
-      allBills = allBills.filter(b => b.ledger_name && b.ledger_name.trim().toLowerCase() === filterName)
+      const filterName = cleanPartyKey(ledger_name)
+      allBills = allBills.filter(b => b.ledger_name && cleanPartyKey(b.ledger_name) === filterName)
     }
 
     // 4. Fetch all settlement ledger entries (Payments and Receipts)
@@ -2225,6 +2230,51 @@ router.get('/outstanding-details', async (req, res) => {
         particulars: s.particulars || ''
       }
     })
+
+    // Also fetch settlements directly from voucher and voucher_entry to guarantee no missing payments
+    try {
+      const vExists = await tableExists('voucher')
+      const veExists = await tableExists('voucher_entry')
+      if (vExists && veExists) {
+        const vRes = await db.query(`
+          SELECT 
+            ve.id,
+            lm.name as ledger_name,
+            v.date,
+            v.voucher_type,
+            v.voucher_no,
+            v.reference_no,
+            v.narration,
+            ve.debit,
+            ve.credit,
+            ve.remarks
+          FROM voucher v
+          JOIN voucher_entry ve ON v.id = ve.voucher_id
+          LEFT JOIN ledgermaster lm ON ve.ledger_id = lm.id
+          WHERE v.voucher_type IN ('Payment', 'Receipt', 'Journal')
+        `)
+        const existingKeys = new Set(settlements.map(s => `${s.voucher_no}_${s.debit}_${s.credit}`))
+        ;(vRes.rows || []).forEach(vr => {
+          const vKey = `${vr.voucher_no}_${vr.debit}_${vr.credit}`
+          if (!existingKeys.has(vKey)) {
+            existingKeys.add(vKey)
+            const combinedParticulars = [vr.remarks, vr.reference_no, vr.narration].filter(Boolean).join(' ')
+            settlements.push({
+              id: `v_${vr.id}`,
+              ledger_name: vr.ledger_name || 'Party',
+              date: vr.date,
+              voucher_type: vr.voucher_type,
+              voucher_no: vr.voucher_no,
+              debit: parseFloat(vr.debit || 0),
+              credit: parseFloat(vr.credit || 0),
+              particulars: combinedParticulars
+            })
+          }
+        })
+      }
+    } catch (e) {
+      console.warn('Could not query voucher table directly:', e.message)
+    }
 
     // Also fetch advances as settlements for suppliers
     let advanceQuery = `
@@ -2267,13 +2317,13 @@ router.get('/outstanding-details', async (req, res) => {
     let allSettlements = [...settlements, ...advanceSettlements]
 
     // Sort settlements chronologically so we apply them in order
-    allSettlements.sort((a, b) => new Date(a.date) - new Date(b.date) || a.id - b.id)
+    allSettlements.sort((a, b) => new Date(a.date) - new Date(b.date) || String(a.id).localeCompare(String(b.id)))
 
-    // Group bills and settlements by ledger_name
+    // Group bills and settlements by cleaned ledger_name
     const billsByLedger = {}
     allBills.forEach(b => {
       if (!b.ledger_name) return
-      const key = b.ledger_name.trim().toLowerCase()
+      const key = cleanPartyKey(b.ledger_name)
       if (!billsByLedger[key]) billsByLedger[key] = []
       billsByLedger[key].push(b)
     })
@@ -2286,7 +2336,7 @@ router.get('/outstanding-details', async (req, res) => {
     const settlementsByLedger = {}
     allSettlements.forEach(s => {
       if (!s.ledger_name) return
-      const key = s.ledger_name.trim().toLowerCase()
+      const key = cleanPartyKey(s.ledger_name)
       if (!settlementsByLedger[key]) settlementsByLedger[key] = []
       settlementsByLedger[key].push(s)
     })
@@ -2310,8 +2360,11 @@ router.get('/outstanding-details', async (req, res) => {
         for (const bill of ledgerBills) {
           if (bill.balance <= 0) continue
 
-          const invNo = String(bill.invoice_no).trim().toLowerCase()
-          if (invNo && s.particulars && String(s.particulars).toLowerCase().includes(invNo)) {
+          const invNo = String(bill.invoice_no || '').trim().toLowerCase()
+          const vNo = String(bill.voucher_no || '').trim().toLowerCase()
+          const pText = String(s.particulars || '').toLowerCase()
+
+          if ((invNo && pText.includes(invNo)) || (vNo && pText.includes(vNo))) {
             const allocation = Math.min(bill.balance, amountToAllocate)
             bill.paid += allocation
             bill.balance -= allocation
@@ -2556,7 +2609,7 @@ router.get('/daily-production', async (req, res) => {
         flour_mill: g.flour_mill_name || g.flour_mill,
         lot_no: inputLotsStr || 'N/A',
         item_name: inputItemsStr || 'N/A',
-        supplier_name: suppliersStr || 'K',
+        supplier_name: suppliersStr || 'Kandiga / Velmurugan',
         source: g.flour_mill_name || g.flour_mill || 'In-House',
         bag_weight: inputs[0]?.weight || 50,
         input_qty: inputQty,

@@ -552,10 +552,15 @@ router.post('/', async (req, res) => {
     for (const entry of data.entries) {
       const lmResult = await db.query('SELECT name FROM ledgermaster WHERE id = ?', [entry.ledger_id]);
       const ledger_name = lmResult.rows[0]?.name || 'Unknown';
+      const particularsText = (entry.remarks && entry.remarks.trim()) 
+        ? entry.remarks.trim() 
+        : ((data.reference_no && data.reference_no.trim()) 
+            ? data.reference_no.trim() 
+            : (data.narration || ''));
       ledgerEntries.push(db.run(
         `INSERT INTO ledger_entries (ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit, particulars) 
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [entry.ledger_id, ledger_name, data.date, data.voucher_type, voucher_no, entry.debit || 0, entry.credit || 0, entry.remarks || '']
+        [entry.ledger_id, ledger_name, data.date, data.voucher_type, voucher_no, entry.debit || 0, entry.credit || 0, particularsText]
       ));
     }
     await Promise.all(ledgerEntries);
@@ -623,10 +628,15 @@ router.put('/:id', async (req, res) => {
       
       const lmResult = await db.query('SELECT name FROM ledgermaster WHERE id = ?', [entry.ledger_id]);
       const ledger_name = lmResult.rows[0]?.name || 'Unknown';
+      const particularsText = (entry.remarks && entry.remarks.trim()) 
+        ? entry.remarks.trim() 
+        : ((data.reference_no && data.reference_no.trim()) 
+            ? data.reference_no.trim() 
+            : (data.narration || ''));
       ledgerEntries.push(db.run(
         `INSERT INTO ledger_entries (ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit, particulars) 
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [entry.ledger_id, ledger_name, data.date, data.voucher_type, voucher_no, entry.debit || 0, entry.credit || 0, entry.remarks || '']
+        [entry.ledger_id, ledger_name, data.date, data.voucher_type, voucher_no, entry.debit || 0, entry.credit || 0, particularsText]
       ));
     }
     await Promise.all(ledgerEntries);

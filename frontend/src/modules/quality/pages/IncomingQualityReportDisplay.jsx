@@ -169,12 +169,12 @@ export default function IncomingQualityReportDisplay() {
           <Box>
             <Typography variant="subtitle2" sx={{ fontWeight: 800, color: 'text.secondary', textTransform: 'uppercase' }}>Inspection & Lot details</Typography>
             <Box sx={{ mt: 1, display: 'grid', gridTemplateColumns: '130px 1fr', rowGap: 0.5 }}>
-              <b>Lot Number:</b> <span>{data.lotNo || '-'}</span>
-              <b>Batch:</b> <span>{data.batch || data.lotNo || '-'}</span>
-              <b>Receipt Date:</b> <span>{data.receipt_date || '-'}</span>
-              <b>Invoice Date:</b> <span>{data.invoice_date || '-'}</span>
-              <b>Inspection Date:</b> <span>{data.inspectionDate || '-'}</span>
-              <b>QC Inspector:</b> <span>{data.analyst || 'QC System'}</span>
+              <b>Lot Number:</b> <span>{data.lotNo || data.rm_lot_no || data.lot_no || data.lotno || data.batch || '-'}</span>
+              <b>Batch:</b> <span>{data.batch || data.lotNo || data.rm_lot_no || data.lot_no || data.lotno || '-'}</span>
+              <b>Receipt Date:</b> <span>{data.receipt_date || data.receiptDate || data.inspectionDate || data.date || '-'}</span>
+              <b>Invoice Date:</b> <span>{data.invoice_date || data.invoiceDate || data.receipt_date || '-'}</span>
+              <b>Inspection Date:</b> <span>{data.inspectionDate || data.inspection_date || data.inspectiondate || data.analysisDate || data.receipt_date || data.date || '-'}</span>
+              <b>QC Inspector:</b> <span>{data.analyst || data.inspector || 'QC System'}</span>
             </Box>
           </Box>
         </Box>

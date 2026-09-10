@@ -748,7 +748,7 @@ async function syncAllProductionRecords() {
              s.name as supplier_name, s.phone_off, s.gst_number, s.address1, s.area
       FROM purchases p
       JOIN purchase_items pi ON p.id = pi.purchase_id
-      LEFT JOIN supplier_master s ON (s.id = CAST(p.supplier AS INTEGER) OR p.supplier = s.name OR p.supplier = s.print_name)
+      LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(p.supplier AS TEXT) OR p.supplier = s.name OR p.supplier = s.print_name)
     `);
 
     for (const pur of (purchases.rows || [])) {
@@ -852,7 +852,7 @@ async function syncAllProductionRecords() {
              fm.flourmill as mill_name, fm.area as mill_area
       FROM grains g
       JOIN grain_input_items gi ON g.id = gi.grain_id
-      LEFT JOIN flour_mill_master fm ON (fm.id = CAST(g.flour_mill AS INTEGER) OR g.flour_mill = fm.flourmill)
+      LEFT JOIN flour_mill_master fm ON (CAST(fm.id AS TEXT) = CAST(g.flour_mill AS TEXT) OR g.flour_mill = fm.flourmill)
     `);
 
     for (const g of (grainsRes.rows || [])) {
@@ -1071,7 +1071,7 @@ async function syncAllProductionRecords() {
              c.name as customer_name, c.phone_off, c.area as customer_area, c.gst_number
       FROM sales s
       JOIN sales_items si ON s.id = si.sales_id
-      LEFT JOIN customer_master c ON (c.id = CAST(s.customer AS INTEGER) OR s.customer = c.name OR s.customer = c.print_name)
+      LEFT JOIN customer_master c ON (CAST(c.id AS TEXT) = CAST(s.customer AS TEXT) OR s.customer = c.name OR s.customer = c.print_name)
     `);
 
     for (const sal of (salesRes.rows || [])) {
@@ -1758,7 +1758,7 @@ router.get('/traceability/:lotNo', async (req, res) => {
                pi.purchase_id, COALESCE(gm.godown_name, 'KNJ Godown') as godown_name
         FROM purchase_items pi
         LEFT JOIN purchases p ON p.id = pi.purchase_id
-        LEFT JOIN godown_master gm ON (gm.id = CAST(p.godown AS INTEGER) OR p.godown = gm.godown_name)
+        LEFT JOIN godown_master gm ON (CAST(gm.id AS TEXT) = CAST(p.godown AS TEXT) OR p.godown = gm.godown_name)
         WHERE UPPER(pi.lot_no) = UPPER(?) OR UPPER(pi.lot_no) LIKE UPPER(?)
         ORDER BY CASE WHEN UPPER(pi.lot_no) = UPPER(?) THEN 0 ELSE 1 END, pi.id DESC LIMIT 1
       `, [lotNo, `%${lotNo}%`, lotNo]);
@@ -1785,7 +1785,7 @@ router.get('/traceability/:lotNo', async (req, res) => {
         SELECT s.lot_no, s.item_name, s.qty as quantity, s.rate, 'Stock' as type,
                COALESCE(gm.godown_name, 'KNJ Godown') as godown_name
         FROM stock s
-        LEFT JOIN godown_master gm ON (gm.id = CAST(s.godown AS INTEGER) OR s.godown = gm.godown_name)
+        LEFT JOIN godown_master gm ON (CAST(gm.id AS TEXT) = CAST(s.godown AS TEXT) OR s.godown = gm.godown_name)
         WHERE UPPER(s.lot_no) = UPPER(?) OR UPPER(s.lot_no) LIKE UPPER(?)
         ORDER BY CASE WHEN UPPER(s.lot_no) = UPPER(?) THEN 0 ELSE 1 END, s.id DESC LIMIT 1
       `, [lotNo, `%${lotNo}%`, lotNo]);
@@ -1814,8 +1814,8 @@ router.get('/traceability/:lotNo', async (req, res) => {
              COALESCE(gm.godown_name, 'KNJ Godown') as godown_name
       FROM purchases p
       JOIN purchase_items pi ON p.id = pi.purchase_id
-      LEFT JOIN supplier_master s ON (s.id = CAST(p.supplier AS INTEGER) OR p.supplier = s.name OR p.supplier = s.print_name)
-      LEFT JOIN godown_master gm ON (gm.id = CAST(p.godown AS INTEGER) OR p.godown = gm.godown_name)
+      LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(p.supplier AS TEXT) OR p.supplier = s.name OR p.supplier = s.print_name)
+      LEFT JOIN godown_master gm ON (CAST(gm.id AS TEXT) = CAST(p.godown AS TEXT) OR p.godown = gm.godown_name)
       WHERE UPPER(pi.lot_no) = UPPER(?) OR UPPER(pi.lot_no) LIKE UPPER(?)
       ORDER BY CASE WHEN UPPER(pi.lot_no) = UPPER(?) THEN 0 ELSE 1 END, p.id DESC
     `, [canonicalLotNo, `%${canonicalLotNo}%`, canonicalLotNo]);
@@ -1833,8 +1833,8 @@ router.get('/traceability/:lotNo', async (req, res) => {
                COALESCE(p.inv_no, CAST(p.s_no AS TEXT), CAST(p.id AS TEXT)) as invoice_no, 
                COALESCE(gm.godown_name, 'KNJ Godown') as godown_name
         FROM purchases p
-        LEFT JOIN supplier_master s ON (s.id = CAST(p.supplier AS INTEGER) OR p.supplier = s.name OR p.supplier = s.print_name)
-        LEFT JOIN godown_master gm ON (gm.id = CAST(p.godown AS INTEGER) OR p.godown = gm.godown_name)
+        LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(p.supplier AS TEXT) OR p.supplier = s.name OR p.supplier = s.print_name)
+        LEFT JOIN godown_master gm ON (CAST(gm.id AS TEXT) = CAST(p.godown AS TEXT) OR p.godown = gm.godown_name)
         WHERE p.id = ?
       `, [lot.purchase_id]);
       if (purRes.rows && purRes.rows[0]) {
@@ -1849,7 +1849,7 @@ router.get('/traceability/:lotNo', async (req, res) => {
              COALESCE(fm.flourmill, 'Premium Flour Mill (Line 1)') as mill_name, fm.area as mill_area
       FROM grains g
       JOIN grain_input_items gi ON g.id = gi.grain_id
-      LEFT JOIN flour_mill_master fm ON (fm.id = CAST(g.flour_mill AS INTEGER) OR g.flour_mill = fm.flourmill)
+      LEFT JOIN flour_mill_master fm ON (CAST(fm.id AS TEXT) = CAST(g.flour_mill AS TEXT) OR g.flour_mill = fm.flourmill)
       WHERE UPPER(gi.lot_no) = UPPER(?) OR UPPER(gi.lot_no) LIKE UPPER(?)
     `, [canonicalLotNo, `%${canonicalLotNo}%`]);
 
@@ -1860,7 +1860,7 @@ router.get('/traceability/:lotNo', async (req, res) => {
       FROM grains g
       JOIN grain_output_items go ON g.id = go.grain_id
       LEFT JOIN grain_input_items gi ON g.id = gi.grain_id
-      LEFT JOIN flour_mill_master fm ON (fm.id = CAST(g.flour_mill AS INTEGER) OR g.flour_mill = fm.flourmill)
+      LEFT JOIN flour_mill_master fm ON (CAST(fm.id AS TEXT) = CAST(g.flour_mill AS TEXT) OR g.flour_mill = fm.flourmill)
       WHERE UPPER(go.lot_no) = UPPER(?) OR UPPER(go.lot_no) LIKE UPPER(?)
     `, [canonicalLotNo, `%${canonicalLotNo}%`]);
 
@@ -1879,8 +1879,8 @@ router.get('/traceability/:lotNo', async (req, res) => {
                  COALESCE(gm.godown_name, 'KNJ Godown') as godown_name
           FROM purchases p
           JOIN purchase_items pi ON p.id = pi.purchase_id
-          LEFT JOIN supplier_master s ON (s.id = CAST(p.supplier AS INTEGER) OR p.supplier = s.name OR p.supplier = s.print_name)
-          LEFT JOIN godown_master gm ON (gm.id = CAST(p.godown AS INTEGER) OR p.godown = gm.godown_name)
+          LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(p.supplier AS TEXT) OR p.supplier = s.name OR p.supplier = s.print_name)
+          LEFT JOIN godown_master gm ON (CAST(gm.id AS TEXT) = CAST(p.godown AS TEXT) OR p.godown = gm.godown_name)
           WHERE UPPER(pi.lot_no) = UPPER(?) OR UPPER(pi.lot_no) LIKE UPPER(?)
         `, [parentInputLot, `%${parentInputLot}%`]);
         if (parentPurRes.rows && parentPurRes.rows[0]) {
@@ -1899,7 +1899,7 @@ router.get('/traceability/:lotNo', async (req, res) => {
       const gHeader = await db.query(`
         SELECT g.*, COALESCE(fm.flourmill, 'Premium Flour Mill (Line 1)') as mill_name, fm.area as mill_area
         FROM grains g
-        LEFT JOIN flour_mill_master fm ON (fm.id = CAST(g.flour_mill AS INTEGER) OR g.flour_mill = fm.flourmill)
+        LEFT JOIN flour_mill_master fm ON (CAST(fm.id AS TEXT) = CAST(g.flour_mill AS TEXT) OR g.flour_mill = fm.flourmill)
         WHERE g.id = ?
       `, [gid]);
       const inputs = await db.query(`SELECT * FROM grain_input_items WHERE grain_id = ?`, [gid]);

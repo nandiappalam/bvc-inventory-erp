@@ -164,8 +164,8 @@ export default function CertificateAnalysisDisplay() {
             </Typography>
             <Box sx={{ display: 'grid', gridTemplateColumns: '120px 1fr', rowGap: 0.75 }}>
               <b>Product Name:</b> <span>{data.item || '-'}</span>
-              <b>Lot Number:</b> <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{data.lotNo || '-'}</span>
-              <b>Batch Identity:</b> <span>{data.batch || data.lotNo || '-'}</span>
+              <b>Lot Number:</b> <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{data.lotNo || data.rm_lot_no || data.lot_no || data.lotno || data.batch || '-'}</span>
+              <b>Batch Identity:</b> <span>{data.batch || data.lotNo || data.rm_lot_no || data.lot_no || data.lotno || '-'}</span>
               <b>Quantity Certified:</b> <span>{data.quantity ? `${data.quantity} bags` : '-'}</span>
               <b>Total Weight:</b> <span>{data.total_weight ? `${data.total_weight} kg (${(data.total_weight / 1000).toFixed(2)} MT)` : (data.unit_weight ? `Unit: ${data.unit_weight} kg` : '-')}</span>
             </Box>
@@ -175,10 +175,10 @@ export default function CertificateAnalysisDisplay() {
               Analysis Information
             </Typography>
             <Box sx={{ display: 'grid', gridTemplateColumns: '130px 1fr', rowGap: 0.75 }}>
-              <b>Date of Analysis:</b> <span>{data.inspectionDate || '-'}</span>
+              <b>Date of Analysis:</b> <span>{data.inspectionDate || data.inspection_date || data.inspectiondate || data.analysisDate || data.analysis_date || data.receipt_date || data.date || '-'}</span>
               <b>Supplier / Source:</b> <span>{data.supplier || '-'}</span>
               <b>Test Specification:</b> <span>BVC-QA-STD-{data.item ? String(data.item).toUpperCase().replace(/\s+/g,'') : '01'}</span>
-              <b>Lab Analyst:</b> <span>{data.analyst || 'QC Scientist'}</span>
+              <b>Lab Analyst:</b> <span>{data.analyst || data.inspector || 'QC Scientist'}</span>
             </Box>
           </Box>
         </Box>
