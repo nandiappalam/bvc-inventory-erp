@@ -223,7 +223,10 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
       const response = await fetch(`/api/reports/outstanding-details?ledger_name=${encodeURIComponent(cleanName)}`);
       const result = await response.json();
       const bills = Array.isArray(result) ? result : (result.data || []);
-      const filteredBills = bills.filter(b => b.type === (type === 'Payment' ? 'Payable' : 'Receivable'));
+      const filteredBills = bills.filter(b => 
+        b.type === (type === 'Payment' ? 'Payable' : 'Receivable') && 
+        (parseFloat(b.balance) || 0) > 0.01
+      );
 
       const matchedInvoices = [];
       if (matchedRemarks && matchedRemarks.startsWith('Ref:')) {

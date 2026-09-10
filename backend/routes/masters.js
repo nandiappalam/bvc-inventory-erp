@@ -416,9 +416,19 @@ router.get('/:type', async (req, res, next) => {
     const params = []
     
     if (tableName === 'item_master') {
-      query = `
+      // 1. Fetch base items from item_master with their current calculated stock
+      const imQuery = `
         SELECT 
-          im.*,
+          im.id,
+          im.item_code,
+          im.item_name,
+          COALESCE(im.print_name, im.item_name) as print_name,
+          COALESCE(im.item_group, 'General') as item_group,
+          COALESCE(im.type, 'Raw Material') as type,
+          im.tax,
+          im.hsn_code,
+          im.status,
+          im.lab_parameters,
           COALESCE(s.stock_qty, 0) as stock_qty
         FROM item_master im
         LEFT JOIN (
@@ -426,11 +436,168 @@ router.get('/:type', async (req, res, next) => {
           FROM stock 
           GROUP BY item_name
         ) s ON LOWER(TRIM(s.item_name)) = LOWER(TRIM(im.item_name))
+        WHERE (im.status = 'Active' OR im.status IS NULL OR im.status = '')
+        ORDER BY im.item_group ASC, im.item_name ASC
       `
-      if (hasStatus) {
-        query += ` WHERE (im.status = 'Active' OR im.status IS NULL OR im.status = '')`
-      }
-      query += ` ORDER BY im.item_group ASC, im.item_name ASC`
+      const imRes = await db.query(imQuery, params)
+      const itemMap = new Map()
+
+      ;(imRes.rows || []).forEach(r => {
+        const key = String(r.item_name || r.name || '').trim().toLowerCase()
+        if (key) {
+          itemMap.set(key, {
+            ...r,
+            id: r.id || r.item_code || r.item_name,
+            name: r.item_name || r.name,
+            item_name: r.item_name || r.name,
+            print_name: r.print_name || r.item_name || r.name,
+            item_group: r.item_group || 'General',
+            type: r.type || 'Raw Material',
+            stock_qty: parseFloat(r.stock_qty || 0)
+          })
+        }
+      })
+
+      // 2. Scan stock_lots for any additional finished goods or lots
+      try {
+        const slRes = await db.query(`
+          SELECT 
+            item_name, 
+            SUM(remaining_quantity) as total_qty,
+            MAX(approval_status) as approval_status
+          FROM stock_lots 
+          WHERE item_name IS NOT NULL AND TRIM(item_name) != ''
+          GROUP BY item_name
+        `)
+        ;(slRes.rows || []).forEach(sl => {
+          const key = String(sl.item_name).trim().toLowerCase()
+          const isFG = key.includes('fg') || key.includes('finish') || key.includes('papad') || key.includes('pack')
+          const isOpening = key.includes('opening') || key.includes('open')
+          const itemType = isFG ? 'Finished Goods' : isOpening ? 'Opening Stock' : 'Raw Material'
+          const itemGroup = isFG ? 'Finished Goods' : isOpening ? 'Opening Stock' : 'Raw Material'
+
+          if (!itemMap.has(key)) {
+            itemMap.set(key, {
+              id: `lot_${key.replace(/\s+/g, '_')}`,
+              item_code: `LOT-${key.substring(0, 4).toUpperCase()}`,
+              name: sl.item_name,
+              item_name: sl.item_name,
+              print_name: sl.item_name,
+              item_group: itemGroup,
+              type: itemType,
+              tax: 5,
+              status: 'Active',
+              stock_qty: parseFloat(sl.total_qty || 0)
+            })
+          } else {
+            const existing = itemMap.get(key)
+            if (!existing.stock_qty || existing.stock_qty === 0) {
+              existing.stock_qty = parseFloat(sl.total_qty || 0)
+            }
+          }
+        })
+      } catch (e) {}
+
+      // 3. Scan open / open_items (Opening Stocks)
+      try {
+        const openRes = await db.query(`
+          SELECT 
+            COALESCE(oi.item_name, o.item_name, 'Opening Stock Item') as item_name,
+            SUM(COALESCE(oi.qty, o.qty, 0)) as total_qty
+          FROM open o
+          LEFT JOIN open_items oi ON CAST(oi.open_id AS TEXT) = CAST(o.id AS TEXT)
+          WHERE COALESCE(oi.item_name, o.item_name) IS NOT NULL
+          GROUP BY COALESCE(oi.item_name, o.item_name)
+        `)
+        ;(openRes.rows || []).forEach(op => {
+          const key = String(op.item_name).trim().toLowerCase()
+          if (!itemMap.has(key)) {
+            itemMap.set(key, {
+              id: `open_${key.replace(/\s+/g, '_')}`,
+              item_code: `OPEN-${key.substring(0, 4).toUpperCase()}`,
+              name: op.item_name,
+              item_name: op.item_name,
+              print_name: op.item_name,
+              item_group: 'Opening Stock',
+              type: 'Opening Stock',
+              tax: 5,
+              status: 'Active',
+              stock_qty: parseFloat(op.total_qty || 0)
+            })
+          }
+        })
+      } catch (e) {}
+
+      // 4. Scan papad_in / packing (Finished Goods)
+      try {
+        const papadRes = await db.query(`
+          SELECT 
+            COALESCE(pcm.name, pi.item_name, 'Finished Papad') as item_name,
+            SUM(COALESCE(pi.qty, 0)) as total_qty
+          FROM papad_in pi
+          LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(pi.papad_company_id AS TEXT) OR pcm.name = pi.papad_company_id)
+          GROUP BY COALESCE(pcm.name, pi.item_name, 'Finished Papad')
+        `)
+        ;(papadRes.rows || []).forEach(p => {
+          const key = String(p.item_name).trim().toLowerCase()
+          if (!itemMap.has(key)) {
+            itemMap.set(key, {
+              id: `fg_${key.replace(/\s+/g, '_')}`,
+              item_code: `FG-${key.substring(0, 4).toUpperCase()}`,
+              name: p.item_name,
+              item_name: p.item_name,
+              print_name: p.item_name,
+              item_group: 'Finished Goods',
+              type: 'Finished Goods',
+              tax: 5,
+              status: 'Active',
+              stock_qty: parseFloat(p.total_qty || 0)
+            })
+          }
+        })
+      } catch (e) {}
+
+      // 5. Scan stock table directly
+      try {
+        const stockRes = await db.query(`
+          SELECT 
+            item_name,
+            SUM(qty) as total_qty
+          FROM stock
+          WHERE item_name IS NOT NULL AND TRIM(item_name) != ''
+          GROUP BY item_name
+        `)
+        ;(stockRes.rows || []).forEach(st => {
+          const key = String(st.item_name).trim().toLowerCase()
+          const isFG = key.includes('fg') || key.includes('finish') || key.includes('papad') || key.includes('pack')
+          const isOpening = key.includes('open') || key.includes('opening')
+          const itemType = isFG ? 'Finished Goods' : isOpening ? 'Opening Stock' : 'Raw Material'
+          const itemGroup = isFG ? 'Finished Goods' : isOpening ? 'Opening Stock' : 'Raw Material'
+
+          if (!itemMap.has(key)) {
+            itemMap.set(key, {
+              id: `stock_${key.replace(/\s+/g, '_')}`,
+              item_code: `STK-${key.substring(0, 4).toUpperCase()}`,
+              name: st.item_name,
+              item_name: st.item_name,
+              print_name: st.item_name,
+              item_group: itemGroup,
+              type: itemType,
+              tax: 5,
+              status: 'Active',
+              stock_qty: parseFloat(st.total_qty || 0)
+            })
+          } else {
+            const existing = itemMap.get(key)
+            if (existing.stock_qty === 0) {
+              existing.stock_qty = parseFloat(st.total_qty || 0)
+            }
+          }
+        })
+      } catch (e) {}
+
+      const allItemsList = Array.from(itemMap.values())
+      return res.json({ success: true, data: allItemsList })
     } else {
       if (hasStatus) {
         query += ` WHERE (status = 'Active' OR status IS NULL OR status = '')`

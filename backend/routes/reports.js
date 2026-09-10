@@ -2101,18 +2101,59 @@ router.get('/outstanding-details', async (req, res) => {
     // 2. Fetch real Purchases & Sales from active operational transaction tables
     const billsMap = {}
 
+    // Helper to generate all searchable identifiers for a bill
+    const getBillSearchTokens = (id, sNo, invNo, voucherType) => {
+      const tokens = new Set()
+      const prefix = voucherType === 'Sales' ? 'SAL' : 'PUR'
+      
+      if (invNo) {
+        tokens.add(String(invNo).trim().toLowerCase())
+        tokens.add(`${prefix}-${String(invNo).trim()}`.toLowerCase())
+      }
+      if (sNo !== undefined && sNo !== null && String(sNo).trim() !== '') {
+        const sStr = String(sNo).trim().toLowerCase()
+        tokens.add(sStr)
+        tokens.add(`${prefix}-${sStr}`)
+        tokens.add(`${prefix}${sStr}`)
+        const num = parseInt(sStr, 10)
+        if (!isNaN(num)) {
+          tokens.add(`${prefix}${String(num).padStart(5, '0')}`.toLowerCase())
+          tokens.add(`${prefix}-${String(num).padStart(5, '0')}`.toLowerCase())
+          tokens.add(`${prefix}${String(num).padStart(4, '0')}`.toLowerCase())
+          tokens.add(`${prefix}-${String(num).padStart(4, '0')}`.toLowerCase())
+        }
+      }
+      if (id !== undefined && id !== null && String(id).trim() !== '') {
+        const idStr = String(id).trim().toLowerCase()
+        tokens.add(idStr)
+        tokens.add(`${prefix}-${idStr}`)
+        tokens.add(`${prefix}${idStr}`)
+        const num = parseInt(idStr, 10)
+        if (!isNaN(num)) {
+          tokens.add(`${prefix}${String(num).padStart(5, '0')}`.toLowerCase())
+          tokens.add(`${prefix}-${String(num).padStart(5, '0')}`.toLowerCase())
+          tokens.add(`${prefix}${String(num).padStart(4, '0')}`.toLowerCase())
+        }
+      }
+      return Array.from(tokens)
+    }
+
     // 2a. Real Purchases
     let purchaseQuery = `
       SELECT 
         p.id,
+        p.s_no,
+        p.inv_no,
         COALESCE(p.inv_no, CAST(p.s_no AS TEXT), CAST(p.id AS TEXT)) as invoice_no,
         p.date,
         'Purchase' as voucher_type,
         'Payable' as type,
         COALESCE(sm.print_name, sm.name, p.supplier, 'Supplier') as ledger_name,
         COALESCE(
-          (SELECT SUM(pi.amount) FROM purchase_items pi WHERE pi.purchase_id = p.id),
+          (SELECT SUM(pi.amount) FROM purchase_items pi WHERE CAST(pi.purchase_id AS TEXT) = CAST(p.id AS TEXT)),
           p.grand_total,
+          p.total_amt,
+          p.bill_amt,
           0
         ) as amount
       FROM purchases p
@@ -2128,16 +2169,21 @@ router.get('/outstanding-details', async (req, res) => {
       const vNo = `PUR-${row.invoice_no}`
       const amt = parseFloat(row.amount || 0)
       if (amt > 0) {
+        const tokens = getBillSearchTokens(row.id, row.s_no, row.inv_no || row.invoice_no, 'Purchase')
         billsMap[vNo] = {
+          id: row.id,
+          s_no: row.s_no,
           voucher_no: row.invoice_no,
           invoice_no: row.invoice_no,
+          inv_no: row.inv_no,
           date: row.date,
           voucher_type: 'Purchase',
           type: 'Payable',
           amount: amt,
           paid: 0,
           balance: amt,
-          ledger_name: row.ledger_name || 'Supplier'
+          ledger_name: row.ledger_name || 'Supplier',
+          searchTokens: tokens
         }
       }
     })
@@ -2146,6 +2192,7 @@ router.get('/outstanding-details', async (req, res) => {
     let salesQuery = `
       SELECT 
         s.id,
+        s.s_no,
         CAST(COALESCE(s.s_no, s.id) AS TEXT) as invoice_no,
         s.date,
         'Sales' as voucher_type,
@@ -2165,7 +2212,10 @@ router.get('/outstanding-details', async (req, res) => {
       const vNo = `SAL-${row.invoice_no}`
       const amt = parseFloat(row.amount || 0)
       if (amt > 0) {
+        const tokens = getBillSearchTokens(row.id, row.s_no, row.invoice_no, 'Sales')
         billsMap[vNo] = {
+          id: row.id,
+          s_no: row.s_no,
           voucher_no: row.invoice_no,
           invoice_no: row.invoice_no,
           date: row.date,
@@ -2174,7 +2224,8 @@ router.get('/outstanding-details', async (req, res) => {
           amount: amt,
           paid: 0,
           balance: amt,
-          ledger_name: row.ledger_name || 'Customer'
+          ledger_name: row.ledger_name || 'Customer',
+          searchTokens: tokens
         }
       }
     })
@@ -2186,14 +2237,7 @@ router.get('/outstanding-details', async (req, res) => {
       return String(name).replace(/\s*\((Supplier|Customer|Papad Co|Flour Mill|Creditor|Debtor)\)$/i, '').trim().toLowerCase()
     }
 
-    // Filter by ledger_name if provided
-    if (ledger_name) {
-      const filterName = cleanPartyKey(ledger_name)
-      allBills = allBills.filter(b => b.ledger_name && cleanPartyKey(b.ledger_name) === filterName)
-    }
-
-    // 4. Fetch all settlement ledger entries (Payments and Receipts)
-    // We exclude 'Purchase' and 'Sales' voucher types to avoid self-allocating.
+    // 4. Fetch all settlement ledger entries (Payments, Receipts, and Journals)
     let settlementQuery = `
       SELECT 
         id,
@@ -2225,13 +2269,14 @@ router.get('/outstanding-details', async (req, res) => {
         date: s.date,
         voucher_type: s.voucher_type,
         voucher_no: s.voucher_no,
+        reference_no: '',
         debit: parseFloat(s.debit || 0),
         credit: parseFloat(s.credit || 0),
         particulars: s.particulars || ''
       }
     })
 
-    // Also fetch settlements directly from voucher and voucher_entry to guarantee no missing payments
+    // Also fetch settlements directly from voucher and voucher_entry
     try {
       const vExists = await tableExists('voucher')
       const veExists = await tableExists('voucher_entry')
@@ -2265,6 +2310,8 @@ router.get('/outstanding-details', async (req, res) => {
               date: vr.date,
               voucher_type: vr.voucher_type,
               voucher_no: vr.voucher_no,
+              reference_no: vr.reference_no || '',
+              narration: vr.narration || '',
               debit: parseFloat(vr.debit || 0),
               credit: parseFloat(vr.credit || 0),
               particulars: combinedParticulars
@@ -2276,7 +2323,7 @@ router.get('/outstanding-details', async (req, res) => {
       console.warn('Could not query voucher table directly:', e.message)
     }
 
-    // Also fetch advances as settlements for suppliers
+    // Also fetch advances as settlements
     let advanceQuery = `
       SELECT 
         id,
@@ -2307,6 +2354,7 @@ router.get('/outstanding-details', async (req, res) => {
         date: a.date,
         voucher_type: 'Advance',
         voucher_no: a.voucher_no,
+        reference_no: '',
         debit: parseFloat(a.debit || 0),
         credit: 0,
         particulars: a.particulars
@@ -2316,10 +2364,71 @@ router.get('/outstanding-details', async (req, res) => {
     // Combine settlements
     let allSettlements = [...settlements, ...advanceSettlements]
 
-    // Sort settlements chronologically so we apply them in order
+    // Sort settlements chronologically
     allSettlements.sort((a, b) => new Date(a.date) - new Date(b.date) || String(a.id).localeCompare(String(b.id)))
 
-    // Group bills and settlements by cleaned ledger_name
+    // Helper: extract reference tokens from settlement text/fields
+    const extractTokensFromSettlement = (s) => {
+      const text = [s.reference_no, s.narration, s.particulars, s.remarks].filter(Boolean).join(' ').toLowerCase()
+      const tokens = []
+      
+      // Match patterns like PUR00001, PUR-00001, PUR-1, SAL00001, Ref: 5332, Invoice #5332
+      const refMatches = text.match(/\b(pur[-0-9a-z_]+|sal[-0-9a-z_]+|inv[-0-9a-z_]+)\b/gi) || []
+      refMatches.forEach(m => tokens.push(m.toLowerCase().trim()))
+
+      // Also match standalone numbers following ref/invoice/#
+      const explicitNumMatches = text.match(/(?:ref|invoice|inv|bill|#)\s*[:#]?\s*([0-9a-z_-]+)/gi) || []
+      explicitNumMatches.forEach(m => {
+        const cleanVal = m.replace(/^(ref|invoice|inv|bill|#)\s*[:#]?\s*/i, '').trim().toLowerCase()
+        if (cleanVal) tokens.push(cleanVal)
+      })
+
+      if (s.reference_no) {
+        tokens.push(String(s.reference_no).trim().toLowerCase())
+      }
+
+      return Array.from(new Set(tokens))
+    }
+
+    // =========================================================================
+    // GLOBAL PASS 1: Apply Explicit Reference Matches across ALL bills
+    // This correctly reconciles settlements even if the voucher entry was booked
+    // to "Purchase Account" / "Bank Account" instead of party ledger.
+    // =========================================================================
+    allSettlements.forEach(s => {
+      let amountToAllocate = 0
+      if (s.debit > 0) amountToAllocate = s.debit
+      else if (s.credit > 0) amountToAllocate = s.credit
+
+      if (amountToAllocate <= 0) return
+
+      const sTokens = extractTokensFromSettlement(s)
+      if (sTokens.length === 0) return
+
+      for (const bill of allBills) {
+        if (bill.balance <= 0.01) continue
+
+        // Check if any token matches the bill's searchTokens
+        const isMatched = sTokens.some(tok => 
+          bill.searchTokens.includes(tok) || 
+          bill.searchTokens.some(bt => bt.includes(tok) || tok.includes(bt))
+        )
+
+        if (isMatched) {
+          const allocation = Math.min(bill.balance, amountToAllocate)
+          bill.paid += allocation
+          bill.balance -= allocation
+          amountToAllocate -= allocation
+          
+          if (amountToAllocate <= 0) break
+        }
+      }
+
+      // Update remaining settlement amount
+      s.remaining_amount = amountToAllocate
+    })
+
+    // Group bills and remaining settlements by cleaned ledger_name
     const billsByLedger = {}
     allBills.forEach(b => {
       if (!b.ledger_name) return
@@ -2341,55 +2450,19 @@ router.get('/outstanding-details', async (req, res) => {
       settlementsByLedger[key].push(s)
     })
 
-    // 5. Apply allocations per ledger
+    // =========================================================================
+    // LEDGER PASS 2: FIFO allocation for remaining amounts of each party
+    // =========================================================================
     Object.keys(billsByLedger).forEach(ledgerKey => {
       const ledgerBills = billsByLedger[ledgerKey]
       const ledgerSettlements = settlementsByLedger[ledgerKey] || []
 
-      let remainingSettlements = []
-
-      // First Pass: Explicit reference matching in remarks/particulars
       ledgerSettlements.forEach(s => {
-        let amountToAllocate = 0
-        if (s.debit > 0) amountToAllocate = s.debit
-        else if (s.credit > 0) amountToAllocate = s.credit
-
-        if (amountToAllocate <= 0) return
-
-        let allocated = false
-        for (const bill of ledgerBills) {
-          if (bill.balance <= 0) continue
-
-          const invNo = String(bill.invoice_no || '').trim().toLowerCase()
-          const vNo = String(bill.voucher_no || '').trim().toLowerCase()
-          const pText = String(s.particulars || '').toLowerCase()
-
-          if ((invNo && pText.includes(invNo)) || (vNo && pText.includes(vNo))) {
-            const allocation = Math.min(bill.balance, amountToAllocate)
-            bill.paid += allocation
-            bill.balance -= allocation
-            amountToAllocate -= allocation
-
-            allocated = true
-            if (amountToAllocate <= 0) break
-          }
-        }
-
-        if (amountToAllocate > 0) {
-          remainingSettlements.push({
-            ...s,
-            remaining_amount: amountToAllocate
-          })
-        }
-      })
-
-      // Second Pass: FIFO allocation of remaining amounts
-      remainingSettlements.forEach(s => {
-        let amountToAllocate = s.remaining_amount
+        let amountToAllocate = s.remaining_amount !== undefined ? s.remaining_amount : (s.debit || s.credit || 0)
         if (amountToAllocate <= 0) return
 
         for (const bill of ledgerBills) {
-          if (bill.balance <= 0) continue
+          if (bill.balance <= 0.01) continue
 
           const allocation = Math.min(bill.balance, amountToAllocate)
           bill.paid += allocation
@@ -2401,18 +2474,22 @@ router.get('/outstanding-details', async (req, res) => {
       })
     })
 
-    // 6. Return outstanding details
+    // Filter by ledger_name if requested
+    let resultBills = allBills
+    if (ledger_name) {
+      const filterName = cleanPartyKey(ledger_name)
+      resultBills = allBills.filter(b => b.ledger_name && cleanPartyKey(b.ledger_name) === filterName)
+    }
+
+    // 6. Return outstanding details (Only bills with balance > 0.01)
     let outstandingBills = []
-    Object.values(billsByLedger).forEach(ledgerBills => {
-      ledgerBills.forEach(b => {
-        b.paid = Math.round(b.paid * 100) / 100
-        b.balance = Math.round(b.balance * 100) / 100
-        
-        // Return bills that have positive balance remaining
-        if (b.balance > 0.01) {
-          outstandingBills.push(b)
-        }
-      })
+    resultBills.forEach(b => {
+      b.paid = Math.round(b.paid * 100) / 100
+      b.balance = Math.round(b.balance * 100) / 100
+      
+      if (b.balance > 0.01) {
+        outstandingBills.push(b)
+      }
     })
 
     // Sort: oldest first
@@ -2609,7 +2686,7 @@ router.get('/daily-production', async (req, res) => {
         flour_mill: g.flour_mill_name || g.flour_mill,
         lot_no: inputLotsStr || 'N/A',
         item_name: inputItemsStr || 'N/A',
-        supplier_name: suppliersStr || 'Kandiga / Velmurugan',
+        supplier_name: suppliersStr || 'K',
         source: g.flour_mill_name || g.flour_mill || 'In-House',
         bag_weight: inputs[0]?.weight || 50,
         input_qty: inputQty,
