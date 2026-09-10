@@ -70,12 +70,14 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
     try {
       const res = await fetch(`/api/compliance/traceability/${encodeURIComponent(query)}`);
       const data = await res.json();
-      if (data.success) {
+      if (data.success && data.lotNo) {
         setTraceData(data);
         const resolved = data.lotNo || query;
         setLotInput(resolved);
         if (data.activeLots && data.activeLots.length > 0) {
           setAllLots(data.activeLots);
+        } else {
+          setAllLots([]);
         }
         if (updateUrl) {
           setSearchParams({ lot: resolved }, { replace: true });
@@ -84,10 +86,13 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
           onLotChange(resolved);
         }
       } else {
-        setError(data.message || `No trace records found for lot "${query}"`);
+        setTraceData(null);
+        setAllLots(data.activeLots || []);
+        setError(data.message || `No trace records found for lot "${query}" in this company.`);
       }
     } catch (err) {
       console.error('Error tracing lot:', err);
+      setTraceData(null);
       setError('Failed to connect to Traceability Engine.');
     } finally {
       setLoading(false);
@@ -95,10 +100,17 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
     }
   }, [onLotChange, setSearchParams]);
 
-  // Initial load
+  // Initial load & company change listener
   useEffect(() => {
     const initialLot = urlLot || targetLot || 'latest';
     fetchTraceData(initialLot, false);
+
+    const handleCompanyChange = () => {
+      lastQueriedLotRef.current = null;
+      fetchTraceData('latest', false);
+    };
+    window.addEventListener('erp_company_changed', handleCompanyChange);
+    return () => window.removeEventListener('erp_company_changed', handleCompanyChange);
   }, []);
 
   // When external targetLot prop changes

@@ -2098,59 +2098,88 @@ router.get('/outstanding-details', async (req, res) => {
       ledgerTypeMap[row.name.trim().toLowerCase()] = row.ledger_type
     })
 
-    // 2. Fetch all Purchase & Sales Vouchers from the voucher register (Primary source of truth)
-    let voucherQuery = `
-      SELECT 
-        v.id,
-        v.voucher_no,
-        v.voucher_type,
-        v.date,
-        v.reference_no,
-        ve.ledger_id,
-        ve.debit,
-        ve.credit,
-        lm.name as ledger_name,
-        lm.ledger_type
-      FROM voucher v
-      JOIN voucher_entry ve ON v.id = ve.voucher_id
-      LEFT JOIN ledgermaster lm ON ve.ledger_id = lm.id
-      WHERE v.voucher_type IN ('Purchase', 'Sales')
-    `
-    const voucherParams = []
-    if (as_on_date) {
-      voucherQuery += ` AND v.date <= ?`
-      voucherParams.push(toDate)
-    }
-    const voucherRes = await db.query(voucherQuery, voucherParams)
+    // 2. Fetch real Purchases & Sales from active operational transaction tables
+    const billsMap = {}
 
-    const voucherBillsMap = {}
-    ;(voucherRes.rows || []).forEach(row => {
-      const vNo = row.voucher_no
-      if (!voucherBillsMap[vNo]) {
-        voucherBillsMap[vNo] = {
-          voucher_no: vNo,
-          invoice_no: vNo,
+    // 2a. Real Purchases
+    let purchaseQuery = `
+      SELECT 
+        p.id,
+        COALESCE(p.inv_no, CAST(p.s_no AS TEXT), CAST(p.id AS TEXT)) as invoice_no,
+        p.date,
+        'Purchase' as voucher_type,
+        'Payable' as type,
+        COALESCE(sm.print_name, sm.name, p.supplier, 'Supplier') as ledger_name,
+        COALESCE(
+          (SELECT SUM(pi.amount) FROM purchase_items pi WHERE pi.purchase_id = p.id),
+          p.grand_total,
+          0
+        ) as amount
+      FROM purchases p
+      LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = CAST(p.supplier AS TEXT) OR sm.print_name = CAST(p.supplier AS TEXT))
+    `
+    const purchaseParams = []
+    if (as_on_date) {
+      purchaseQuery += ` WHERE p.date <= ?`
+      purchaseParams.push(toDate)
+    }
+    const purchasesRes = await db.query(purchaseQuery, purchaseParams)
+    ;(purchasesRes.rows || []).forEach(row => {
+      const vNo = `PUR-${row.invoice_no}`
+      const amt = parseFloat(row.amount || 0)
+      if (amt > 0) {
+        billsMap[vNo] = {
+          voucher_no: row.invoice_no,
+          invoice_no: row.invoice_no,
           date: row.date,
-          voucher_type: row.voucher_type,
-          type: row.voucher_type === 'Purchase' ? 'Payable' : 'Receivable',
-          amount: 0,
+          voucher_type: 'Purchase',
+          type: 'Payable',
+          amount: amt,
           paid: 0,
-          balance: 0,
-          ledger_name: ''
+          balance: amt,
+          ledger_name: row.ledger_name || 'Supplier'
         }
-      }
-      if (row.voucher_type === 'Purchase' && row.credit > 0) {
-        voucherBillsMap[vNo].ledger_name = row.ledger_name || 'Supplier'
-        voucherBillsMap[vNo].amount = parseFloat(row.credit || 0)
-        voucherBillsMap[vNo].balance = parseFloat(row.credit || 0)
-      } else if (row.voucher_type === 'Sales' && row.debit > 0) {
-        voucherBillsMap[vNo].ledger_name = row.ledger_name || 'Customer'
-        voucherBillsMap[vNo].amount = parseFloat(row.debit || 0)
-        voucherBillsMap[vNo].balance = parseFloat(row.debit || 0)
       }
     })
 
-    let allBills = Object.values(voucherBillsMap)
+    // 2b. Real Sales
+    let salesQuery = `
+      SELECT 
+        s.id,
+        CAST(COALESCE(s.s_no, s.id) AS TEXT) as invoice_no,
+        s.date,
+        'Sales' as voucher_type,
+        'Receivable' as type,
+        COALESCE(cm.name, cm.print_name, s.customer, 'Customer') as ledger_name,
+        COALESCE(s.grand_total, s.total_amt, s.bill_amt, 0) as amount
+      FROM sales s
+      LEFT JOIN customer_master cm ON (cm.name = s.customer OR cm.print_name = s.customer)
+    `
+    const salesParams = []
+    if (as_on_date) {
+      salesQuery += ` WHERE s.date <= ?`
+      salesParams.push(toDate)
+    }
+    const salesRes = await db.query(salesQuery, salesParams)
+    ;(salesRes.rows || []).forEach(row => {
+      const vNo = `SAL-${row.invoice_no}`
+      const amt = parseFloat(row.amount || 0)
+      if (amt > 0) {
+        billsMap[vNo] = {
+          voucher_no: row.invoice_no,
+          invoice_no: row.invoice_no,
+          date: row.date,
+          voucher_type: 'Sales',
+          type: 'Receivable',
+          amount: amt,
+          paid: 0,
+          balance: amt,
+          ledger_name: row.ledger_name || 'Customer'
+        }
+      }
+    })
+
+    let allBills = Object.values(billsMap)
 
     // Filter by ledger_name if provided
     if (ledger_name) {

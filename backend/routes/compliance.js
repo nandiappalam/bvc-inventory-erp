@@ -1707,18 +1707,21 @@ router.get('/traceability/:lotNo', async (req, res) => {
     let lotNo = (req.params.lotNo || '').trim();
 
     // Traceability inspection
-    // If 'latest' or empty, resolve the most recent active lot
+    // If 'latest' or empty, resolve the most recent active lot from real purchases or grain runs
     if (!lotNo || lotNo.toLowerCase() === 'latest' || lotNo.toLowerCase() === 'default') {
-      const latestLotRes = await db.query(`
-        SELECT lot_no FROM stock_lots WHERE lot_no IS NOT NULL AND TRIM(lot_no) != '' ORDER BY id DESC LIMIT 1
+      const latestPurRes = await db.query(`
+        SELECT pi.lot_no FROM purchase_items pi
+        JOIN purchases p ON p.id = pi.purchase_id
+        WHERE pi.lot_no IS NOT NULL AND TRIM(pi.lot_no) != ''
+        ORDER BY p.id DESC, pi.id DESC LIMIT 1
       `);
-      if (latestLotRes.rows && latestLotRes.rows[0]?.lot_no) {
-        lotNo = latestLotRes.rows[0].lot_no;
+      if (latestPurRes.rows && latestPurRes.rows[0]?.lot_no) {
+        lotNo = latestPurRes.rows[0].lot_no;
       } else {
-        const latestPurRes = await db.query(`
-          SELECT lot_no FROM purchase_items WHERE lot_no IS NOT NULL AND TRIM(lot_no) != '' ORDER BY id DESC LIMIT 1
+        const latestGoRes = await db.query(`
+          SELECT lot_no FROM grain_output_items WHERE lot_no IS NOT NULL AND TRIM(lot_no) != '' ORDER BY id DESC LIMIT 1
         `);
-        lotNo = latestPurRes.rows && latestPurRes.rows[0]?.lot_no ? latestPurRes.rows[0].lot_no : null;
+        lotNo = latestGoRes.rows && latestGoRes.rows[0]?.lot_no ? latestGoRes.rows[0].lot_no : null;
       }
     }
 
@@ -2050,21 +2053,20 @@ router.get('/traceability/:lotNo', async (req, res) => {
       }
     }));
 
-    // 8. Fetch list of all active lots across stock_lots, purchase_items, and grain_output_items for quick switching
+    // 8. Fetch list of all active lots across real purchases and grain outputs for quick switching
     const activeLotsRes = await db.query(`
       SELECT lot_no, MAX(item_name) as item_name, SUM(initial_qty) as initial_qty, SUM(remaining_quantity) as remaining_quantity, MAX(godown_name) as godown_name
       FROM (
-        SELECT sl.lot_no, sl.item_name, sl.quantity as initial_qty, sl.remaining_quantity, COALESCE(gm.godown_name, 'KNJ Godown') as godown_name
-        FROM stock_lots sl
-        LEFT JOIN godown_master gm ON sl.godown_id = gm.id
-        WHERE sl.lot_no IS NOT NULL AND TRIM(sl.lot_no) != ''
-        UNION ALL
-        SELECT pi.lot_no, pi.item_name, pi.qty as initial_qty, pi.qty as remaining_quantity, 'KNJ Godown' as godown_name
+        SELECT pi.lot_no, pi.item_name, pi.qty as initial_qty, COALESCE(sl.remaining_quantity, pi.qty) as remaining_quantity, COALESCE(gm.godown_name, 'KNJ Godown') as godown_name
         FROM purchase_items pi
+        JOIN purchases p ON p.id = pi.purchase_id
+        LEFT JOIN stock_lots sl ON sl.lot_no = pi.lot_no
+        LEFT JOIN godown_master gm ON (CAST(gm.id AS TEXT) = CAST(p.godown AS TEXT) OR p.godown = gm.godown_name)
         WHERE pi.lot_no IS NOT NULL AND TRIM(pi.lot_no) != ''
         UNION ALL
-        SELECT go.lot_no, go.item_name, go.qty as initial_qty, go.qty as remaining_quantity, 'KNJ Godown' as godown_name
+        SELECT go.lot_no, go.item_name, go.qty as initial_qty, COALESCE(sl.remaining_quantity, go.qty) as remaining_quantity, 'KNJ Godown' as godown_name
         FROM grain_output_items go
+        LEFT JOIN stock_lots sl ON sl.lot_no = go.lot_no
         WHERE go.lot_no IS NOT NULL AND TRIM(go.lot_no) != ''
       ) combined_lots
       GROUP BY lot_no

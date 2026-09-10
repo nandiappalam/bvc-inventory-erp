@@ -71,14 +71,44 @@ if (isPostgres) {
 }
 
 // ============================================================================
+// TENANT BUSINESS TABLES SET
+// ============================================================================
+const TENANT_BUSINESS_TABLES = new Set([
+  'purchases', 'purchase_items', 'purchase_orders', 'purchase_order_items', 'purchase_requests', 'purchase_request_items',
+  'purchase_returns', 'purchase_return_items', 'purchase_deductions', 'purchase_order_deductions', 'purchase_return_deductions',
+  'sales', 'sales_items', 'sales_export_orders', 'sales_export_order_items', 'sales_return', 'sales_return_items',
+  'voucher', 'voucher_entry', 'ledger_entries', 'ledgermaster', 'ledgergroupmaster',
+  'stock', 'stock_lots', 'stock_adjustments', 'stock_adjustment_items', 'stock_alerts', 'stock_alert_config',
+  'grains', 'grain_input_items', 'grain_output_items', 'grain_wastage_items',
+  'flour_out', 'flour_out_items', 'flour_out_returns', 'flour_out_return_items',
+  'papad_in', 'papad_return', 'papad_company_master', 'papad_company_entry', 'papad_companies',
+  'godown_master', 'godown_transfers', 'item_transfers', 'item_master', 'item_groups',
+  'customer_master', 'supplier_master', 'employee_master', 'flour_mill_master', 'city_master', 'area_master',
+  'transport_master', 'tax_master', 'qc_inspections', 'qc_inspection_params', 'qc_approval_history',
+  'incoming_quality_reports', 'compliance_documents', 'compliance_production_records', 'compliance_cleaning_records',
+  'vehicle_movements', 'advances', 'open', 'open_items', 'packing', 'packing_items', 'financial_years',
+  'general_setup', 'weight_machine_setup', 'weight_conversion', 'weight_conversion_items', 'work_orders'
+]);
+
+// ============================================================================
 // HELPER: IS MASTER TABLE QUERY
 // ============================================================================
 function isMasterTableQuery(sql) {
   if (!sql || typeof sql !== 'string') return false;
   const normalized = sql.toLowerCase();
+
+  // If any business table is referenced in the query, it is strictly a tenant query
+  for (const bTable of TENANT_BUSINESS_TABLES) {
+    const bRegex = new RegExp(`\\b${bTable}\\b`, 'i');
+    if (bRegex.test(normalized)) {
+      return false;
+    }
+  }
+
+  // Otherwise check if it strictly targets a master table
   for (const tableName of MASTER_TABLE_NAMES) {
-    const regex = new RegExp(`\\b${tableName}\\b`, 'i');
-    if (regex.test(normalized)) {
+    const mRegex = new RegExp(`\\b(from|into|update|join|table)\\s+(public\\.)?${tableName}\\b`, 'i');
+    if (mRegex.test(normalized)) {
       return true;
     }
   }
@@ -993,12 +1023,24 @@ async function ensurePostgresMasterSchema() {
     `);
 
     await resyncPostgresSequences(client);
+    await cleanPostgresPublicBusinessTables(client);
     await dropPostgresForeignKeyConstraints(client);
     console.log('✓ PostgreSQL public master schema, sequences, and multi-tenant constraints verified successfully');
   } catch (err) {
     console.error('⚠️ [PostgreSQL] Master schema check notice:', err.message);
   } finally {
     client.release();
+  }
+}
+
+async function cleanPostgresPublicBusinessTables(client) {
+  try {
+    for (const bTable of TENANT_BUSINESS_TABLES) {
+      await client.query(`DROP TABLE IF EXISTS "public"."${bTable}" CASCADE`);
+    }
+    console.log('✓ Cleaned up any orphan tenant business tables from PostgreSQL public schema');
+  } catch (err) {
+    console.warn('⚠️ [PostgreSQL] Public business tables cleanup notice:', err.message);
   }
 }
 

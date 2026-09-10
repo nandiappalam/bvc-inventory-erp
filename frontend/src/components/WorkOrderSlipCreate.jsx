@@ -81,7 +81,7 @@ const WorkOrderSlipCreate = () => {
 
   // Section 3: Wastage & Rejection Breakdown
   const [wastageItems, setWastageItems] = useState([
-    {
+    /*{
       category: 'Rejection',
       item_name: 'Rejection Waste Flour',
       lot_no: 'REJ-01',
@@ -116,7 +116,7 @@ const WorkOrderSlipCreate = () => {
       qty: '0',
       total_wt: 0,
       remarks: ''
-    }
+    }*/
   ]);
 
   // Load masters on mount

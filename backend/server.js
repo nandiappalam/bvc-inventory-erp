@@ -7,7 +7,7 @@ const fs = require('fs')
 const db = require('./config/database')
 
 const app = express()
-// Production allows PORT override, defaults to 3001 for clean local frontend dev proxying
+//  Production allows PORT override, defaults to 3001 for clean local frontend dev proxying
 const PORT = process.env.PORT || 3001
 let actualPort = PORT
 

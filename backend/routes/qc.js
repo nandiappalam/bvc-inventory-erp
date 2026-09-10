@@ -110,7 +110,22 @@ router.get(['/history', '/purchase-lab-testing'], asyncHandler(async (req, res) 
     LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = CAST(p.supplier AS TEXT) OR sm.print_name = CAST(p.supplier AS TEXT))
     ORDER BY qi.inspection_date DESC, qi.id DESC
   `);
-  res.json({ success: true, data: history.rows });
+  const normalizedRows = (history.rows || []).map(r => ({
+    ...r,
+    id: r.id || r.qcid,
+    qcId: r.qcid || r.id || r.qcId,
+    qc_no: r.qc_no || r.qcno || r.qcNo,
+    lotNo: r.lotno || r.rm_lot_no || r.lotNo || r.lot_no || '',
+    inspectionDate: r.inspectiondate || r.inspection_date || r.inspectionDate || '',
+    purchaseId: r.purchaseid || r.purchase_id || r.purchaseId || '',
+    analyst: r.analyst || r.inspector || 'QC Engineer',
+    overallResult: r.overallresult || r.overall_result || r.overallResult || 'ACCEPTED',
+    item: r.item || r.item_name || 'Raw Material',
+    quantity: r.quantity !== undefined ? r.quantity : (r.qty || 0),
+    supplier: r.supplier || r.supplier_name || '',
+    receiptDate: r.receiptdate || r.receipt_date || r.receiptDate || ''
+  }));
+  res.json({ success: true, data: normalizedRows });
 }));
 
 // GET /api/quality/registers
@@ -282,39 +297,71 @@ router.get(['/inspection/:id', '/purchase-lab-testing/:id'], asyncHandler(async 
     return res.status(404).json({ success: false, message: 'Inspection not found' });
   }
 
-  const rowData = inspectionResult.rows[0];
+    const raw = inspectionResult.rows[0];
+    const rowData = {
+      ...raw,
+      id: raw.id || raw.qcid,
+      qcId: raw.qcid || raw.id || raw.qcId,
+      qcNo: raw.qc_no || raw.qcno || raw.qcNo,
+      lotNo: raw.lotno || raw.rm_lot_no || raw.lotNo || raw.lot_no || '',
+      rm_lot_no: raw.rm_lot_no || raw.lotno || raw.lotNo || raw.lot_no || '',
+      batch: raw.batch || raw.lotno || raw.rm_lot_no || raw.lotNo || raw.lot_no || '-',
+      inspectionDate: raw.inspectiondate || raw.inspection_date || raw.inspectionDate || '',
+      purchaseId: raw.purchaseid || raw.purchase_id || raw.purchaseId || '',
+      overallResult: raw.overallresult || raw.overall_result || raw.overallResult || 'ACCEPTED',
+      analyst: raw.analyst || raw.inspector || 'QC Engineer',
+      unloadingStatus: raw.unloadingstatus || raw.unloading_status || raw.unloadingStatus || 'PENDING_DECISION',
+      unloading_status: raw.unloading_status || raw.unloadingstatus || 'PENDING_DECISION',
+      item: raw.item || raw.item_name || raw.itemname || 'Raw Material',
+      quantity: raw.quantity !== undefined ? raw.quantity : (raw.qty || 0),
+      supplier: raw.supplier || raw.supplier_name || raw.suppliername || '',
+      unit_weight: raw.unit_weight || raw.per_unit_weight || 50,
+      total_weight: raw.total_weight || 0,
+      receipt_date: raw.receipt_date || raw.receiptdate || raw.date || '',
+      invoice_date: raw.invoice_date || raw.invoicedate || raw.inv_date || '',
+      invoice_no: raw.invoice_no || raw.invoiceno || raw.inv_no || '',
+      remarks: raw.remarks || ''
+    };
 
-  // Fallback to fetch supplier, invoice, and dates if not joined cleanly
-  if (!rowData.supplier || rowData.supplier === '-' || rowData.supplier.trim() === '' || !rowData.invoice_no) {
-    try {
-      const purLookup = await db.query(`
-        SELECT 
-          COALESCE(sm.print_name, sm.name, p.supplier, '') as supplier_name,
-          p.date as receipt_date,
-          p.inv_date as invoice_date,
-          p.inv_no as invoice_no
-        FROM purchases p
-        LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = CAST(p.supplier AS TEXT) OR sm.print_name = CAST(p.supplier AS TEXT))
-        LEFT JOIN purchase_items pi ON pi.purchase_id = p.id
-        WHERE pi.lot_no = ? OR CAST(p.id AS TEXT) = CAST(? AS TEXT)
-        LIMIT 1
-      `, [rowData.lotNo, rowData.purchaseId]);
-      if (purLookup.rows && purLookup.rows.length > 0) {
-        const found = purLookup.rows[0];
-        if (found.supplier_name && (!rowData.supplier || rowData.supplier === '-')) rowData.supplier = found.supplier_name;
-        if (!rowData.receipt_date && found.receipt_date) rowData.receipt_date = found.receipt_date;
-        if (!rowData.invoice_date && found.invoice_date) rowData.invoice_date = found.invoice_date;
-        if (!rowData.invoice_no && found.invoice_no) rowData.invoice_no = found.invoice_no;
-      }
-    } catch (e) {}
-  }
+    // Fallback to fetch supplier, invoice, and dates if not joined cleanly
+    if (!rowData.supplier || rowData.supplier === '-' || rowData.supplier.trim() === '' || !rowData.invoice_no || !rowData.lotNo) {
+      try {
+        const purLookup = await db.query(`
+          SELECT 
+            COALESCE(sm.print_name, sm.name, p.supplier, '') as supplier_name,
+            p.date as receipt_date,
+            p.inv_date as invoice_date,
+            p.inv_no as invoice_no,
+            pi.lot_no,
+            pi.qty as quantity,
+            pi.item_name
+          FROM purchases p
+          LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = CAST(p.supplier AS TEXT) OR sm.print_name = CAST(p.supplier AS TEXT))
+          LEFT JOIN purchase_items pi ON pi.purchase_id = p.id
+          WHERE (pi.lot_no = ? AND pi.lot_no IS NOT NULL) OR CAST(p.id AS TEXT) = CAST(? AS TEXT)
+          LIMIT 1
+        `, [rowData.lotNo, rowData.purchaseId]);
+        if (purLookup.rows && purLookup.rows.length > 0) {
+          const found = purLookup.rows[0];
+          if (found.supplier_name && (!rowData.supplier || rowData.supplier === '-')) rowData.supplier = found.supplier_name;
+          if (!rowData.receipt_date && found.receipt_date) rowData.receipt_date = found.receipt_date;
+          if (!rowData.invoice_date && found.invoice_date) rowData.invoice_date = found.invoice_date;
+          if (!rowData.invoice_no && found.invoice_no) rowData.invoice_no = found.invoice_no;
+          if (!rowData.lotNo && found.lot_no) {
+            rowData.lotNo = found.lot_no;
+            rowData.rm_lot_no = found.lot_no;
+            rowData.batch = found.lot_no;
+          }
+        }
+      } catch (e) {}
+    }
 
-  rowData.batch = rowData.batch || rowData.lotNo || '-';
-  rowData.supplier = rowData.supplier || 'Standard Supplier';
-  rowData.item = rowData.item || 'Raw Material';
-  rowData.receipt_date = rowData.receipt_date || rowData.inspectionDate || new Date().toISOString().split('T')[0];
-  rowData.invoice_date = rowData.invoice_date || rowData.receipt_date;
-  rowData.invoice_no = rowData.invoice_no || `INV-${rowData.lotNo || id}`;
+    rowData.batch = rowData.batch || rowData.lotNo || '-';
+    rowData.supplier = rowData.supplier || 'Standard Supplier';
+    rowData.item = rowData.item || 'Raw Material';
+    rowData.receipt_date = rowData.receipt_date || rowData.inspectionDate || new Date().toISOString().split('T')[0];
+    rowData.invoice_date = rowData.invoice_date || rowData.receipt_date;
+    rowData.invoice_no = rowData.invoice_no || (rowData.lotNo ? `INV-${rowData.lotNo}` : `INV-${id}`);
 
   if (rowData.lotNo) {
     try {

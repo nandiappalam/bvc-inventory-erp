@@ -46,7 +46,7 @@ function getActiveAuthHeaders() {
 axios.interceptors.request.use((config) => {
   const { companyId, token, userId } = getActiveAuthHeaders();
   config.headers = config.headers || {};
-  if (!config.headers['x-company-id'] && !config.headers['X-Company-Id']) {
+  if (!config.headers['x-company-id'] && !config.headers['X-Company-Id'] && companyId) {
     config.headers['X-Company-Id'] = String(companyId);
   }
   if (!config.headers['authorization'] && !config.headers['Authorization'] && token) {
@@ -57,6 +57,75 @@ axios.interceptors.request.use((config) => {
   }
   return config;
 }, (error) => Promise.reject(error));
+
+// 2. Configure global window.fetch interceptor to guarantee multi-tenant header isolation
+if (typeof window !== 'undefined' && typeof window.fetch === 'function') {
+  try {
+    const originalFetch = window.fetch.bind(window);
+    const customFetch = async function (input, init = {}) {
+      try {
+        const { companyId, token, userId } = getActiveAuthHeaders();
+        const customInit = { ...init };
+        let headers;
+
+        if (customInit.headers instanceof Headers) {
+          headers = new Headers(customInit.headers);
+        } else if (Array.isArray(customInit.headers)) {
+          headers = new Headers(customInit.headers);
+        } else {
+          headers = new Headers(customInit.headers || {});
+        }
+
+        if (!headers.has('x-company-id') && !headers.has('X-Company-Id') && companyId) {
+          headers.set('X-Company-Id', String(companyId));
+        }
+        if (!headers.has('authorization') && !headers.has('Authorization') && token) {
+          headers.set('Authorization', `Bearer ${token}`);
+        }
+        if (!headers.has('x-user-id') && !headers.has('X-User-Id') && userId) {
+          headers.set('X-User-Id', String(userId));
+        }
+
+        customInit.headers = headers;
+        return originalFetch(input, customInit);
+      } catch (fetchErr) {
+        return originalFetch(input, init);
+      }
+    };
+
+    let patchSuccess = false;
+    try {
+      window.fetch = customFetch;
+      patchSuccess = true;
+    } catch (e) {
+      // Setter not available on window directly
+    }
+
+    if (!patchSuccess) {
+      try {
+        Object.defineProperty(window, 'fetch', {
+          value: customFetch,
+          writable: true,
+          configurable: true,
+          enumerable: true
+        });
+        patchSuccess = true;
+      } catch (e) {
+        // Object.defineProperty not allowed
+      }
+    }
+
+    if (!patchSuccess && typeof window.constructor?.prototype === 'object') {
+      try {
+        window.constructor.prototype.fetch = customFetch;
+      } catch (e) {
+        // Ignore prototype patch failure
+      }
+    }
+  } catch (err) {
+    console.warn('Could not wrap window.fetch:', err);
+  }
+}
 
 
 

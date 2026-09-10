@@ -21,8 +21,33 @@ function getDocumentStyles() {
   // 2. Copy all inline <style> tags
   const styles = document.querySelectorAll('style:not(#iframe-print-style)');
   styles.forEach(style => {
-    styleMarkup += `<style>${style.innerHTML}</style>\n`;
+    if (style.innerHTML && style.innerHTML.trim()) {
+      styleMarkup += `<style>${style.innerHTML}</style>\n`;
+    }
   });
+
+  // 3. Copy CSSOM rules for dynamic styles (Emotion, Material UI, Tailwind)
+  try {
+    if (typeof document !== 'undefined' && document.styleSheets) {
+      for (let i = 0; i < document.styleSheets.length; i++) {
+        const sheet = document.styleSheets[i];
+        if (sheet.ownerNode && sheet.ownerNode.id === 'iframe-print-style') continue;
+        try {
+          if (sheet.cssRules && sheet.cssRules.length > 0) {
+            let rulesText = '';
+            for (let j = 0; j < sheet.cssRules.length; j++) {
+              rulesText += sheet.cssRules[j].cssText + '\n';
+            }
+            if (rulesText) {
+              styleMarkup += `<style>${rulesText}</style>\n`;
+            }
+          }
+        } catch (cssomErr) {
+          // Cross-origin stylesheet access restricted
+        }
+      }
+    }
+  } catch (e) {}
 
   return styleMarkup;
 }
