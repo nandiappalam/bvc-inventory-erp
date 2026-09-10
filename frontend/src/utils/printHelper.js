@@ -1,17 +1,104 @@
 /**
- * printHelper.js - Reliable printing for iframe / sandbox environments
+ * printHelper.js - Reliable, high-fidelity printing engine for ERP applications
  * 
- * Injects a styled print preview modal directly into the document body
- * allowing visual preview and triggering window.print() with comprehensive print styles.
+ * Supports printing HTML strings, DOM elements, modals, reports, and tables.
+ * Injects complete stylesheet links, synchronizes live form field values,
+ * and manages print preview modals without clipping or blank pages.
  */
 
-export function printHtml(html, title = "Print Document") {
+/**
+ * Extracts and compiles all active styles from the current document
+ */
+function getDocumentStyles() {
+  let styleMarkup = "";
+  
+  // 1. Copy all <link rel="stylesheet">
+  const links = document.querySelectorAll('link[rel="stylesheet"]');
+  links.forEach(link => {
+    styleMarkup += link.outerHTML + "\n";
+  });
+
+  // 2. Copy all inline <style> tags
+  const styles = document.querySelectorAll('style:not(#iframe-print-style)');
+  styles.forEach(style => {
+    styleMarkup += `<style>${style.innerHTML}</style>\n`;
+  });
+
+  return styleMarkup;
+}
+
+/**
+ * Deep clones a DOM element and synchronizes form values (inputs, selects, textareas)
+ */
+function cloneWithFormValues(element) {
+  const clone = element.cloneNode(true);
+  
+  const origInputs = element.querySelectorAll('input, select, textarea');
+  const cloneInputs = clone.querySelectorAll('input, select, textarea');
+
+  origInputs.forEach((orig, i) => {
+    const cl = cloneInputs[i];
+    if (!cl) return;
+
+    if (orig.tagName === 'SELECT') {
+      cl.value = orig.value;
+      const selectedIndex = orig.selectedIndex;
+      if (selectedIndex >= 0 && orig.options[selectedIndex]) {
+        cl.setAttribute('data-value', orig.options[selectedIndex].text);
+      }
+    } else if (orig.type === 'checkbox' || orig.type === 'radio') {
+      cl.checked = orig.checked;
+      if (orig.checked) {
+        cl.setAttribute('checked', 'checked');
+      } else {
+        cl.removeAttribute('checked');
+      }
+    } else {
+      cl.value = orig.value;
+      cl.setAttribute('value', orig.value || '');
+    }
+  });
+
+  return clone;
+}
+
+/**
+ * Print a DOM element or CSS selector directly
+ */
+export function printElement(elementOrSelector, options = {}) {
+  let target = typeof elementOrSelector === 'string' 
+    ? document.querySelector(elementOrSelector) 
+    : elementOrSelector;
+
+  if (!target) {
+    target = document.getElementById('printable-area') || 
+             document.querySelector('.print-modal-box') || 
+             document.querySelector('.document-modal') ||
+             document.querySelector('.report-container') ||
+             document.querySelector('main') ||
+             document.body;
+  }
+
+  const title = options.title || (typeof options === 'string' ? options : document.title) || 'Print Preview';
+  
+  if (target) {
+    const cloned = cloneWithFormValues(target);
+    printHtml(cloned.outerHTML, title, options);
+  } else {
+    window.print();
+  }
+}
+
+/**
+ * Core print HTML renderer with preview dialog
+ */
+export function printHtml(html, title = "Print Document", options = {}) {
   // Safe content fallback
   const safeContent = (html && String(html).trim().length > 0) 
     ? html 
-    : `<div style="text-align:center; padding: 40px; color: #64748b;">
+    : `<div style="text-align:center; padding: 40px; color: #64748b; font-family: sans-serif;">
         <h3>No Printable Content Available</h3>
-        <p>The selected record or report does not contain any printable data.</p>
+        <p>The selected record or report does not contain printable data.</p>
        </div>`;
 
   // Save existing title
@@ -20,7 +107,10 @@ export function printHtml(html, title = "Print Document") {
     document.title = title;
   }
 
-  // 1. Create unique container
+  // 1. Collect all head stylesheets
+  const headStyles = getDocumentStyles();
+
+  // 2. Create unique container
   const containerId = "iframe-print-container";
   let container = document.getElementById(containerId);
   if (container) {
@@ -29,53 +119,58 @@ export function printHtml(html, title = "Print Document") {
   container = document.createElement("div");
   container.id = containerId;
 
-  // 2. Wrap HTML inside a styled print preview modal box
+  // 3. Wrap HTML inside a styled print preview modal box
   container.innerHTML = `
+    ${headStyles}
     <div class="print-modal-box">
       <div class="print-toolbar">
-        <span style="font-weight: bold; font-size: 15px; text-transform: uppercase; letter-spacing: 0.5px;">${title}</span>
+        <span style="font-weight: 700; font-size: 15px; text-transform: uppercase; letter-spacing: 0.5px; display: flex; align-items: center; gap: 8px;">
+          <span>📄</span> ${title}
+        </span>
         <div style="display: flex; gap: 10px; align-items: center;">
           <button id="print-btn-action" style="
             background: #10b981; 
             color: white; 
             border: none; 
-            padding: 7px 16px; 
-            border-radius: 4px; 
+            padding: 8px 18px; 
+            border-radius: 5px; 
             cursor: pointer; 
-            font-weight: bold;
+            font-weight: 700;
             font-size: 13px;
             display: flex;
             align-items: center;
             gap: 6px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+            transition: background 0.15s ease;
           ">
-            🖨 Print
+            🖨 Print Now
           </button>
           <button id="close-btn-action" style="
             background: #ef4444; 
             color: white; 
             border: none; 
-            padding: 7px 16px; 
-            border-radius: 4px; 
+            padding: 8px 18px; 
+            border-radius: 5px; 
             cursor: pointer; 
-            font-weight: bold;
+            font-weight: 700;
             font-size: 13px;
             display: flex;
             align-items: center;
             gap: 6px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+            transition: background 0.15s ease;
           ">
             ✕ Close
           </button>
         </div>
       </div>
-      <div class="print-content">
+      <div class="print-content" id="print-content-inner">
         ${safeContent}
       </div>
     </div>
   `;
 
-  // 3. Create printing style
+  // 4. Create printing style
   const styleId = "iframe-print-style";
   let style = document.getElementById(styleId);
   if (style) {
@@ -91,25 +186,25 @@ export function printHtml(html, title = "Print Document") {
         left: 0 !important;
         width: 100vw !important;
         height: 100vh !important;
-        background: rgba(15, 23, 42, 0.7) !important;
-        backdrop-filter: blur(3px) !important;
+        background: rgba(15, 23, 42, 0.75) !important;
+        backdrop-filter: blur(4px) !important;
         display: flex !important;
         flex-direction: column !important;
         justify-content: center !important;
         align-items: center !important;
         z-index: 9999999 !important;
         box-sizing: border-box !important;
-        padding: 24px 16px !important;
-        font-family: system-ui, -apple-system, sans-serif !important;
+        padding: 20px 16px !important;
+        font-family: 'Segoe UI', system-ui, -apple-system, sans-serif !important;
       }
       .print-modal-box {
         background: #ffffff !important;
         width: 100% !important;
-        max-width: 950px !important;
+        max-width: 960px !important;
         height: auto !important;
-        max-height: 92vh !important;
+        max-height: 94vh !important;
         border-radius: 8px !important;
-        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.25), 0 10px 10px -5px rgba(0, 0, 0, 0.1) !important;
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35) !important;
         display: flex !important;
         flex-direction: column !important;
         overflow: hidden !important;
@@ -121,7 +216,7 @@ export function printHtml(html, title = "Print Document") {
         align-items: center !important;
         background: #1e3a8a !important;
         color: white !important;
-        padding: 12px 18px !important;
+        padding: 12px 20px !important;
         font-family: inherit !important;
         user-select: none !important;
       }
@@ -133,7 +228,7 @@ export function printHtml(html, title = "Print Document") {
       }
       .print-content {
         background: #ffffff !important;
-        padding: 24px !important;
+        padding: 28px !important;
         overflow-y: auto !important;
         flex: 1 !important;
         box-sizing: border-box !important;
@@ -143,7 +238,7 @@ export function printHtml(html, title = "Print Document") {
     @media print {
       @page {
         size: auto;
-        margin: 8mm 10mm;
+        margin: 6mm 8mm;
       }
       html, body {
         margin: 0 !important;
@@ -156,7 +251,7 @@ export function printHtml(html, title = "Print Document") {
         width: 100% !important;
         position: static !important;
       }
-      /* Hide all elements except the print container */
+      /* When print modal is active, hide everything outside the print container */
       body > *:not(#iframe-print-container) {
         display: none !important;
       }
@@ -226,13 +321,16 @@ export function printHtml(html, title = "Print Document") {
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;
       }
+      .no-print, .action-btn, button:not(#print-btn-action) {
+        display: none !important;
+      }
     }
   `;
 
   document.body.appendChild(style);
   document.body.appendChild(container);
 
-  // 4. Action handlers & cleanup
+  // 5. Action handlers & cleanup
   const cleanup = () => {
     document.title = oldTitle;
     if (container && container.parentNode) container.remove();
@@ -275,5 +373,7 @@ export function printHtml(html, title = "Print Document") {
   document.addEventListener("keydown", handleKeyDown);
 
   // Auto-trigger print dialog after small render delay
-  setTimeout(handlePrintTrigger, 300);
+  setTimeout(handlePrintTrigger, 350);
 }
+
+export default printHtml;

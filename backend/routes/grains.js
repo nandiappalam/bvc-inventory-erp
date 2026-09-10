@@ -845,90 +845,170 @@ router.post('/', async (req, res) => {
       ])
     }
 
-    // Apply stock changes using filtered active rows
-    await deductGrainsInputStock(grainId, formData.date, activeInputItems);
-    await addGrainsOutputStock(grainId, formData.date, activeOutputItems);
-    await addGrainsWastageStock(grainId, formData.date, activeWastageItems);
-
-    // Save CCP Monitoring
-    const ccp = req.body.ccp || req.body.ccpData || {};
-    const ccpRequired = ccp.ccpRequired !== undefined ? (ccp.ccpRequired ? 1 : 0) : 1;
-    const ccpCategory = ccp.ccpCategory || ccp.category || 'Sortex Machine / Sieving';
-    const criticalLimit = ccp.criticalLimit || '5.5 g/MT';
-    const actualReading = parseFloat(ccp.actualReading) || 0;
-    const unit = ccp.unit || 'g/MT';
-    const status = ccp.status || (actualReading > 10 ? 'Fail' : 'Pass');
-    const correctiveAction = ccp.correctiveAction || '';
-    const checkedBy = ccp.checkedBy || formData.checkedBy || 'QC Inspector';
-    const firstLotNo = activeInputItems[0]?.lotNo || activeInputItems[0]?.lot_no || 'LOT001';
-
-    await db.run(`
-      INSERT INTO grind_ccp_monitoring (grind_id, voucher_number, lot_number, ccp_required, ccp_category, critical_limit, actual_reading, unit, status, corrective_action, checked_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [grainId, formData.sNo || formData.s_no || `VOUCH-${grainId}`, firstLotNo, ccpRequired, ccpCategory, criticalLimit, actualReading, unit, status, correctiveAction, checkedBy]);
-
-    // Save OPRP Monitoring
-    const oprpList = req.body.oprp || req.body.oprpData || [];
-    if (Array.isArray(oprpList) && oprpList.length > 0) {
-      for (const oprpItem of oprpList) {
-        await db.run(`
-          INSERT INTO grind_oprp_monitoring (grind_id, voucher_number, date, material, rm_fg, lot_number, quantity, alp, g, checked_by, remarks, alp_gram)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [
-          grainId,
-          formData.sNo || formData.s_no,
-          oprpItem.date || formData.date,
-          oprpItem.material || activeInputItems[0]?.itemName || 'Raw Material',
-          oprpItem.rmFg || oprpItem.rm_fg || 'RM',
-          oprpItem.lotNo || oprpItem.lot_number || firstLotNo,
-          parseFloat(oprpItem.quantity) || parseFloat(activeInputItems[0]?.qty) || 0,
-          oprpItem.alp ? 1 : 0,
-          oprpItem.g ? 1 : 0,
-          oprpItem.checkedBy || checkedBy,
-          oprpItem.remarks || '',
-          parseFloat(oprpItem.alpGram || oprpItem.alp_gram) || 0
-        ]);
-      }
-    } else if (activeInputItems.length > 0) {
-      for (const inItem of activeInputItems) {
-        await db.run(`
-          INSERT INTO grind_oprp_monitoring (grind_id, voucher_number, date, material, rm_fg, lot_number, quantity, alp, g, checked_by, remarks, alp_gram)
-          VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?)
-        `, [
-          grainId,
-          formData.sNo || formData.s_no,
-          formData.date,
-          inItem.itemName || inItem.item_name,
-          'RM',
-          inItem.lotNo || inItem.lot_no,
-          parseFloat(inItem.qty) || 0,
-          checkedBy,
-          'Verified during production',
-          0
-        ]);
-      }
+    // Ensure auxiliary tables exist
+    try {
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS grind_ccp_monitoring (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          grind_id INTEGER NOT NULL,
+          voucher_number TEXT,
+          lot_number TEXT,
+          ccp_required INTEGER DEFAULT 1,
+          ccp_category TEXT,
+          critical_limit TEXT,
+          actual_reading REAL DEFAULT 0,
+          unit TEXT DEFAULT 'g/MT',
+          status TEXT DEFAULT 'Pass',
+          corrective_action TEXT,
+          checked_by TEXT,
+          checked_date_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS grind_oprp_monitoring (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          grind_id INTEGER NOT NULL,
+          voucher_number TEXT,
+          date TEXT,
+          material TEXT,
+          rm_fg TEXT DEFAULT 'RM',
+          lot_number TEXT,
+          quantity REAL DEFAULT 0,
+          alp INTEGER DEFAULT 0,
+          g INTEGER DEFAULT 0,
+          checked_by TEXT,
+          remarks TEXT,
+          alp_gram REAL DEFAULT 0,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS grind_production_verification (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          grind_id INTEGER NOT NULL,
+          voucher_number TEXT,
+          operator TEXT,
+          shift TEXT DEFAULT 'Shift-1',
+          production_incharge TEXT,
+          qc_technologist TEXT,
+          qa_manager TEXT,
+          final_approval TEXT DEFAULT 'APPROVED',
+          remarks TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS grind_operator_log (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          grind_id INTEGER NOT NULL,
+          voucher_number TEXT,
+          lot_number TEXT,
+          operator TEXT,
+          shift TEXT,
+          action TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+    } catch (tblErr) {
+      console.warn('Auxiliary table check warning:', tblErr.message);
     }
 
-    // Save Production Verification
-    const verif = req.body.verification || req.body.verificationData || {};
-    const operator = verif.operator || formData.operator || 'Operator 1';
-    const shift = verif.shift || 'Shift-A (06:00 AM - 02:00 PM)';
-    const productionIncharge = verif.productionIncharge || 'Production Incharge';
-    const qcTechnologist = verif.qcTechnologist || 'QC Technologist J.V.N.';
-    const qaManager = verif.qaManager || 'QA Manager';
-    const finalApproval = verif.finalApproval || 'APPROVED';
-    const verifRemarks = verif.remarks || formData.remarks || '';
+    // Apply stock changes using filtered active rows
+    try {
+      await deductGrainsInputStock(grainId, formData.date, activeInputItems);
+      await addGrainsOutputStock(grainId, formData.date, activeOutputItems);
+      await addGrainsWastageStock(grainId, formData.date, activeWastageItems);
+    } catch (stkErr) {
+      console.error('Error applying stock changes for grains:', stkErr);
+    }
 
-    await db.run(`
-      INSERT INTO grind_production_verification (grind_id, voucher_number, operator, shift, production_incharge, qc_technologist, qa_manager, final_approval, remarks)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [grainId, formData.sNo || formData.s_no, operator, shift, productionIncharge, qcTechnologist, qaManager, finalApproval, verifRemarks]);
+    // Save CCP Monitoring
+    try {
+      const ccp = req.body.ccp || req.body.ccpData || {};
+      const ccpRequired = ccp.ccpRequired !== undefined ? (ccp.ccpRequired ? 1 : 0) : 1;
+      const ccpCategory = ccp.ccpCategory || ccp.category || 'Sortex Machine / Sieving';
+      const criticalLimit = ccp.criticalLimit || '5.5 g/MT';
+      const actualReading = parseFloat(ccp.actualReading) || 0;
+      const unit = ccp.unit || 'g/MT';
+      const status = ccp.status || (actualReading > 10 ? 'Fail' : 'Pass');
+      const correctiveAction = ccp.correctiveAction || '';
+      const checkedBy = ccp.checkedBy || formData.checkedBy || 'QC Inspector';
+      const firstLotNo = activeInputItems[0]?.lotNo || activeInputItems[0]?.lot_no || 'LOT001';
 
-    // Save Operator Log
-    await db.run(`
-      INSERT INTO grind_operator_log (grind_id, voucher_number, lot_number, operator, shift, action)
-      VALUES (?, ?, ?, ?, ?, 'GRIND_CREATED')
-    `, [grainId, formData.sNo || formData.s_no, firstLotNo, operator, shift]);
+      await db.run(`
+        INSERT INTO grind_ccp_monitoring (grind_id, voucher_number, lot_number, ccp_required, ccp_category, critical_limit, actual_reading, unit, status, corrective_action, checked_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [grainId, formData.sNo || formData.s_no || `VOUCH-${grainId}`, firstLotNo, ccpRequired, ccpCategory, criticalLimit, actualReading, unit, status, correctiveAction, checkedBy]);
+
+      // Save OPRP Monitoring
+      const oprpList = req.body.oprp || req.body.oprpData || [];
+      if (Array.isArray(oprpList) && oprpList.length > 0) {
+        for (const oprpItem of oprpList) {
+          await db.run(`
+            INSERT INTO grind_oprp_monitoring (grind_id, voucher_number, date, material, rm_fg, lot_number, quantity, alp, g, checked_by, remarks, alp_gram)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `, [
+            grainId,
+            formData.sNo || formData.s_no,
+            oprpItem.date || formData.date,
+            oprpItem.material || activeInputItems[0]?.itemName || 'Raw Material',
+            oprpItem.rmFg || oprpItem.rm_fg || 'RM',
+            oprpItem.lotNo || oprpItem.lot_number || firstLotNo,
+            parseFloat(oprpItem.quantity) || parseFloat(activeInputItems[0]?.qty) || 0,
+            oprpItem.alp ? 1 : 0,
+            oprpItem.g ? 1 : 0,
+            oprpItem.checkedBy || checkedBy,
+            oprpItem.remarks || '',
+            parseFloat(oprpItem.alpGram || oprpItem.alp_gram) || 0
+          ]);
+        }
+      } else if (activeInputItems.length > 0) {
+        for (const inItem of activeInputItems) {
+          await db.run(`
+            INSERT INTO grind_oprp_monitoring (grind_id, voucher_number, date, material, rm_fg, lot_number, quantity, alp, g, checked_by, remarks, alp_gram)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?)
+          `, [
+            grainId,
+            formData.sNo || formData.s_no,
+            formData.date,
+            inItem.itemName || inItem.item_name,
+            'RM',
+            inItem.lotNo || inItem.lot_no,
+            parseFloat(inItem.qty) || 0,
+            checkedBy,
+            'Verified during production',
+            0
+          ]);
+        }
+      }
+
+      // Save Production Verification
+      const verif = req.body.verification || req.body.verificationData || {};
+      const operator = verif.operator || formData.operator || 'Operator 1';
+      const shift = verif.shift || 'Shift-A (06:00 AM - 02:00 PM)';
+      const productionIncharge = verif.productionIncharge || 'Production Incharge';
+      const qcTechnologist = verif.qcTechnologist || 'QC Technologist J.V.N.';
+      const qaManager = verif.qaManager || 'QA Manager';
+      const finalApproval = verif.finalApproval || 'APPROVED';
+      const verifRemarks = verif.remarks || formData.remarks || '';
+
+      await db.run(`
+        INSERT INTO grind_production_verification (grind_id, voucher_number, operator, shift, production_incharge, qc_technologist, qa_manager, final_approval, remarks)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [grainId, formData.sNo || formData.s_no, operator, shift, productionIncharge, qcTechnologist, qaManager, finalApproval, verifRemarks]);
+
+      // Save Operator Log
+      await db.run(`
+        INSERT INTO grind_operator_log (grind_id, voucher_number, lot_number, operator, shift, action)
+        VALUES (?, ?, ?, ?, ?, 'GRIND_CREATED')
+      `, [grainId, formData.sNo || formData.s_no, firstLotNo, operator, shift]);
+    } catch (ccpErr) {
+      console.error('Error recording auxiliary FSMS data for grains:', ccpErr);
+    }
 
     // If linked to a Work Order, update work order status and final actuals
     if (workOrderId) {
@@ -1076,94 +1156,102 @@ router.put('/:id', async (req, res) => {
     }
 
     // Apply new stock changes using filtered active rows
-    await deductGrainsInputStock(grainId, formData.date, activeInputItems);
-    await addGrainsOutputStock(grainId, formData.date, activeOutputItems);
-    await addGrainsWastageStock(grainId, formData.date, activeWastageItems);
-
-    // Delete existing FSMS records for this grainId
-    await db.run('DELETE FROM grind_ccp_monitoring WHERE grind_id = ?', [grainId]);
-    await db.run('DELETE FROM grind_oprp_monitoring WHERE grind_id = ?', [grainId]);
-    await db.run('DELETE FROM grind_production_verification WHERE grind_id = ?', [grainId]);
-
-    // Re-insert updated CCP Monitoring
-    const ccp = req.body.ccp || req.body.ccpData || {};
-    const ccpRequired = ccp.ccpRequired !== undefined ? (ccp.ccpRequired ? 1 : 0) : 1;
-    const ccpCategory = ccp.ccpCategory || ccp.category || 'Sortex Machine / Sieving';
-    const criticalLimit = ccp.criticalLimit || '5.5 g/MT';
-    const actualReading = parseFloat(ccp.actualReading) || 0;
-    const unit = ccp.unit || 'g/MT';
-    const status = ccp.status || (actualReading > 10 ? 'Fail' : 'Pass');
-    const correctiveAction = ccp.correctiveAction || '';
-    const checkedBy = ccp.checkedBy || formData.checkedBy || 'QC Inspector';
-    const firstLotNo = activeInputItems[0]?.lotNo || activeInputItems[0]?.lot_no || 'LOT001';
-
-    await db.run(`
-      INSERT INTO grind_ccp_monitoring (grind_id, voucher_number, lot_number, ccp_required, ccp_category, critical_limit, actual_reading, unit, status, corrective_action, checked_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [grainId, formData.sNo || formData.s_no || `VOUCH-${grainId}`, firstLotNo, ccpRequired, ccpCategory, criticalLimit, actualReading, unit, status, correctiveAction, checkedBy]);
-
-    // Re-insert updated OPRP Monitoring
-    const oprpList = req.body.oprp || req.body.oprpData || [];
-    if (Array.isArray(oprpList) && oprpList.length > 0) {
-      for (const oprpItem of oprpList) {
-        await db.run(`
-          INSERT INTO grind_oprp_monitoring (grind_id, voucher_number, date, material, rm_fg, lot_number, quantity, alp, g, checked_by, remarks, alp_gram)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [
-          grainId,
-          formData.sNo || formData.s_no,
-          oprpItem.date || formData.date,
-          oprpItem.material || activeInputItems[0]?.itemName || 'Raw Material',
-          oprpItem.rmFg || oprpItem.rm_fg || 'RM',
-          oprpItem.lotNo || oprpItem.lot_number || firstLotNo,
-          parseFloat(oprpItem.quantity) || parseFloat(activeInputItems[0]?.qty) || 0,
-          oprpItem.alp ? 1 : 0,
-          oprpItem.g ? 1 : 0,
-          oprpItem.checkedBy || checkedBy,
-          oprpItem.remarks || '',
-          parseFloat(oprpItem.alpGram || oprpItem.alp_gram) || 0
-        ]);
-      }
-    } else if (activeInputItems.length > 0) {
-      for (const inItem of activeInputItems) {
-        await db.run(`
-          INSERT INTO grind_oprp_monitoring (grind_id, voucher_number, date, material, rm_fg, lot_number, quantity, alp, g, checked_by, remarks, alp_gram)
-          VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?)
-        `, [
-          grainId,
-          formData.sNo || formData.s_no,
-          formData.date,
-          inItem.itemName || inItem.item_name,
-          'RM',
-          inItem.lotNo || inItem.lot_no,
-          parseFloat(inItem.qty) || 0,
-          checkedBy,
-          'Verified during production',
-          0
-        ]);
-      }
+    try {
+      await deductGrainsInputStock(grainId, formData.date, activeInputItems);
+      await addGrainsOutputStock(grainId, formData.date, activeOutputItems);
+      await addGrainsWastageStock(grainId, formData.date, activeWastageItems);
+    } catch (stkErr) {
+      console.error('Error updating stock on grains update:', stkErr);
     }
 
-    // Re-insert updated Production Verification
-    const verif = req.body.verification || req.body.verificationData || {};
-    const operator = verif.operator || formData.operator || 'Operator 1';
-    const shift = verif.shift || 'Shift-A (06:00 AM - 02:00 PM)';
-    const productionIncharge = verif.productionIncharge || 'Production Incharge';
-    const qcTechnologist = verif.qcTechnologist || 'QC Technologist J.V.N.';
-    const qaManager = verif.qaManager || 'QA Manager';
-    const finalApproval = verif.finalApproval || 'APPROVED';
-    const verifRemarks = verif.remarks || formData.remarks || '';
+    try {
+      // Delete existing FSMS records for this grainId
+      await db.run('DELETE FROM grind_ccp_monitoring WHERE grind_id = ?', [grainId]);
+      await db.run('DELETE FROM grind_oprp_monitoring WHERE grind_id = ?', [grainId]);
+      await db.run('DELETE FROM grind_production_verification WHERE grind_id = ?', [grainId]);
 
-    await db.run(`
-      INSERT INTO grind_production_verification (grind_id, voucher_number, operator, shift, production_incharge, qc_technologist, qa_manager, final_approval, remarks)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [grainId, formData.sNo || formData.s_no, operator, shift, productionIncharge, qcTechnologist, qaManager, finalApproval, verifRemarks]);
+      // Re-insert updated CCP Monitoring
+      const ccp = req.body.ccp || req.body.ccpData || {};
+      const ccpRequired = ccp.ccpRequired !== undefined ? (ccp.ccpRequired ? 1 : 0) : 1;
+      const ccpCategory = ccp.ccpCategory || ccp.category || 'Sortex Machine / Sieving';
+      const criticalLimit = ccp.criticalLimit || '5.5 g/MT';
+      const actualReading = parseFloat(ccp.actualReading) || 0;
+      const unit = ccp.unit || 'g/MT';
+      const status = ccp.status || (actualReading > 10 ? 'Fail' : 'Pass');
+      const correctiveAction = ccp.correctiveAction || '';
+      const checkedBy = ccp.checkedBy || formData.checkedBy || 'QC Inspector';
+      const firstLotNo = activeInputItems[0]?.lotNo || activeInputItems[0]?.lot_no || 'LOT001';
 
-    // Save Operator Log
-    await db.run(`
-      INSERT INTO grind_operator_log (grind_id, voucher_number, lot_number, operator, shift, action)
-      VALUES (?, ?, ?, ?, ?, 'GRIND_UPDATED')
-    `, [grainId, formData.sNo || formData.s_no, firstLotNo, operator, shift]);
+      await db.run(`
+        INSERT INTO grind_ccp_monitoring (grind_id, voucher_number, lot_number, ccp_required, ccp_category, critical_limit, actual_reading, unit, status, corrective_action, checked_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [grainId, formData.sNo || formData.s_no || `VOUCH-${grainId}`, firstLotNo, ccpRequired, ccpCategory, criticalLimit, actualReading, unit, status, correctiveAction, checkedBy]);
+
+      // Re-insert updated OPRP Monitoring
+      const oprpList = req.body.oprp || req.body.oprpData || [];
+      if (Array.isArray(oprpList) && oprpList.length > 0) {
+        for (const oprpItem of oprpList) {
+          await db.run(`
+            INSERT INTO grind_oprp_monitoring (grind_id, voucher_number, date, material, rm_fg, lot_number, quantity, alp, g, checked_by, remarks, alp_gram)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `, [
+            grainId,
+            formData.sNo || formData.s_no,
+            oprpItem.date || formData.date,
+            oprpItem.material || activeInputItems[0]?.itemName || 'Raw Material',
+            oprpItem.rmFg || oprpItem.rm_fg || 'RM',
+            oprpItem.lotNo || oprpItem.lot_number || firstLotNo,
+            parseFloat(oprpItem.quantity) || parseFloat(activeInputItems[0]?.qty) || 0,
+            oprpItem.alp ? 1 : 0,
+            oprpItem.g ? 1 : 0,
+            oprpItem.checkedBy || checkedBy,
+            oprpItem.remarks || '',
+            parseFloat(oprpItem.alpGram || oprpItem.alp_gram) || 0
+          ]);
+        }
+      } else if (activeInputItems.length > 0) {
+        for (const inItem of activeInputItems) {
+          await db.run(`
+            INSERT INTO grind_oprp_monitoring (grind_id, voucher_number, date, material, rm_fg, lot_number, quantity, alp, g, checked_by, remarks, alp_gram)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?)
+          `, [
+            grainId,
+            formData.sNo || formData.s_no,
+            formData.date,
+            inItem.itemName || inItem.item_name,
+            'RM',
+            inItem.lotNo || inItem.lot_no,
+            parseFloat(inItem.qty) || 0,
+            checkedBy,
+            'Verified during production',
+            0
+          ]);
+        }
+      }
+
+      // Re-insert updated Production Verification
+      const verif = req.body.verification || req.body.verificationData || {};
+      const operator = verif.operator || formData.operator || 'Operator 1';
+      const shift = verif.shift || 'Shift-A (06:00 AM - 02:00 PM)';
+      const productionIncharge = verif.productionIncharge || 'Production Incharge';
+      const qcTechnologist = verif.qcTechnologist || 'QC Technologist J.V.N.';
+      const qaManager = verif.qaManager || 'QA Manager';
+      const finalApproval = verif.finalApproval || 'APPROVED';
+      const verifRemarks = verif.remarks || formData.remarks || '';
+
+      await db.run(`
+        INSERT INTO grind_production_verification (grind_id, voucher_number, operator, shift, production_incharge, qc_technologist, qa_manager, final_approval, remarks)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [grainId, formData.sNo || formData.s_no, operator, shift, productionIncharge, qcTechnologist, qaManager, finalApproval, verifRemarks]);
+
+      // Save Operator Log
+      await db.run(`
+        INSERT INTO grind_operator_log (grind_id, voucher_number, lot_number, operator, shift, action)
+        VALUES (?, ?, ?, ?, ?, 'GRIND_UPDATED')
+      `, [grainId, formData.sNo || formData.s_no, firstLotNo, operator, shift]);
+    } catch (fsmsErr) {
+      console.error('Error updating FSMS records for grains:', fsmsErr);
+    }
 
     try {
       await rebuildStockLedger();

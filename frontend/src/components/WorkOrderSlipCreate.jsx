@@ -81,7 +81,7 @@ const WorkOrderSlipCreate = () => {
 
   // Section 3: Wastage & Rejection Breakdown
   const [wastageItems, setWastageItems] = useState([
-   /* {
+    /*{
       category: 'Rejection',
       item_name: 'Rejection Waste Flour',
       lot_no: 'REJ-01',
@@ -337,7 +337,8 @@ const WorkOrderSlipCreate = () => {
 
     // When LOT NO selected, auto-fill supplier, item, weight, rate
     if (field === 'lot_no' && value) {
-      const matched = availableRmLots.find(l => l.lot_no === value);
+      const trimmedVal = String(value).trim().toLowerCase();
+      let matched = availableRmLots.find(l => String(l.lot_no || '').trim().toLowerCase() === trimmedVal);
       if (matched) {
         currentRow.item_name = matched.item_name || currentRow.item_name;
         currentRow.item_id = matched.item_id || currentRow.item_id;
@@ -347,6 +348,30 @@ const WorkOrderSlipCreate = () => {
         const avQty = parseFloat(matched.available_qty || matched.remaining_quantity || matched.qty || 0);
         if (avQty > 0 && !currentRow.input_qty) currentRow.input_qty = String(avQty);
         currentRow.rate = parseFloat(matched.rate || matched.purchase_rate || 0);
+      }
+
+      // If supplier is missing or not in availableRmLots, fetch directly from backend
+      if (!currentRow.supplier || currentRow.supplier === '-' || !matched) {
+        try {
+          const fetchRes = await api(`/stock/available-lots?lot_no=${encodeURIComponent(value)}`).catch(() => null);
+          const foundLot = Array.isArray(fetchRes) ? fetchRes[0] : (fetchRes?.lots?.[0] || null);
+          if (foundLot) {
+            if (foundLot.supplier_name && foundLot.supplier_name !== '-') {
+              currentRow.supplier = foundLot.supplier_name;
+            } else if (foundLot.supplier && foundLot.supplier !== '-') {
+              currentRow.supplier = foundLot.supplier;
+            }
+            if (!currentRow.item_name && foundLot.item_name) currentRow.item_name = foundLot.item_name;
+            if (!currentRow.item_id && foundLot.item_id) currentRow.item_id = foundLot.item_id;
+            const wt = parseFloat(foundLot.per_unit_weight || foundLot.weight || 0);
+            if (wt > 0 && (!currentRow.weight || currentRow.weight === '50')) currentRow.weight = String(wt);
+            const avQty = parseFloat(foundLot.available_qty || foundLot.remaining_quantity || foundLot.qty || 0);
+            if (avQty > 0 && !currentRow.input_qty) currentRow.input_qty = String(avQty);
+            if (foundLot.rate) currentRow.rate = parseFloat(foundLot.rate);
+          }
+        } catch (e) {
+          console.error('Error fetching lot details for work order:', e);
+        }
       }
     }
 

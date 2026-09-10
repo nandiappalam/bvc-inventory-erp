@@ -7,7 +7,7 @@ import ERPBreadcrumb from '../../../components/erp/ERPBreadcrumb';
 import ERPHeader from '../../../components/erp/ERPHeader';
 import qualityApi from '../services/qualityApi';
 import api from '../../../services/api';
-import { printHtml } from '../../../utils/printHelper';
+import { printElement } from '../../../utils/printHelper';
 
 export default function CertificateAnalysisDisplay() {
   const { id } = useParams(); // QC inspection ID
@@ -48,7 +48,7 @@ export default function CertificateAnalysisDisplay() {
   const onPrint = () => {
     const el = document.getElementById('coa-printable-area');
     if (el) {
-      printHtml(el.innerHTML, `COA - Lot ${data?.lotNo || id}`);
+      printElement(el, { title: `COA - Lot ${data?.lotNo || id}` });
     } else {
       window.print();
     }

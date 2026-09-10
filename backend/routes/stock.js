@@ -399,6 +399,20 @@ router.get('/lots', async (req, res) => {
         im.item_group,
         (sl.quantity - sl.remaining_quantity) as sold_qty,
         COALESCE(
+          (SELECT sm2.name FROM purchase_items pi2 JOIN purchases p2 ON p2.id = pi2.purchase_id LEFT JOIN supplier_master sm2 ON (CAST(sm2.id AS TEXT) = CAST(p2.supplier AS TEXT) OR sm2.name = p2.supplier) WHERE pi2.lot_no = sl.lot_no AND sm2.name IS NOT NULL LIMIT 1),
+          (SELECT p3.supplier FROM purchase_items pi3 JOIN purchases p3 ON p3.id = pi3.purchase_id WHERE pi3.lot_no = sl.lot_no AND p3.supplier IS NOT NULL LIMIT 1),
+          (SELECT sm3.name FROM supplier_master sm3 JOIN purchases p4 ON CAST(p4.id AS TEXT) = CAST(sl.purchase_id AS TEXT) WHERE (CAST(sm3.id AS TEXT) = CAST(p4.supplier AS TEXT) OR sm3.name = p4.supplier) LIMIT 1),
+          (SELECT p5.supplier FROM purchases p5 WHERE CAST(p5.id AS TEXT) = CAST(sl.purchase_id AS TEXT) LIMIT 1),
+          '-'
+        ) AS supplier_name,
+        COALESCE(
+          (SELECT sm2.name FROM purchase_items pi2 JOIN purchases p2 ON p2.id = pi2.purchase_id LEFT JOIN supplier_master sm2 ON (CAST(sm2.id AS TEXT) = CAST(p2.supplier AS TEXT) OR sm2.name = p2.supplier) WHERE pi2.lot_no = sl.lot_no AND sm2.name IS NOT NULL LIMIT 1),
+          (SELECT p3.supplier FROM purchase_items pi3 JOIN purchases p3 ON p3.id = pi3.purchase_id WHERE pi3.lot_no = sl.lot_no AND p3.supplier IS NOT NULL LIMIT 1),
+          (SELECT sm3.name FROM supplier_master sm3 JOIN purchases p4 ON CAST(p4.id AS TEXT) = CAST(sl.purchase_id AS TEXT) WHERE (CAST(sm3.id AS TEXT) = CAST(p4.supplier AS TEXT) OR sm3.name = p4.supplier) LIMIT 1),
+          (SELECT p5.supplier FROM purchases p5 WHERE CAST(p5.id AS TEXT) = CAST(sl.purchase_id AS TEXT) LIMIT 1),
+          '-'
+        ) AS supplier,
+        COALESCE(
           (SELECT CASE WHEN COALESCE(qty, 0) != 0 THEN ROUND(CAST(ABS(weight) / ABS(qty) AS NUMERIC), 2) ELSE 0 END FROM stock WHERE lot_no = sl.lot_no AND item_name = sl.item_name AND qty != 0 LIMIT 1),
           (SELECT COALESCE(per_unit_weight, weight) FROM purchase_items WHERE lot_no = sl.lot_no AND item_name = sl.item_name AND COALESCE(per_unit_weight, weight) > 0 LIMIT 1),
           50
@@ -762,7 +776,7 @@ router.get('/next-lot-no', async (req, res) => {
 // ============================================================================
 router.get('/available-lots', async (req, res) => {
   try {
-    const { item_id, item_name } = req.query
+    const { item_id, item_name, lot_no } = req.query
     
     let query = `
       SELECT 
@@ -790,6 +804,15 @@ router.get('/available-lots', async (req, res) => {
           p.supplier,
           '-'
         ) AS supplier_name,
+        COALESCE(
+          sm.name,
+          sm.print_name,
+          (SELECT sm2.name FROM purchase_items pi2 JOIN purchases p2 ON p2.id = pi2.purchase_id LEFT JOIN supplier_master sm2 ON (CAST(sm2.id AS TEXT) = CAST(p2.supplier AS TEXT) OR sm2.name = p2.supplier) WHERE pi2.lot_no = sl.lot_no AND sm2.name IS NOT NULL LIMIT 1),
+          (SELECT p3.supplier FROM purchase_items pi3 JOIN purchases p3 ON p3.id = pi3.purchase_id WHERE pi3.lot_no = sl.lot_no AND p3.supplier IS NOT NULL LIMIT 1),
+          (SELECT sm3.name FROM supplier_master sm3 WHERE CAST(sm3.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm3.name = p.supplier LIMIT 1),
+          p.supplier,
+          '-'
+        ) AS supplier,
         sl.created_at as purchase_date,
         sl.created_at,
         COALESCE(
@@ -812,6 +835,11 @@ router.get('/available-lots', async (req, res) => {
     `
     const params = []
     
+    if (lot_no) {
+      query += ` AND (LOWER(sl.lot_no) = LOWER(?) OR sl.lot_no LIKE ?)`
+      params.push(String(lot_no), '%' + String(lot_no) + '%')
+    }
+
     if (item_id) {
       query += ` AND (CAST(sl.item_id AS TEXT) = ? OR sl.item_id IN (SELECT id FROM item_master WHERE CAST(id AS TEXT) = ? OR LOWER(item_name) = LOWER(?)))`
       params.push(String(item_id), String(item_id), String(item_id))

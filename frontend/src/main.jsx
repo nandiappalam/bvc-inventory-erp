@@ -58,34 +58,7 @@ axios.interceptors.request.use((config) => {
   return config;
 }, (error) => Promise.reject(error));
 
-// 2. Configure global fetch interceptor
-if (typeof window !== 'undefined' && window.fetch) {
-  const originalFetch = window.fetch.bind(window);
-  window.fetch = async function(input, init = {}) {
-    let url = typeof input === 'string' ? input : (input instanceof Request ? input.url : String(input));
 
-    // Only intercept requests to our local /api endpoints
-    if (url.startsWith('/api') || url.includes('/api/')) {
-      const { companyId, token, userId } = getActiveAuthHeaders();
-      const currentHeaders = init?.headers || (input instanceof Request ? input.headers : {});
-      const headers = new Headers(currentHeaders);
-
-      if (!headers.has('X-Company-Id') && !headers.has('x-company-id')) {
-        headers.set('X-Company-Id', String(companyId));
-      }
-      if (!headers.has('Authorization') && !headers.has('authorization') && token) {
-        headers.set('Authorization', `Bearer ${token}`);
-      }
-      if (!headers.has('X-User-Id') && !headers.has('x-user-id') && userId) {
-        headers.set('X-User-Id', String(userId));
-      }
-
-      init = { ...init, headers };
-    }
-
-    return originalFetch(input, init);
-  };
-}
 
 // Central alert override to prevent iframe DOMExceptions from blocking execution and show styled toast instead
 if (typeof window !== 'undefined') {
