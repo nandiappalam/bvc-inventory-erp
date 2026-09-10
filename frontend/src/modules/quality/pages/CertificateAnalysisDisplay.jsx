@@ -167,6 +167,7 @@ export default function CertificateAnalysisDisplay() {
               <b>Lot Number:</b> <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{data.lotNo || '-'}</span>
               <b>Batch Identity:</b> <span>{data.batch || data.lotNo || '-'}</span>
               <b>Quantity Certified:</b> <span>{data.quantity ? `${data.quantity} bags` : '-'}</span>
+              <b>Total Weight:</b> <span>{data.total_weight ? `${data.total_weight} kg (${(data.total_weight / 1000).toFixed(2)} MT)` : (data.unit_weight ? `Unit: ${data.unit_weight} kg` : '-')}</span>
             </Box>
           </Box>
           <Box>

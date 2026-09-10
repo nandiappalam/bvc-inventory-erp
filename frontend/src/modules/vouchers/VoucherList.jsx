@@ -605,7 +605,7 @@ const VoucherList = () => {
                 Inventory Management System & Double Entry Financial Accounting Core
               </Typography>
               <Typography variant="caption" sx={{ display: 'block', color: '#cfd8dc', fontSize: '0.75rem', fontFamily: 'monospace' }}>
-                A.S.MOORTHY & CO — FINANCIAL YEAR: 2026-2027
+                FINANCIAL YEAR: 2026-2027
               </Typography>
             </Box>
 

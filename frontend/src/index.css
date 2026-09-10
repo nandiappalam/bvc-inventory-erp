@@ -104,18 +104,30 @@ button.action-btn.warning {
     background: #ffffff !important;
     color: #000000 !important;
     width: 100% !important;
+    position: static !important;
   }
 
-  /* When no iframe print container is active, hide sidebar and nav elements */
-  body:not(:has(#iframe-print-container)) .no-print,
-  body:not(:has(#iframe-print-container)) .erp-sidebar,
-  body:not(:has(#iframe-print-container)) .erp-navbar,
-  body:not(:has(#iframe-print-container)) nav,
-  body:not(:has(#iframe-print-container)) aside,
-  body:not(:has(#iframe-print-container)) .MuiAppBar-root,
-  body:not(:has(#iframe-print-container)) .MuiDrawer-root,
-  body:not(:has(#iframe-print-container)) button.action-btn,
-  body:not(:has(#iframe-print-container)) .action-btn {
+  /* Universal hide for navigation, sidebars, and action toolbars during print */
+  .no-print,
+  .erp-sidebar,
+  .erp-navbar,
+  nav,
+  aside,
+  .MuiAppBar-root,
+  .MuiDrawer-root,
+  button.action-btn,
+  .action-btn,
+  .report-filters,
+  .summary-cards,
+  .erp-bottom-bar,
+  .action-bar,
+  .btn-print,
+  button[type="button"].no-print {
+    display: none !important;
+  }
+
+  /* When print modal is active, hide everything outside the print container */
+  body.print-modal-active > *:not(#iframe-print-container) {
     display: none !important;
   }
 

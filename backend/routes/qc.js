@@ -359,10 +359,21 @@ router.get(['/inspection/:id', '/purchase-lab-testing/:id'], asyncHandler(async 
     WHERE qc_id = ?
   `, [id]);
 
+  // Format dates cleanly (YYYY-MM-DD)
+  if (rowData.inspectionDate && String(rowData.inspectionDate).includes('T')) {
+    rowData.inspectionDate = String(rowData.inspectionDate).split('T')[0];
+  }
+  if (rowData.receipt_date && String(rowData.receipt_date).includes('T')) {
+    rowData.receipt_date = String(rowData.receipt_date).split('T')[0];
+  }
+  if (rowData.invoice_date && String(rowData.invoice_date).includes('T')) {
+    rowData.invoice_date = String(rowData.invoice_date).split('T')[0];
+  }
+
   res.json({ 
     success: true, 
     data: {
-      ...inspectionResult.rows[0],
+      ...rowData,
       qcResults,
       iqr: iqrResult.rows[0] || null
     }

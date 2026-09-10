@@ -850,7 +850,7 @@ router.get('/available-lots', async (req, res) => {
       params.push(item_name, `%${item_name}%`, item_name)
     }
     
-    query += ` GROUP BY sl.lot_no ORDER BY sl.id DESC`
+    query += ` ORDER BY sl.id DESC`
     
     const result = await db.query(query, params)
     
@@ -955,7 +955,6 @@ router.get('/available/:itemId', async (req, res) => {
       AND sl.lot_no NOT IN (
         SELECT DISTINCT lot_no FROM purchase_return_items WHERE lot_no IS NOT NULL AND lot_no != ''
       )
-      GROUP BY sl.lot_no
       ORDER BY sl.id DESC
     `, [itemId, itemId, `%${itemId}%`, itemId, itemId])
 
@@ -1043,7 +1042,6 @@ router.get('/available-item-name/:itemName', async (req, res) => {
         OR sl.item_id IN (SELECT id FROM item_master WHERE LOWER(item_name) = LOWER(?) OR item_name LIKE ?)
       )
       AND COALESCE(sl.remaining_quantity, sl.quantity, 0) > 0
-      GROUP BY sl.lot_no
       ORDER BY sl.id DESC
     `, [itemName, `%${itemName}%`, itemName, `%${itemName}%`])
     

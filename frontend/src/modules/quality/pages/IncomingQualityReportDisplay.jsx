@@ -162,8 +162,8 @@ export default function IncomingQualityReportDisplay() {
               <b>Supplier:</b> <span>{data.supplier || '-'}</span>
               <b>Product / Item:</b> <span>{data.item || '-'}</span>
               <b>Quantity:</b> <span>{data.quantity ? `${data.quantity} bags` : '-'}</span>
-              <b>Weight:</b> <span>{data.total_weight ? `${data.total_weight} MT` : (data.unit_weight ? `Unit: ${data.unit_weight} kg` : '-')}</span>
-              <b>Receipt S.No:</b> <span>{data.purchaseId || '-'}</span>
+              <b>Weight:</b> <span>{data.total_weight ? `${data.total_weight} kg (${(data.total_weight / 1000).toFixed(2)} MT)` : (data.unit_weight ? `Unit: ${data.unit_weight} kg` : '-')}</span>
+              <b>Receipt S.No:</b> <span>{data.purchaseId ? (String(data.purchaseId).startsWith('PUR-') ? data.purchaseId : `PUR-${data.purchaseId}`) : (data.invoice_no || '-')}</span>
             </Box>
           </Box>
           <Box>

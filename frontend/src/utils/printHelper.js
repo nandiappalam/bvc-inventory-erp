@@ -252,10 +252,10 @@ export function printHtml(html, title = "Print Document", options = {}) {
         position: static !important;
       }
       /* When print modal is active, hide everything outside the print container */
-      body > *:not(#iframe-print-container) {
+      body.print-modal-active > *:not(#iframe-print-container) {
         display: none !important;
       }
-      #iframe-print-container {
+      body.print-modal-active #iframe-print-container {
         display: block !important;
         position: static !important;
         width: 100% !important;
@@ -271,10 +271,10 @@ export function printHtml(html, title = "Print Document", options = {}) {
         opacity: 1 !important;
         visibility: visible !important;
       }
-      #iframe-print-container * {
+      body.print-modal-active #iframe-print-container * {
         visibility: visible !important;
       }
-      .print-modal-box {
+      body.print-modal-active .print-modal-box {
         display: block !important;
         box-shadow: none !important;
         border-radius: 0 !important;
@@ -288,10 +288,10 @@ export function printHtml(html, title = "Print Document", options = {}) {
         padding: 0 !important;
         margin: 0 !important;
       }
-      .print-toolbar {
+      body.print-modal-active .print-toolbar {
         display: none !important;
       }
-      .print-content {
+      body.print-modal-active .print-content {
         display: block !important;
         width: 100% !important;
         height: auto !important;
@@ -327,12 +327,14 @@ export function printHtml(html, title = "Print Document", options = {}) {
     }
   `;
 
+  document.body.classList.add("print-modal-active");
   document.body.appendChild(style);
   document.body.appendChild(container);
 
   // 5. Action handlers & cleanup
   const cleanup = () => {
     document.title = oldTitle;
+    document.body.classList.remove("print-modal-active");
     if (container && container.parentNode) container.remove();
     if (style && style.parentNode) style.remove();
     document.removeEventListener("keydown", handleKeyDown);

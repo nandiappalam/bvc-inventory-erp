@@ -22,6 +22,7 @@ import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import ReplyAllIcon from '@mui/icons-material/ReplyAll';
 import PrintIcon from '@mui/icons-material/Print';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
+import { printElement } from '../../../utils/printHelper';
 
 import ERPPageLayout from '../../../components/erp/ERPPageLayout';
 import ERPBreadcrumb from '../../../components/erp/ERPBreadcrumb';
@@ -187,7 +188,12 @@ export default function IncomingQualityCreate() {
   };
 
   const onPrint = () => {
-    window.print();
+    const el = document.getElementById('iqr-printable-area');
+    if (el) {
+      printElement(el, { title: `IQR - Lot ${data?.lotNo || id}` });
+    } else {
+      window.print();
+    }
   };
 
   const onExit = () => {
@@ -415,8 +421,8 @@ export default function IncomingQualityCreate() {
                 <b>Supplier:</b> <span>{data.supplier || '-'}</span>
                 <b>Product / Item:</b> <span>{data.item || '-'}</span>
                 <b>Quantity:</b> <span>{data.quantity ? `${data.quantity} bags` : '-'}</span>
-                <b>Weight:</b> <span>{data.total_weight ? `${data.total_weight} MT` : (data.unit_weight ? `Unit: ${data.unit_weight} kg` : '-')}</span>
-                <b>Receipt S.No:</b> <span>{data.purchaseId || '-'}</span>
+                <b>Weight:</b> <span>{data.total_weight ? `${data.total_weight} kg (${(data.total_weight / 1000).toFixed(2)} MT)` : (data.unit_weight ? `Unit: ${data.unit_weight} kg` : '-')}</span>
+                <b>Receipt S.No:</b> <span>{data.purchaseId ? (String(data.purchaseId).startsWith('PUR-') ? data.purchaseId : `PUR-${data.purchaseId}`) : (data.invoice_no || '-')}</span>
               </Box>
             </Box>
             <Box>
