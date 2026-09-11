@@ -14,6 +14,7 @@ import {
   TableHead,
   Box,
   Alert,
+  FormControl,
   FormControlLabel,
   Switch,
   IconButton,
@@ -1489,29 +1490,29 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
                 {entries.map((entry, index) => (
                   <TableRow key={index} sx={{ '&:nth-of-type(even)': { bgcolor: '#f8f9fa' } }}>
                     <TableCell>
-                      <Select
-                        value={entry.type || 'Dr'}
-                        onChange={(e) => updateEntry(index, 'type', e.target.value)}
-                        size="small"
-                        fullWidth
-                      >
-                        <MenuItem value="Dr">Dr</MenuItem>
-                        <MenuItem value="Cr">Cr</MenuItem>
-                      </Select>
+                      <FormControl size="small" fullWidth>
+                        <Select
+                          value={entry.type || 'Dr'}
+                          onChange={(e) => updateEntry(index, 'type', e.target.value)}
+                        >
+                          <MenuItem value="Dr">Dr</MenuItem>
+                          <MenuItem value="Cr">Cr</MenuItem>
+                        </Select>
+                      </FormControl>
                     </TableCell>
                     <TableCell>
-                      <Select
-                        value={entry.ledger_id || ''}
-                        onChange={(e) => updateEntry(index, 'ledger_id', e.target.value)}
-                        size="small"
-                        fullWidth
-                        displayEmpty
-                      >
-                        <MenuItem value="">-- Select Ledger --</MenuItem>
-                        {ledgers.map(ledger => (
-                          <MenuItem key={ledger.id} value={ledger.id}>{ledger.name}</MenuItem>
-                        ))}
-                      </Select>
+                      <FormControl size="small" fullWidth>
+                        <Select
+                          value={entry.ledger_id || ''}
+                          onChange={(e) => updateEntry(index, 'ledger_id', e.target.value)}
+                          displayEmpty
+                        >
+                          <MenuItem value="">-- Select Ledger --</MenuItem>
+                          {ledgers.map(ledger => (
+                            <MenuItem key={ledger.id} value={ledger.id}>{ledger.name}</MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
                       {entry.ledger_name && (
                         <Box sx={{ mt: 0.5, px: 1 }}>
                           {ledgerBalances[entry.ledger_name] !== undefined && (

@@ -301,6 +301,7 @@ const Navigation = () => {
 
   const [entryOpen, setEntryOpen] = useState(true);
   const [masterOpen, setMasterOpen] = useState(true);
+  const [coldStorageOpen, setColdStorageOpen] = useState(false);
   const [qualityOpen, setQualityOpen] = useState(false);
   const [documentsOpen, setDocumentsOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
@@ -358,6 +359,16 @@ const Navigation = () => {
     'Transport',
     'Godown',
     'Tax',
+  ];
+
+  const coldStorageModules = [
+    { name: 'Cold Storage IN (CSI)', path: '/cold-storage/in' },
+    { name: 'Cold Storage OUT (CSO)', path: '/cold-storage/out' },
+    { name: 'Stock Balance', path: '/cold-storage/stock' },
+    { name: 'Voucher Register', path: '/cold-storage/vouchers' },
+    { name: 'Movement Ledger', path: '/cold-storage/ledger' },
+    { name: 'Lot Traceability', path: '/cold-storage/traceability' },
+    { name: 'Facility Master', path: '/cold-storage/master' },
   ];
 
 
@@ -444,6 +455,10 @@ const Navigation = () => {
 
   const handleMasterClick = () => {
     setMasterOpen(!masterOpen);
+  };
+
+  const handleColdStorageClick = () => {
+    setColdStorageOpen(!coldStorageOpen);
   };
 
   const handleQualityClick = () => {
@@ -689,6 +704,60 @@ const Navigation = () => {
                   isAdmin={isAdmin}
                 />
               ))}
+            </List>
+          </Collapse>
+
+          {/* Cold Storage Section */}
+          <ListItemButton
+            onClick={handleColdStorageClick}
+            sx={{
+              minHeight: 48,
+              borderTop: `1px solid ${themeColors.lightBlue}`,
+              borderBottom: `1px solid ${themeColors.lightBlue}`,
+              backgroundColor: themeColors.lighterBlue,
+              px: 2,
+            }}
+          >
+            <ListItemText
+              primary="Cold Storage"
+              primaryTypographyProps={{
+                fontSize: '14px',
+                fontWeight: 'bold',
+                color: themeColors.primary,
+              }}
+              sx={{ mr: 1 }}
+            />
+            {coldStorageOpen ? <ExpandLess sx={{ color: themeColors.primary }} /> : <ExpandMore sx={{ color: themeColors.primary }} />}
+          </ListItemButton>
+          <Collapse in={coldStorageOpen} timeout="auto" unmountOnExit>
+            <List component="div" disablePadding>
+              {coldStorageModules.map((module) => {
+                const isActive = location.pathname === module.path;
+                return (
+                  <ListItemButton
+                    key={module.name}
+                    component={Link}
+                    to={module.path}
+                    onClick={toggleDrawer}
+                    sx={{
+                      pl: 4,
+                      backgroundColor: isActive ? themeColors.primary : 'transparent',
+                      '&:hover': {
+                        backgroundColor: isActive ? themeColors.primary : themeColors.lightBlue,
+                      }
+                    }}
+                  >
+                    <ListItemText
+                      primary={module.name}
+                      primaryTypographyProps={{
+                        fontSize: '12px',
+                        fontWeight: isActive ? 'bold' : 'normal',
+                        color: isActive ? themeColors.white : themeColors.textPrimary,
+                      }}
+                    />
+                  </ListItemButton>
+                );
+              })}
             </List>
           </Collapse>
 

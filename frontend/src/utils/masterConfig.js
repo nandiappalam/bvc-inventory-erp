@@ -210,6 +210,17 @@ export const MASTER_CONFIG = {
         fields: [
           { name: 'godown_name', label: 'Godown Name', type: 'text', required: true },
           { name: 'print_name', label: 'Print Name', type: 'text' },
+          { name: 'godown_type', label: 'Godown Type', type: 'select', options: [{ label: 'Normal', value: 'Normal' }, { label: 'Cold Storage', value: 'Cold Storage' }], defaultValue: 'Normal' },
+          { name: 'storage_location', label: 'Storage Location', type: 'select', options: [{ label: 'Inside Factory', value: 'Inside Factory' }, { label: 'Outside Factory', value: 'Outside Factory' }], defaultValue: 'Inside Factory' },
+          { name: 'external_company', label: 'External Company Name', type: 'text' },
+        ]
+      },
+      {
+        title: 'Cold Storage Settings',
+        fields: [
+          { name: 'capacity', label: 'Capacity', type: 'number' },
+          { name: 'capacity_unit', label: 'Capacity Unit', type: 'select', options: [{ label: 'KG', value: 'KG' }, { label: 'Bags', value: 'Bags' }, { label: 'Tons', value: 'Tons' }], defaultValue: 'KG' },
+          { name: 'temperature_range', label: 'Temperature Range', type: 'text' },
         ]
       },
       {

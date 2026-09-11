@@ -82,7 +82,7 @@ const TENANT_BUSINESS_TABLES = new Set([
   'grains', 'grain_input_items', 'grain_output_items', 'grain_wastage_items',
   'flour_out', 'flour_out_items', 'flour_out_returns', 'flour_out_return_items',
   'papad_in', 'papad_return', 'papad_company_master', 'papad_company_entry', 'papad_companies',
-  'godown_master', 'godown_transfers', 'item_transfers', 'item_master', 'item_groups',
+  'godown_master', 'godown_transfers', 'item_transfers', 'item_master', 'item_groups', 'cold_storage_vouchers', 'cold_storage_items', 'cold_storage_stock',
   'customer_master', 'supplier_master', 'employee_master', 'flour_mill_master', 'city_master', 'area_master',
   'transport_master', 'tax_master', 'qc_inspections', 'qc_inspection_params', 'qc_approval_history',
   'incoming_quality_reports', 'compliance_documents', 'compliance_production_records', 'compliance_cleaning_records',

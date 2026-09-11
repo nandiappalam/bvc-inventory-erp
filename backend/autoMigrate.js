@@ -492,8 +492,10 @@ module.exports = async function autoMigrate() {
   await safeAddColumn('grain_input_items', 'wages_kg', 'REAL DEFAULT 0');
   await safeAddColumn('grain_input_items', 'total_wages', 'REAL DEFAULT 0');
 
-  await safeAddColumn('godown_master', 'godown_name', 'TEXT');
-  await safeAddColumn('godown_master', 'name', 'TEXT');
+  await safeAddColumn('godown_master', 'godown_type', "TEXT DEFAULT 'Normal'");
+  await safeAddColumn('godown_master', 'storage_location', "TEXT DEFAULT 'Inside Factory'");
+  await safeAddColumn('godown_master', 'external_company', 'TEXT');
+  await safeAddColumn('tax_master', 'tax_percent', 'REAL DEFAULT 0');
   await safeAddColumn('financial_years', 'is_current', 'INTEGER DEFAULT 0');
   await safeAddColumn('financial_years', 'is_active', 'INTEGER DEFAULT 0');
   await safeAddColumn('financial_years', 'financial_year', 'TEXT');
@@ -524,8 +526,9 @@ module.exports = async function autoMigrate() {
   await safeAddColumn('purchases', 'tax_percent', 'REAL DEFAULT 0');
   await safeAddColumn('purchases', 'deduction_amount', 'REAL DEFAULT 0');
 
-  await safeAddColumn('purchase_items', 'item_id', 'INTEGER');
-  await safeAddColumn('purchase_items', 'per_unit_weight', 'REAL DEFAULT 0');
+  await safeAddColumn('purchase_items', 'unit', "TEXT DEFAULT 'KG'");
+  await safeAddColumn('purchases', 'voucher_no', 'TEXT');
+  await safeAddColumn('purchases', 's_no', 'INTEGER DEFAULT 1');
   await safeAddColumn('purchase_items', 'total_weight', 'REAL DEFAULT 0');
   await safeAddColumn('purchase_items', 'disc_amount', 'REAL DEFAULT 0');
   await safeAddColumn('purchase_items', 'tax_amount', 'REAL DEFAULT 0');

@@ -168,6 +168,15 @@ import ReportPage from './components/ReportPage'
 import VehicleCreate from './modules/vehicle/VehicleCreate'
 import VehicleList from './modules/vehicle/VehicleList'
 
+// Cold Storage Module Pages
+import ColdStorageIn from './components/coldStorage/ColdStorageIn'
+import ColdStorageOut from './components/coldStorage/ColdStorageOut'
+import ColdStorageStock from './components/coldStorage/ColdStorageStock'
+import ColdStorageVouchers from './components/coldStorage/ColdStorageVouchers'
+import ColdStorageLedger from './components/coldStorage/ColdStorageLedger'
+import ColdStorageTraceability from './components/coldStorage/ColdStorageTraceability'
+import ColdStorageMaster from './components/coldStorage/ColdStorageMaster'
+
 // Reports
 import { 
   ReportsIndex,
@@ -421,6 +430,18 @@ const AppLayout = () => {
           {/* Vehicle Movement - NEW */}
           <Route path="/entry/vehicle-movement-create" element={<VehicleCreate />} />
           <Route path="/entry/vehicle-movement-display" element={<VehicleList />} />
+
+          {/* Cold Storage Module Routes */}
+          <Route path="/cold-storage/in" element={<ColdStorageIn />} />
+          <Route path="/cold-storage/out" element={<ColdStorageOut />} />
+          <Route path="/cold-storage/stock" element={<ColdStorageStock />} />
+          <Route path="/cold-storage/vouchers" element={<ColdStorageVouchers />} />
+          <Route path="/cold-storage/ledger" element={<ColdStorageLedger />} />
+          <Route path="/cold-storage/traceability" element={<ColdStorageTraceability />} />
+          <Route path="/cold-storage/master" element={<ColdStorageMaster />} />
+          <Route path="/entry/cold-storage-in-create" element={<ColdStorageIn />} />
+          <Route path="/entry/cold-storage-out-create" element={<ColdStorageOut />} />
+          <Route path="/entry/cold-storage-display" element={<ColdStorageVouchers />} />
 
           {/* Master Routes — All routed through dynamic config-driven components */}
           <Route path="/entry/item-create" element={<DynamicMasterForm configKey="item" key="item" />} />

@@ -122,6 +122,7 @@ app.use('/api/cheque-printing', require('./routes/chequePrinting'))
 
 app.use('/api/stock', stockRouter)
 app.use('/api/godowns', require('./routes/godowns'))
+app.use('/api/cold-storage', require('./routes/coldStorage'))
 app.use('/api/item-transfers', require('./routes/itemTransfers'))
 app.use('/api/godown-transfers', require('./routes/godownTransfers'))
 app.use('/api/reports', reportsRouter)
