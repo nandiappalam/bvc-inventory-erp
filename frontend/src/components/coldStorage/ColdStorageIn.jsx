@@ -262,7 +262,7 @@ const ColdStorageIn = () => {
   const totalWtSum = items.reduce((sum, i) => sum + parseFloat(i.total_wt || 0), 0);
 
   return (
-    <Box sx={{ p: 3, maxWidth: 1200, margin: '0 auto' }}>
+    <Box sx={{ p: { xs: 2, md: 3 }, width: '100%', maxWidth: '100%', margin: '0 auto' }}>
       {/* Header */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
@@ -296,11 +296,11 @@ const ColdStorageIn = () => {
         <form onSubmit={handleSubmit}>
           {/* Main Info Card */}
           <Card sx={{ mb: 3, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
-            <CardContent>
+            <CardContent sx={{ p: 3 }}>
               <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 2, color: '#2a5ea0' }}>
                 Storage Location & Transfer Details
               </Typography>
-              <Grid container spacing={2}>
+              <Grid container spacing={2.5}>
                 <Grid item xs={12} sm={3}>
                   <TextField
                     fullWidth
@@ -314,7 +314,7 @@ const ColdStorageIn = () => {
                   />
                 </Grid>
 
-                <Grid item xs={12} sm={4}>
+                <Grid item xs={12} sm={4.5}>
                   <TextField
                     fullWidth
                     select
@@ -332,7 +332,7 @@ const ColdStorageIn = () => {
                   </TextField>
                 </Grid>
 
-                <Grid item xs={12} sm={5}>
+                <Grid item xs={12} sm={4.5}>
                   <TextField
                     fullWidth
                     size="small"
@@ -359,7 +359,7 @@ const ColdStorageIn = () => {
 
           {/* Items Table Card */}
           <Card sx={{ mb: 3, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
-            <CardContent>
+            <CardContent sx={{ p: { xs: 2, md: 3 } }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                 <Typography variant="subtitle1" sx={{ fontWeight: 'bold', color: '#2a5ea0' }}>
                   Material & Lot Selection
@@ -369,28 +369,30 @@ const ColdStorageIn = () => {
                 </Button>
               </Box>
 
-              <TableContainer component={Paper} variant="outlined">
-                <Table size="small">
+              <TableContainer component={Paper} variant="outlined" sx={{ overflowX: 'auto', borderRadius: 1.5 }}>
+                <Table sx={{ minWidth: 1250, '& .MuiTableCell-root': { py: 1, px: 1 } }}>
                   <TableHead sx={{ backgroundColor: '#f0f4fa' }}>
                     <TableRow>
-                      <TableCell sx={{ fontWeight: 'bold' }}>#</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold', width: '280px' }}>Purchase Lot & Item</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold' }}>Purchase Lot #</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold' }}>Cold Storage Lot #</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold', width: '110px' }}>Inward Qty</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold', width: '90px' }}>Per Wt</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold', width: '110px' }}>Total Wt</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold', width: '80px' }}>Unit</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold' }}>Item Remarks</TableCell>
-                      <TableCell align="center" sx={{ fontWeight: 'bold' }}>Action</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', width: 45, textAlign: 'center' }}>#</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', minWidth: 280, width: 320 }}>Purchase Lot & Item</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', minWidth: 150, width: 170 }}>Purchase Lot #</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', minWidth: 150, width: 170 }}>Cold Storage Lot #</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', minWidth: 120, width: 135 }}>Inward Qty</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', minWidth: 100, width: 110 }}>Per Wt</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', minWidth: 120, width: 135 }}>Total Wt</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', minWidth: 90, width: 100 }}>Unit</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', minWidth: 160 }}>Item Remarks</TableCell>
+                      <TableCell align="center" sx={{ fontWeight: 'bold', width: 60 }}>Action</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     {items.map((row, idx) => {
                       const lotKey = row.item_name && row.purchase_lot_no ? `${row.item_name}_${row.purchase_lot_no}` : '';
                       return (
-                        <TableRow key={idx}>
-                          <TableCell>{idx + 1}</TableCell>
+                        <TableRow key={idx} sx={{ '&:hover': { backgroundColor: '#fbfcfd' } }}>
+                          <TableCell align="center" sx={{ fontWeight: '600', color: 'text.secondary' }}>
+                            {idx + 1}
+                          </TableCell>
                           
                           {/* Lot & Item Select */}
                           <TableCell>
@@ -400,7 +402,10 @@ const ColdStorageIn = () => {
                               size="small"
                               value={lotKey}
                               onChange={(e) => handleLotSelect(idx, e.target.value)}
-                              SelectProps={{ displayEmpty: true }}
+                              SelectProps={{ 
+                                displayEmpty: true,
+                                sx: { fontSize: '0.875rem' }
+                              }}
                             >
                               <MenuItem value="" disabled>-- Select Purchase Lot --</MenuItem>
                               {availableLots.map((l, lIdx) => (
@@ -418,6 +423,9 @@ const ColdStorageIn = () => {
                               value={row.purchase_lot_no}
                               onChange={(e) => handleItemChange(idx, 'purchase_lot_no', e.target.value)}
                               placeholder="Purchase Lot #"
+                              inputProps={{
+                                sx: { px: 1.25, py: 0.9, fontSize: '0.875rem' }
+                              }}
                             />
                           </TableCell>
 
@@ -428,6 +436,9 @@ const ColdStorageIn = () => {
                               value={row.cold_storage_lot_no}
                               onChange={(e) => handleItemChange(idx, 'cold_storage_lot_no', e.target.value)}
                               placeholder="e.g. CS-001"
+                              inputProps={{
+                                sx: { px: 1.25, py: 0.9, fontSize: '0.875rem', fontWeight: '500' }
+                              }}
                             />
                           </TableCell>
 
@@ -439,6 +450,10 @@ const ColdStorageIn = () => {
                               value={row.quantity}
                               onChange={(e) => handleItemChange(idx, 'quantity', e.target.value)}
                               placeholder="Qty"
+                              inputProps={{
+                                step: "any",
+                                sx: { px: 1.25, py: 0.9, fontSize: '0.875rem', fontWeight: '600' }
+                              }}
                             />
                           </TableCell>
 
@@ -449,6 +464,11 @@ const ColdStorageIn = () => {
                               type="number"
                               value={row.weight}
                               onChange={(e) => handleItemChange(idx, 'weight', e.target.value)}
+                              placeholder="1"
+                              inputProps={{
+                                step: "any",
+                                sx: { px: 1.25, py: 0.9, fontSize: '0.875rem' }
+                              }}
                             />
                           </TableCell>
 
@@ -459,6 +479,11 @@ const ColdStorageIn = () => {
                               type="number"
                               value={row.total_wt}
                               onChange={(e) => handleItemChange(idx, 'total_wt', e.target.value)}
+                              placeholder="0"
+                              inputProps={{
+                                step: "any",
+                                sx: { px: 1.25, py: 0.9, fontSize: '0.875rem', fontWeight: '600' }
+                              }}
                             />
                           </TableCell>
 
@@ -468,6 +493,10 @@ const ColdStorageIn = () => {
                               size="small"
                               value={row.unit}
                               onChange={(e) => handleItemChange(idx, 'unit', e.target.value)}
+                              placeholder="KG"
+                              inputProps={{
+                                sx: { px: 1.25, py: 0.9, fontSize: '0.875rem', textAlign: 'center' }
+                              }}
                             />
                           </TableCell>
 
@@ -478,6 +507,9 @@ const ColdStorageIn = () => {
                               value={row.remarks}
                               onChange={(e) => handleItemChange(idx, 'remarks', e.target.value)}
                               placeholder="Notes"
+                              inputProps={{
+                                sx: { px: 1.25, py: 0.9, fontSize: '0.875rem' }
+                              }}
                             />
                           </TableCell>
 
@@ -487,6 +519,7 @@ const ColdStorageIn = () => {
                               size="small" 
                               onClick={() => removeItemRow(idx)}
                               disabled={items.length === 1}
+                              title="Delete Row"
                             >
                               <DeleteIcon fontSize="small" />
                             </IconButton>

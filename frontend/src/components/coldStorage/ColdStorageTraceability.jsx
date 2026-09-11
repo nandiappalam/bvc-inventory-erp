@@ -57,7 +57,7 @@ const ColdStorageTraceability = () => {
   };
 
   return (
-    <Box sx={{ p: 3, maxWidth: 1300, margin: '0 auto' }}>
+    <Box sx={{ p: { xs: 2, md: 3 }, width: '100%', maxWidth: '100%', margin: '0 auto' }}>
       {/* Title */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
@@ -210,8 +210,8 @@ const ColdStorageTraceability = () => {
               <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1, color: '#1f4fb2' }}>
                 Cold Storage Sub-Lot Breakdown
               </Typography>
-              <TableContainer component={Paper} variant="outlined" sx={{ mb: 3 }}>
-                <Table size="small">
+              <TableContainer component={Paper} variant="outlined" sx={{ mb: 3, overflowX: 'auto' }}>
+                <Table size="small" sx={{ minWidth: 800 }}>
                   <TableHead sx={{ backgroundColor: '#f0f4fa' }}>
                     <TableRow>
                       <TableCell sx={{ fontWeight: 'bold' }}>#</TableCell>
@@ -245,8 +245,8 @@ const ColdStorageTraceability = () => {
               <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1, color: '#1f4fb2' }}>
                 Complete Voucher Audit Trail
               </Typography>
-              <TableContainer component={Paper} variant="outlined">
-                <Table size="small">
+              <TableContainer component={Paper} variant="outlined" sx={{ overflowX: 'auto' }}>
+                <Table size="small" sx={{ minWidth: 950 }}>
                   <TableHead sx={{ backgroundColor: '#f8fafc' }}>
                     <TableRow>
                       <TableCell sx={{ fontWeight: 'bold' }}>#</TableCell>

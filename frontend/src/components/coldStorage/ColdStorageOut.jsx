@@ -289,7 +289,7 @@ const ColdStorageOut = () => {
   const totalWtSum = items.reduce((sum, i) => sum + parseFloat(i.total_wt || 0), 0);
 
   return (
-    <Box sx={{ p: 3, maxWidth: 1200, margin: '0 auto' }}>
+    <Box sx={{ p: { xs: 2, md: 3 }, width: '100%', maxWidth: '100%', margin: '0 auto' }}>
       {/* Header */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
@@ -323,11 +323,11 @@ const ColdStorageOut = () => {
         <form onSubmit={handleSubmit}>
           {/* Main Info Card */}
           <Card sx={{ mb: 3, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
-            <CardContent>
+            <CardContent sx={{ p: 3 }}>
               <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 2, color: '#b45309' }}>
                 Cold Storage Source & Destination Details
               </Typography>
-              <Grid container spacing={2}>
+              <Grid container spacing={2.5}>
                 <Grid item xs={12} sm={3}>
                   <TextField
                     fullWidth
@@ -341,7 +341,7 @@ const ColdStorageOut = () => {
                   />
                 </Grid>
 
-                <Grid item xs={12} sm={4}>
+                <Grid item xs={12} sm={4.5}>
                   <TextField
                     fullWidth
                     select
@@ -359,7 +359,7 @@ const ColdStorageOut = () => {
                   </TextField>
                 </Grid>
 
-                <Grid item xs={12} sm={5}>
+                <Grid item xs={12} sm={4.5}>
                   <TextField
                     fullWidth
                     size="small"
@@ -386,7 +386,7 @@ const ColdStorageOut = () => {
 
           {/* Items Table Card */}
           <Card sx={{ mb: 3, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
-            <CardContent>
+            <CardContent sx={{ p: { xs: 2, md: 3 } }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                 <Typography variant="subtitle1" sx={{ fontWeight: 'bold', color: '#b45309' }}>
                   Stored Material & Cold Storage Lot Selection
@@ -402,20 +402,20 @@ const ColdStorageOut = () => {
                 </Alert>
               )}
 
-              <TableContainer component={Paper} variant="outlined">
-                <Table size="small">
+              <TableContainer component={Paper} variant="outlined" sx={{ overflowX: 'auto', borderRadius: 1.5 }}>
+                <Table sx={{ minWidth: 1250, '& .MuiTableCell-root': { py: 1, px: 1 } }}>
                   <TableHead sx={{ backgroundColor: '#fffbe3' }}>
                     <TableRow>
-                      <TableCell sx={{ fontWeight: 'bold' }}>#</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold', width: '280px' }}>Cold Storage Lot & Item</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold' }}>Purchase Lot #</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold' }}>Avail Stock in CS</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold', width: '110px' }}>Issue Qty</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold', width: '90px' }}>Per Wt</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold', width: '110px' }}>Total Wt</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold', width: '80px' }}>Unit</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold' }}>Item Remarks</TableCell>
-                      <TableCell align="center" sx={{ fontWeight: 'bold' }}>Action</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', width: 45, textAlign: 'center' }}>#</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', minWidth: 280, width: 320 }}>Cold Storage Lot & Item</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', minWidth: 140, width: 160 }}>Purchase Lot #</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', minWidth: 130, width: 150 }}>Avail Stock in CS</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', minWidth: 120, width: 135 }}>Issue Qty</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', minWidth: 100, width: 110 }}>Per Wt</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', minWidth: 120, width: 135 }}>Total Wt</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', minWidth: 90, width: 100 }}>Unit</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', minWidth: 160 }}>Item Remarks</TableCell>
+                      <TableCell align="center" sx={{ fontWeight: 'bold', width: 60 }}>Action</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -424,8 +424,10 @@ const ColdStorageOut = () => {
                       const isExcess = parseFloat(row.quantity || 0) > row.avail_in_cs;
 
                       return (
-                        <TableRow key={idx} sx={{ backgroundColor: isExcess ? '#fff1f2' : 'inherit' }}>
-                          <TableCell>{idx + 1}</TableCell>
+                        <TableRow key={idx} sx={{ backgroundColor: isExcess ? '#fff1f2' : 'inherit', '&:hover': { backgroundColor: isExcess ? '#ffe4e6' : '#fffdf5' } }}>
+                          <TableCell align="center" sx={{ fontWeight: '600', color: 'text.secondary' }}>
+                            {idx + 1}
+                          </TableCell>
                           
                           {/* CS Lot & Item Select */}
                           <TableCell>
@@ -435,7 +437,10 @@ const ColdStorageOut = () => {
                               size="small"
                               value={csLotKey}
                               onChange={(e) => handleCsLotSelect(idx, e.target.value)}
-                              SelectProps={{ displayEmpty: true }}
+                              SelectProps={{ 
+                                displayEmpty: true,
+                                sx: { fontSize: '0.875rem' }
+                              }}
                             >
                               <MenuItem value="" disabled>-- Select CS Stored Lot --</MenuItem>
                               {csLots.map((l, lIdx) => (
@@ -447,9 +452,11 @@ const ColdStorageOut = () => {
                           </TableCell>
 
                           <TableCell>
-                            <Typography variant="body2" sx={{ fontWeight: '500' }}>
-                              {row.purchase_lot_no || 'N/A'}
-                            </Typography>
+                            <Box sx={{ px: 1, py: 0.5, backgroundColor: '#f8fafc', borderRadius: 1, border: '1px solid #e2e8f0' }}>
+                              <Typography variant="body2" sx={{ fontWeight: '600', color: '#334155' }}>
+                                {row.purchase_lot_no || '—'}
+                              </Typography>
+                            </Box>
                           </TableCell>
 
                           <TableCell>
@@ -458,6 +465,7 @@ const ColdStorageOut = () => {
                               color={row.avail_in_cs > 0 ? 'success' : 'default'} 
                               size="small" 
                               variant="outlined" 
+                              sx={{ fontWeight: 'bold' }}
                             />
                           </TableCell>
 
@@ -471,6 +479,10 @@ const ColdStorageOut = () => {
                               error={isExcess}
                               helperText={isExcess ? 'Exceeds stock!' : ''}
                               placeholder="Qty"
+                              inputProps={{
+                                step: "any",
+                                sx: { px: 1.25, py: 0.9, fontSize: '0.875rem', fontWeight: '600' }
+                              }}
                             />
                           </TableCell>
 
@@ -481,6 +493,11 @@ const ColdStorageOut = () => {
                               type="number"
                               value={row.weight}
                               onChange={(e) => handleItemChange(idx, 'weight', e.target.value)}
+                              placeholder="1"
+                              inputProps={{
+                                step: "any",
+                                sx: { px: 1.25, py: 0.9, fontSize: '0.875rem' }
+                              }}
                             />
                           </TableCell>
 
@@ -491,6 +508,11 @@ const ColdStorageOut = () => {
                               type="number"
                               value={row.total_wt}
                               onChange={(e) => handleItemChange(idx, 'total_wt', e.target.value)}
+                              placeholder="0"
+                              inputProps={{
+                                step: "any",
+                                sx: { px: 1.25, py: 0.9, fontSize: '0.875rem', fontWeight: '600' }
+                              }}
                             />
                           </TableCell>
 
@@ -500,6 +522,10 @@ const ColdStorageOut = () => {
                               size="small"
                               value={row.unit}
                               onChange={(e) => handleItemChange(idx, 'unit', e.target.value)}
+                              placeholder="KG"
+                              inputProps={{
+                                sx: { px: 1.25, py: 0.9, fontSize: '0.875rem', textAlign: 'center' }
+                              }}
                             />
                           </TableCell>
 
@@ -510,6 +536,9 @@ const ColdStorageOut = () => {
                               value={row.remarks}
                               onChange={(e) => handleItemChange(idx, 'remarks', e.target.value)}
                               placeholder="Notes"
+                              inputProps={{
+                                sx: { px: 1.25, py: 0.9, fontSize: '0.875rem' }
+                              }}
                             />
                           </TableCell>
 
@@ -519,6 +548,7 @@ const ColdStorageOut = () => {
                               size="small" 
                               onClick={() => removeItemRow(idx)}
                               disabled={items.length === 1}
+                              title="Delete Row"
                             >
                               <DeleteIcon fontSize="small" />
                             </IconButton>

@@ -93,7 +93,7 @@ const ColdStorageLedger = () => {
   };
 
   return (
-    <Box sx={{ p: 3, maxWidth: 1300, margin: '0 auto' }}>
+    <Box sx={{ p: { xs: 2, md: 3 }, width: '100%', maxWidth: '100%', margin: '0 auto' }}>
       {/* Title */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
@@ -214,8 +214,8 @@ const ColdStorageLedger = () => {
               <Typography color="text.secondary">No ledger transaction history found for selected criteria.</Typography>
             </Box>
           ) : (
-            <TableContainer component={Paper} elevation={0}>
-              <Table size="small">
+            <TableContainer component={Paper} elevation={0} sx={{ overflowX: 'auto' }}>
+              <Table size="small" sx={{ minWidth: 1150 }}>
                 <TableHead sx={{ backgroundColor: '#1f4fb2' }}>
                   <TableRow>
                     <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>#</TableCell>
