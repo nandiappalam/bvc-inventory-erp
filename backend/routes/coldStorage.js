@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
+const { rebuildStockLedger } = require('../utils/stockRebuilder');
 
 // Initialize cold storage tables if not created
 const initTables = async () => {
@@ -119,6 +120,8 @@ router.get('/available-lots', async (req, res) => {
           COALESCE(p.godown, 'Main Godown') AS current_godown,
           SUM(pi.qty) AS purchased_qty,
           SUM(COALESCE(pi.total_wt, pi.qty * COALESCE(pi.weight, 0), pi.qty)) AS total_weight,
+          COALESCE(NULLIF(MAX(pi.weight), 0), NULLIF(MAX(pi.per_unit_weight), 0), 1) AS weight,
+          COALESCE(NULLIF(MAX(pi.weight), 0), NULLIF(MAX(pi.per_unit_weight), 0), 1) AS per_weight,
           COALESCE(pi.unit, 'KG') AS unit
         FROM purchase_items pi
         LEFT JOIN purchases p ON pi.purchase_id = p.id
@@ -136,6 +139,8 @@ router.get('/available-lots', async (req, res) => {
             'Main Godown' AS current_godown,
             SUM(pi.qty) AS purchased_qty,
             SUM(pi.qty) AS total_weight,
+            1 AS weight,
+            1 AS per_weight,
             'KG' AS unit
           FROM purchase_items pi
           WHERE pi.lot_no IS NOT NULL AND pi.lot_no != ''
@@ -174,8 +179,11 @@ router.get('/available-lots', async (req, res) => {
       const movedToCS = csInMap[key] || 0;
       const total = parseFloat(r.purchased_qty || 0);
       const availInMain = Math.max(0, total - movedToCS);
+      const perWt = parseFloat(r.weight || r.per_weight || (r.total_weight && total ? (r.total_weight / total) : 1)) || 1;
       return {
         ...r,
+        weight: perWt,
+        per_weight: perWt,
         moved_to_cs_qty: movedToCS,
         available_qty: availInMain
       };
@@ -204,6 +212,8 @@ router.get('/stock', async (req, res) => {
         SUM(CASE WHEN csv.voucher_type = 'OUT' THEN csi.quantity ELSE 0 END) AS out_qty,
         SUM(CASE WHEN csv.voucher_type = 'IN' THEN csi.total_wt ELSE 0 END) AS in_wt,
         SUM(CASE WHEN csv.voucher_type = 'OUT' THEN csi.total_wt ELSE 0 END) AS out_wt,
+        COALESCE(NULLIF(MAX(csi.weight), 0), 1) AS weight,
+        COALESCE(NULLIF(MAX(csi.weight), 0), 1) AS per_weight,
         csi.unit
       FROM cold_storage_items csi
       JOIN cold_storage_vouchers csv ON csi.voucher_id = csv.id
@@ -213,11 +223,12 @@ router.get('/stock', async (req, res) => {
 
     if (cold_storage_id) {
       params.push(cold_storage_id);
-      query += ` AND csv.cold_storage_id = $${params.length}`;
+      query += ` AND (csv.cold_storage_id = ? OR CAST(csv.cold_storage_id AS TEXT) = ?)`;
+      params.push(String(cold_storage_id));
     }
     if (item_name) {
       params.push(item_name);
-      query += ` AND csi.item_name = $${params.length}`;
+      query += ` AND csi.item_name = ?`;
     }
 
     query += `
@@ -234,6 +245,7 @@ router.get('/stock', async (req, res) => {
       const inWt = parseFloat(r.in_wt || 0);
       const outWt = parseFloat(r.out_wt || 0);
       const availWt = inWt - outWt;
+      const perWt = parseFloat(r.weight || (availQty > 0 ? availWt / availQty : 1)) || 1;
 
       return {
         ...r,
@@ -243,6 +255,8 @@ router.get('/stock', async (req, res) => {
         in_wt: inWt,
         out_wt: outWt,
         available_wt: availWt,
+        weight: perWt,
+        per_weight: perWt,
       };
     }).filter(r => {
       if (search) {
@@ -282,17 +296,31 @@ router.get('/cs-lots', async (req, res) => {
         SUM(CASE WHEN csv.voucher_type = 'OUT' THEN csi.quantity ELSE 0 END) AS available_qty,
         SUM(CASE WHEN csv.voucher_type = 'IN' THEN csi.total_wt ELSE 0 END) - 
         SUM(CASE WHEN csv.voucher_type = 'OUT' THEN csi.total_wt ELSE 0 END) AS available_wt,
+        COALESCE(NULLIF(MAX(csi.weight), 0), 1) AS weight,
+        COALESCE(NULLIF(MAX(csi.weight), 0), 1) AS per_weight,
         csi.unit
       FROM cold_storage_items csi
       JOIN cold_storage_vouchers csv ON csi.voucher_id = csv.id
-      WHERE csv.cold_storage_id = ?
+      WHERE csv.cold_storage_id = ? OR CAST(csv.cold_storage_id AS TEXT) = ?
       GROUP BY csi.item_name, csi.purchase_lot_no, csi.cold_storage_lot_no, csv.cold_storage_id, csv.cold_storage_name, csi.unit
       HAVING (SUM(CASE WHEN csv.voucher_type = 'IN' THEN csi.quantity ELSE 0 END) - SUM(CASE WHEN csv.voucher_type = 'OUT' THEN csi.quantity ELSE 0 END)) > 0
       ORDER BY csi.item_name, csi.cold_storage_lot_no
     `;
 
-    const result = await db.query(query, [cold_storage_id]);
-    res.json({ success: true, data: result.rows || [] });
+    const result = await db.query(query, [cold_storage_id, String(cold_storage_id)]);
+    const formatted = (result.rows || []).map(r => {
+      const availQty = parseFloat(r.available_qty || 0);
+      const availWt = parseFloat(r.available_wt || 0);
+      const perWt = parseFloat(r.weight || r.per_weight || (availQty > 0 ? (availWt / availQty) : 1)) || 1;
+      return {
+        ...r,
+        available_qty: availQty,
+        available_wt: availWt,
+        weight: perWt,
+        per_weight: perWt
+      };
+    });
+    res.json({ success: true, data: formatted });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -410,6 +438,12 @@ router.post('/in', async (req, res) => {
         item.unit || 'KG',
         item.remarks || ''
       ]);
+    }
+
+    try {
+      await rebuildStockLedger();
+    } catch (rErr) {
+      console.warn('Rebuild ledger after CS IN warning:', rErr.message);
     }
 
     res.json({ success: true, message: `Cold Storage IN Voucher ${voucher_no} saved successfully`, voucher_no, id: voucher_id });
@@ -547,6 +581,12 @@ router.post('/out', async (req, res) => {
       ]);
     }
 
+    try {
+      await rebuildStockLedger();
+    } catch (rErr) {
+      console.warn('Rebuild ledger after CS OUT warning:', rErr.message);
+    }
+
     res.json({ success: true, message: `Cold Storage OUT Voucher ${voucher_no} issued successfully`, voucher_no, id: voucher_id });
   } catch (err) {
     console.error('Error saving Cold Storage OUT:', err);
@@ -616,6 +656,11 @@ router.delete('/vouchers/:id', async (req, res) => {
     const { id } = req.params;
     await db.query(`DELETE FROM cold_storage_items WHERE voucher_id = ?`, [id]);
     await db.query(`DELETE FROM cold_storage_vouchers WHERE id = ?`, [id]);
+    try {
+      await rebuildStockLedger();
+    } catch (rErr) {
+      console.warn('Rebuild ledger after CS delete warning:', rErr.message);
+    }
     res.json({ success: true, message: 'Voucher deleted successfully' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });

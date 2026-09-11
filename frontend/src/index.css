@@ -97,32 +97,46 @@ button.action-btn.warning {
     margin: 8mm 10mm;
   }
   
-  html, body, #root {
+  html, body, #root, #root > *, main, 
+  .MuiBox-root, .MuiContainer-root, .MuiPaper-root, 
+  .MuiCard-root, .MuiCardContent-root, .MuiTableContainer-root, 
+  .table-container, table, tbody, tr, td, th {
     height: auto !important;
-    min-height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
     overflow: visible !important;
     background: #ffffff !important;
     color: #000000 !important;
-    width: 100% !important;
     position: static !important;
+    float: none !important;
+    box-shadow: none !important;
+    transform: none !important;
   }
 
-  /* Universal hide for navigation, sidebars, and action toolbars during print */
+  body {
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+  }
+
+  /* Universal hide for navigation, sidebars, action toolbars, and buttons during print */
   .no-print,
   .erp-sidebar,
   .erp-navbar,
   nav,
   aside,
+  header,
   .MuiAppBar-root,
   .MuiDrawer-root,
-  button.action-btn,
+  .MuiBackdrop-root,
+  .MuiDialogActions-root,
+  .MuiPagination-root,
+  button,
   .action-btn,
   .report-filters,
-  .summary-cards,
   .erp-bottom-bar,
   .action-bar,
-  .btn-print,
-  button[type="button"].no-print {
+  .btn-print {
     display: none !important;
   }
 
@@ -131,10 +145,42 @@ button.action-btn.warning {
     display: none !important;
   }
 
+  /* If a MUI Dialog is open, make sure it renders clean and unclipped */
+  .MuiDialog-container {
+    position: static !important;
+    display: block !important;
+    width: 100% !important;
+    height: auto !important;
+  }
+
+  .MuiDialog-paper {
+    position: static !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    overflow: visible !important;
+  }
+
+  /* Table layout for print */
   table {
     width: 100% !important;
+    max-width: 100% !important;
     border-collapse: collapse !important;
     page-break-inside: auto !important;
+    font-size: 11px !important;
+  }
+
+  th, td {
+    border: 1px solid #cbd5e1 !important;
+    padding: 5px 8px !important;
+    color: #0f172a !important;
+  }
+
+  th {
+    background-color: #f1f5f9 !important;
+    font-weight: 700 !important;
   }
 
   tr {

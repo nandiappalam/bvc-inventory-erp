@@ -132,15 +132,20 @@ const ColdStorageIn = () => {
     if (selectedLot) {
       const updated = [...items];
       const autoCsLot = `CS-${selectedLot.purchase_lot_no}`;
+      const lotWeight = parseFloat(selectedLot.weight || selectedLot.per_weight || (selectedLot.total_weight && selectedLot.purchased_qty ? (selectedLot.total_weight / selectedLot.purchased_qty) : 1)) || 1;
+      const initialQty = selectedLot.available_qty > 0 ? selectedLot.available_qty : '';
+      const initialTotalWt = initialQty !== '' ? (parseFloat(initialQty) * lotWeight).toFixed(2) : '';
+      
       updated[index] = {
         ...updated[index],
         item_name: selectedLot.item_name,
         purchase_lot_no: selectedLot.purchase_lot_no,
         cold_storage_lot_no: autoCsLot,
         unit: selectedLot.unit || 'KG',
+        weight: String(lotWeight),
         avail_in_main: selectedLot.available_qty,
-        quantity: selectedLot.available_qty > 0 ? selectedLot.available_qty : '',
-        total_wt: selectedLot.available_qty > 0 ? selectedLot.available_qty : ''
+        quantity: initialQty,
+        total_wt: initialTotalWt
       };
       setItems(updated);
     }

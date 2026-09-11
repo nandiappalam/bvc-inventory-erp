@@ -363,6 +363,7 @@ export function printHtml(html, title = "Print Document", options = {}) {
     if (container && container.parentNode) container.remove();
     if (style && style.parentNode) style.remove();
     document.removeEventListener("keydown", handleKeyDown);
+    window.removeEventListener("afterprint", cleanup);
   };
 
   const handleKeyDown = (e) => {
@@ -398,6 +399,7 @@ export function printHtml(html, title = "Print Document", options = {}) {
   });
 
   document.addEventListener("keydown", handleKeyDown);
+  window.addEventListener("afterprint", cleanup);
 
   // Auto-trigger print dialog after small render delay
   setTimeout(handlePrintTrigger, 350);

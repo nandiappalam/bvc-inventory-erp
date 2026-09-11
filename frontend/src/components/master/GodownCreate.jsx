@@ -16,7 +16,16 @@ const GodownCreate = () => {
   const [messageType, setMessageType] = useState('success');
 
   const handleChange = (name, value) => {
-    setFormData(prev => ({ ...prev, [name]: value }));
+    setFormData(prev => {
+      const updated = { ...prev, [name]: value };
+      if (name === 'godown_type' && value !== 'Cold Storage') {
+        updated.external_company = '';
+        updated.capacity = '';
+        updated.capacity_unit = 'KG';
+        updated.temperature_range = '';
+      }
+      return updated;
+    });
   };
 
   useEffect(() => {
@@ -94,18 +103,28 @@ const GodownCreate = () => {
     <MasterFormLayout title="Godown Creation" onSave={handleSubmit} onCancel={handleCancel}>
       {message && <div className={`message ${messageType}`}>{message}</div>}
 
-      {sections.map((section, secIndex) => (
-        <FormSection key={secIndex} title={section.title}>
-          {safeArray(section.fields).map((field, fieldIndex) => (
-            <SmartField 
-              key={fieldIndex} 
-              field={field} 
-              value={formData[field.name]} 
-              onChange={handleChange} 
-            />
-          ))}
-        </FormSection>
-      ))}
+      {sections.map((section, secIndex) => {
+        if (section.dependsOn && formData[section.dependsOn.field] !== section.dependsOn.value) {
+          return null;
+        }
+        return (
+          <FormSection key={secIndex} title={section.title}>
+            {safeArray(section.fields).map((field, fieldIndex) => {
+              if (field.dependsOn && formData[field.dependsOn.field] !== field.dependsOn.value) {
+                return null;
+              }
+              return (
+                <SmartField 
+                  key={fieldIndex} 
+                  field={field} 
+                  value={formData[field.name]} 
+                  onChange={handleChange} 
+                />
+              );
+            })}
+          </FormSection>
+        );
+      })}
     </MasterFormLayout>
   );
 };

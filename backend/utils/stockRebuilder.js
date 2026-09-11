@@ -83,6 +83,30 @@ async function rebuildStockLedger() {
       `);
     } catch (e) {}
 
+    // H. Cold Storage IN (Inflow into Cold Storage Facility)
+    let coldStorageIns = { rows: [] };
+    try {
+      coldStorageIns = await db.query(`
+        SELECT csi.*, csv.voucher_date as date, csv.id as voucher_id, csv.cold_storage_id, csv.cold_storage_name, csv.source_godown_id, csv.source_godown_name
+        FROM cold_storage_items csi
+        JOIN cold_storage_vouchers csv ON csi.voucher_id = csv.id
+        WHERE csv.voucher_type = 'IN'
+        ORDER BY csv.voucher_date ASC, csi.id ASC
+      `);
+    } catch (e) {}
+
+    // I. Cold Storage OUT (Return / Inflow into Destination Godown)
+    let coldStorageOuts = { rows: [] };
+    try {
+      coldStorageOuts = await db.query(`
+        SELECT csi.*, csv.voucher_date as date, csv.id as voucher_id, csv.cold_storage_id, csv.cold_storage_name, csv.destination_godown_id, csv.destination_godown_name
+        FROM cold_storage_items csi
+        JOIN cold_storage_vouchers csv ON csi.voucher_id = csv.id
+        WHERE csv.voucher_type = 'OUT'
+        ORDER BY csv.voucher_date ASC, csi.id ASC
+      `);
+    } catch (e) {}
+
     // Map of lots: key = UPPER(itemName):::UPPER(lotNo)
     const lotMap = new Map();
 
@@ -216,6 +240,65 @@ async function rebuildStockLedger() {
         INSERT INTO stock (date, item_name, lot_no, qty, weight, rate, amount, type, reference_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, 'Sales Return', ?)
       `, [row.date, row.item_name, row.lot_no || '', qty, wt, row.rate || 0, row.total_amt || 0, row.sales_return_id]);
+    }
+
+    // Process Cold Storage IN (Inflow to Cold Storage)
+    for (const row of coldStorageIns.rows) {
+      if (!row.item_name) continue;
+      const qty = parseFloat(row.quantity) || 0;
+      const wt = parseFloat(row.total_wt) || (qty * (parseFloat(row.weight) || 1));
+      const godownId = row.cold_storage_id || null;
+      const godownName = row.cold_storage_name || 'Cold Storage';
+      getOrCreateLot(row.item_name, row.cold_storage_lot_no, qty, 0, row.date, 'Cold Storage IN', row.voucher_id, godownId);
+      await db.run(`
+        INSERT INTO stock (date, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, godown_id)
+        VALUES (?, ?, ?, ?, ?, 0, 0, 'Cold Storage IN', ?, ?, ?)
+      `, [row.date, row.item_name, row.cold_storage_lot_no || '', qty, wt, row.voucher_id, godownName, godownId]);
+
+      // Deduct from source purchase lot
+      if (row.purchase_lot_no) {
+        const srcKey = `${row.item_name.trim().toUpperCase()}:::${row.purchase_lot_no.trim().toUpperCase()}`;
+        if (lotMap.has(srcKey)) {
+          const srcLot = lotMap.get(srcKey);
+          srcLot.remaining_quantity = Math.max(0, srcLot.remaining_quantity - qty);
+        }
+        const srcGodownName = row.source_godown_name || 'Main Godown';
+        const srcGodownId = row.source_godown_id || 1;
+        await db.run(`
+          INSERT INTO stock (date, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, godown_id)
+          VALUES (?, ?, ?, ?, ?, 0, 0, 'Cold Storage Transfer', ?, ?, ?)
+        `, [row.date, row.item_name, row.purchase_lot_no, -qty, -wt, row.voucher_id, srcGodownName, srcGodownId]);
+      }
+    }
+
+    // Process Cold Storage OUT (Return / Inflow into Destination Godown)
+    for (const row of coldStorageOuts.rows) {
+      if (!row.item_name) continue;
+      const qty = parseFloat(row.quantity) || 0;
+      const wt = parseFloat(row.total_wt) || (qty * (parseFloat(row.weight) || 1));
+      const destGodownId = row.destination_godown_id || 1;
+      const destGodownName = row.destination_godown_name || 'Main Godown';
+      const destLotNo = row.purchase_lot_no || row.cold_storage_lot_no;
+      getOrCreateLot(row.item_name, destLotNo, qty, 0, row.date, 'Cold Storage Return', row.voucher_id, destGodownId);
+      await db.run(`
+        INSERT INTO stock (date, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, godown_id)
+        VALUES (?, ?, ?, ?, ?, 0, 0, 'Cold Storage Return', ?, ?, ?)
+      `, [row.date, row.item_name, destLotNo, qty, wt, row.voucher_id, destGodownName, destGodownId]);
+
+      // Deduct from Cold Storage lot
+      if (row.cold_storage_lot_no) {
+        const csKey = `${row.item_name.trim().toUpperCase()}:::${row.cold_storage_lot_no.trim().toUpperCase()}`;
+        if (lotMap.has(csKey)) {
+          const csLot = lotMap.get(csKey);
+          csLot.remaining_quantity = Math.max(0, csLot.remaining_quantity - qty);
+        }
+        const csGodownName = row.cold_storage_name || 'Cold Storage';
+        const csGodownId = row.cold_storage_id || null;
+        await db.run(`
+          INSERT INTO stock (date, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, godown_id)
+          VALUES (?, ?, ?, ?, ?, 0, 0, 'Cold Storage OUT', ?, ?, ?)
+        `, [row.date, row.item_name, row.cold_storage_lot_no, -qty, -wt, row.voucher_id, csGodownName, csGodownId]);
+      }
     }
 
     // 3. Process Outflow Transactions
