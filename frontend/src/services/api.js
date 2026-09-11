@@ -66,6 +66,11 @@ export async function api(endpoint, options = {}) {
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
+      let formattedBody = undefined;
+      if (options.body !== undefined && options.body !== null) {
+        formattedBody = typeof options.body === 'string' ? options.body : JSON.stringify(options.body);
+      }
+
       const res = await fetch(url, {
         method: options.method || "GET",
         headers: {
@@ -73,7 +78,7 @@ export async function api(endpoint, options = {}) {
           ...authHeaders,
           ...(options.headers || {}),
         },
-        body: options.body ? JSON.stringify(options.body) : undefined,
+        body: formattedBody,
       });
 
       // If backend is still initializing (503 from proxy), retry if attempts remain

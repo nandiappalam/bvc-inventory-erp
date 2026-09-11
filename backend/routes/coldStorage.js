@@ -55,7 +55,7 @@ const getNextVoucherNo = async (type) => {
   const prefix = type === 'IN' ? 'CSI' : 'CSO';
   try {
     const res = await db.query(
-      `SELECT voucher_no FROM cold_storage_vouchers WHERE voucher_type = $1 ORDER BY id DESC LIMIT 1`,
+      `SELECT voucher_no FROM cold_storage_vouchers WHERE voucher_type = ? ORDER BY id DESC LIMIT 1`,
       [type]
     );
     let lastNum = 0;
@@ -285,7 +285,7 @@ router.get('/cs-lots', async (req, res) => {
         csi.unit
       FROM cold_storage_items csi
       JOIN cold_storage_vouchers csv ON csi.voucher_id = csv.id
-      WHERE csv.cold_storage_id = $1
+      WHERE csv.cold_storage_id = ?
       GROUP BY csi.item_name, csi.purchase_lot_no, csi.cold_storage_lot_no, csv.cold_storage_id, csv.cold_storage_name, csi.unit
       HAVING (SUM(CASE WHEN csv.voucher_type = 'IN' THEN csi.quantity ELSE 0 END) - SUM(CASE WHEN csv.voucher_type = 'OUT' THEN csi.quantity ELSE 0 END)) > 0
       ORDER BY csi.item_name, csi.cold_storage_lot_no
@@ -301,7 +301,13 @@ router.get('/cs-lots', async (req, res) => {
 // POST Cold Storage IN voucher
 router.post('/in', async (req, res) => {
   try {
-    const {
+    let body = req.body;
+    if (typeof body === 'string') {
+      try { body = JSON.parse(body); } catch (e) {}
+    }
+    body = body || {};
+
+    let {
       voucher_date,
       cold_storage_id,
       cold_storage_name,
@@ -309,9 +315,28 @@ router.post('/in', async (req, res) => {
       source_godown_name,
       remarks,
       items
-    } = req.body;
+    } = body;
 
-    if (!cold_storage_id || !cold_storage_name) {
+    // Resolve cold storage name if only ID provided or vice versa
+    if (!cold_storage_name && cold_storage_id) {
+      try {
+        const csRow = await db.query('SELECT godown_name FROM godown_master WHERE id = ?', [cold_storage_id]);
+        if (csRow.rows && csRow.rows.length > 0) {
+          cold_storage_name = csRow.rows[0].godown_name;
+        }
+      } catch (e) {}
+    }
+
+    if (!cold_storage_id && cold_storage_name) {
+      try {
+        const csRow = await db.query('SELECT id FROM godown_master WHERE godown_name = ?', [cold_storage_name]);
+        if (csRow.rows && csRow.rows.length > 0) {
+          cold_storage_id = csRow.rows[0].id;
+        }
+      } catch (e) {}
+    }
+
+    if (!cold_storage_name && !cold_storage_id) {
       return res.status(400).json({ success: false, message: 'Cold Storage location is required' });
     }
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -327,25 +352,30 @@ router.post('/in', async (req, res) => {
       total_wt += parseFloat(it.total_wt || (parseFloat(it.quantity || 0) * parseFloat(it.weight || 1)));
     });
 
+    const createdBy = body.created_by || (req.user && req.user.username) || 'Admin';
+
     const voucherRes = await db.query(`
       INSERT INTO cold_storage_vouchers 
       (voucher_no, voucher_type, voucher_date, cold_storage_id, cold_storage_name, source_godown_id, source_godown_name, remarks, total_qty, total_wt, created_by)
-      VALUES ($1, 'IN', $2, $3, $4, $5, $6, $7, $8, $9, $10)
-      RETURNING id
+      VALUES (?, 'IN', ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       voucher_no,
       voucher_date || new Date().toISOString().split('T')[0],
-      cold_storage_id,
-      cold_storage_name,
+      cold_storage_id || null,
+      cold_storage_name || 'Cold Storage',
       source_godown_id || null,
       source_godown_name || 'Main Godown',
       remarks || '',
       total_qty,
       total_wt,
-      req.body.created_by || 'Admin'
+      createdBy
     ]);
 
-    const voucher_id = voucherRes.rows?.[0]?.id || voucherRes.lastID || voucherRes.lastInsertRowid;
+    let voucher_id = voucherRes.rows?.[0]?.id || voucherRes.lastID || voucherRes.lastInsertRowid;
+    if (!voucher_id) {
+      const vLookup = await db.query(`SELECT id FROM cold_storage_vouchers WHERE voucher_no = ?`, [voucher_no]);
+      voucher_id = vLookup.rows?.[0]?.id || 1;
+    }
 
     // Generate CS lot number prefix
     const csLotRes = await db.query(`SELECT COUNT(*) as count FROM cold_storage_items WHERE cold_storage_lot_no IS NOT NULL`);
@@ -366,7 +396,7 @@ router.post('/in', async (req, res) => {
       await db.query(`
         INSERT INTO cold_storage_items 
         (voucher_id, voucher_no, item_id, item_name, purchase_lot_no, cold_storage_lot_no, quantity, weight, total_wt, unit, remarks)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
         voucher_id,
         voucher_no,
@@ -392,7 +422,13 @@ router.post('/in', async (req, res) => {
 // POST Cold Storage OUT voucher
 router.post('/out', async (req, res) => {
   try {
-    const {
+    let body = req.body;
+    if (typeof body === 'string') {
+      try { body = JSON.parse(body); } catch (e) {}
+    }
+    body = body || {};
+
+    let {
       voucher_date,
       cold_storage_id,
       cold_storage_name,
@@ -400,9 +436,28 @@ router.post('/out', async (req, res) => {
       destination_godown_name,
       remarks,
       items
-    } = req.body;
+    } = body;
 
-    if (!cold_storage_id || !cold_storage_name) {
+    // Resolve cold storage name if only ID provided or vice versa
+    if (!cold_storage_name && cold_storage_id) {
+      try {
+        const csRow = await db.query('SELECT godown_name FROM godown_master WHERE id = ?', [cold_storage_id]);
+        if (csRow.rows && csRow.rows.length > 0) {
+          cold_storage_name = csRow.rows[0].godown_name;
+        }
+      } catch (e) {}
+    }
+
+    if (!cold_storage_id && cold_storage_name) {
+      try {
+        const csRow = await db.query('SELECT id FROM godown_master WHERE godown_name = ?', [cold_storage_name]);
+        if (csRow.rows && csRow.rows.length > 0) {
+          cold_storage_id = csRow.rows[0].id;
+        }
+      } catch (e) {}
+    }
+
+    if (!cold_storage_name && !cold_storage_id) {
       return res.status(400).json({ success: false, message: 'Cold Storage location is required' });
     }
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -419,10 +474,10 @@ router.post('/out', async (req, res) => {
           SUM(CASE WHEN csv.voucher_type = 'OUT' THEN csi.quantity ELSE 0 END) AS available_qty
         FROM cold_storage_items csi
         JOIN cold_storage_vouchers csv ON csi.voucher_id = csv.id
-        WHERE csv.cold_storage_id = $1 
-          AND csi.item_name = $2 
-          AND csi.cold_storage_lot_no = $3
-      `, [cold_storage_id, item.item_name, item.cold_storage_lot_no]);
+        WHERE (csv.cold_storage_id = ? OR csv.cold_storage_name = ?)
+          AND csi.item_name = ? 
+          AND csi.cold_storage_lot_no = ?
+      `, [cold_storage_id || 0, cold_storage_name || '', item.item_name, item.cold_storage_lot_no]);
 
       const availQty = parseFloat((stockRes.rows[0] || {}).available_qty || 0);
 
@@ -443,25 +498,30 @@ router.post('/out', async (req, res) => {
       total_wt += parseFloat(it.total_wt || (parseFloat(it.quantity || 0) * parseFloat(it.weight || 1)));
     });
 
+    const createdBy = body.created_by || (req.user && req.user.username) || 'Admin';
+
     const voucherRes = await db.query(`
       INSERT INTO cold_storage_vouchers 
       (voucher_no, voucher_type, voucher_date, cold_storage_id, cold_storage_name, destination_godown_id, destination_godown_name, remarks, total_qty, total_wt, created_by)
-      VALUES ($1, 'OUT', $2, $3, $4, $5, $6, $7, $8, $9, $10)
-      RETURNING id
+      VALUES (?, 'OUT', ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       voucher_no,
       voucher_date || new Date().toISOString().split('T')[0],
-      cold_storage_id,
-      cold_storage_name,
+      cold_storage_id || null,
+      cold_storage_name || 'Cold Storage',
       destination_godown_id || null,
       destination_godown_name || 'Production / Main Godown',
       remarks || '',
       total_qty,
       total_wt,
-      req.body.created_by || 'Admin'
+      createdBy
     ]);
 
-    const voucher_id = voucherRes.rows?.[0]?.id || voucherRes.lastID || voucherRes.lastInsertRowid;
+    let voucher_id = voucherRes.rows?.[0]?.id || voucherRes.lastID || voucherRes.lastInsertRowid;
+    if (!voucher_id) {
+      const vLookup = await db.query(`SELECT id FROM cold_storage_vouchers WHERE voucher_no = ?`, [voucher_no]);
+      voucher_id = vLookup.rows?.[0]?.id || 1;
+    }
 
     for (const item of items) {
       const qty = parseFloat(item.quantity || 0);
@@ -471,7 +531,7 @@ router.post('/out', async (req, res) => {
       await db.query(`
         INSERT INTO cold_storage_items 
         (voucher_id, voucher_no, item_id, item_name, purchase_lot_no, cold_storage_lot_no, quantity, weight, total_wt, unit, remarks)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
         voucher_id,
         voucher_no,
@@ -503,19 +563,19 @@ router.get('/vouchers', async (req, res) => {
 
     if (voucher_type) {
       params.push(voucher_type.toUpperCase());
-      query += ` AND voucher_type = $${params.length}`;
+      query += ` AND voucher_type = ?`;
     }
     if (cold_storage_id) {
       params.push(cold_storage_id);
-      query += ` AND cold_storage_id = $${params.length}`;
+      query += ` AND cold_storage_id = ?`;
     }
     if (date_from) {
       params.push(date_from);
-      query += ` AND voucher_date >= $${params.length}`;
+      query += ` AND voucher_date >= ?`;
     }
     if (date_to) {
       params.push(date_to);
-      query += ` AND voucher_date <= $${params.length}`;
+      query += ` AND voucher_date <= ?`;
     }
 
     query += ` ORDER BY id DESC`;
@@ -531,12 +591,12 @@ router.get('/vouchers', async (req, res) => {
 router.get('/vouchers/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const vRes = await db.query(`SELECT * FROM cold_storage_vouchers WHERE id = $1`, [id]);
+    const vRes = await db.query(`SELECT * FROM cold_storage_vouchers WHERE id = ?`, [id]);
     if (!vRes.rows || vRes.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Voucher not found' });
     }
 
-    const itemsRes = await db.query(`SELECT * FROM cold_storage_items WHERE voucher_id = $1`, [id]);
+    const itemsRes = await db.query(`SELECT * FROM cold_storage_items WHERE voucher_id = ?`, [id]);
 
     res.json({
       success: true,
@@ -554,8 +614,8 @@ router.get('/vouchers/:id', async (req, res) => {
 router.delete('/vouchers/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    await db.query(`DELETE FROM cold_storage_items WHERE voucher_id = $1`, [id]);
-    await db.query(`DELETE FROM cold_storage_vouchers WHERE id = $1`, [id]);
+    await db.query(`DELETE FROM cold_storage_items WHERE voucher_id = ?`, [id]);
+    await db.query(`DELETE FROM cold_storage_vouchers WHERE id = ?`, [id]);
     res.json({ success: true, message: 'Voucher deleted successfully' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -591,27 +651,27 @@ router.get('/ledger', async (req, res) => {
 
     if (item_name) {
       params.push(item_name);
-      query += ` AND csi.item_name = $${params.length}`;
+      query += ` AND csi.item_name = ?`;
     }
     if (cold_storage_id) {
       params.push(cold_storage_id);
-      query += ` AND csv.cold_storage_id = $${params.length}`;
+      query += ` AND csv.cold_storage_id = ?`;
     }
     if (purchase_lot_no) {
       params.push(purchase_lot_no);
-      query += ` AND csi.purchase_lot_no = $${params.length}`;
+      query += ` AND csi.purchase_lot_no = ?`;
     }
     if (cold_storage_lot_no) {
       params.push(cold_storage_lot_no);
-      query += ` AND csi.cold_storage_lot_no = $${params.length}`;
+      query += ` AND csi.cold_storage_lot_no = ?`;
     }
     if (date_from) {
       params.push(date_from);
-      query += ` AND csv.voucher_date >= $${params.length}`;
+      query += ` AND csv.voucher_date >= ?`;
     }
     if (date_to) {
       params.push(date_to);
-      query += ` AND csv.voucher_date <= $${params.length}`;
+      query += ` AND csv.voucher_date <= ?`;
     }
 
     query += ` ORDER BY csv.voucher_date ASC, csv.id ASC`;
@@ -668,9 +728,9 @@ router.get('/traceability', async (req, res) => {
         FROM purchase_items pi
         JOIN purchases p ON pi.purchase_id = p.id
         LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = CAST(p.supplier AS TEXT) OR sm.print_name = CAST(p.supplier AS TEXT))
-        WHERE pi.lot_no LIKE $1 OR pi.item_name LIKE $1
+        WHERE pi.lot_no LIKE ? OR pi.item_name LIKE ?
         ORDER BY p.date DESC
-      `, [q]);
+      `, [q, q]);
     } catch (pErr) {
       console.warn('Fallback traceability purchase query:', pErr.message);
       try {
@@ -689,9 +749,9 @@ router.get('/traceability', async (req, res) => {
             'KG' AS unit
           FROM purchase_items pi
           JOIN purchases p ON pi.purchase_id = p.id
-          WHERE pi.lot_no LIKE $1 OR pi.item_name LIKE $1
+          WHERE pi.lot_no LIKE ? OR pi.item_name LIKE ?
           ORDER BY p.date DESC
-        `, [q]);
+        `, [q, q]);
       } catch (pErr2) {
         purchaseRes = { rows: [] };
       }
@@ -714,9 +774,9 @@ router.get('/traceability', async (req, res) => {
         csi.unit
       FROM cold_storage_items csi
       JOIN cold_storage_vouchers csv ON csi.voucher_id = csv.id
-      WHERE csi.purchase_lot_no LIKE $1 OR csi.cold_storage_lot_no LIKE $1 OR csi.item_name LIKE $1
+      WHERE csi.purchase_lot_no LIKE ? OR csi.cold_storage_lot_no LIKE ? OR csi.item_name LIKE ?
       ORDER BY csv.voucher_date ASC
-    `, [q]);
+    `, [q, q, q]);
 
     // Build comprehensive traceability maps
     const traceMap = {};

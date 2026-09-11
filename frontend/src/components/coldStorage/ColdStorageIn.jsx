@@ -212,7 +212,7 @@ const ColdStorageIn = () => {
 
       const res = await api('/cold-storage/in', {
         method: 'POST',
-        body: JSON.stringify(payload)
+        body: payload
       });
 
       if (res && res.success) {
