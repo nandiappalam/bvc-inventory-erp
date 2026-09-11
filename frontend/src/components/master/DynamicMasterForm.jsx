@@ -258,14 +258,19 @@ export const DynamicMasterForm = ({ configKey }) => {
         </div>
       )}
 
-      {allFields.map((field, idx) => (
-        <SmartField
-          key={`${field.name}_${idx}`}
-          field={field}
-          value={formData[field.name]}
-          onChange={handleChange}
-        />
-      ))}
+      {allFields.map((field, idx) => {
+        if (field.dependsOn && formData[field.dependsOn.field] !== field.dependsOn.value) {
+          return null;
+        }
+        return (
+          <SmartField
+            key={`${field.name}_${idx}`}
+            field={field}
+            value={formData[field.name]}
+            onChange={handleChange}
+          />
+        );
+      })}
 
       {loading && (
         <div style={{ gridColumn: "span 2", textAlign: "center", padding: 12 }}>
