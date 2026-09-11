@@ -20,14 +20,7 @@ const GodownCreate = () => {
   };
 
   useEffect(() => {
-    // Generate next godown code
-    api.getMasters(config.table).then((res) => {
-      const count = (res.data || []).length;
-      const nextCode = `GODOWN${String(count + 1).padStart(3, '0')}`;
-      handleChange('godown_name', nextCode);
-    }).catch(err => console.log('Godown code gen failed', err));
-
-    // Init form
+    // Init form with default values
     const initialData = {};
     sections.forEach(section => {
       safeArray(section.fields).forEach(field => {
@@ -35,6 +28,17 @@ const GodownCreate = () => {
       });
     });
     setFormData(initialData);
+
+    // Generate next godown code
+    api.getMasters(config.table || 'godown_master').then((res) => {
+      const list = Array.isArray(res) ? res : (res?.data || []);
+      const count = list.length;
+      const nextCode = `GODOWN${String(count + 1).padStart(3, '0')}`;
+      setFormData(prev => ({
+        ...prev,
+        godown_name: prev.godown_name || nextCode
+      }));
+    }).catch(err => console.log('Godown code gen failed', err));
   }, []);
 
   const handleSubmit = async (e) => {

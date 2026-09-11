@@ -49,7 +49,19 @@ const normalizeMasterData = async (tableName, rawData) => {
     calculation_type: 'calc_type',
     deduction_value: 'ded_value',
     address1: 'address',
+    address: 'address1',
     mobile1: 'mobile',
+    mobile: 'mobile1',
+    phone_off: 'phone',
+    phone: 'phone_off',
+    gst_number: 'gst_no',
+    gst_no: 'gst_number',
+    area: 'location',
+    location: 'area',
+    print_name: 'printname',
+    printname: 'print_name',
+    godown_name: 'name',
+    name: 'godown_name',
   };
 
   const filteredData = {};
@@ -312,7 +324,12 @@ const masterTables = {
   },
   godown_master: {
     table: 'godown_master',
-    fields: ['godown_name', 'print_name', 'contact_person', 'address', 'phone_off', 'mobile1', 'email', 'website', 'area', 'gst_number', 'status'],
+    fields: [
+      'id', 'godown_name', 'name', 'print_name', 'printname', 'godown_type', 'storage_location',
+      'external_company', 'capacity', 'capacity_unit', 'temperature_range', 'contact_person',
+      'address', 'address1', 'phone_off', 'phone', 'mobile1', 'mobile', 'email', 'website',
+      'area', 'location', 'gst_number', 'gst_no', 'status'
+    ],
     uniqueField: 'godown_name',
     displayField: 'godown_name'
   }
@@ -678,7 +695,27 @@ router.get('/all/:table', async (req, res) => {
     }
 
     const result = await db.query(`SELECT * FROM ${tableName}`)
-    res.json({ success: true, data: result.rows })
+    const rows = (result.rows || []).map(row => {
+      const copy = { ...row };
+      if (tableName === 'godown_master' || tableNameParam === 'godown' || tableNameParam === 'godowns') {
+        if (copy.name && !copy.godown_name) copy.godown_name = copy.name;
+        if (copy.godown_name && !copy.name) copy.name = copy.godown_name;
+        if (copy.printname && !copy.print_name) copy.print_name = copy.printname;
+        if (copy.print_name && !copy.printname) copy.printname = copy.print_name;
+        if (copy.address && !copy.address1) copy.address1 = copy.address;
+        if (copy.address1 && !copy.address) copy.address = copy.address1;
+        if (copy.phone && !copy.phone_off) copy.phone_off = copy.phone;
+        if (copy.phone_off && !copy.phone) copy.phone = copy.phone_off;
+        if (copy.mobile && !copy.mobile1) copy.mobile1 = copy.mobile;
+        if (copy.mobile1 && !copy.mobile) copy.mobile = copy.mobile1;
+        if (copy.gst_no && !copy.gst_number) copy.gst_number = copy.gst_no;
+        if (copy.gst_number && !copy.gst_no) copy.gst_no = copy.gst_number;
+        if (copy.location && !copy.area) copy.area = copy.location;
+        if (copy.area && !copy.location) copy.location = copy.area;
+      }
+      return copy;
+    });
+    res.json({ success: true, data: rows })
   } catch (error) {
     console.error('Error fetching master records:', error)
     res.status(500).json({ message: 'Error fetching records', error: error.message })

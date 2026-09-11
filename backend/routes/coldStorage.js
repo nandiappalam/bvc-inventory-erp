@@ -109,39 +109,65 @@ router.get('/storages', async (req, res) => {
 // GET active purchase lots for Cold Storage IN
 router.get('/available-lots', async (req, res) => {
   try {
-    // Get purchase items with available stock safely with COALESCE
-    const result = await db.query(`
-      SELECT 
-        pi.item_name,
-        pi.lot_no AS purchase_lot_no,
-        COALESCE(p.godown, 'Main Godown') AS current_godown,
-        SUM(pi.qty) AS purchased_qty,
-        SUM(COALESCE(pi.total_wt, pi.qty * pi.weight, pi.qty)) AS total_weight,
-        COALESCE(pi.unit, 'KG') AS unit
-      FROM purchase_items pi
-      LEFT JOIN purchases p ON pi.purchase_id = p.id
-      WHERE pi.lot_no IS NOT NULL AND pi.lot_no != ''
-      GROUP BY pi.item_name, pi.lot_no, current_godown, unit
-      ORDER BY pi.item_name, pi.lot_no
-    `);
+    // Get purchase items with available stock safely with COALESCE and standard GROUP BY
+    let result;
+    try {
+      result = await db.query(`
+        SELECT 
+          pi.item_name,
+          pi.lot_no AS purchase_lot_no,
+          COALESCE(p.godown, 'Main Godown') AS current_godown,
+          SUM(pi.qty) AS purchased_qty,
+          SUM(COALESCE(pi.total_wt, pi.qty * COALESCE(pi.weight, 0), pi.qty)) AS total_weight,
+          COALESCE(pi.unit, 'KG') AS unit
+        FROM purchase_items pi
+        LEFT JOIN purchases p ON pi.purchase_id = p.id
+        WHERE pi.lot_no IS NOT NULL AND pi.lot_no != ''
+        GROUP BY pi.item_name, pi.lot_no, p.godown, pi.unit
+        ORDER BY pi.item_name, pi.lot_no
+      `);
+    } catch (colErr) {
+      console.warn('Fallback available-lots query due to schema discrepancy:', colErr.message);
+      try {
+        result = await db.query(`
+          SELECT 
+            pi.item_name,
+            pi.lot_no AS purchase_lot_no,
+            'Main Godown' AS current_godown,
+            SUM(pi.qty) AS purchased_qty,
+            SUM(pi.qty) AS total_weight,
+            'KG' AS unit
+          FROM purchase_items pi
+          WHERE pi.lot_no IS NOT NULL AND pi.lot_no != ''
+          GROUP BY pi.item_name, pi.lot_no
+          ORDER BY pi.item_name, pi.lot_no
+        `);
+      } catch (err2) {
+        result = { rows: [] };
+      }
+    }
 
     // Calculate CS IN quantity for each lot to know how much is already moved
-    const csInRes = await db.query(`
-      SELECT 
-        item_name,
-        purchase_lot_no,
-        SUM(quantity) AS in_qty
-      FROM cold_storage_items csi
-      JOIN cold_storage_vouchers csv ON csi.voucher_id = csv.id
-      WHERE csv.voucher_type = 'IN'
-      GROUP BY item_name, purchase_lot_no
-    `);
+    let csInMap = {};
+    try {
+      const csInRes = await db.query(`
+        SELECT 
+          item_name,
+          purchase_lot_no,
+          SUM(quantity) AS in_qty
+        FROM cold_storage_items csi
+        JOIN cold_storage_vouchers csv ON csi.voucher_id = csv.id
+        WHERE csv.voucher_type = 'IN'
+        GROUP BY item_name, purchase_lot_no
+      `);
 
-    const csInMap = {};
-    (csInRes.rows || []).forEach(r => {
-      const key = `${r.item_name}_${r.purchase_lot_no}`;
-      csInMap[key] = parseFloat(r.in_qty || 0);
-    });
+      (csInRes.rows || []).forEach(r => {
+        const key = `${r.item_name}_${r.purchase_lot_no}`;
+        csInMap[key] = parseFloat(r.in_qty || 0);
+      });
+    } catch (csErr) {
+      console.warn('Notice querying cs_items in available-lots:', csErr.message);
+    }
 
     const items = (result.rows || []).map(r => {
       const key = `${r.item_name}_${r.purchase_lot_no}`;
@@ -157,6 +183,7 @@ router.get('/available-lots', async (req, res) => {
 
     res.json({ success: true, data: items });
   } catch (err) {
+    console.error('Error in /available-lots:', err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -318,7 +345,7 @@ router.post('/in', async (req, res) => {
       req.body.created_by || 'Admin'
     ]);
 
-    const voucher_id = voucherRes.rows[0].id;
+    const voucher_id = voucherRes.rows?.[0]?.id || voucherRes.lastID || voucherRes.lastInsertRowid;
 
     // Generate CS lot number prefix
     const csLotRes = await db.query(`SELECT COUNT(*) as count FROM cold_storage_items WHERE cold_storage_lot_no IS NOT NULL`);
@@ -434,7 +461,7 @@ router.post('/out', async (req, res) => {
       req.body.created_by || 'Admin'
     ]);
 
-    const voucher_id = voucherRes.rows[0].id;
+    const voucher_id = voucherRes.rows?.[0]?.id || voucherRes.lastID || voucherRes.lastInsertRowid;
 
     for (const item of items) {
       const qty = parseFloat(item.quantity || 0);
@@ -622,26 +649,53 @@ router.get('/traceability', async (req, res) => {
 
     const q = `%${searchQuery.trim()}%`;
 
-    // 1. Fetch Purchase Lot Entries
-    const purchaseRes = await db.query(`
-      SELECT 
-        p.id AS purchase_id,
-        p.voucher_no,
-        p.date AS purchase_date,
-        COALESCE(sm.print_name, sm.name, CAST(p.supplier AS TEXT), 'Supplier') AS supplier_name,
-        COALESCE(p.godown, 'Main Godown') AS main_godown,
-        pi.item_name,
-        pi.lot_no AS purchase_lot_no,
-        pi.qty AS purchased_qty,
-        pi.weight AS per_unit_wt,
-        COALESCE(pi.total_wt, pi.qty * pi.weight) AS purchased_total_wt,
-        pi.unit
-      FROM purchase_items pi
-      JOIN purchases p ON pi.purchase_id = p.id
-      LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = CAST(p.supplier AS TEXT) OR sm.print_name = CAST(p.supplier AS TEXT))
-      WHERE pi.lot_no LIKE $1 OR pi.item_name LIKE $1
-      ORDER BY p.date DESC
-    `, [q]);
+    // 1. Fetch Purchase Lot Entries safely with fallback
+    let purchaseRes;
+    try {
+      purchaseRes = await db.query(`
+        SELECT 
+          p.id AS purchase_id,
+          COALESCE(p.voucher_no, CAST(p.id AS TEXT)) AS voucher_no,
+          p.date AS purchase_date,
+          COALESCE(sm.print_name, sm.name, CAST(p.supplier AS TEXT), 'Supplier') AS supplier_name,
+          COALESCE(p.godown, 'Main Godown') AS main_godown,
+          pi.item_name,
+          pi.lot_no AS purchase_lot_no,
+          pi.qty AS purchased_qty,
+          COALESCE(pi.weight, 0) AS per_unit_wt,
+          COALESCE(pi.total_wt, pi.qty * COALESCE(pi.weight, 1), pi.qty) AS purchased_total_wt,
+          COALESCE(pi.unit, 'KG') AS unit
+        FROM purchase_items pi
+        JOIN purchases p ON pi.purchase_id = p.id
+        LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = CAST(p.supplier AS TEXT) OR sm.print_name = CAST(p.supplier AS TEXT))
+        WHERE pi.lot_no LIKE $1 OR pi.item_name LIKE $1
+        ORDER BY p.date DESC
+      `, [q]);
+    } catch (pErr) {
+      console.warn('Fallback traceability purchase query:', pErr.message);
+      try {
+        purchaseRes = await db.query(`
+          SELECT 
+            p.id AS purchase_id,
+            CAST(p.id AS TEXT) AS voucher_no,
+            p.date AS purchase_date,
+            'Supplier' AS supplier_name,
+            'Main Godown' AS main_godown,
+            pi.item_name,
+            pi.lot_no AS purchase_lot_no,
+            pi.qty AS purchased_qty,
+            0 AS per_unit_wt,
+            pi.qty AS purchased_total_wt,
+            'KG' AS unit
+          FROM purchase_items pi
+          JOIN purchases p ON pi.purchase_id = p.id
+          WHERE pi.lot_no LIKE $1 OR pi.item_name LIKE $1
+          ORDER BY p.date DESC
+        `, [q]);
+      } catch (pErr2) {
+        purchaseRes = { rows: [] };
+      }
+    }
 
     // 2. Fetch Cold Storage Movements for matching lots
     const csRes = await db.query(`

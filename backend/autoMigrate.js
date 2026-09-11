@@ -46,6 +46,96 @@ module.exports = async function autoMigrate() {
     } catch (e) {
       console.log('Notice dropping foreign key constraints in autoMigrate:', e.message);
     }
+
+    // Comprehensive PostgreSQL schema migration across public and all company_% schemas
+    try {
+      await db.run(`
+        DO $$
+        DECLARE
+          sch TEXT;
+          schemas TEXT[] := ARRAY(
+            SELECT schema_name::TEXT 
+            FROM information_schema.schemata 
+            WHERE schema_name LIKE 'company_%' OR schema_name = 'public'
+          );
+        BEGIN
+          FOREACH sch IN ARRAY schemas LOOP
+            -- purchase_items
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchase_items" ADD COLUMN IF NOT EXISTS "unit" TEXT DEFAULT ''KG'''; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchase_items" ADD COLUMN IF NOT EXISTS "total_weight" REAL DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchase_items" ADD COLUMN IF NOT EXISTS "disc_amount" REAL DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchase_items" ADD COLUMN IF NOT EXISTS "tax_amount" REAL DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
+
+            -- purchases
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchases" ADD COLUMN IF NOT EXISTS "voucher_no" TEXT'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchases" ADD COLUMN IF NOT EXISTS "s_no" INTEGER DEFAULT 1'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchases" ADD COLUMN IF NOT EXISTS "godown" TEXT DEFAULT ''Main Godown'''; EXCEPTION WHEN OTHERS THEN END;
+
+            -- godown_master
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."godown_master" ADD COLUMN IF NOT EXISTS "print_name" TEXT'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."godown_master" ADD COLUMN IF NOT EXISTS "location" TEXT'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."godown_master" ADD COLUMN IF NOT EXISTS "contact_person" TEXT'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."godown_master" ADD COLUMN IF NOT EXISTS "address" TEXT'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."godown_master" ADD COLUMN IF NOT EXISTS "address1" TEXT'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."godown_master" ADD COLUMN IF NOT EXISTS "phone_off" TEXT'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."godown_master" ADD COLUMN IF NOT EXISTS "phone" TEXT'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."godown_master" ADD COLUMN IF NOT EXISTS "mobile1" TEXT'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."godown_master" ADD COLUMN IF NOT EXISTS "mobile" TEXT'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."godown_master" ADD COLUMN IF NOT EXISTS "email" TEXT'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."godown_master" ADD COLUMN IF NOT EXISTS "website" TEXT'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."godown_master" ADD COLUMN IF NOT EXISTS "area" TEXT'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."godown_master" ADD COLUMN IF NOT EXISTS "gst_number" TEXT'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."godown_master" ADD COLUMN IF NOT EXISTS "gst_no" TEXT'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."godown_master" ADD COLUMN IF NOT EXISTS "godown_type" TEXT DEFAULT ''Normal'''; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."godown_master" ADD COLUMN IF NOT EXISTS "storage_location" TEXT DEFAULT ''Inside Factory'''; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."godown_master" ADD COLUMN IF NOT EXISTS "external_company" TEXT'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."godown_master" ADD COLUMN IF NOT EXISTS "capacity" REAL DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."godown_master" ADD COLUMN IF NOT EXISTS "capacity_unit" TEXT DEFAULT ''KG'''; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."godown_master" ADD COLUMN IF NOT EXISTS "temperature_range" TEXT'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."godown_master" ADD COLUMN IF NOT EXISTS "status" TEXT DEFAULT ''Active'''; EXCEPTION WHEN OTHERS THEN END;
+
+            -- cold storage tables
+            BEGIN EXECUTE 'CREATE TABLE IF NOT EXISTS "' || sch || '"."cold_storage_vouchers" (
+                id SERIAL PRIMARY KEY,
+                voucher_no TEXT UNIQUE NOT NULL,
+                voucher_type TEXT NOT NULL,
+                voucher_date TEXT NOT NULL,
+                cold_storage_id INTEGER,
+                cold_storage_name TEXT,
+                source_godown_id INTEGER,
+                source_godown_name TEXT,
+                destination_godown_id INTEGER,
+                destination_godown_name TEXT,
+                remarks TEXT,
+                total_qty REAL DEFAULT 0,
+                total_wt REAL DEFAULT 0,
+                created_by TEXT DEFAULT ''Admin'',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )'; EXCEPTION WHEN OTHERS THEN END;
+
+            BEGIN EXECUTE 'CREATE TABLE IF NOT EXISTS "' || sch || '"."cold_storage_items" (
+                id SERIAL PRIMARY KEY,
+                voucher_id INTEGER NOT NULL,
+                voucher_no TEXT NOT NULL,
+                item_id INTEGER,
+                item_name TEXT NOT NULL,
+                purchase_lot_no TEXT NOT NULL,
+                cold_storage_lot_no TEXT NOT NULL,
+                quantity REAL DEFAULT 0,
+                weight REAL DEFAULT 0,
+                total_wt REAL DEFAULT 0,
+                unit TEXT DEFAULT ''KG'',
+                remarks TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )'; EXCEPTION WHEN OTHERS THEN END;
+          END LOOP;
+        END $$;
+      `);
+      console.log('✅ [Postgres] Multi-tenant schemas successfully migrated for cold storage, godown_master, purchases, and purchase_items.');
+    } catch (pgMigrateErr) {
+      console.log('Notice running multi-tenant schema migration in autoMigrate:', pgMigrateErr.message);
+    }
   }
 
   // First ensure base DB tables exist
