@@ -2230,6 +2230,98 @@ router.get('/outstanding-details', async (req, res) => {
       }
     })
 
+    // 2c. Scan voucher and ledger_entries for Purchase / Sales vouchers
+    try {
+      const vExists = await tableExists('voucher')
+      if (vExists) {
+        const vQuery = `
+          SELECT 
+            v.id,
+            v.voucher_no,
+            v.date,
+            v.voucher_type,
+            v.narration,
+            v.reference_no,
+            lm.name as ledger_name,
+            COALESCE(
+              (SELECT SUM(ve.credit) FROM voucher_entry ve WHERE ve.voucher_id = v.id AND ve.credit > 0),
+              (SELECT SUM(ve.debit) FROM voucher_entry ve WHERE ve.voucher_id = v.id AND ve.debit > 0),
+              0
+            ) as amount
+          FROM voucher v
+          LEFT JOIN voucher_entry ve ON ve.voucher_id = v.id
+          LEFT JOIN ledgermaster lm ON ve.ledger_id = lm.id
+          WHERE v.voucher_type IN ('Purchase', 'Sales')
+        `
+        const vRes = await db.query(vQuery)
+        ;(vRes.rows || []).forEach(row => {
+          const vType = row.voucher_type === 'Purchase' ? 'Purchase' : 'Sales'
+          const prefix = vType === 'Purchase' ? 'PUR' : 'SAL'
+          const vNo = `${prefix}-${row.voucher_no || row.id}`
+          const amt = parseFloat(row.amount || 0)
+          if (amt > 0 && !billsMap[vNo]) {
+            const tokens = getBillSearchTokens(row.id, row.voucher_no, row.voucher_no, vType)
+            billsMap[vNo] = {
+              id: row.id,
+              s_no: row.voucher_no,
+              voucher_no: row.voucher_no,
+              invoice_no: row.voucher_no,
+              date: row.date,
+              voucher_type: vType,
+              type: vType === 'Purchase' ? 'Payable' : 'Receivable',
+              amount: amt,
+              paid: 0,
+              balance: amt,
+              ledger_name: row.ledger_name || 'Party',
+              searchTokens: tokens
+            }
+          }
+        })
+      }
+    } catch (e) {}
+
+    // 2d. Scan ledger_entries for Purchase / Sales
+    try {
+      const leExists = await tableExists('ledger_entries')
+      if (leExists) {
+        const leRes = await db.query(`
+          SELECT 
+            id,
+            voucher_no,
+            voucher_type,
+            date,
+            ledger_name,
+            debit,
+            credit
+          FROM ledger_entries
+          WHERE voucher_type IN ('Purchase', 'Sales')
+        `)
+        ;(leRes.rows || []).forEach(row => {
+          const vType = row.voucher_type === 'Purchase' ? 'Purchase' : 'Sales'
+          const prefix = vType === 'Purchase' ? 'PUR' : 'SAL'
+          const vNo = `${prefix}-${row.voucher_no || row.id}`
+          const amt = parseFloat(row.credit || row.debit || 0)
+          if (amt > 0 && !billsMap[vNo]) {
+            const tokens = getBillSearchTokens(row.id, row.voucher_no, row.voucher_no, vType)
+            billsMap[vNo] = {
+              id: row.id,
+              s_no: row.voucher_no,
+              voucher_no: row.voucher_no,
+              invoice_no: row.voucher_no,
+              date: row.date,
+              voucher_type: vType,
+              type: vType === 'Purchase' ? 'Payable' : 'Receivable',
+              amount: amt,
+              paid: 0,
+              balance: amt,
+              ledger_name: row.ledger_name || 'Party',
+              searchTokens: tokens
+            }
+          }
+        })
+      }
+    } catch (e) {}
+
     let allBills = Object.values(billsMap)
 
     const cleanPartyKey = (name) => {

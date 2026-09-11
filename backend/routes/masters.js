@@ -445,44 +445,59 @@ router.get('/:type', async (req, res, next) => {
       ;(imRes.rows || []).forEach(r => {
         const key = String(r.item_name || r.name || '').trim().toLowerCase()
         if (key) {
-          itemMap.set(key, {
+          const isFG = key.includes('fg') || key.includes('finish') || key.includes('papad') || key.includes('pack')
+          const isOpening = key.includes('opening') || key.includes('open')
+          const isWastage = key.includes('wastage') || key.includes('reject') || key.includes('scrap')
+          const itemType = isWastage ? 'Rejection / Wastage' : isFG ? 'Finished Goods' : isOpening ? 'Opening Stock' : (r.type || 'Raw Material')
+          const itemGroup = isWastage ? 'Rejection / Wastage' : isFG ? 'Finished Goods' : isOpening ? 'Opening Stock' : (r.item_group || 'Raw Material')
+          const uniqueKey = `${key}_${itemType.toLowerCase()}`
+
+          itemMap.set(uniqueKey, {
             ...r,
             id: r.id || r.item_code || r.item_name,
             name: r.item_name || r.name,
             item_name: r.item_name || r.name,
             print_name: r.print_name || r.item_name || r.name,
-            item_group: r.item_group || 'General',
-            type: r.type || 'Raw Material',
+            item_group: itemGroup,
+            type: itemType,
             stock_qty: parseFloat(r.stock_qty || 0)
           })
         }
       })
 
-      // 2. Scan stock_lots for any additional finished goods or lots
+      // 2. Scan stock_lots for any additional finished goods, opening stock, or lots by category and godown
       try {
         const slRes = await db.query(`
           SELECT 
             item_name, 
-            SUM(remaining_quantity) as total_qty,
-            MAX(approval_status) as approval_status
+            category,
+            godown,
+            SUM(remaining_quantity) as total_qty
           FROM stock_lots 
           WHERE item_name IS NOT NULL AND TRIM(item_name) != ''
-          GROUP BY item_name
+          GROUP BY item_name, category, godown
         `)
         ;(slRes.rows || []).forEach(sl => {
-          const key = String(sl.item_name).trim().toLowerCase()
-          const isFG = key.includes('fg') || key.includes('finish') || key.includes('papad') || key.includes('pack')
-          const isOpening = key.includes('opening') || key.includes('open')
-          const itemType = isFG ? 'Finished Goods' : isOpening ? 'Opening Stock' : 'Raw Material'
-          const itemGroup = isFG ? 'Finished Goods' : isOpening ? 'Opening Stock' : 'Raw Material'
+          const itemName = sl.item_name
+          const cat = String(sl.category || '').toUpperCase()
+          const godown = String(sl.godown || '').toLowerCase()
+          const keyName = String(itemName).trim().toLowerCase()
 
-          if (!itemMap.has(key)) {
-            itemMap.set(key, {
-              id: `lot_${key.replace(/\s+/g, '_')}`,
-              item_code: `LOT-${key.substring(0, 4).toUpperCase()}`,
-              name: sl.item_name,
-              item_name: sl.item_name,
-              print_name: sl.item_name,
+          const isFG = cat === 'FG' || godown.includes('finished') || keyName.includes('fg') || keyName.includes('finish') || keyName.includes('papad')
+          const isOpening = cat === 'OPEN' || cat === 'OS' || godown.includes('pj') || keyName.includes('opening') || keyName.includes('open')
+          const isWastage = cat === 'WASTAGE' || cat === 'REJECT' || godown.includes('wastage') || keyName.includes('wastage') || keyName.includes('reject')
+
+          const itemType = isWastage ? 'Rejection / Wastage' : isFG ? 'Finished Goods' : isOpening ? 'Opening Stock' : 'Raw Material'
+          const itemGroup = itemType
+          const uniqueKey = `${keyName}_${itemType.toLowerCase()}`
+
+          if (!itemMap.has(uniqueKey)) {
+            itemMap.set(uniqueKey, {
+              id: `lot_${uniqueKey.replace(/[^a-z0-9]/g, '_')}`,
+              item_code: `${itemType.substring(0, 3).toUpperCase()}-${keyName.substring(0, 4).toUpperCase()}`,
+              name: itemName,
+              item_name: itemName,
+              print_name: itemName,
               item_group: itemGroup,
               type: itemType,
               tax: 5,
@@ -490,10 +505,8 @@ router.get('/:type', async (req, res, next) => {
               stock_qty: parseFloat(sl.total_qty || 0)
             })
           } else {
-            const existing = itemMap.get(key)
-            if (!existing.stock_qty || existing.stock_qty === 0) {
-              existing.stock_qty = parseFloat(sl.total_qty || 0)
-            }
+            const existing = itemMap.get(uniqueKey)
+            existing.stock_qty = (existing.stock_qty || 0) + parseFloat(sl.total_qty || 0)
           }
         })
       } catch (e) {}
