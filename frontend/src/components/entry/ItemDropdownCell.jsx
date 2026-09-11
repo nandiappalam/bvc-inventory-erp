@@ -195,11 +195,33 @@ const ItemDropdownCell = ({
 
   const selectedColor = getStockTypeColor(selectedItem?.type || row?.type);
 
-  // Filter items based on search term
+  // Filter items based on search term and deduplicate by item_name
   const filteredItems = useMemo(() => {
-    if (!searchTerm.trim()) return items;
+    const map = new Map();
+    (items || []).forEach((item) => {
+      const rawName = String(item.item_name || item.name || '').trim();
+      const key = rawName.toLowerCase();
+      if (!key) return;
+      if (!map.has(key)) {
+        map.set(key, item);
+      } else {
+        const existing = map.get(key);
+        // Prefer finished goods or opening stock or non-RM type over generic RM if duplicate exists
+        const eType = String(existing.type || '').toUpperCase();
+        const iType = String(item.type || '').toUpperCase();
+        if ((eType.includes('RAW') || eType === '') && (iType.includes('FINISH') || iType.includes('FG') || iType.includes('OPEN') || iType.includes('PAPAD'))) {
+          map.set(key, { ...item, stock_qty: (existing.stock_qty || 0) + (item.stock_qty || 0) });
+        } else {
+          existing.stock_qty = (existing.stock_qty || 0) + (item.stock_qty || 0);
+        }
+      }
+    });
+
+    const uniqueItems = Array.from(map.values());
+
+    if (!searchTerm.trim()) return uniqueItems;
     const term = searchTerm.toLowerCase().trim();
-    return items.filter((item) => {
+    return uniqueItems.filter((item) => {
       const name = String(item.item_name || item.name || '').toLowerCase();
       const group = String(item.item_group || '').toLowerCase();
       const type = String(item.type || '').toLowerCase();

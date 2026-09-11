@@ -42,7 +42,7 @@ const DEBUG = false;
 
 const validateEntryConfig = (fields, columns) => true;
 
-export const EntryTopFrame = ({ fields = [], data = {}, onChange = () => {}, columns: colCount = 3, taxType, taxRate, onTaxChange, nextSnoEndpoint }) => {
+export const EntryTopFrame = ({ fields = [], data = {}, onChange = () => {}, columns: colCount = 3, taxType, taxRate, onTaxChange, nextSnoEndpoint, hideStockType = false }) => {
   const generateSno = () => '1';
 
   useEffect(() => {
@@ -107,7 +107,8 @@ export const EntryTopFrame = ({ fields = [], data = {}, onChange = () => {}, col
     if (!data.date) {
       onChange({ target: { name: 'date', value: new Date().toISOString().split('T')[0] } });
     }
-    if (!data.stock_type && !data.stockType) {
+    const isAdvance = window.location.pathname.toLowerCase().includes('advance');
+    if (!hideStockType && !isAdvance && !data.stock_type && !data.stockType) {
       onChange({ target: { name: 'stock_type', value: 'RM' } });
     }
   }, []);
@@ -142,8 +143,10 @@ export const EntryTopFrame = ({ fields = [], data = {}, onChange = () => {}, col
       });
     }
 
+    const isAdvance = window.location.pathname.toLowerCase().includes('advance');
+    const shouldHideStockType = hideStockType || isAdvance;
     const hasStockType = updatedFields.some(f => f.name === 'stock_type' || f.name === 'stockType');
-    if (!hasStockType) {
+    if (!hasStockType && !shouldHideStockType) {
       updatedFields.push({
         name: 'stock_type',
         label: 'Stock Type',

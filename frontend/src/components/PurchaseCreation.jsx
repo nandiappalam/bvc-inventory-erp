@@ -804,7 +804,7 @@ const PurchaseCreation = () => {
     { key: 'item_name', title: 'Item', type: 'masterSelect', masterType: 'items' },
     { key: 'lot_no', title: 'Lot No' },
     { key: 'qty', title: 'Qty', type: 'number' },
-    { key: 'weight', title: 'Per Unit Wt', type: 'number' }, // Manual entry as requested
+    { key: 'weight', title: 'Per Unit Wt', type: 'masterSelect', masterType: 'weights' },
     { key: 'total_wt', title: 'Total Wt', readOnly: true },
     { key: 'rate', title: 'Rate', type: 'number' }, // Manual entry
     { key: 'disc', title: 'Disc%', type: 'number' },

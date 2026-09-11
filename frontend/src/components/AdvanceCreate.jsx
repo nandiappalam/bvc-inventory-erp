@@ -154,6 +154,7 @@ const AdvanceCreate = () => {
           fields={topFrameFields} 
           data={formData} 
           onChange={handleFormChange}
+          hideStockType={true}
         />
 
         <EntryActions 
