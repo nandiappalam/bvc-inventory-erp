@@ -2139,96 +2139,112 @@ router.get('/outstanding-details', async (req, res) => {
     }
 
     // 2a. Real Purchases
-    let purchaseQuery = `
-      SELECT 
-        p.id,
-        p.s_no,
-        p.inv_no,
-        COALESCE(p.inv_no, CAST(p.s_no AS TEXT), CAST(p.id AS TEXT)) as invoice_no,
-        p.date,
-        'Purchase' as voucher_type,
-        'Payable' as type,
-        COALESCE(sm.print_name, sm.name, p.supplier, 'Supplier') as ledger_name,
-        COALESCE(
-          (SELECT SUM(pi.amount) FROM purchase_items pi WHERE CAST(pi.purchase_id AS TEXT) = CAST(p.id AS TEXT)),
-          p.grand_total,
-          p.total_amt,
-          p.bill_amt,
-          0
-        ) as amount
-      FROM purchases p
-      LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = CAST(p.supplier AS TEXT) OR sm.print_name = CAST(p.supplier AS TEXT))
-    `
-    const purchaseParams = []
-    if (as_on_date) {
-      purchaseQuery += ` WHERE p.date <= ?`
-      purchaseParams.push(toDate)
-    }
-    const purchasesRes = await db.query(purchaseQuery, purchaseParams)
-    ;(purchasesRes.rows || []).forEach(row => {
-      const vNo = `PUR-${row.invoice_no}`
-      const amt = parseFloat(row.amount || 0)
-      if (amt > 0) {
-        const tokens = getBillSearchTokens(row.id, row.s_no, row.inv_no || row.invoice_no, 'Purchase')
-        billsMap[vNo] = {
-          id: row.id,
-          s_no: row.s_no,
-          voucher_no: row.invoice_no,
-          invoice_no: row.invoice_no,
-          inv_no: row.inv_no,
-          date: row.date,
-          voucher_type: 'Purchase',
-          type: 'Payable',
-          amount: amt,
-          paid: 0,
-          balance: amt,
-          ledger_name: row.ledger_name || 'Supplier',
-          searchTokens: tokens
-        }
+    try {
+      let purchaseQuery = `
+        SELECT 
+          p.id,
+          p.s_no,
+          p.inv_no,
+          COALESCE(p.inv_no, CAST(p.s_no AS TEXT), CAST(p.id AS TEXT)) as invoice_no,
+          p.date,
+          'Purchase' as voucher_type,
+          'Payable' as type,
+          COALESCE(sm.print_name, sm.name, CAST(p.supplier AS TEXT), 'Supplier') as ledger_name,
+          COALESCE(
+            (SELECT SUM(pi.amount) FROM purchase_items pi WHERE CAST(pi.purchase_id AS TEXT) = CAST(p.id AS TEXT)),
+            p.grand_total,
+            p.total_amt,
+            p.bill_amt,
+            0
+          ) as amount
+        FROM purchases p
+        LEFT JOIN supplier_master sm ON (
+          CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR 
+          sm.name = CAST(p.supplier AS TEXT) OR 
+          sm.print_name = CAST(p.supplier AS TEXT)
+        )
+      `
+      const purchaseParams = []
+      if (as_on_date) {
+        purchaseQuery += ` WHERE p.date <= ?`
+        purchaseParams.push(toDate)
       }
-    })
+      const purchasesRes = await db.query(purchaseQuery, purchaseParams)
+      ;(purchasesRes.rows || []).forEach(row => {
+        const vNo = `PUR-${row.invoice_no}`
+        const amt = parseFloat(row.amount || 0)
+        if (amt > 0) {
+          const tokens = getBillSearchTokens(row.id, row.s_no, row.inv_no || row.invoice_no, 'Purchase')
+          billsMap[vNo] = {
+            id: row.id,
+            s_no: row.s_no,
+            voucher_no: row.invoice_no,
+            invoice_no: row.invoice_no,
+            inv_no: row.inv_no,
+            date: row.date,
+            voucher_type: 'Purchase',
+            type: 'Payable',
+            amount: amt,
+            paid: 0,
+            balance: amt,
+            ledger_name: row.ledger_name || 'Supplier',
+            searchTokens: tokens
+          }
+        }
+      })
+    } catch (e) {
+      console.warn('Error fetching purchases for outstanding details:', e.message)
+    }
 
     // 2b. Real Sales
-    let salesQuery = `
-      SELECT 
-        s.id,
-        s.s_no,
-        CAST(COALESCE(s.s_no, s.id) AS TEXT) as invoice_no,
-        s.date,
-        'Sales' as voucher_type,
-        'Receivable' as type,
-        COALESCE(cm.name, cm.print_name, s.customer, 'Customer') as ledger_name,
-        COALESCE(s.grand_total, s.total_amt, s.bill_amt, 0) as amount
-      FROM sales s
-      LEFT JOIN customer_master cm ON (cm.name = s.customer OR cm.print_name = s.customer)
-    `
-    const salesParams = []
-    if (as_on_date) {
-      salesQuery += ` WHERE s.date <= ?`
-      salesParams.push(toDate)
-    }
-    const salesRes = await db.query(salesQuery, salesParams)
-    ;(salesRes.rows || []).forEach(row => {
-      const vNo = `SAL-${row.invoice_no}`
-      const amt = parseFloat(row.amount || 0)
-      if (amt > 0) {
-        const tokens = getBillSearchTokens(row.id, row.s_no, row.invoice_no, 'Sales')
-        billsMap[vNo] = {
-          id: row.id,
-          s_no: row.s_no,
-          voucher_no: row.invoice_no,
-          invoice_no: row.invoice_no,
-          date: row.date,
-          voucher_type: 'Sales',
-          type: 'Receivable',
-          amount: amt,
-          paid: 0,
-          balance: amt,
-          ledger_name: row.ledger_name || 'Customer',
-          searchTokens: tokens
-        }
+    try {
+      let salesQuery = `
+        SELECT 
+          s.id,
+          s.s_no,
+          CAST(COALESCE(s.s_no, s.id) AS TEXT) as invoice_no,
+          s.date,
+          'Sales' as voucher_type,
+          'Receivable' as type,
+          COALESCE(cm.name, cm.print_name, CAST(s.customer AS TEXT), 'Customer') as ledger_name,
+          COALESCE(s.grand_total, s.total_amt, s.bill_amt, 0) as amount
+        FROM sales s
+        LEFT JOIN customer_master cm ON (
+          CAST(cm.id AS TEXT) = CAST(s.customer AS TEXT) OR 
+          cm.name = CAST(s.customer AS TEXT) OR 
+          cm.print_name = CAST(s.customer AS TEXT)
+        )
+      `
+      const salesParams = []
+      if (as_on_date) {
+        salesQuery += ` WHERE s.date <= ?`
+        salesParams.push(toDate)
       }
-    })
+      const salesRes = await db.query(salesQuery, salesParams)
+      ;(salesRes.rows || []).forEach(row => {
+        const vNo = `SAL-${row.invoice_no}`
+        const amt = parseFloat(row.amount || 0)
+        if (amt > 0) {
+          const tokens = getBillSearchTokens(row.id, row.s_no, row.invoice_no, 'Sales')
+          billsMap[vNo] = {
+            id: row.id,
+            s_no: row.s_no,
+            voucher_no: row.invoice_no,
+            invoice_no: row.invoice_no,
+            date: row.date,
+            voucher_type: 'Sales',
+            type: 'Receivable',
+            amount: amt,
+            paid: 0,
+            balance: amt,
+            ledger_name: row.ledger_name || 'Customer',
+            searchTokens: tokens
+          }
+        }
+      })
+    } catch (e) {
+      console.warn('Error fetching sales for outstanding details:', e.message)
+    }
 
     // 2c. Scan voucher and ledger_entries for Purchase / Sales vouchers
     try {
@@ -2244,13 +2260,13 @@ router.get('/outstanding-details', async (req, res) => {
             v.reference_no,
             lm.name as ledger_name,
             COALESCE(
-              (SELECT SUM(ve.credit) FROM voucher_entry ve WHERE ve.voucher_id = v.id AND ve.credit > 0),
-              (SELECT SUM(ve.debit) FROM voucher_entry ve WHERE ve.voucher_id = v.id AND ve.debit > 0),
+              (SELECT SUM(ve2.credit) FROM voucher_entry ve2 WHERE CAST(ve2.voucher_id AS TEXT) = CAST(v.id AS TEXT) AND ve2.credit > 0),
+              (SELECT SUM(ve3.debit) FROM voucher_entry ve3 WHERE CAST(ve3.voucher_id AS TEXT) = CAST(v.id AS TEXT) AND ve3.debit > 0),
               0
             ) as amount
           FROM voucher v
-          LEFT JOIN voucher_entry ve ON ve.voucher_id = v.id
-          LEFT JOIN ledgermaster lm ON ve.ledger_id = lm.id
+          LEFT JOIN voucher_entry ve ON CAST(ve.voucher_id AS TEXT) = CAST(v.id AS TEXT)
+          LEFT JOIN ledgermaster lm ON CAST(ve.ledger_id AS TEXT) = CAST(lm.id AS TEXT)
           WHERE v.voucher_type IN ('Purchase', 'Sales')
         `
         const vRes = await db.query(vQuery)
@@ -2330,43 +2346,48 @@ router.get('/outstanding-details', async (req, res) => {
     }
 
     // 4. Fetch all settlement ledger entries (Payments, Receipts, and Journals)
-    let settlementQuery = `
-      SELECT 
-        id,
-        ledger_name,
-        date,
-        voucher_type,
-        voucher_no,
-        debit,
-        credit,
-        particulars
-      FROM ledger_entries
-      WHERE voucher_type NOT IN ('Purchase', 'Sales')
-    `
-    const settlementParams = []
-    if (as_on_date) {
-      settlementQuery += ` AND date <= ?`
-      settlementParams.push(toDate)
+    let settlements = []
+    try {
+      let settlementQuery = `
+        SELECT 
+          id,
+          ledger_name,
+          date,
+          voucher_type,
+          voucher_no,
+          debit,
+          credit,
+          particulars
+        FROM ledger_entries
+        WHERE voucher_type NOT IN ('Purchase', 'Sales')
+      `
+      const settlementParams = []
+      if (as_on_date) {
+        settlementQuery += ` AND date <= ?`
+        settlementParams.push(toDate)
+      }
+      const settlementRes = await db.query(settlementQuery, settlementParams)
+      settlements = (settlementRes.rows || []).map(s => {
+        let name = s.ledger_name
+        if (name) {
+          const key = String(name).trim()
+          name = ledgerMap[key] || name
+        }
+        return {
+          id: s.id,
+          ledger_name: name,
+          date: s.date,
+          voucher_type: s.voucher_type,
+          voucher_no: s.voucher_no,
+          reference_no: '',
+          debit: parseFloat(s.debit || 0),
+          credit: parseFloat(s.credit || 0),
+          particulars: s.particulars || ''
+        }
+      })
+    } catch (e) {
+      console.warn('Error fetching settlement ledger entries:', e.message)
     }
-    const settlementRes = await db.query(settlementQuery, settlementParams)
-    let settlements = (settlementRes.rows || []).map(s => {
-      let name = s.ledger_name
-      if (name) {
-        const key = String(name).trim()
-        name = ledgerMap[key] || name
-      }
-      return {
-        id: s.id,
-        ledger_name: name,
-        date: s.date,
-        voucher_type: s.voucher_type,
-        voucher_no: s.voucher_no,
-        reference_no: '',
-        debit: parseFloat(s.debit || 0),
-        credit: parseFloat(s.credit || 0),
-        particulars: s.particulars || ''
-      }
-    })
 
     // Also fetch settlements directly from voucher and voucher_entry
     try {
@@ -2386,8 +2407,8 @@ router.get('/outstanding-details', async (req, res) => {
             ve.credit,
             ve.remarks
           FROM voucher v
-          JOIN voucher_entry ve ON v.id = ve.voucher_id
-          LEFT JOIN ledgermaster lm ON ve.ledger_id = lm.id
+          JOIN voucher_entry ve ON CAST(v.id AS TEXT) = CAST(ve.voucher_id AS TEXT)
+          LEFT JOIN ledgermaster lm ON CAST(ve.ledger_id AS TEXT) = CAST(lm.id AS TEXT)
           WHERE v.voucher_type IN ('Payment', 'Receipt', 'Journal')
         `)
         const existingKeys = new Set(settlements.map(s => `${s.voucher_no}_${s.debit}_${s.credit}`))
@@ -2416,42 +2437,50 @@ router.get('/outstanding-details', async (req, res) => {
     }
 
     // Also fetch advances as settlements
-    let advanceQuery = `
-      SELECT 
-        id,
-        papad_company as ledger_name,
-        date,
-        'Advance' as voucher_type,
-        s_no as voucher_no,
-        amount as debit,
-        0 as credit,
-        'Advance payment' as particulars
-      FROM advances
-    `
-    const advanceParams = []
-    if (as_on_date) {
-      advanceQuery += ` WHERE date <= ?`
-      advanceParams.push(toDate)
+    let advanceSettlements = []
+    try {
+      const advExists = await tableExists('advances')
+      if (advExists) {
+        let advanceQuery = `
+          SELECT 
+            id,
+            papad_company as ledger_name,
+            date,
+            'Advance' as voucher_type,
+            s_no as voucher_no,
+            amount as debit,
+            0 as credit,
+            'Advance payment' as particulars
+          FROM advances
+        `
+        const advanceParams = []
+        if (as_on_date) {
+          advanceQuery += ` WHERE date <= ?`
+          advanceParams.push(toDate)
+        }
+        const advanceRes = await db.query(advanceQuery, advanceParams)
+        advanceSettlements = (advanceRes.rows || []).map(a => {
+          let name = a.ledger_name
+          if (name) {
+            const key = String(name).trim()
+            name = ledgerMap[key] || name
+          }
+          return {
+            id: a.id,
+            ledger_name: name,
+            date: a.date,
+            voucher_type: 'Advance',
+            voucher_no: a.voucher_no,
+            reference_no: '',
+            debit: parseFloat(a.debit || 0),
+            credit: 0,
+            particulars: a.particulars
+          }
+        })
+      }
+    } catch (e) {
+      console.warn('Error fetching advances:', e.message)
     }
-    const advanceRes = await db.query(advanceQuery, advanceParams)
-    let advanceSettlements = (advanceRes.rows || []).map(a => {
-      let name = a.ledger_name
-      if (name) {
-        const key = String(name).trim()
-        name = ledgerMap[key] || name
-      }
-      return {
-        id: a.id,
-        ledger_name: name,
-        date: a.date,
-        voucher_type: 'Advance',
-        voucher_no: a.voucher_no,
-        reference_no: '',
-        debit: parseFloat(a.debit || 0),
-        credit: 0,
-        particulars: a.particulars
-      }
-    })
 
     // Combine settlements
     let allSettlements = [...settlements, ...advanceSettlements]
@@ -2484,8 +2513,6 @@ router.get('/outstanding-details', async (req, res) => {
 
     // =========================================================================
     // GLOBAL PASS 1: Apply Explicit Reference Matches across ALL bills
-    // This correctly reconciles settlements even if the voucher entry was booked
-    // to "Purchase Account" / "Bank Account" instead of party ledger.
     // =========================================================================
     allSettlements.forEach(s => {
       let amountToAllocate = 0
@@ -2500,10 +2527,10 @@ router.get('/outstanding-details', async (req, res) => {
       for (const bill of allBills) {
         if (bill.balance <= 0.01) continue
 
-        // Check if any token matches the bill's searchTokens
+        const searchTokens = Array.isArray(bill.searchTokens) ? bill.searchTokens : []
         const isMatched = sTokens.some(tok => 
-          bill.searchTokens.includes(tok) || 
-          bill.searchTokens.some(bt => bt.includes(tok) || tok.includes(bt))
+          searchTokens.includes(tok) || 
+          searchTokens.some(bt => bt.includes(tok) || tok.includes(bt))
         )
 
         if (isMatched) {
@@ -2516,7 +2543,6 @@ router.get('/outstanding-details', async (req, res) => {
         }
       }
 
-      // Update remaining settlement amount
       s.remaining_amount = amountToAllocate
     })
 
@@ -2570,16 +2596,11 @@ router.get('/outstanding-details', async (req, res) => {
     let resultBills = allBills
     if (ledger_name) {
       const filterName = cleanPartyKey(ledger_name)
-      const matched = allBills.filter(b => {
+      resultBills = allBills.filter(b => {
         if (!b.ledger_name) return false
         const bKey = cleanPartyKey(b.ledger_name)
         return bKey === filterName || bKey.includes(filterName) || filterName.includes(bKey)
       })
-      if (matched.length > 0) {
-        resultBills = matched
-      } else {
-        resultBills = allBills
-      }
     }
 
     // 6. Return outstanding details (Only bills with balance > 0.01)
