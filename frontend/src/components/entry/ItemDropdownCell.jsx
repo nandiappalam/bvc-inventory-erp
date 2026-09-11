@@ -213,10 +213,11 @@ const ItemDropdownCell = ({
     });
   }, [items, searchTerm]);
 
-  // Group items by category: 1. RAW MATERIALS (RM), 2. FINISHED GOODS (FG), 3. OPENING STOCK, 4. OTHER STOCKS
+  // Group items by category: 1. RAW MATERIALS (RM), 2. FINISHED GOODS (FG), 3. REJECTION / WASTAGE, 4. OPENING STOCK, 5. OTHER MATERIALS & SUPPLIES
   const groupedItems = useMemo(() => {
     const rmItems = [];
     const fgItems = [];
+    const rejectionItems = [];
     const openItems = [];
     const otherItems = [];
 
@@ -224,6 +225,10 @@ const ItemDropdownCell = ({
       const type = String(item.type || '').toUpperCase();
       const group = String(item.item_group || '').toUpperCase();
       const name = String(item.item_name || item.name || '').toUpperCase();
+
+      const isWastage = type.includes('REJECT') || type.includes('WASTAGE') || type.includes('SCRAP') || type.includes('WASTE') ||
+                        group.includes('REJECT') || group.includes('WASTAGE') || group.includes('SCRAP') ||
+                        name.includes('REJECT') || name.includes('WASTAGE') || name.includes('SCRAP') || name.includes('WASTE');
 
       const isFG = type.includes('FINISH') || type.includes('FG') || group.includes('FINISH') || group.includes('FG') || 
                    name.includes('-FG') || name.includes(' FG') || name.includes('(FG)') ||
@@ -237,7 +242,9 @@ const ItemDropdownCell = ({
                    type.includes('GRAIN') || group.includes('GRAIN') ||
                    name.includes('WHEAT') || name.includes('RICE') || name.includes('URAD') || name.includes('GRAM') || name.includes('CHANA');
 
-      if (isFG) {
+      if (isWastage) {
+        rejectionItems.push(item);
+      } else if (isFG) {
         fgItems.push(item);
       } else if (isOpening) {
         openItems.push(item);
@@ -269,9 +276,19 @@ const ItemDropdownCell = ({
         items: fgItems,
       });
     }
+    if (rejectionItems.length > 0) {
+      groups.push({
+        groupName: '3. REJECTION / WASTAGE',
+        categoryType: 'REJECTION',
+        badgeBg: '#fef2f2',
+        badgeColor: '#b91c1c',
+        icon: '⚠️',
+        items: rejectionItems,
+      });
+    }
     if (openItems.length > 0) {
       groups.push({
-        groupName: '3. OPENING STOCK',
+        groupName: '4. OPENING STOCK',
         categoryType: 'OPEN',
         badgeBg: '#fef3c7',
         badgeColor: '#b45309',
@@ -281,7 +298,7 @@ const ItemDropdownCell = ({
     }
     if (otherItems.length > 0) {
       groups.push({
-        groupName: '4. OTHER MATERIALS & SUPPLIES',
+        groupName: '5. OTHER MATERIALS & SUPPLIES',
         categoryType: 'OTHER',
         badgeBg: '#f3e8ff',
         badgeColor: '#7e22ce',
