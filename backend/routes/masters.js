@@ -443,25 +443,30 @@ router.get('/:type', async (req, res, next) => {
       const itemMap = new Map()
 
       ;(imRes.rows || []).forEach(r => {
-        const key = String(r.item_name || r.name || '').trim().toLowerCase()
+        const itemName = r.item_name || r.name || ''
+        const key = String(itemName).trim().toLowerCase()
         if (key) {
           const isFG = key.includes('fg') || key.includes('finish') || key.includes('papad') || key.includes('pack')
           const isOpening = key.includes('opening') || key.includes('open')
           const isWastage = key.includes('wastage') || key.includes('reject') || key.includes('scrap')
           const itemType = isWastage ? 'Rejection / Wastage' : isFG ? 'Finished Goods' : isOpening ? 'Opening Stock' : (r.type || 'Raw Material')
           const itemGroup = isWastage ? 'Rejection / Wastage' : isFG ? 'Finished Goods' : isOpening ? 'Opening Stock' : (r.item_group || 'Raw Material')
-          const uniqueKey = `${key}_${itemType.toLowerCase()}`
 
-          itemMap.set(uniqueKey, {
-            ...r,
-            id: r.id || r.item_code || r.item_name,
-            name: r.item_name || r.name,
-            item_name: r.item_name || r.name,
-            print_name: r.print_name || r.item_name || r.name,
-            item_group: itemGroup,
-            type: itemType,
-            stock_qty: parseFloat(r.stock_qty || 0)
-          })
+          if (!itemMap.has(key)) {
+            itemMap.set(key, {
+              ...r,
+              id: r.id || r.item_code || itemName,
+              name: itemName,
+              item_name: itemName,
+              print_name: r.print_name || itemName,
+              item_group: itemGroup,
+              type: itemType,
+              stock_qty: parseFloat(r.stock_qty || 0)
+            })
+          } else {
+            const existing = itemMap.get(key)
+            existing.stock_qty = (existing.stock_qty || 0) + parseFloat(r.stock_qty || 0)
+          }
         }
       })
 
@@ -489,11 +494,11 @@ router.get('/:type', async (req, res, next) => {
 
           const itemType = isWastage ? 'Rejection / Wastage' : isFG ? 'Finished Goods' : isOpening ? 'Opening Stock' : 'Raw Material'
           const itemGroup = itemType
-          const uniqueKey = `${keyName}_${itemType.toLowerCase()}`
+          const qty = parseFloat(sl.total_qty || 0)
 
-          if (!itemMap.has(uniqueKey)) {
-            itemMap.set(uniqueKey, {
-              id: `lot_${uniqueKey.replace(/[^a-z0-9]/g, '_')}`,
+          if (!itemMap.has(keyName)) {
+            itemMap.set(keyName, {
+              id: `lot_${keyName.replace(/[^a-z0-9]/g, '_')}`,
               item_code: `${itemType.substring(0, 3).toUpperCase()}-${keyName.substring(0, 4).toUpperCase()}`,
               name: itemName,
               item_name: itemName,
@@ -502,11 +507,15 @@ router.get('/:type', async (req, res, next) => {
               type: itemType,
               tax: 5,
               status: 'Active',
-              stock_qty: parseFloat(sl.total_qty || 0)
+              stock_qty: qty
             })
           } else {
-            const existing = itemMap.get(uniqueKey)
-            existing.stock_qty = (existing.stock_qty || 0) + parseFloat(sl.total_qty || 0)
+            const existing = itemMap.get(keyName)
+            existing.stock_qty = (existing.stock_qty || 0) + qty
+            if (itemType !== 'Raw Material' && (existing.type === 'Raw Material' || !existing.type)) {
+              existing.type = itemType
+              existing.item_group = itemGroup
+            }
           }
         })
       } catch (e) {}

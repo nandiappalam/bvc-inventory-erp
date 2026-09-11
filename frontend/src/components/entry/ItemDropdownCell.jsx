@@ -237,10 +237,10 @@ const ItemDropdownCell = ({
 
       const isOpening = type.includes('OPEN') || group.includes('OPEN') || name.includes('OPEN') || name.includes('OPENING');
 
-      const isRM = type.includes('RAW') || type.includes('RM') || group.includes('RAW') || group.includes('RM') || 
+      const isRM = (type.includes('RAW') || type.includes('RM') || group.includes('RAW') || group.includes('RM') || 
                    name.includes('-RM') || name.includes(' RM') || name.includes('(RM)') ||
                    type.includes('GRAIN') || group.includes('GRAIN') ||
-                   name.includes('WHEAT') || name.includes('RICE') || name.includes('URAD') || name.includes('GRAM') || name.includes('CHANA');
+                   name.includes('WHEAT') || name.includes('RICE') || name.includes('URAD') || name.includes('GRAM') || name.includes('CHANA')) && !isFG && !isOpening && !isWastage;
 
       if (isWastage) {
         rejectionItems.push(item);
