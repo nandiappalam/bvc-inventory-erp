@@ -1672,49 +1672,145 @@ router.get('/profit-loss', async (req, res) => {
 // ============================================================
 router.get('/ledger/:ledgerName', async (req, res) => {
   try {
-    const { ledgerName } = req.params
+    const rawLedgerName = decodeURIComponent(req.params.ledgerName || '')
     const { from_date, to_date, type } = req.query
     
-    // Resolve ledger ID and official name
-    let ledgerId = null
-    let officialName = ledgerName
+    // Clean name by stripping suffix like " (Supplier)", " (Customer)", " (Papad Company)", etc.
+    const cleanName = rawLedgerName
+      .replace(/\s*\((Supplier|Customer|Papad Company|Flour Mill|Expense|Income|Bank|Cash|Party|Tax|Asset|Liability)\)$/i, '')
+      .trim()
+    
+    let officialName = cleanName || rawLedgerName
     let openingBalance = 0
+    let candidateIds = new Set()
+    let candidateNames = new Set([cleanName.toLowerCase(), rawLedgerName.toLowerCase()])
 
+    // 1. Look in ledgermaster
     try {
-      let lmRes;
-      if (type) {
-        lmRes = await db.query('SELECT id, name, openingbalance FROM ledgermaster WHERE name = ? AND ledger_type = ?', [ledgerName, type])
-        if (lmRes.rows.length === 0) {
-          lmRes = await db.query('SELECT id, name, openingbalance FROM ledgermaster WHERE TRIM(name) = ? AND ledger_type = ?', [ledgerName.trim(), type])
-        }
-      }
-      if (!lmRes || lmRes.rows.length === 0) {
-        lmRes = await db.query('SELECT id, name, openingbalance FROM ledgermaster WHERE name = ?', [ledgerName])
-      }
-      if (!lmRes || lmRes.rows.length === 0) {
-        lmRes = await db.query('SELECT id, name, openingbalance FROM ledgermaster WHERE TRIM(name) = ?', [ledgerName.trim()])
-      }
-
-      if (lmRes && lmRes.rows.length > 0) {
-        ledgerId = lmRes.rows[0].id
-        officialName = lmRes.rows[0].name
-        openingBalance = parseFloat(lmRes.rows[0].openingbalance || 0)
-      } else {
-        // Try fallback if ledgerName is actually an ID
-        if (/^\d+$/.test(ledgerName)) {
-          const lmRes2 = await db.query('SELECT id, name, openingbalance FROM ledgermaster WHERE id = ?', [parseInt(ledgerName, 10)])
-          if (lmRes2.rows.length > 0) {
-            ledgerId = lmRes2.rows[0].id
-            officialName = lmRes2.rows[0].name
-            openingBalance = parseFloat(lmRes2.rows[0].openingbalance || 0)
-          }
-        }
+      const lmQuery = await db.query(
+        `SELECT id, name, printname, print_name, openingbalance, ledger_type 
+         FROM ledgermaster 
+         WHERE name = ? OR TRIM(name) = ? OR LOWER(TRIM(name)) = LOWER(?) 
+            OR printname = ? OR print_name = ? 
+            OR name LIKE ? OR id = ?`,
+        [cleanName, cleanName, cleanName, cleanName, cleanName, `%${cleanName}%`, parseInt(cleanName) || -1]
+      )
+      if (lmQuery.rows && lmQuery.rows.length > 0) {
+        const best = lmQuery.rows.find(r => 
+          (type && r.ledger_type && r.ledger_type.toLowerCase() === type.toLowerCase()) ||
+          r.name.toLowerCase() === cleanName.toLowerCase()
+        ) || lmQuery.rows[0]
+        
+        officialName = best.name || officialName
+        openingBalance = parseFloat(best.openingbalance || 0)
+        
+        lmQuery.rows.forEach(r => {
+          if (r.id) candidateIds.add(Number(r.id))
+          if (r.name) candidateNames.add(r.name.trim().toLowerCase())
+          if (r.printname) candidateNames.add(r.printname.trim().toLowerCase())
+          if (r.print_name) candidateNames.add(r.print_name.trim().toLowerCase())
+        })
       }
     } catch (e) {
-      console.error('Error resolving ledger info:', e)
+      console.error('Error querying ledgermaster:', e)
     }
 
-    // Query ledger_entries
+    // 2. Look in supplier_master
+    try {
+      const smQuery = await db.query(
+        `SELECT id, name, print_name, opening_balance FROM supplier_master 
+         WHERE name = ? OR TRIM(name) = ? OR LOWER(TRIM(name)) = LOWER(?) 
+            OR print_name = ? OR id = ?`,
+        [cleanName, cleanName, cleanName, cleanName, parseInt(cleanName) || -1]
+      )
+      if (smQuery.rows && smQuery.rows.length > 0) {
+        smQuery.rows.forEach(r => {
+          if (r.id) candidateIds.add(Number(r.id))
+          if (r.name) candidateNames.add(r.name.trim().toLowerCase())
+          if (r.print_name) candidateNames.add(r.print_name.trim().toLowerCase())
+          if (openingBalance === 0 && r.opening_balance) {
+            openingBalance = parseFloat(r.opening_balance || 0)
+          }
+        })
+      }
+    } catch (e) {}
+
+    // 3. Look in customer_master
+    try {
+      const cmQuery = await db.query(
+        `SELECT id, name, print_name, opening_balance FROM customer_master 
+         WHERE name = ? OR TRIM(name) = ? OR LOWER(TRIM(name)) = LOWER(?) 
+            OR print_name = ? OR id = ?`,
+        [cleanName, cleanName, cleanName, cleanName, parseInt(cleanName) || -1]
+      )
+      if (cmQuery.rows && cmQuery.rows.length > 0) {
+        cmQuery.rows.forEach(r => {
+          if (r.id) candidateIds.add(Number(r.id))
+          if (r.name) candidateNames.add(r.name.trim().toLowerCase())
+          if (r.print_name) candidateNames.add(r.print_name.trim().toLowerCase())
+          if (openingBalance === 0 && r.opening_balance) {
+            openingBalance = parseFloat(r.opening_balance || 0)
+          }
+        })
+      }
+    } catch (e) {}
+
+    // 4. Look in papad_company_master
+    try {
+      const pmQuery = await db.query(
+        `SELECT id, name, print_name, opening_balance FROM papad_company_master 
+         WHERE name = ? OR TRIM(name) = ? OR LOWER(TRIM(name)) = LOWER(?) 
+            OR print_name = ? OR id = ?`,
+        [cleanName, cleanName, cleanName, cleanName, parseInt(cleanName) || -1]
+      )
+      if (pmQuery.rows && pmQuery.rows.length > 0) {
+        pmQuery.rows.forEach(r => {
+          if (r.id) candidateIds.add(Number(r.id))
+          if (r.name) candidateNames.add(r.name.trim().toLowerCase())
+          if (r.print_name) candidateNames.add(r.print_name.trim().toLowerCase())
+          if (openingBalance === 0 && r.opening_balance) {
+            openingBalance = parseFloat(r.opening_balance || 0)
+          }
+        })
+      }
+    } catch (e) {}
+
+    // 5. Look in flour_mill_master
+    try {
+      const fmQuery = await db.query(
+        `SELECT id, flourmill, name, print_name FROM flour_mill_master 
+         WHERE flourmill = ? OR name = ? OR id = ?`,
+        [cleanName, cleanName, parseInt(cleanName) || -1]
+      )
+      if (fmQuery.rows && fmQuery.rows.length > 0) {
+        fmQuery.rows.forEach(r => {
+          if (r.id) candidateIds.add(Number(r.id))
+          if (r.flourmill) candidateNames.add(r.flourmill.trim().toLowerCase())
+          if (r.name) candidateNames.add(r.name.trim().toLowerCase())
+        })
+      }
+    } catch (e) {}
+
+    const idList = Array.from(candidateIds)
+    const nameList = Array.from(candidateNames)
+
+    // Build conditions for ledger_entries
+    let entryConditions = []
+    let entryParams = []
+
+    if (idList.length > 0) {
+      entryConditions.push(`ledger_id IN (${idList.map(() => '?').join(', ')})`)
+      entryParams.push(...idList)
+    }
+
+    if (nameList.length > 0) {
+      entryConditions.push(`LOWER(TRIM(ledger_name)) IN (${nameList.map(() => '?').join(', ')})`)
+      entryParams.push(...nameList)
+    }
+
+    entryConditions.push(`LOWER(ledger_name) LIKE ?`)
+    entryParams.push(`%${cleanName.toLowerCase()}%`)
+
     let query = `
       SELECT 
         id,
@@ -1723,39 +1819,99 @@ router.get('/ledger/:ledgerName', async (req, res) => {
         voucher_no,
         particulars,
         debit,
-        credit
+        credit,
+        ledger_id,
+        ledger_name
       FROM ledger_entries
-      WHERE 1=1
+      WHERE (${entryConditions.join(' OR ')})
     `
-    const params = []
-    
-    if (ledgerId !== null) {
-      query += ` AND ledger_id = ?`
-      params.push(ledgerId)
-    } else {
-      query += ` AND ledger_name = ?`
-      params.push(officialName)
-    }
 
     if (from_date) {
       query += ` AND date >= ?`
-      params.push(from_date)
+      entryParams.push(from_date)
     }
     if (to_date) {
       query += ` AND date <= ?`
-      params.push(to_date)
+      entryParams.push(to_date)
     }
 
     query += ` ORDER BY date ASC, id ASC`
 
-    const result = await db.query(query, params)
+    const result = await db.query(query, entryParams)
     let transactions = result.rows || []
+    const seenVoucherNos = new Set(transactions.map(t => `${t.voucher_no}_${parseFloat(t.debit || 0)}_${parseFloat(t.credit || 0)}`))
 
-    // Sort and calculate running balance
+    // 6. Cross-check voucher + voucher_entry table for any vouchers (Payment, Receipt, Journal, Contra, Purchase, Sales)
+    try {
+      let vConds = []
+      let vParams = []
+
+      if (idList.length > 0) {
+        vConds.push(`ve.ledger_id IN (${idList.map(() => '?').join(', ')})`)
+        vParams.push(...idList)
+      }
+      if (nameList.length > 0) {
+        vConds.push(`LOWER(TRIM(lm.name)) IN (${nameList.map(() => '?').join(', ')})`)
+        vParams.push(...nameList)
+      }
+      vConds.push(`LOWER(v.narration) LIKE ?`)
+      vParams.push(`%${cleanName.toLowerCase()}%`)
+
+      let vQuery = `
+        SELECT 
+          ve.id,
+          v.date,
+          v.voucher_type,
+          v.voucher_no,
+          COALESCE(NULLIF(TRIM(ve.remarks), ''), NULLIF(TRIM(v.reference_no), ''), NULLIF(TRIM(v.narration), ''), v.voucher_type) as particulars,
+          ve.debit,
+          ve.credit,
+          ve.ledger_id,
+          COALESCE(lm.name, '') as ledger_name
+        FROM voucher_entry ve
+        JOIN voucher v ON v.id = ve.voucher_id
+        LEFT JOIN ledgermaster lm ON lm.id = ve.ledger_id
+        WHERE (${vConds.join(' OR ')})
+      `
+      if (from_date) {
+        vQuery += ` AND v.date >= ?`
+        vParams.push(from_date)
+      }
+      if (to_date) {
+        vQuery += ` AND v.date <= ?`
+        vParams.push(to_date)
+      }
+
+      const vResult = await db.query(vQuery, vParams)
+      if (vResult.rows && vResult.rows.length > 0) {
+        for (const vRow of vResult.rows) {
+          const key = `${vRow.voucher_no}_${parseFloat(vRow.debit || 0)}_${parseFloat(vRow.credit || 0)}`
+          if (!seenVoucherNos.has(key)) {
+            seenVoucherNos.add(key)
+            transactions.push({
+              id: vRow.id || (100000 + transactions.length),
+              date: vRow.date,
+              voucher_type: vRow.voucher_type,
+              voucher_no: vRow.voucher_no,
+              particulars: vRow.particulars,
+              debit: parseFloat(vRow.debit || 0),
+              credit: parseFloat(vRow.credit || 0),
+              ledger_id: vRow.ledger_id,
+              ledger_name: vRow.ledger_name
+            })
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Voucher cross-check in ledger skipped:', e.message)
+    }
+
+    // 7. Sort and calculate running balance
     transactions.sort((a, b) => {
-      const dateDiff = new Date(a.date) - new Date(b.date)
-      if (dateDiff !== 0) return dateDiff
-      return a.id - b.id
+      const dateA = a.date ? new Date(a.date).getTime() : 0
+      const dateB = b.date ? new Date(b.date).getTime() : 0
+      if (dateA !== dateB) return dateA - dateB
+      return (a.id || 0) - (b.id || 0)
     })
 
     let balance = openingBalance
@@ -1764,15 +1920,24 @@ router.get('/ledger/:ledgerName', async (req, res) => {
       return { ...t, balance }
     })
 
-    res.json({
+    const payload = {
+      success: true,
       ledgerName: officialName,
       openingBalance,
       transactions,
-      closingBalance: balance
-    })
+      closingBalance: balance,
+      data: {
+        ledgerName: officialName,
+        openingBalance,
+        transactions,
+        closingBalance: balance
+      }
+    }
+
+    res.json(payload)
   } catch (error) {
     console.error('Error fetching ledger:', error)
-    res.status(500).json({ message: 'Error fetching ledger', error: error.message })
+    res.status(500).json({ success: false, message: 'Error fetching ledger', error: error.message })
   }
 })
 
@@ -2751,14 +2916,41 @@ router.get('/daily-production', async (req, res) => {
         let supp = inp.supplier_name || inp.supplier;
         if (!supp && inp.lot_no) {
           try {
-            const qcRes = await db.query(`SELECT supplier_name FROM quality_control WHERE lot_no = ? AND supplier_name IS NOT NULL AND supplier_name != '' LIMIT 1`, [inp.lot_no]);
-            if (qcRes.rows && qcRes.rows[0]?.supplier_name) supp = qcRes.rows[0].supplier_name;
+            const piRes = await db.query(`
+              SELECT COALESCE(sm.name, p.supplier) AS supplier_name 
+              FROM purchase_items pi 
+              JOIN purchases p ON (pi.purchase_id = p.id) 
+              LEFT JOIN supplier_master sm ON (p.supplier = CAST(sm.id AS TEXT) OR p.supplier = sm.name) 
+              WHERE pi.lot_no = ? AND (p.supplier IS NOT NULL OR sm.name IS NOT NULL) 
+              LIMIT 1
+            `, [inp.lot_no]);
+            if (piRes.rows && piRes.rows[0]?.supplier_name) supp = piRes.rows[0].supplier_name;
           } catch (e) {}
 
           if (!supp) {
             try {
-              const piRes = await db.query(`SELECT p.supplier_name FROM purchase_items pi JOIN purchases p ON (pi.purchase_id = p.id OR pi.purchase_id = p.purchase_id) WHERE pi.lot_no = ? AND p.supplier_name IS NOT NULL AND p.supplier_name != '' LIMIT 1`, [inp.lot_no]);
-              if (piRes.rows && piRes.rows[0]?.supplier_name) supp = piRes.rows[0].supplier_name;
+              const qcRes = await db.query(`SELECT supplier_name FROM quality_control WHERE lot_no = ? AND supplier_name IS NOT NULL AND supplier_name != '' LIMIT 1`, [inp.lot_no]);
+              if (qcRes.rows && qcRes.rows[0]?.supplier_name) supp = qcRes.rows[0].supplier_name;
+            } catch (e) {}
+          }
+
+          if (!supp) {
+            try {
+              const qciRes = await db.query(`SELECT supplier_name FROM qc_inspections WHERE rm_lot_no = ? AND supplier_name IS NOT NULL AND supplier_name != '' LIMIT 1`, [inp.lot_no]);
+              if (qciRes.rows && qciRes.rows[0]?.supplier_name) supp = qciRes.rows[0].supplier_name;
+            } catch (e) {}
+          }
+
+          if (!supp) {
+            try {
+              const slRes = await db.query(`
+                SELECT COALESCE(sm.name, sl.supplier) AS supplier_name 
+                FROM stock_lots sl 
+                LEFT JOIN supplier_master sm ON (sl.supplier_id = sm.id OR sl.supplier = sm.name) 
+                WHERE sl.lot_no = ? AND (sl.supplier IS NOT NULL OR sm.name IS NOT NULL) 
+                LIMIT 1
+              `, [inp.lot_no]);
+              if (slRes.rows && slRes.rows[0]?.supplier_name) supp = slRes.rows[0].supplier_name;
             } catch (e) {}
           }
 
@@ -2767,16 +2959,6 @@ router.get('/daily-production', async (req, res) => {
               const vmRes = await db.query(`SELECT party_name FROM vehicle_movements WHERE lot_no = ? AND party_name IS NOT NULL AND party_name != '' LIMIT 1`, [inp.lot_no]);
               if (vmRes.rows && vmRes.rows[0]?.party_name) supp = vmRes.rows[0].party_name;
             } catch (e) {}
-          }
-
-          if (!supp) {
-            const l = String(inp.lot_no);
-            if (l.includes('11188') || l.includes('11496') || l.includes('11497') || l.includes('11183')) supp = 'K';
-            else if (l.includes('10603') || l.includes('10604')) supp = 'A';
-            else if (l.includes('11320') || l.includes('11566')) supp = 'S';
-            else if (l.includes('10991') || l.includes('11326') || l.includes('11333')) supp = 'S';
-            else if (l.includes('11347')) supp = 'N';
-            else if (l.includes('11372') || l.includes('11408')) supp = 'C';
           }
         }
         if (supp) resolvedSuppliers.push(supp);
@@ -2795,7 +2977,7 @@ router.get('/daily-production', async (req, res) => {
         flour_mill: g.flour_mill_name || g.flour_mill,
         lot_no: inputLotsStr || 'N/A',
         item_name: inputItemsStr || 'N/A',
-        supplier_name: suppliersStr || 'K',
+        supplier_name: suppliersStr || 'Factory Inward',
         source: g.flour_mill_name || g.flour_mill || 'In-House',
         bag_weight: inputs[0]?.weight || 50,
         input_qty: inputQty,
@@ -3467,7 +3649,7 @@ const categoryReportHandler = async (req, res) => {
           LEFT JOIN purchase_items pi ON p.id = pi.purchase_id
           LEFT JOIN item_master im ON (pi.item_name = im.item_name OR pi.item_name = im.item_code)
           ${where}
-          GROUP BY STRFTIME('%Y-%m', p.date), pi.item_name
+          GROUP BY STRFTIME('%Y-%m', p.date), pi.item_name, COALESCE(im.item_group, 'General')
           ORDER BY month DESC, item_name ASC
         `;
       } else if (sub_type === 'monthly-supplier') {
@@ -3499,7 +3681,7 @@ const categoryReportHandler = async (req, res) => {
           LEFT JOIN purchase_items pi ON p.id = pi.purchase_id
           LEFT JOIN item_master im ON (pi.item_name = im.item_name OR pi.item_name = im.item_code)
           ${where}
-          GROUP BY p.date, pi.item_name
+          GROUP BY p.date, pi.item_name, COALESCE(im.item_group, 'General')
           ORDER BY p.date DESC, item_name ASC
         `;
       } else if (sub_type === 'daily-supplier') {
@@ -3611,7 +3793,7 @@ const categoryReportHandler = async (req, res) => {
           LEFT JOIN purchase_return_items pri ON pr.id = pri.purchase_return_id
           LEFT JOIN item_master im ON (pri.item_name = im.item_name OR pri.item_name = im.item_code)
           ${where}
-          GROUP BY ${groupCol}, pri.item_name
+          GROUP BY ${groupCol}, pri.item_name, COALESCE(im.item_group, 'General')
           ORDER BY 1 DESC, item_name ASC
         `;
       } else if (sub_type === 'monthly-supplier' || sub_type === 'daily-supplier') {
@@ -3722,7 +3904,7 @@ const categoryReportHandler = async (req, res) => {
           LEFT JOIN sales_items si ON s.id = si.sales_id
           LEFT JOIN item_master im ON (si.item_name = im.item_name OR si.item_name = im.item_code)
           ${where}
-          GROUP BY ${groupCol}, si.item_name
+          GROUP BY ${groupCol}, si.item_name, COALESCE(im.item_group, 'General')
           ORDER BY 1 DESC, item_name ASC
         `;
       } else if (sub_type === 'monthly-customer' || sub_type === 'daily-customer') {
@@ -3824,13 +4006,15 @@ const categoryReportHandler = async (req, res) => {
           SELECT 
             ${timeCol},
             COALESCE(sri.item_name, 'Returned Product') as item_name,
+            COALESCE(im.item_group, 'General') as item_group,
             SUM(COALESCE(sri.qty, 0)) as total_qty,
             ROUND(AVG(COALESCE(sri.rate, 0)), 2) as avg_rate,
             SUM(COALESCE(sr.total_amt, sri.total_amt, sri.qty * sri.rate, 0)) as total_amount
           FROM sales_return sr
           LEFT JOIN sales_return_items sri ON sr.id = sri.sales_return_id
+          LEFT JOIN item_master im ON (sri.item_name = im.item_name OR sri.item_name = im.item_code)
           ${where}
-          GROUP BY ${groupCol}, sri.item_name
+          GROUP BY ${groupCol}, sri.item_name, COALESCE(im.item_group, 'General')
           ORDER BY 1 DESC, item_name ASC
         `;
       } else if (sub_type === 'monthly-customer' || sub_type === 'daily-customer') {
@@ -3873,7 +4057,7 @@ const categoryReportHandler = async (req, res) => {
       const result = await db.query(sql, params);
       rows = result.rows || [];
     } else if (categoryKey === 'tax') {
-      if (sub_type === 'purchase-vat') {
+      if (sub_type === 'purchase-vat' || sub_type === 'purchase-cat' || sub_type === 'purchase-gst') {
         const sql = `
           SELECT 
             p.date,
@@ -3916,23 +4100,24 @@ const categoryReportHandler = async (req, res) => {
       if (sub_type === 'iqr') {
         const sql = `
           SELECT 
-            COALESCE(r.record_date, p.date) as date,
-            COALESCE(r.record_no, 'IQR-' || p.id) as iqr_no,
-            COALESCE(r.lot_no, pi.lot_no, 'RM-LOT') as lot_no,
+            COALESCE(r.record_date, qi.inspection_date, p.date) as date,
+            COALESCE(r.record_no, qi.qc_no, 'IQR-' || p.id) as iqr_no,
+            COALESCE(r.lot_no, qi.rm_lot_no, pi.lot_no, 'RM-LOT') as lot_no,
             COALESCE(s.name, s.print_name, r.supplier_name, p.supplier, 'Supplier') as supplier_name,
             COALESCE(r.item_name, pi.item_name, 'Raw Material') as item_name,
             COALESCE(pi.qty, p.total_qty, 0) as inward_bags,
             COALESCE(pi.total_weight, p.total_weight, (pi.qty * COALESCE(pi.per_unit_weight, 50)), 0) as total_weight,
-            COALESCE(json_extract(r.findings_json, '$.moisture'), '10.8%') as moisture,
-            COALESCE(json_extract(r.findings_json, '$.foreign_matter'), '0.4%') as foreign_matter,
-            COALESCE(json_extract(r.findings_json, '$.broken_grain'), '1.2%') as broken_grain,
-            COALESCE(r.status, 'PASSED') as status,
-            COALESCE(r.checked_by, 'QA QC Officer') as checked_by
+            COALESCE(JSON_EXTRACT(r.findings_json, '$.moisture'), '10.8%') as moisture,
+            COALESCE(JSON_EXTRACT(r.findings_json, '$.foreign_matter'), '0.4%') as foreign_matter,
+            COALESCE(JSON_EXTRACT(r.findings_json, '$.broken_grain'), '1.2%') as broken_grain,
+            COALESCE(r.status, qi.overall_result, 'PASSED') as status,
+            COALESCE(r.checked_by, qi.inspector, 'QA QC Officer') as checked_by
           FROM purchases p
           JOIN purchase_items pi ON p.id = pi.purchase_id
           LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(p.supplier AS TEXT) OR p.supplier = s.name OR p.supplier = s.print_name)
+          LEFT JOIN qc_inspections qi ON (qi.purchase_id = p.id OR qi.rm_lot_no = pi.lot_no)
           LEFT JOIN compliance_production_records r ON (r.record_code = 'P1' AND (r.lot_no = pi.lot_no OR r.purchase_id = p.id))
-          ORDER BY p.date DESC, p.id DESC
+          ORDER BY COALESCE(r.record_date, p.date) DESC, p.id DESC
         `;
         const result = await db.query(sql);
         rows = result.rows || [];
@@ -3964,21 +4149,22 @@ const categoryReportHandler = async (req, res) => {
       } else if (sub_type === 'coa') {
         const sql = `
           SELECT 
-            g.date,
-            'COA-' || strftime('%Y', g.date) || '-' || PRINTF('%04d', COALESCE(g.s_no, g.id)) as coa_no,
-            COALESCE(go.item_name, 'Flour Product') as item_name,
-            COALESCE(go.lot_no, 'FG-LOT') as lot_no,
+            COALESCE(r.record_date, g.date) as date,
+            COALESCE(r.record_no, 'COA-' || SUBSTR(COALESCE(g.date, '2026'), 1, 4) || '-' || PRINTF('%04d', COALESCE(g.s_no, g.id))) as coa_no,
+            COALESCE(go.item_name, r.item_name, 'Flour Product') as item_name,
+            COALESCE(go.lot_no, r.lot_no, 'FG-LOT') as lot_no,
             COALESCE(go.qty, 0) as batch_bags,
             COALESCE(go.total_wt, (go.qty * 30), 0) as total_weight,
-            '11.2%' as moisture,
-            '24.8%' as protein_gluten,
-            '0.48%' as ash_content,
-            '60 Mesh Passed' as fineness,
-            'APPROVED' as disposition,
-            'QA Lead Officer' as certified_by
+            COALESCE(JSON_EXTRACT(r.findings_json, '$.moisture'), '11.2%') as moisture,
+            COALESCE(JSON_EXTRACT(r.findings_json, '$.protein_gluten'), '24.8%') as protein_gluten,
+            COALESCE(JSON_EXTRACT(r.findings_json, '$.ash_content'), '0.48%') as ash_content,
+            COALESCE(JSON_EXTRACT(r.findings_json, '$.fineness'), '60 Mesh Passed') as fineness,
+            COALESCE(r.status, 'APPROVED') as disposition,
+            COALESCE(r.checked_by, 'QA Lead Officer') as certified_by
           FROM grains g
           JOIN grain_output_items go ON g.id = go.grain_id
-          ORDER BY g.date DESC, g.id DESC
+          LEFT JOIN compliance_production_records r ON (r.record_code = 'P6' AND (r.lot_no = go.lot_no OR r.findings_json LIKE '%' || go.lot_no || '%'))
+          ORDER BY COALESCE(r.record_date, g.date) DESC, g.id DESC
         `;
         const result = await db.query(sql);
         rows = result.rows || [];

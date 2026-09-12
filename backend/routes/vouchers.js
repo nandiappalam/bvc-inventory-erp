@@ -550,17 +550,35 @@ router.post('/', async (req, res) => {
     // Post to ledger_entries
     const ledgerEntries = [];
     for (const entry of data.entries) {
-      const lmResult = await db.query('SELECT name FROM ledgermaster WHERE id = ?', [entry.ledger_id]);
-      const ledger_name = lmResult.rows[0]?.name || 'Unknown';
+      let ledger_name = '';
+      try {
+        const lmResult = await db.query('SELECT name FROM ledgermaster WHERE id = ?', [entry.ledger_id]);
+        if (lmResult.rows && lmResult.rows.length > 0) ledger_name = lmResult.rows[0].name;
+        if (!ledger_name) {
+          const smResult = await db.query('SELECT name FROM supplier_master WHERE id = ?', [entry.ledger_id]);
+          if (smResult.rows && smResult.rows.length > 0) ledger_name = smResult.rows[0].name;
+        }
+        if (!ledger_name) {
+          const cmResult = await db.query('SELECT name FROM customer_master WHERE id = ?', [entry.ledger_id]);
+          if (cmResult.rows && cmResult.rows.length > 0) ledger_name = cmResult.rows[0].name;
+        }
+        if (!ledger_name) {
+          const pmResult = await db.query('SELECT name FROM papad_company_master WHERE id = ?', [entry.ledger_id]);
+          if (pmResult.rows && pmResult.rows.length > 0) ledger_name = pmResult.rows[0].name;
+        }
+      } catch (e) {}
+
+      if (!ledger_name) ledger_name = 'Unknown';
+
       const particularsText = (entry.remarks && entry.remarks.trim()) 
         ? entry.remarks.trim() 
         : ((data.reference_no && data.reference_no.trim()) 
             ? data.reference_no.trim() 
             : (data.narration || ''));
       ledgerEntries.push(db.run(
-        `INSERT INTO ledger_entries (ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit, particulars) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [entry.ledger_id, ledger_name, data.date, data.voucher_type, voucher_no, entry.debit || 0, entry.credit || 0, particularsText]
+        `INSERT INTO ledger_entries (ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit, particulars, voucher_id) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [entry.ledger_id, ledger_name, data.date, data.voucher_type, voucher_no, entry.debit || 0, entry.credit || 0, particularsText, voucherId]
       ));
     }
     await Promise.all(ledgerEntries);
@@ -626,17 +644,35 @@ router.put('/:id', async (req, res) => {
         [req.params.id, entry.type, entry.ledger_id, entry.debit || 0, entry.credit || 0, entry.remarks || '']
       );
       
-      const lmResult = await db.query('SELECT name FROM ledgermaster WHERE id = ?', [entry.ledger_id]);
-      const ledger_name = lmResult.rows[0]?.name || 'Unknown';
+      let ledger_name = '';
+      try {
+        const lmResult = await db.query('SELECT name FROM ledgermaster WHERE id = ?', [entry.ledger_id]);
+        if (lmResult.rows && lmResult.rows.length > 0) ledger_name = lmResult.rows[0].name;
+        if (!ledger_name) {
+          const smResult = await db.query('SELECT name FROM supplier_master WHERE id = ?', [entry.ledger_id]);
+          if (smResult.rows && smResult.rows.length > 0) ledger_name = smResult.rows[0].name;
+        }
+        if (!ledger_name) {
+          const cmResult = await db.query('SELECT name FROM customer_master WHERE id = ?', [entry.ledger_id]);
+          if (cmResult.rows && cmResult.rows.length > 0) ledger_name = cmResult.rows[0].name;
+        }
+        if (!ledger_name) {
+          const pmResult = await db.query('SELECT name FROM papad_company_master WHERE id = ?', [entry.ledger_id]);
+          if (pmResult.rows && pmResult.rows.length > 0) ledger_name = pmResult.rows[0].name;
+        }
+      } catch (e) {}
+
+      if (!ledger_name) ledger_name = 'Unknown';
+
       const particularsText = (entry.remarks && entry.remarks.trim()) 
         ? entry.remarks.trim() 
         : ((data.reference_no && data.reference_no.trim()) 
             ? data.reference_no.trim() 
             : (data.narration || ''));
       ledgerEntries.push(db.run(
-        `INSERT INTO ledger_entries (ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit, particulars) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [entry.ledger_id, ledger_name, data.date, data.voucher_type, voucher_no, entry.debit || 0, entry.credit || 0, particularsText]
+        `INSERT INTO ledger_entries (ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit, particulars, voucher_id) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [entry.ledger_id, ledger_name, data.date, data.voucher_type, voucher_no, entry.debit || 0, entry.credit || 0, particularsText, req.params.id]
       ));
     }
     await Promise.all(ledgerEntries);

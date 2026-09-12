@@ -187,9 +187,14 @@ router.get('/registers', asyncHandler(async (req, res) => {
     }
 
     const allocs = await db.query(`
-      SELECT sl.id, sl.godown_id, sl.quantity, sl.remaining_quantity, sl.unloading_status, g.godown_name
+      SELECT sl.id, sl.godown_id, sl.godown_name, sl.quantity, sl.remaining_quantity, sl.unloading_status,
+             COALESCE(g.godown_name, g.print_name, g.name, sl.godown_name, '') as godown_name
       FROM stock_lots sl
-      LEFT JOIN godown_master g ON (CAST(g.id AS TEXT) = CAST(sl.godown_id AS TEXT) OR g.godown_name = CAST(sl.godown_id AS TEXT))
+      LEFT JOIN godown_master g ON (
+        CAST(g.id AS TEXT) = CAST(sl.godown_id AS TEXT) 
+        OR g.godown_name = CAST(sl.godown_id AS TEXT) 
+        OR g.name = CAST(sl.godown_id AS TEXT)
+      )
       WHERE sl.lot_no = ?
     `, [row.rm_lot_no]);
     row.allocations = allocs.rows || [];
@@ -1099,17 +1104,26 @@ router.post('/confirm-disposal', asyncHandler(async (req, res) => {
 
   const todayStr = new Date().toISOString().split('T')[0];
   for (const alloc of finalAllocations) {
+    let godownName = '';
+    try {
+      const gRes = await db.query('SELECT godown_name, print_name, name FROM godown_master WHERE id = ? OR godown_name = ? OR name = ? LIMIT 1', [alloc.godownId, alloc.godownId, alloc.godownId]);
+      if (gRes.rows && gRes.rows.length > 0) {
+        godownName = gRes.rows[0].godown_name || gRes.rows[0].print_name || gRes.rows[0].name || '';
+      }
+    } catch (e) {}
+
     await db.run(
       `INSERT INTO stock_lots (
-         item_id, item_name, lot_no, purchase_id, godown_id, quantity, remaining_quantity, 
+         item_id, item_name, lot_no, purchase_id, godown_id, godown_name, quantity, remaining_quantity, 
          rate, qc_status, usable_for_production, approval_status, approval_date, unloading_status
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'APPROVED', ?, 'UNLOADED')`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'APPROVED', ?, 'UNLOADED')`,
       [
         itemId,
         itemName,
         lotNo,
         finalPurchaseId,
         alloc.godownId,
+        godownName,
         alloc.qty,
         alloc.qty,
         rate,
