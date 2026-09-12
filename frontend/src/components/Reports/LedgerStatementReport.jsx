@@ -34,73 +34,25 @@ const LedgerStatementReport = () => {
   useEffect(() => {
     const fetchLedgers = async () => {
       try {
-        const [suppliersRes, customersRes, papadRes, flourRes, lmRes] = await Promise.all([
-          api.getMasters('suppliers'),
-          api.getMasters('customers'),
-          api.getMasters('papad_companies'),
-          api.getMasters('flour_mills'),
-          api.get('/masters/all/ledgermaster').catch(() => null)
-        ])
+        // Fetch suppliers
+        const suppliersRes = await api.getMasters('suppliers')
+        const suppliers = (suppliersRes.success && Array.isArray(suppliersRes.data)) ? suppliersRes.data : []
         
-        const suppliers = (suppliersRes?.success && Array.isArray(suppliersRes.data)) ? suppliersRes.data : []
-        const customers = (customersRes?.success && Array.isArray(customersRes.data)) ? customersRes.data : []
-        const papads = (papadRes?.success && Array.isArray(papadRes.data)) ? papadRes.data : []
-        const flourMills = (flourRes?.success && Array.isArray(flourRes.data)) ? flourRes.data : []
-        const generalLedgers = (lmRes?.data && Array.isArray(lmRes.data)) ? lmRes.data : (Array.isArray(lmRes) ? lmRes : [])
+        // Fetch customers
+        const customersRes = await api.getMasters('customers')
+        const customers = (customersRes.success && Array.isArray(customersRes.data)) ? customersRes.data : []
         
-        const combined = []
-        const seen = new Set()
-
-        suppliers.forEach(s => {
-          const key = `${s.name}_Supplier`
-          if (!seen.has(key)) {
-            seen.add(key)
-            combined.push({ id: s.id, name: s.name, type: 'Supplier' })
-          }
-        })
-
-        customers.forEach(c => {
-          const key = `${c.name}_Customer`
-          if (!seen.has(key)) {
-            seen.add(key)
-            combined.push({ id: c.id, name: c.name, type: 'Customer' })
-          }
-        })
-
-        papads.forEach(p => {
-          const key = `${p.name}_Papad Company`
-          if (!seen.has(key)) {
-            seen.add(key)
-            combined.push({ id: p.id, name: p.name, type: 'Papad Company' })
-          }
-        })
-
-        flourMills.forEach(f => {
-          const name = f.flourmill || f.name
-          if (name) {
-            const key = `${name}_Flour Mill`
-            if (!seen.has(key)) {
-              seen.add(key)
-              combined.push({ id: f.id, name, type: 'Flour Mill' })
-            }
-          }
-        })
-
-        generalLedgers.forEach(l => {
-          const name = l.name
-          const type = l.ledger_type || 'General'
-          if (name) {
-            const key = `${name}_${type}`
-            if (!seen.has(key) && !seen.has(`${name}_Supplier`) && !seen.has(`${name}_Customer`)) {
-              seen.add(key)
-              combined.push({ id: l.id, name, type })
-            }
-          }
-        })
-
-        // Sort alphabetically by name
-        combined.sort((a, b) => (a.name || '').localeCompare(b.name || ''))
-        setLedgers(combined)
+        // Fetch papad companies
+        const papadRes = await api.getMasters('papad_companies')
+        const papads = (papadRes.success && Array.isArray(papadRes.data)) ? papadRes.data : []
+        
+        // Combine all ledgers
+        const allLedgers = [
+          ...suppliers.map(s => ({ id: s.id, name: s.name, type: 'Supplier' })),
+          ...customers.map(c => ({ id: c.id, name: c.name, type: 'Customer' })),
+          ...papads.map(p => ({ id: p.id, name: p.name, type: 'Papad Company' }))
+        ]
+        setLedgers(allLedgers)
       } catch (err) {
         console.error('Error fetching ledgers:', err)
         setLedgers([])
@@ -123,14 +75,11 @@ const LedgerStatementReport = () => {
       if (selectedType) params.type = selectedType
       
       const result = await api.get('/reports/ledger/' + encodeURIComponent(selectedLedger), { params })
-      const data = (result && result.data && typeof result.data === 'object' && result.data.transactions) 
-        ? result.data 
-        : (result && result.transactions ? result : (result && result.data ? result.data : null))
-
-      if (data && Array.isArray(data.transactions)) {
-        setReportData(data)
+      
+      if (result.success && result.data && typeof result.data === 'object') {
+        setReportData(result.data)
       } else {
-        setError(result?.message || 'Failed to load Ledger Statement')
+        setError(result.message || 'Failed to load Ledger Statement')
       }
     } catch (err) {
       console.error('Error fetching ledger:', err)

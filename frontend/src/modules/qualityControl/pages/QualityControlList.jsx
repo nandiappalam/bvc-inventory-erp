@@ -734,29 +734,21 @@ export default function QualityControlList() {
                               ✓ Unloaded & Verified
                             </Box>
                             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                              {(row.allocations && row.allocations.length > 0 ? row.allocations : [{ godown_name: row.godown_name, godown_id: row.godown_id, quantity: row.quantity }]).map((alloc, aIdx) => {
-                                const matchedGodown = godowns.find(g => 
-                                  String(g.id) === String(alloc.godown_id || alloc.godownId) ||
-                                  String(g.godown_name).toLowerCase() === String(alloc.godown_name || alloc.godown_id || '').toLowerCase() ||
-                                  String(g.name).toLowerCase() === String(alloc.godown_name || alloc.godown_id || '').toLowerCase()
-                                );
-                                const godownDisplayName = alloc.godown_name || matchedGodown?.godown_name || matchedGodown?.name || (alloc.godown_id ? `Godown ${alloc.godown_id}` : 'Godown');
-                                return (
-                                  <Box key={aIdx} sx={{ display: 'flex', alignItems: 'center', gap: 0.8 }}>
-                                    <StoreIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
-                                    <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '0.85rem' }}>
-                                      {godownDisplayName}:
-                                    </Typography>
-                                    <Chip 
-                                      label={`${alloc.quantity} bags`} 
-                                      size="small" 
-                                      variant="outlined" 
-                                      color="success" 
-                                      sx={{ fontWeight: 800, height: 22, fontSize: '0.75rem' }} 
-                                    />
-                                  </Box>
-                                );
-                              })}
+                              {(row.allocations && row.allocations.length > 0 ? row.allocations : [{ godown_name: row.godown_name, godown_id: row.godown_id, quantity: row.quantity }]).map((alloc, aIdx) => (
+                                <Box key={aIdx} sx={{ display: 'flex', alignItems: 'center', gap: 0.8 }}>
+                                  <StoreIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+                                  <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '0.85rem' }}>
+                                    {alloc.godown_name || `Godown ID: ${alloc.godown_id}`}:
+                                  </Typography>
+                                  <Chip 
+                                    label={`${alloc.quantity} bags`} 
+                                    size="small" 
+                                    variant="outlined" 
+                                    color="success" 
+                                    sx={{ fontWeight: 800, height: 22, fontSize: '0.75rem' }} 
+                                  />
+                                </Box>
+                              ))}
                             </Box>
                           </Box>
                         ) : (
