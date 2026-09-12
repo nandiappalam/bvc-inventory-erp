@@ -306,7 +306,14 @@ const AppLayout = () => {
           <Route path="/features/stock-alert-dashboard" element={<StockAlertDashboard />} />
           <Route path="/features/stock-alert-config" element={<StockAlertConfig />} />
           <Route path="/features/stock-alert-contacts" element={<StockAlertContacts />} />
+          <Route path="/stock-alerts" element={<StockAlertDashboard />} />
+          <Route path="/stock-alerts/dashboard" element={<StockAlertDashboard />} />
+          <Route path="/stock-alerts/config" element={<StockAlertConfig />} />
+          <Route path="/stock-alerts/min-stock-config" element={<StockAlertConfig />} />
+          <Route path="/stock-alerts/contacts" element={<StockAlertContacts />} />
           <Route path="/reports/stock-alerts" element={<StockAlertDashboard />} />
+          <Route path="/reports/stock-alert-config" element={<StockAlertConfig />} />
+          <Route path="/reports/min-stock-config" element={<StockAlertConfig />} />
           <Route path="/features/user-activities" element={<UserActivitiesDisplay />} />
           <Route path="/features/setup" element={<WeightMachineSetup />} />
           <Route path="/features/general-setup" element={<GeneralSetup />} />

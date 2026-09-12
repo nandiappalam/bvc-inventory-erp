@@ -43,6 +43,7 @@ import CcpMonitoringReport from './CcpMonitoringReport';
 import OprpMonitoringReport from './OprpMonitoringReport';
 import TerminalInspectionReport from './TerminalInspectionReport';
 import VehicleInspectionReport from './VehicleInspectionReport';
+import { printHtml } from '../../utils/printHelper';
 import api from '../../services/api.js';
 
 const CATEGORY_CONFIGS = {
@@ -799,7 +800,78 @@ const CategoryReportPage = () => {
 
   // Print
   const handlePrint = () => {
-    window.print();
+    const reportTitle = `${config.title} - ${activeSubLabel}`;
+    const headerCols = currentColumns.map(col => `
+      <th style="border: 1px solid #cbd5e1; padding: 8px; background-color: #1f4fb2; color: #ffffff; text-align: ${col.align === 'right' ? 'right' : 'left'}; font-size: 11px; text-transform: uppercase;">
+        ${col.label}
+      </th>
+    `).join('');
+
+    const bodyRows = (filteredRows.length > 0 ? filteredRows : rows).map((row, idx) => {
+      const cells = currentColumns.map(col => {
+        const val = row[col.id];
+        let displayVal = val !== undefined && val !== null ? String(val) : '-';
+        if (col.isNumber && typeof val === 'number') {
+          displayVal = val.toLocaleString('en-IN', { minimumFractionDigits: col.id.includes('rate') || col.id.includes('amount') ? 2 : 0 });
+        }
+        return `
+          <td style="border: 1px solid #cbd5e1; padding: 6px 8px; text-align: ${col.align === 'right' ? 'right' : 'left'}; font-size: 11px; ${col.align === 'right' ? 'font-weight: 500;' : ''}">
+            ${displayVal}
+          </td>
+        `;
+      }).join('');
+
+      return `
+        <tr style="background-color: ${idx % 2 === 0 ? '#ffffff' : '#f8fafc'};">
+          ${cells}
+        </tr>
+      `;
+    }).join('');
+
+    const activeFilterBadges = [
+      dateFrom ? `From: ${dateFrom}` : null,
+      dateTo ? `To: ${dateTo}` : null,
+      itemFilter ? `Item: ${itemFilter}` : null,
+      godownFilter ? `Godown: ${godownFilter}` : null,
+      itemGroupFilter ? `Group: ${itemGroupFilter}` : null,
+      searchQuery ? `Search: "${searchQuery}"` : null
+    ].filter(Boolean).join(' | ');
+
+    const html = `
+      <div style="font-family: 'Segoe UI', Tahoma, Arial, sans-serif; padding: 20px; color: #0f172a; width: 100%;">
+        <div style="text-align: center; border-bottom: 2px solid #1f4fb2; padding-bottom: 12px; margin-bottom: 16px;">
+          <h2 style="color: #1f4fb2; margin: 0 0 4px 0; font-size: 20px; text-transform: uppercase; letter-spacing: 0.5px;">BVC ERP - ${reportTitle}</h2>
+          <div style="font-size: 12px; color: #64748b;">
+            <span>Category: <strong>${config.title}</strong></span> | 
+            <span>Sub-Report: <strong>${activeSubLabel}</strong></span> | 
+            <span>Generated on: <strong>${new Date().toLocaleString('en-IN')}</strong></span>
+          </div>
+          ${activeFilterBadges ? `<div style="font-size: 11px; color: #475569; margin-top: 4px; font-style: italic;">Filters Applied: ${activeFilterBadges}</div>` : ''}
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 11px;">
+          <thead>
+            <tr>
+              ${headerCols}
+            </tr>
+          </thead>
+          <tbody>
+            ${bodyRows || '<tr><td colspan="20" style="text-align: center; padding: 20px; color: #94a3b8;">No records found</td></tr>'}
+          </tbody>
+        </table>
+
+        <div style="background-color: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 4px; padding: 10px 14px; font-size: 11px; display: flex; justify-content: space-between; align-items: center;">
+          <span><strong>Total Records:</strong> ${(filteredRows.length > 0 ? filteredRows : rows).length}</span>
+          <span>
+            ${totalQty > 0 ? `<strong>Total Qty:</strong> ${totalQty.toLocaleString('en-IN')} Units &nbsp;&nbsp;|&nbsp;&nbsp; ` : ''}
+            ${totalWeight > 0 ? `<strong>Total Weight:</strong> ${totalWeight.toFixed(2)} Kg &nbsp;&nbsp;|&nbsp;&nbsp; ` : ''}
+            ${totalAmount > 0 ? `<strong>Total Valuation:</strong> ₹${totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : ''}
+          </span>
+        </div>
+      </div>
+    `;
+
+    printHtml(html, reportTitle);
   };
 
   const activeSubLabel = config.subReports.find(s => s.id === currentSubReport)?.label || config.title;
