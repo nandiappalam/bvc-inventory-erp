@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api.js';
-import { printHtml } from '../utils/printHelper.js';
+import { printHtml, printElement } from '../utils/printHelper.js';
 import { buildItemPrintHtml } from '../utils/itemPrintHelper.js';
 import './ItemDisplay.css';
 
@@ -232,7 +232,7 @@ const ItemDisplay = () => {
       const html = buildItemPrintHtml(printItem, getGroupName(printItem.item_group));
       printHtml(html, `Item - ${printItem.item_name || printItem.item_code}`);
     } else {
-      window.print();
+      printElement('.standard-display', { title: 'Items_Master' });
     }
   };
 

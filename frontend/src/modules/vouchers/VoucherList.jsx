@@ -7,6 +7,7 @@ import {
 import { Link, useNavigate } from 'react-router-dom';
 import voucherAPI from './voucherService.js';
 import { safeArray } from '../../utils/safeArray.js';
+import { printElement } from '../../utils/printHelper.js';
 
 // Icons
 import VisibilityIcon from '@mui/icons-material/Visibility';
@@ -163,7 +164,12 @@ const VoucherList = () => {
           const fullData = await voucherAPI.get(v.id);
           setDisplayVoucher(fullData);
           setTimeout(() => {
-            window.print();
+            const el = document.getElementById('voucher-print-area');
+            if (el) {
+              printElement(el, { title: `Voucher_${v.voucher_no}` });
+            } else {
+              window.print();
+            }
           }, 400);
         } catch (err) {
           console.error(err);
@@ -173,7 +179,12 @@ const VoucherList = () => {
         return;
       }
     }
-    window.print();
+    const el = document.getElementById('voucher-print-area');
+    if (el) {
+      printElement(el, { title: `Voucher_${displayVoucher?.voucher_no || 'Document'}` });
+    } else {
+      window.print();
+    }
   };
 
   const handleDownloadPDF = async (voucher) => {
@@ -567,29 +578,6 @@ const VoucherList = () => {
           }
         }}
       >
-        <style dangerouslySetInnerHTML={{ __html: `
-          @media print {
-            body * {
-              visibility: hidden !important;
-            }
-            #voucher-print-area, #voucher-print-area * {
-              visibility: visible !important;
-            }
-            #voucher-print-area {
-              position: absolute !important;
-              left: 0 !important;
-              top: 0 !important;
-              width: 100% !important;
-              background-color: #e8ebe6 !important;
-              color: #1b3a1e !important;
-              box-shadow: none !important;
-              border: none !important;
-            }
-            .MuiDialogActions-root, button, .MuiButton-root, .MuiIconButton-root {
-              display: none !important;
-            }
-          }
-        ` }} />
         {displayLoading ? (
           <DialogContent sx={{ p: 6, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, bgcolor: '#e8ebe6' }}>
             <CircularProgress color="success" />

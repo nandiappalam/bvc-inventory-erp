@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import axios from 'axios'
 import { useAuth } from '../context/AuthContext'
+import { printElement } from '../utils/printHelper'
 import './erp-theme.css'
 
 /**
@@ -217,7 +218,12 @@ const StockReport = () => {
   };
 
   const handlePrint = () => {
-    window.print()
+    const el = document.getElementById('stock-report-printable') || document.querySelector('.erp-container') || document.querySelector('table');
+    if (el) {
+      printElement(el, { title: 'Stock_Report' });
+    } else {
+      window.print();
+    }
   }
 
   const toggleExpandLot = (lotNo) => {
@@ -286,7 +292,7 @@ const StockReport = () => {
   }, 0);
 
   return (
-    <div style={styles.container}>
+    <div id="stock-report-printable" style={styles.container}>
       {/* Title Bar - matches HTML format */}
       <div style={styles.titleBar}>
         <span style={styles.titleText}>🏢 Stock & Traceability Report</span>

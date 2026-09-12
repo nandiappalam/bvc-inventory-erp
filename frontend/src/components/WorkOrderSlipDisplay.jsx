@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import api from '../services/api.js';
+import { printElement } from '../utils/printHelper.js';
 import './WorkOrderSlipDisplay.css';
 
 const WorkOrderSlipDisplay = () => {
@@ -72,7 +73,12 @@ const WorkOrderSlipDisplay = () => {
   };
 
   const executePrint = () => {
-    window.print();
+    const el = document.getElementById('printable-slip');
+    if (el) {
+      printElement(el, { title: `WorkOrderSlip_${selectedSlipForPrint?.work_order_no || 'Document'}` });
+    } else {
+      window.print();
+    }
   };
 
   return (

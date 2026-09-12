@@ -1,4 +1,5 @@
 import React from "react";
+import { printElement } from "../../utils/printHelper.js";
 
 /**
  * EntryDisplayActions - Uniform action buttons for Entry display pages
@@ -25,7 +26,12 @@ const EntryDisplayActions = ({
     if (onPrint) {
       onPrint();
     } else {
-      window.print();
+      const target = document.querySelector('.table-container') || 
+                     document.querySelector('.table-wrapper') || 
+                     document.querySelector('.standard-display') || 
+                     document.querySelector('main') || 
+                     document.body;
+      printElement(target, { title: 'Register_Print' });
     }
   };
 

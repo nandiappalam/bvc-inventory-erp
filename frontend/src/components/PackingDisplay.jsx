@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
-import { printHtml } from '../utils/printHelper';
+import { printHtml, printElement } from '../utils/printHelper';
 import { useAuth } from '../context/AuthContext';
 import './PackingDisplay.css';
 
@@ -295,7 +295,7 @@ const PackingDisplay = () => {
       </div>
 
       <div style={{ background: '#d0d7e5', padding: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #7f9db9' }}>
-        <button onClick={() => window.print()} style={{ padding: '4px 15px', background: '#3f6fc0', color: '#fff', border: 'none', cursor: 'pointer' }}>Print</button>
+        <button onClick={() => printElement(document.querySelector('.table-container') || document.querySelector('table'), { title: 'Packing_Register' })} style={{ padding: '4px 15px', background: '#3f6fc0', color: '#fff', border: 'none', cursor: 'pointer' }}>Print</button>
         <span style={{ fontWeight: 'bold', fontSize: '12px' }}>Row(s) : {filteredEntries.length}</span>
         {canCreate && (
           <button onClick={() => navigate('/entry/packing-create')} style={{ padding: '4px 15px', background: '#3f6fc0', color: '#fff', border: 'none', cursor: 'pointer' }}>Add Packing</button>

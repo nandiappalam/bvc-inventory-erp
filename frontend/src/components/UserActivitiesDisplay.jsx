@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { printElement } from '../utils/printHelper';
 import {
   Box,
   Card,
@@ -94,7 +95,7 @@ const UserActivitiesDisplay = () => {
   };
 
   const handlePrint = () => {
-    window.print();
+    printElement('#user-activities-printable', { title: 'User_Activities_Audit' });
   };
 
   const filteredActivities = activities.filter(item => {
@@ -106,7 +107,7 @@ const UserActivitiesDisplay = () => {
   });
 
   return (
-    <Box sx={{ p: 3, maxWidth: 1200, margin: '0 auto' }}>
+    <Box id="user-activities-printable" sx={{ p: 3, maxWidth: 1200, margin: '0 auto' }}>
       {/* Top Bar Header */}
       <Card sx={{ mb: 3, bgcolor: themeColors.primary, color: 'white', borderRadius: 2, boxShadow: 2 }}>
         <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

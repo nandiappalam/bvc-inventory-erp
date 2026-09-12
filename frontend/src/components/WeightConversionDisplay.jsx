@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../utils/api.js'
+import { printHtml, printElement } from '../utils/printHelper.js'
 import './WeightConversionDisplay.css'
 
 const WeightConversionDisplay = () => {
@@ -63,7 +64,7 @@ const WeightConversionDisplay = () => {
   }
 
   const handlePrint = () => {
-    window.print()
+    printElement(document.querySelector('.table-container') || document.querySelector('table') || document.body, { title: 'Weight_Conversion_Register' })
   }
 
   const handlePrintRow = (record) => {
@@ -71,89 +72,69 @@ const WeightConversionDisplay = () => {
     const inputItems = groupItems.filter(r => r.item_type === 'input');
     const outputItems = groupItems.filter(r => r.item_type === 'output');
 
-    const printWin = window.open('', '_blank', 'width=800,height=600');
-    if (!printWin) return;
-    printWin.document.write(`
-      <html>
-        <head>
-          <title>Weight Conversion #${record.s_no || record.id}</title>
-          <style>
-            body { font-family: Arial, sans-serif; padding: 20px; color: #333; }
-            h2 { color: #1e4fa8; border-bottom: 2px solid #1e4fa8; padding-bottom: 8px; margin-bottom: 15px; }
-            .info { margin-bottom: 15px; display: flex; gap: 30px; font-size: 14px; background: #f5f8ff; padding: 10px; border-radius: 4px; }
-            table { width: 100%; border-collapse: collapse; margin-top: 10px; margin-bottom: 20px; }
-            th, td { border: 1px solid #ccc; padding: 8px; text-align: left; font-size: 13px; }
-            th { background: #1e4fa8; color: white; }
-            .section-title { font-weight: bold; margin-top: 15px; color: #1e4fa8; font-size: 15px; }
-          </style>
-        </head>
-        <body>
-          <h2>Weight Conversion Record</h2>
-          <div class="info">
-            <div><strong>S.No:</strong> ${record.s_no || ''}</div>
-            <div><strong>Date:</strong> ${formatDate(record.date)}</div>
-            <div><strong>Type:</strong> ${record.type || 'Standard'}</div>
-            <div><strong>Remarks:</strong> ${record.remarks || '-'}</div>
-          </div>
+    const htmlContent = `
+      <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
+        <h2 style="color: #1e4fa8; border-bottom: 2px solid #1e4fa8; padding-bottom: 8px; margin-bottom: 15px;">Weight Conversion Record</h2>
+        <div style="margin-bottom: 15px; display: flex; gap: 30px; font-size: 14px; background: #f5f8ff; padding: 10px; border-radius: 4px;">
+          <div><strong>S.No:</strong> ${record.s_no || ''}</div>
+          <div><strong>Date:</strong> ${formatDate(record.date)}</div>
+          <div><strong>Type:</strong> ${record.type || 'Standard'}</div>
+          <div><strong>Remarks:</strong> ${record.remarks || '-'}</div>
+        </div>
 
-          <div class="section-title">Input Items</div>
-          <table>
-            <thead>
+        <div style="font-weight: bold; margin-top: 15px; color: #1e4fa8; font-size: 15px;">Input Items</div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 10px; margin-bottom: 20px;">
+          <thead>
+            <tr style="background: #1e4fa8; color: white;">
+              <th style="border: 1px solid #ccc; padding: 8px; text-align: left;">S.No</th>
+              <th style="border: 1px solid #ccc; padding: 8px; text-align: left;">Item Name</th>
+              <th style="border: 1px solid #ccc; padding: 8px; text-align: left;">Lot No</th>
+              <th style="border: 1px solid #ccc; padding: 8px; text-align: left;">Weight</th>
+              <th style="border: 1px solid #ccc; padding: 8px; text-align: left;">Qty</th>
+              <th style="border: 1px solid #ccc; padding: 8px; text-align: left;">Total Wt</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${inputItems.map((item, i) => `
               <tr>
-                <th>S.No</th>
-                <th>Item Name</th>
-                <th>Lot No</th>
-                <th>Weight</th>
-                <th>Qty</th>
-                <th>Total Wt</th>
+                <td style="border: 1px solid #ccc; padding: 8px;">${i + 1}</td>
+                <td style="border: 1px solid #ccc; padding: 8px;">${item.item_name || ''}</td>
+                <td style="border: 1px solid #ccc; padding: 8px;">${item.lot_no || ''}</td>
+                <td style="border: 1px solid #ccc; padding: 8px;">${item.weight || ''}</td>
+                <td style="border: 1px solid #ccc; padding: 8px;">${item.qty || 0}</td>
+                <td style="border: 1px solid #ccc; padding: 8px;">${parseFloat(item.total_wt || 0).toFixed(2)}</td>
               </tr>
-            </thead>
-            <tbody>
-              ${inputItems.map((item, i) => `
-                <tr>
-                  <td>${i + 1}</td>
-                  <td>${item.item_name || ''}</td>
-                  <td>${item.lot_no || ''}</td>
-                  <td>${item.weight || ''}</td>
-                  <td>${item.qty || 0}</td>
-                  <td>${parseFloat(item.total_wt || 0).toFixed(2)}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
+            `).join('')}
+          </tbody>
+        </table>
 
-          <div class="section-title">Output Converted Items</div>
-          <table>
-            <thead>
+        <div style="font-weight: bold; margin-top: 15px; color: #1e4fa8; font-size: 15px;">Output Converted Items</div>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 10px; margin-bottom: 20px;">
+          <thead>
+            <tr style="background: #1e4fa8; color: white;">
+              <th style="border: 1px solid #ccc; padding: 8px; text-align: left;">S.No</th>
+              <th style="border: 1px solid #ccc; padding: 8px; text-align: left;">Item Name</th>
+              <th style="border: 1px solid #ccc; padding: 8px; text-align: left;">Weight</th>
+              <th style="border: 1px solid #ccc; padding: 8px; text-align: left;">Qty</th>
+              <th style="border: 1px solid #ccc; padding: 8px; text-align: left;">Total Wt</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${outputItems.map((item, i) => `
               <tr>
-                <th>S.No</th>
-                <th>Item Name</th>
-                <th>Weight</th>
-                <th>Qty</th>
-                <th>Total Wt</th>
+                <td style="border: 1px solid #ccc; padding: 8px;">${i + 1}</td>
+                <td style="border: 1px solid #ccc; padding: 8px;">${item.item_name || ''}</td>
+                <td style="border: 1px solid #ccc; padding: 8px;">${item.weight || ''}</td>
+                <td style="border: 1px solid #ccc; padding: 8px;">${item.qty || 0}</td>
+                <td style="border: 1px solid #ccc; padding: 8px;">${parseFloat(item.total_wt || 0).toFixed(2)}</td>
               </tr>
-            </thead>
-            <tbody>
-              ${outputItems.map((item, i) => `
-                <tr>
-                  <td>${i + 1}</td>
-                  <td>${item.item_name || ''}</td>
-                  <td>${item.weight || ''}</td>
-                  <td>${item.qty || 0}</td>
-                  <td>${parseFloat(item.total_wt || 0).toFixed(2)}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </body>
-      </html>
-    `);
-    printWin.document.close();
-    printWin.focus();
-    setTimeout(() => {
-      printWin.print();
-      printWin.close();
-    }, 250);
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    printHtml(htmlContent, `Weight_Conversion_${record.s_no || record.id}`);
   };
 
   const handleEdit = (record) => {

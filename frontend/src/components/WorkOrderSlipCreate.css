@@ -631,31 +631,29 @@
 
 /* Print Media Query */
 @media print {
-  body * {
-    visibility: hidden;
-  }
-  .no-print {
+  .no-print,
+  .erp-sidebar,
+  .erp-navbar,
+  nav, aside, header, button {
     display: none !important;
   }
-  #printable-slip, #printable-slip * {
-    visibility: visible;
-  }
   #printable-slip {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 100%;
-    margin: 0;
-    padding: 0;
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    box-shadow: none !important;
   }
   .wo-modal-overlay {
-    position: static;
-    background: transparent;
-    padding: 0;
+    position: static !important;
+    background: transparent !important;
+    padding: 0 !important;
   }
   .wo-modal-content {
-    box-shadow: none;
-    padding: 0;
-    max-width: 100%;
+    box-shadow: none !important;
+    padding: 0 !important;
+    max-width: 100% !important;
   }
 }

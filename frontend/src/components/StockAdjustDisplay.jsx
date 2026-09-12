@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from "../services/api.js";
-import { printHtml } from '../utils/printHelper';
+import { printHtml, printElement } from '../utils/printHelper';
 import './StockAdjustDisplay.css';
 
 const StockAdjustDisplay = () => {
@@ -248,7 +248,7 @@ const StockAdjustDisplay = () => {
         {/* BOTTOM BAR */}
         <div className="bottom-bar" style={{ display: 'flex', justifyContent: 'space-between', marginTop: '15px' }}>
           <div className="btn-group">
-            <button onClick={() => window.print()} className="no-print">Print Screen</button>
+            <button onClick={() => printElement('.stock-adjust-display', { title: 'Stock_Adjustments' })} className="no-print">Print Screen</button>
           </div>
           <div className="status" style={{ fontWeight: 'bold' }}>
             Total Items: {flattenedRows.length} &nbsp;|&nbsp; Unique Records: {records.length}

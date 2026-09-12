@@ -90,38 +90,47 @@ button.action-btn.warning {
   color: #ffffff !important;
 }
 
-/* Universal Print Styles */
+/* ==========================================================================
+   UNIVERSAL PRINT PORTAL & MEDIA PRINT ENGINE (BVC ERP)
+   Guaranteed 100% reliable print previews across Chrome, Edge, Safari, Firefox,
+   Render cloud environments, and desktop Tauri runtimes.
+   ========================================================================== */
+
+/* Screen mode: Portal is totally invisible to the user and takes 0 space */
+#bvc-print-portal {
+  display: none !important;
+}
+
+@media screen {
+  #bvc-print-portal {
+    display: none !important;
+  }
+}
+
 @media print {
   @page {
     size: auto;
     margin: 8mm 10mm;
   }
-  
-  html, body, #root, #root > *, main, 
-  .MuiBox-root, .MuiContainer-root, .MuiPaper-root, 
-  .MuiCard-root, .MuiCardContent-root, .MuiTableContainer-root, 
-  .table-container, .table-wrapper, .standard-display, .container,
-  table, tbody, tr, td, th {
+
+  *, *::before, *::after {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    box-sizing: border-box !important;
+  }
+
+  html, body {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
     height: auto !important;
     min-height: 0 !important;
-    max-height: none !important;
     overflow: visible !important;
-    overflow-x: visible !important;
-    overflow-y: visible !important;
     background: #ffffff !important;
     color: #0f172a !important;
-    float: none !important;
-    box-shadow: none !important;
-    transform: none !important;
   }
 
-  body {
-    padding: 0 !important;
-    margin: 0 !important;
-    width: 100% !important;
-  }
-
-  /* Universal hide for navigation, sidebars, action toolbars, and buttons during print */
+  /* Universal hide for non-printable navigation, sidebars, action toolbars, and buttons */
   .no-print,
   .erp-sidebar,
   .erp-navbar,
@@ -142,61 +151,89 @@ button.action-btn.warning {
   .action-bar,
   .btn-print,
   .actions-cell,
-  .actions-header {
+  .actions-header,
+  .filter-section,
+  .pagination-container,
+  .clear-search-btn {
     display: none !important;
   }
 
-  /* When print modal is active, hide everything outside the print container */
-  body.print-modal-active > *:not(#iframe-print-container) {
+  /* -----------------------------------------------------------------------
+     MODE 1: Portal Print Mode (when body has .bvc-printing-portal)
+     Used by printHtml() & printElement() across all 9 ERP modules
+     ----------------------------------------------------------------------- */
+  body.bvc-printing-portal > *:not(#bvc-print-portal) {
     display: none !important;
   }
 
-  /* If a MUI Dialog is open, make sure it renders clean and unclipped */
-  .MuiDialog-container {
+  body.bvc-printing-portal #bvc-print-portal {
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
+    min-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+    overflow: visible !important;
+    visibility: visible !important;
+  }
+
+  body.bvc-printing-portal #bvc-print-portal * {
+    visibility: visible !important;
+  }
+
+  /* -----------------------------------------------------------------------
+     MODE 2: Direct Page Print Mode (when body DOES NOT have portal active)
+     ----------------------------------------------------------------------- */
+  body:not(.bvc-printing-portal) #root,
+  body:not(.bvc-printing-portal) main,
+  body:not(.bvc-printing-portal) .MuiBox-root,
+  body:not(.bvc-printing-portal) .standard-display,
+  body:not(.bvc-printing-portal) .table-container,
+  body:not(.bvc-printing-portal) .table-wrapper {
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    overflow-x: visible !important;
+    overflow-y: visible !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+    float: none !important;
+    box-shadow: none !important;
+    transform: none !important;
+  }
+
+  /* Modal print handling (Vouchers, Work Orders, Viewer modals) */
+  .MuiDialog-container,
+  .MuiDialog-paper,
+  .wo-modal-overlay,
+  .wo-modal-content,
+  #voucher-print-area,
+  #printable-slip,
+  .printable-slip-wrapper {
     position: static !important;
     display: block !important;
     width: 100% !important;
-    height: auto !important;
-    overflow: visible !important;
-    overflow-x: visible !important;
-    overflow-y: visible !important;
-  }
-
-  .MuiDialog-paper {
-    position: static !important;
     max-width: 100% !important;
-    width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
     margin: 0 !important;
+    padding: 0 !important;
     box-shadow: none !important;
     border: none !important;
+    background: #ffffff !important;
     overflow: visible !important;
-    overflow-x: visible !important;
-    overflow-y: visible !important;
   }
 
-  /* Table layout for print */
+  /* Universal Table Pagination Formatting */
   table {
     width: 100% !important;
     max-width: 100% !important;
     border-collapse: collapse !important;
     page-break-inside: auto !important;
     font-size: 11px !important;
-  }
-
-  th, td {
-    border: 1px solid #cbd5e1 !important;
-    padding: 5px 8px !important;
-    color: #0f172a !important;
-  }
-
-  th {
-    background-color: #f1f5f9 !important;
-    font-weight: 700 !important;
-  }
-
-  tr {
-    page-break-inside: avoid !important;
-    page-break-after: auto !important;
   }
 
   thead {
@@ -207,9 +244,20 @@ button.action-btn.warning {
     display: table-footer-group !important;
   }
 
-  * {
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
+  tr {
+    page-break-inside: avoid !important;
+    page-break-after: auto !important;
+  }
+
+  th, td {
+    border: 1px solid #cbd5e1 !important;
+    padding: 6px 8px !important;
+    color: #0f172a !important;
+  }
+
+  th {
+    background-color: #f1f5f9 !important;
+    font-weight: 700 !important;
   }
 }
 

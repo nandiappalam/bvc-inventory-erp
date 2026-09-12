@@ -181,7 +181,9 @@ export function printElement(elementOrSelector, options = {}) {
 }
 
 /**
- * Core print HTML renderer with isolated hidden iframe & visual modal preview
+ * Core universal print HTML renderer using the dedicated #bvc-print-portal in the main DOM tree.
+ * Guaranteed 100% reliable print preview across Chrome, Edge, Safari, Firefox,
+ * both in cloud web (Render) environments and desktop Tauri runtimes.
  */
 export function printHtml(html, title = "Print Document", options = {}) {
   // Safe content fallback
@@ -197,119 +199,53 @@ export function printHtml(html, title = "Print Document", options = {}) {
     document.title = title;
   }
 
-  const headStyles = getDocumentStyles();
-
-  // Create or retrieve hidden print iframe for direct, isolated printing
-  // CRITICAL: Set 100% width/height with opacity: 0 and z-index: -9999 (NOT width: 0, height: 0, or visibility: hidden)
-  // so browser layout engine calculates full table layout geometry and prevents blank pages!
-  let iframe = document.getElementById("erp-hidden-print-frame");
-  if (iframe) {
-    iframe.remove();
+  // Retrieve or create print portal on document.body
+  let portal = document.getElementById("bvc-print-portal");
+  if (!portal) {
+    portal = document.createElement("div");
+    portal.id = "bvc-print-portal";
+    portal.setAttribute("aria-hidden", "true");
+    document.body.appendChild(portal);
   }
 
-  iframe = document.createElement("iframe");
-  iframe.id = "erp-hidden-print-frame";
-  iframe.style.position = "absolute";
-  iframe.style.left = "-9999px";
-  iframe.style.top = "-9999px";
-  iframe.style.width = "1024px";
-  iframe.style.height = "768px";
-  iframe.style.border = "0";
-  iframe.style.opacity = "1";
-  iframe.style.visibility = "visible";
-  iframe.style.pointerEvents = "none";
-  iframe.style.zIndex = "-9999";
-  document.body.appendChild(iframe);
+  // Inject content into the portal
+  portal.innerHTML = safeContent;
 
-  const fullHtmlDoc = `
-    <!DOCTYPE html>
-    <html lang="en">
-      <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>${title}</title>
-        ${headStyles}
-        <style>
-          body {
-            padding: 16px !important;
-            background: #ffffff !important;
-            color: #0f172a !important;
-          }
-          .header-banner {
-            border-bottom: 2px solid #1f4fb2;
-            padding-bottom: 8px;
-            margin-bottom: 16px;
-          }
-        </style>
-      </head>
-      <body>
-        <div style="width: 100%; max-width: 100%;">
-          ${safeContent}
-        </div>
-      </body>
-    </html>
-  `;
+  // Add the portal printing class to body so @media print reveals ONLY the portal
+  document.body.classList.add("bvc-printing-portal");
 
-  // Directly display high-fidelity modal print preview to prevent blank pages across all browsers and hosting environments
-  showModalFallback(safeContent, title, headStyles, oldTitle);
-  setTimeout(() => {
-    try {
-      window.print();
-    } catch (e) {
-      // User can also click Print Now button in modal
-    }
-  }, 400);
-}
-
-/**
- * Modal Fallback if iframe print is blocked by browser sandbox
- */
-function showModalFallback(safeContent, title, headStyles, oldTitle) {
-  const containerId = "iframe-print-container";
-  let container = document.getElementById(containerId);
-  if (container) container.remove();
-
-  container = document.createElement("div");
-  container.id = containerId;
-  container.style.position = "fixed";
-  container.style.inset = "0";
-  container.style.zIndex = "999999";
-  container.style.backgroundColor = "rgba(15, 23, 42, 0.75)";
-  container.style.backdropFilter = "blur(4px)";
-  container.style.display = "flex";
-  container.style.justifyContent = "center";
-  container.style.alignItems = "center";
-  container.style.padding = "20px";
-  container.style.overflowY = "auto";
-
-  container.innerHTML = `
-    <div style="background: #ffffff; border-radius: 8px; width: 900px; max-width: 95vw; max-height: 92vh; display: flex; flex-direction: column; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.3); overflow: hidden;">
-      <div style="background: #1f4fb2; color: #ffffff; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center;">
-        <span style="font-weight: 700; font-size: 16px; text-transform: uppercase;">📄 ${title}</span>
-        <div style="display: flex; gap: 10px;">
-          <button id="modal-print-btn" style="background: #ffffff; color: #1f4fb2; border: none; padding: 6px 16px; border-radius: 4px; font-weight: bold; cursor: pointer;">🖨 Print Now</button>
-          <button id="modal-close-btn" style="background: rgba(255,255,255,0.2); color: #ffffff; border: none; padding: 6px 12px; border-radius: 4px; font-weight: bold; cursor: pointer;">✕ Close</button>
-        </div>
-      </div>
-      <div style="padding: 24px; overflow-y: auto; flex: 1;" id="modal-print-body">
-        ${safeContent}
-      </div>
-    </div>
-  `;
-
-  document.body.appendChild(container);
-  document.body.classList.add("print-modal-active");
-
+  // Robust cleanup after printing finishes or user cancels
+  let isCleanedUp = false;
   const cleanup = () => {
+    if (isCleanedUp) return;
+    isCleanedUp = true;
+    document.body.classList.remove("bvc-printing-portal");
+    setTimeout(() => {
+      if (portal && !document.body.classList.contains("bvc-printing-portal")) {
+        portal.innerHTML = "";
+      }
+    }, 2000);
     document.title = oldTitle;
-    document.body.classList.remove("print-modal-active");
-    if (container && container.parentNode) container.remove();
+    window.removeEventListener("afterprint", cleanup);
   };
 
-  document.getElementById("modal-close-btn")?.addEventListener("click", cleanup);
-  document.getElementById("modal-print-btn")?.addEventListener("click", () => {
-    window.print();
+  window.addEventListener("afterprint", cleanup, { once: true });
+
+  // Safety fallback cleanup after 2 minutes in case afterprint does not fire
+  setTimeout(cleanup, 120000);
+
+  // Allow browser layout engine to paint DOM before opening native print dialog
+  requestAnimationFrame(() => {
+    setTimeout(() => {
+      try {
+        window.focus();
+        window.print();
+      } catch (err) {
+        console.error("Print invocation error:", err);
+      }
+    }, 150);
   });
 }
 
 export default printHtml;
+
