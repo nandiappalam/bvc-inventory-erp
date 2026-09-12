@@ -250,39 +250,15 @@ export function printHtml(html, title = "Print Document", options = {}) {
     </html>
   `;
 
-  // Write content to iframe and trigger print
-  try {
-    const doc = iframe.contentWindow.document;
-    doc.open();
-    doc.write(fullHtmlDoc);
-    doc.close();
-
-    // Trigger iframe print
-    const triggerIframePrint = () => {
-      try {
-        iframe.contentWindow.focus();
-        iframe.contentWindow.print();
-        setTimeout(() => {
-          document.title = oldTitle;
-          if (iframe && iframe.parentNode) {
-            iframe.remove();
-          }
-        }, 1500);
-      } catch (err) {
-        console.warn("Iframe print error, falling back to modal:", err);
-        showModalFallback(safeContent, title, headStyles, oldTitle);
-      }
-    };
-
-    if (iframe.contentWindow.document.readyState === 'complete') {
-      setTimeout(triggerIframePrint, 250);
-    } else {
-      iframe.onload = () => setTimeout(triggerIframePrint, 250);
+  // Directly display high-fidelity modal print preview to prevent blank pages across all browsers and hosting environments
+  showModalFallback(safeContent, title, headStyles, oldTitle);
+  setTimeout(() => {
+    try {
+      window.print();
+    } catch (e) {
+      // User can also click Print Now button in modal
     }
-  } catch (e) {
-    console.warn("Iframe write failed, falling back to modal:", e);
-    showModalFallback(safeContent, title, headStyles, oldTitle);
-  }
+  }, 400);
 }
 
 /**
