@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import axios from 'axios'
+import { printHtml } from '../../utils/printHelper.js'
 import './ReportPage.css'
 
 /**
@@ -63,7 +64,62 @@ const PapadLedgerReport = () => {
 
   useEffect(() => { fetchReport() }, [fromDate, toDate, papadCompany])
 
-  const handlePrint = () => { window.print() }
+  const handlePrint = () => {
+    const rowsHtml = safeReportData.map((row, idx) => `
+      <tr style="background-color: ${idx % 2 === 0 ? '#ffffff' : '#f8fafc'};">
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center;">${row.date || '-'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: bold; color: #1f4fb2;">${row.voucher_no || '-'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1;">${row.voucher_type || '-'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1;">${row.particulars || '-'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; color: ${parseFloat(row.debit) > 0 ? '#059669' : 'inherit'};">${parseFloat(row.debit || 0) > 0 ? parseFloat(row.debit).toFixed(2) : '-'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; color: ${parseFloat(row.credit) > 0 ? '#d97706' : 'inherit'};">${parseFloat(row.credit || 0) > 0 ? parseFloat(row.credit).toFixed(2) : '-'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; font-weight: bold;">${parseFloat(row.balance || 0).toFixed(2)}</td>
+      </tr>
+    `).join('');
+
+    const html = `
+      <div style="font-family: Arial, sans-serif; color: #0f172a; padding: 12px;">
+        <div style="border-bottom: 2px solid #1f4fb2; padding-bottom: 8px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: flex-end;">
+          <div>
+            <h2 style="margin: 0; color: #1f4fb2; font-size: 20px;">PAPAD LEDGER REPORT</h2>
+            <div style="font-size: 11px; color: #64748b; margin-top: 4px;">
+              Company: <strong>${papadCompany || 'All Companies'}</strong> | Period: <strong>${fromDate || 'Start'}</strong> to <strong>${toDate || 'End'}</strong> | Printed on: ${new Date().toLocaleString()}
+            </div>
+          </div>
+          <div style="text-align: right; font-size: 12px; color: #475569;">
+            Closing Balance: <strong style="color: #1f4fb2;">₹ ${parseFloat(finalBalance || 0).toFixed(2)}</strong>
+          </div>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+          <thead>
+            <tr style="background-color: #1f4fb2; color: #ffffff;">
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: center;">Date</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: left;">Voucher No</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: left;">Voucher Type</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: left;">Particulars</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: right;">Debit (₹)</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: right;">Credit (₹)</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: right;">Balance (₹)</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml || '<tr><td colspan="7" style="text-align:center; padding: 14px;">No papad ledger records found</td></tr>'}
+          </tbody>
+          <tfoot>
+            <tr style="background-color: #e2e8f0; font-weight: bold;">
+              <td colspan="4" style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right;">Totals:</td>
+              <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; color: #059669;">₹ ${totalDebit.toFixed(2)}</td>
+              <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; color: #d97706;">₹ ${totalCredit.toFixed(2)}</td>
+              <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; color: #1f4fb2;">₹ ${parseFloat(finalBalance || 0).toFixed(2)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    `;
+
+    printHtml(html, 'Papad_Ledger_Report');
+  }
 
   // Ensure data is always an array
   const safeReportData = Array.isArray(reportData) ? reportData : []

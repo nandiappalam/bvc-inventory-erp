@@ -37,6 +37,7 @@ import {
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../services/api';
+import { printHtml } from '../../utils/printHelper';
 
 const ColdStorageVouchers = () => {
   const navigate = useNavigate();
@@ -123,6 +124,159 @@ const ColdStorageVouchers = () => {
       }
     } catch (err) {
       alert('Error deleting voucher: ' + err.message);
+    }
+  };
+
+  const handlePrintVoucher = (v) => {
+    if (!v) return;
+    const isIn = v.voucher_type === 'IN';
+    const items = v.items || [];
+    const itemsHtml = items.map((it, idx) => `
+      <tr>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center;">${idx + 1}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: bold;">${it.item_name || '-'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center;">${it.purchase_lot_no || '-'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center; font-weight: 600; color: #1f4fb2;">${it.cold_storage_lot_no || '-'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right;">${parseFloat(it.quantity || 0).toFixed(2)}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right;">${parseFloat(it.weight || 0).toFixed(2)}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; font-weight: bold;">${parseFloat(it.total_wt || 0).toFixed(2)} KG</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center;">${it.unit || 'KG'}</td>
+      </tr>
+    `).join('');
+
+    const html = `
+      <div style="font-family: Arial, sans-serif; color: #0f172a; padding: 12px;">
+        <div style="border-bottom: 2px solid #1f4fb2; padding-bottom: 8px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <h2 style="margin: 0; color: #1f4fb2; font-size: 20px;">COLD STORAGE ${isIn ? 'INWARD (CSI)' : 'OUTWARD (CSO)'} VOUCHER</h2>
+            <div style="font-size: 11px; color: #64748b; margin-top: 3px;">BVC ERP SYSTEM - INVENTORY VOUCHER</div>
+          </div>
+          <div style="text-align: right;">
+            <div style="font-size: 16px; font-weight: bold; color: ${isIn ? '#1f4fb2' : '#d97706'};">${v.voucher_no}</div>
+            <div style="font-size: 12px; color: #475569;">Date: ${v.voucher_date}</div>
+          </div>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 12px;">
+          <tr>
+            <td style="padding: 6px 8px; border: 1px solid #e2e8f0; width: 25%; font-weight: bold; background: #f8fafc;">Cold Storage Facility:</td>
+            <td style="padding: 6px 8px; border: 1px solid #e2e8f0; width: 25%;">${v.cold_storage_name || '-'}</td>
+            <td style="padding: 6px 8px; border: 1px solid #e2e8f0; width: 25%; font-weight: bold; background: #f8fafc;">${isIn ? 'Source Location:' : 'Destination Location:'}</td>
+            <td style="padding: 6px 8px; border: 1px solid #e2e8f0; width: 25%;">${isIn ? (v.source_godown_name || 'Main Godown') : (v.destination_godown_name || 'Production')}</td>
+          </tr>
+          <tr>
+            <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-weight: bold; background: #f8fafc;">Total Quantity:</td>
+            <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-weight: bold;">${parseFloat(v.total_qty || 0).toFixed(2)}</td>
+            <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-weight: bold; background: #f8fafc;">Total Net Weight:</td>
+            <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-weight: bold;">${parseFloat(v.total_wt || 0).toFixed(2)} KG</td>
+          </tr>
+        </table>
+
+        <h4 style="margin: 12px 0 6px 0; color: #1f4fb2; font-size: 13px;">ITEM & LOT DETAILS</h4>
+        <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+          <thead>
+            <tr style="background-color: #1f4fb2; color: #ffffff;">
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: center;">#</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: left;">Item Name</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: center;">Purchase Lot #</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: center;">CS Lot #</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: right;">Quantity</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: right;">Per Wt</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: right;">Total Wt</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: center;">Unit</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemsHtml || '<tr><td colspan="8" style="text-align:center; padding: 12px;">No item details</td></tr>'}
+          </tbody>
+        </table>
+
+        ${v.remarks ? `
+          <div style="margin-top: 14px; padding: 8px 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; font-size: 11px;">
+            <strong>Remarks:</strong> ${v.remarks}
+          </div>
+        ` : ''}
+
+        <div style="margin-top: 40px; display: flex; justify-content: space-between; font-size: 11px; padding-top: 10px; border-top: 1px solid #cbd5e1;">
+          <div style="text-align: center; width: 30%;">
+            <div style="border-top: 1px dashed #94a3b8; margin-top: 30px; padding-top: 4px;">Authorized Signatory</div>
+          </div>
+          <div style="text-align: center; width: 30%;">
+            <div style="border-top: 1px dashed #94a3b8; margin-top: 30px; padding-top: 4px;">Cold Storage Supervisor</div>
+          </div>
+          <div style="text-align: center; width: 30%;">
+            <div style="border-top: 1px dashed #94a3b8; margin-top: 30px; padding-top: 4px;">Store Keeper / Receiver</div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    printHtml(html, `Voucher_${v.voucher_no}`);
+  };
+
+  const handlePrintRegister = () => {
+    const rowsHtml = filteredVouchers.map((row, idx) => `
+      <tr style="background-color: ${idx % 2 === 0 ? '#ffffff' : '#f8fafc'};">
+        <td style="padding: 6px; border: 1px solid #cbd5e1; text-align: center;">${idx + 1}</td>
+        <td style="padding: 6px; border: 1px solid #cbd5e1; font-weight: bold; color: ${row.voucher_type === 'IN' ? '#1f4fb2' : '#d97706'};">${row.voucher_no}</td>
+        <td style="padding: 6px; border: 1px solid #cbd5e1; text-align: center;">${row.voucher_type === 'IN' ? 'INWARD' : 'OUTWARD'}</td>
+        <td style="padding: 6px; border: 1px solid #cbd5e1; text-align: center;">${row.voucher_date}</td>
+        <td style="padding: 6px; border: 1px solid #cbd5e1;">${row.cold_storage_name || '-'}</td>
+        <td style="padding: 6px; border: 1px solid #cbd5e1;">${row.voucher_type === 'IN' ? (row.source_godown_name || 'Main') : (row.destination_godown_name || 'Production')}</td>
+        <td style="padding: 6px; border: 1px solid #cbd5e1; text-align: right; font-weight: bold;">${parseFloat(row.total_qty || 0).toFixed(2)}</td>
+        <td style="padding: 6px; border: 1px solid #cbd5e1; text-align: right; font-weight: bold;">${parseFloat(row.total_wt || 0).toFixed(2)} KG</td>
+        <td style="padding: 6px; border: 1px solid #cbd5e1; font-size: 10px;">${row.remarks || '-'}</td>
+      </tr>
+    `).join('');
+
+    const html = `
+      <div style="font-family: Arial, sans-serif; color: #0f172a; padding: 10px;">
+        <div style="border-bottom: 2px solid #1f4fb2; padding-bottom: 8px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: flex-end;">
+          <div>
+            <h2 style="margin: 0; color: #1f4fb2; font-size: 20px;">COLD STORAGE VOUCHER REGISTER</h2>
+            <div style="font-size: 11px; color: #64748b; margin-top: 3px;">
+              Filter: ${activeTab === 'ALL' ? 'All Types' : activeTab === 'IN' ? 'Inward Only' : 'Outward Only'} | 
+              Printed on: ${new Date().toLocaleString()}
+            </div>
+          </div>
+          <div style="text-align: right; font-size: 12px; color: #475569;">
+            Total Vouchers: <strong>${filteredVouchers.length}</strong>
+          </div>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+          <thead>
+            <tr style="background-color: #1f4fb2; color: #ffffff;">
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: center;">#</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: left;">Voucher No</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: center;">Type</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: center;">Date</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: left;">Cold Storage</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: left;">Origin/Dest</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: right;">Total Qty</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: right;">Total Wt</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: left;">Remarks</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml || '<tr><td colspan="9" style="text-align:center; padding: 16px;">No vouchers recorded</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    printHtml(html, 'Cold_Storage_Voucher_Register');
+  };
+
+  const handlePrintRow = async (row) => {
+    try {
+      const res = await api.get(`/cold-storage/vouchers/${row.id}`);
+      if (res.data) {
+        handlePrintVoucher(res.data);
+      }
+    } catch (err) {
+      console.error('Error printing voucher:', err);
+      handlePrintVoucher(row);
     }
   };
 
@@ -236,9 +390,12 @@ const ColdStorageVouchers = () => {
             />
           </Grid>
 
-          <Grid item xs={12} sm={1}>
+          <Grid item xs={12} sm={1.5} sx={{ display: 'flex', gap: 0.5 }}>
             <IconButton onClick={fetchVouchers} color="primary" title="Refresh">
               <RefreshIcon />
+            </IconButton>
+            <IconButton onClick={handlePrintRegister} color="primary" title="Print Voucher Register">
+              <PrintIcon />
             </IconButton>
           </Grid>
         </Grid>
@@ -303,6 +460,14 @@ const ColdStorageVouchers = () => {
                           {row.remarks || '-'}
                         </TableCell>
                         <TableCell align="center">
+                          <IconButton
+                            size="small"
+                            color="info"
+                            onClick={() => handlePrintRow(row)}
+                            title="Print Voucher"
+                          >
+                            <PrintIcon fontSize="small" />
+                          </IconButton>
                           <IconButton
                             size="small"
                             color="primary"
@@ -415,7 +580,7 @@ const ColdStorageVouchers = () => {
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>
           <Button variant="outlined" onClick={() => setViewModalOpen(false)}>Close</Button>
-          <Button variant="contained" startIcon={<PrintIcon />} onClick={() => window.print()}>
+          <Button variant="contained" startIcon={<PrintIcon />} onClick={() => handlePrintVoucher(selectedVoucherDetails)}>
             Print Voucher
           </Button>
         </DialogActions>

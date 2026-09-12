@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import axios from 'axios'
 import { useAuth } from '../../context/AuthContext'
+import { printHtml } from '../../utils/printHelper'
 import './ReportPage.css'
 
 /**
@@ -161,10 +162,6 @@ const StockStatusReport = () => {
     }
   };
 
-  const handlePrint = () => {
-    window.print()
-  }
-
   const handlePurgeLegacyData = async () => {
     if (!window.confirm("Are you sure you want to purge old legacy Tauri test records (prior to April 2025) and recalculate stock balances? This will clear stale historical data.")) {
       return;
@@ -236,6 +233,106 @@ const StockStatusReport = () => {
       return sum + (parseFloat(row.sold_qty) || 0);
     }
   }, 0);
+
+  const handlePrint = () => {
+    const isSummary = reportMode === 'summary';
+    const rowsHtml = filteredData.map((row, idx) => {
+      if (isSummary) {
+        return `
+          <tr style="background-color: ${idx % 2 === 0 ? '#ffffff' : '#f8fafc'};">
+            <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center;">${idx + 1}</td>
+            <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: bold; color: #1f4fb2;">${row.item_name || '-'}</td>
+            <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center;">${row.category || row.stock_type || 'RM'}</td>
+            <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right;">${parseFloat(row.total_purchased || 0).toFixed(2)}</td>
+            <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; color: #d97706;">${parseFloat(row.total_sold || 0).toFixed(2)}</td>
+            <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; font-weight: bold; color: ${parseFloat(row.current_balance || 0) > 0 ? '#059669' : '#dc2626'};">${parseFloat(row.current_balance || 0).toFixed(2)} ${row.unit || 'KG'}</td>
+          </tr>
+        `;
+      } else {
+        return `
+          <tr style="background-color: ${idx % 2 === 0 ? '#ffffff' : '#f8fafc'};">
+            <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center;">${idx + 1}</td>
+            <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: bold; color: #1f4fb2;">${row.lot_no || '-'}</td>
+            <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: 600;">${row.item_name || '-'}</td>
+            <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center;">${row.category || row.stock_type || 'RM'}</td>
+            <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center;">${row.financial_year || '-'}</td>
+            <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right;">${parseFloat(row.purchased_qty || 0).toFixed(2)}</td>
+            <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; color: #d97706;">${parseFloat(row.sold_qty || 0).toFixed(2)}</td>
+            <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; font-weight: bold; color: ${parseFloat(row.remaining_quantity || 0) > 0 ? '#059669' : '#dc2626'};">${parseFloat(row.remaining_quantity || 0).toFixed(2)} ${row.unit || 'KG'}</td>
+          </tr>
+        `;
+      }
+    }).join('');
+
+    const html = `
+      <div style="font-family: Arial, sans-serif; color: #0f172a; padding: 12px;">
+        <div style="border-bottom: 2px solid #1f4fb2; padding-bottom: 8px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: flex-end;">
+          <div>
+            <h2 style="margin: 0; color: #1f4fb2; font-size: 20px;">STOCK STATUS & INVENTORY REPORT</h2>
+            <div style="font-size: 11px; color: #64748b; margin-top: 4px;">
+              Mode: <strong>${isSummary ? 'Product Summary' : 'Lot Breakdown'}</strong> | 
+              Category: <strong>${selectedCategory}</strong> | 
+              Financial Year: <strong>${selectedFY}</strong> |
+              Printed on: ${new Date().toLocaleString()}
+            </div>
+          </div>
+          <div style="text-align: right; font-size: 12px; color: #475569;">
+            Total Items: <strong>${filteredData.length}</strong>
+          </div>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 16px;">
+          <tr style="background: #f1f5f9;">
+            <td style="padding: 8px 12px; border: 1px solid #cbd5e1; width: 33.3%;">
+              <div style="font-size: 10px; color: #64748b;">Total Purchased / Inward Qty</div>
+              <div style="font-size: 14px; font-weight: bold; color: #1f4fb2;">${totalPurchasedQty.toFixed(2)}</div>
+            </td>
+            <td style="padding: 8px 12px; border: 1px solid #cbd5e1; width: 33.3%;">
+              <div style="font-size: 10px; color: #64748b;">Total Sold / Outward Qty</div>
+              <div style="font-size: 14px; font-weight: bold; color: #d97706;">${totalSoldQty.toFixed(2)}</div>
+            </td>
+            <td style="padding: 8px 12px; border: 1px solid #cbd5e1; width: 33.3%;">
+              <div style="font-size: 10px; color: #64748b;">Net Available Stock Balance</div>
+              <div style="font-size: 14px; font-weight: bold; color: #059669;">${totalBalance.toFixed(2)}</div>
+            </td>
+          </tr>
+        </table>
+
+        <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+          <thead>
+            <tr style="background-color: #1f4fb2; color: #ffffff;">
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: center;">#</th>
+              ${isSummary ? `
+                <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: left;">Item Name</th>
+                <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: center;">Category</th>
+                <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: right;">Total Purchased</th>
+                <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: right;">Total Sold</th>
+                <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: right;">Current Balance</th>
+              ` : `
+                <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: center;">Lot No</th>
+                <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: left;">Item Name</th>
+                <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: center;">Category</th>
+                <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: center;">FY</th>
+                <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: right;">Inward Qty</th>
+                <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: right;">Outward Qty</th>
+                <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: right;">Remaining Balance</th>
+              `}
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml || '<tr><td colspan="7" style="text-align:center; padding: 14px;">No records available</td></tr>'}
+          </tbody>
+        </table>
+        
+        <div style="margin-top: 24px; border-top: 1px solid #cbd5e1; padding-top: 8px; font-size: 10px; color: #64748b; display: flex; justify-content: space-between;">
+          <span>BVC ERP System - Stock Status Report</span>
+          <span>Printed on ${new Date().toLocaleString()}</span>
+        </div>
+      </div>
+    `;
+
+    printHtml(html, 'Stock_Status_Report');
+  };
 
   return (
     <div className="window" style={styles.container}>

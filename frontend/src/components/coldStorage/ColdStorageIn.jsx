@@ -36,6 +36,7 @@ import {
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../services/api';
+import { printHtml } from '../../utils/printHelper';
 
 const ColdStorageIn = () => {
   const navigate = useNavigate();
@@ -265,6 +266,76 @@ const ColdStorageIn = () => {
 
   const totalQtySum = items.reduce((sum, i) => sum + parseFloat(i.quantity || 0), 0);
   const totalWtSum = items.reduce((sum, i) => sum + parseFloat(i.total_wt || 0), 0);
+
+  const handlePrintVoucherSlip = () => {
+    if (!savedVoucher) return;
+    const itemsHtml = (savedVoucher.items || []).map((it, idx) => `
+      <tr>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center;">${idx + 1}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: bold;">${it.item_name}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center; color: #1f4fb2; font-weight: bold;">${it.cold_storage_lot_no || '-'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center;">${it.purchase_lot_no || '-'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; font-weight: bold;">${it.quantity} ${it.unit}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right;">${it.weight_per_unit || 1} KG</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; font-weight: bold;">${it.total_wt} KG</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1;">${it.remarks || '-'}</td>
+      </tr>
+    `).join('');
+
+    const html = `
+      <div style="font-family: Arial, sans-serif; padding: 12px; color: #0f172a;">
+        <div style="border-bottom: 2px solid #1f4fb2; padding-bottom: 8px; margin-bottom: 12px;">
+          <div style="font-size: 18px; font-weight: 800; color: #1f4fb2; text-transform: uppercase;">BHAGWATI VEG COMMODITIES</div>
+          <div style="font-size: 14px; font-weight: 700; color: #334155; margin-top: 2px;">COLD STORAGE INWARD (IN) SLIP</div>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; background: #f1f5f9; padding: 10px; border-radius: 4px; margin-bottom: 14px; font-size: 12px;">
+          <div>
+            <div><strong>Voucher #:</strong> ${savedVoucher.voucher_no}</div>
+            <div><strong>Date:</strong> ${savedVoucher.voucher_date}</div>
+            <div><strong>Origin Godown:</strong> ${savedVoucher.source_godown_name}</div>
+          </div>
+          <div style="text-align: right;">
+            <div><strong>Cold Storage:</strong> ${savedVoucher.cold_storage_name}</div>
+            <div><strong>Total Qty:</strong> ${savedVoucher.total_qty || ''}</div>
+            <div><strong>Total Weight:</strong> ${savedVoucher.total_wt || ''} KG</div>
+          </div>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+          <thead>
+            <tr style="background-color: #1f4fb2; color: #ffffff;">
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: center;">#</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: left;">Item Name</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: center;">Cold Storage Lot #</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: center;">Purchase Lot #</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: right;">Qty</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: right;">Per Wt</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: right;">Total Wt</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: left;">Remarks</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemsHtml}
+          </tbody>
+        </table>
+
+        ${savedVoucher.remarks ? `
+          <div style="margin-top: 12px; font-size: 11px; color: #475569;">
+            <strong>Remarks:</strong> ${savedVoucher.remarks}
+          </div>
+        ` : ''}
+
+        <div style="margin-top: 36px; display: flex; justify-content: space-between; font-size: 11px; color: #475569;">
+          <div style="border-top: 1px solid #94a3b8; width: 150px; text-align: center; padding-top: 4px;">Prepared By</div>
+          <div style="border-top: 1px solid #94a3b8; width: 150px; text-align: center; padding-top: 4px;">Cold Storage Incharge</div>
+          <div style="border-top: 1px solid #94a3b8; width: 150px; text-align: center; padding-top: 4px;">Authorized Signature</div>
+        </div>
+      </div>
+    `;
+
+    printHtml(html, `Cold_Inward_Voucher_${savedVoucher.voucher_no}`);
+  };
 
   return (
     <Box sx={{ p: { xs: 2, md: 3 }, width: '100%', maxWidth: '100%', margin: '0 auto' }}>
@@ -607,9 +678,7 @@ const ColdStorageIn = () => {
           <Button 
             variant="contained" 
             startIcon={<PrintIcon />}
-            onClick={() => {
-              window.print();
-            }}
+            onClick={handlePrintVoucherSlip}
           >
             Print Voucher Slip
           </Button>

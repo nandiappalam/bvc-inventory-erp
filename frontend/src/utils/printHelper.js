@@ -1,53 +1,114 @@
 /**
- * printHelper.js - Reliable, high-fidelity printing engine for ERP applications
+ * printHelper.js - Universal, high-fidelity printing engine for ERP applications
  * 
- * Supports printing HTML strings, DOM elements, modals, reports, and tables.
- * Injects complete stylesheet links, synchronizes live form field values,
- * and manages print preview modals without clipping or blank pages.
+ * Supports printing HTML strings, DOM elements, modals, reports, vouchers, and tables.
+ * Uses an isolated hidden iframe engine for 100% reliable, unclipped prints across all browsers,
+ * with seamless fallback and interactive preview capabilities.
  */
 
 /**
  * Extracts and compiles all active styles from the current document
  */
-function getDocumentStyles() {
-  let styleMarkup = "";
+export function getDocumentStyles() {
+  let styleMarkup = `
+    <style>
+      *, *::before, *::after {
+        box-sizing: border-box !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+      @page {
+        size: auto;
+        margin: 8mm 10mm;
+      }
+      html, body {
+        margin: 0 !important;
+        padding: 0 !important;
+        height: auto !important;
+        min-height: 0 !important;
+        max-height: none !important;
+        overflow: visible !important;
+        overflow-x: visible !important;
+        overflow-y: visible !important;
+        background: #ffffff !important;
+        color: #0f172a !important;
+        font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif !important;
+        font-size: 12px !important;
+        line-height: 1.4 !important;
+      }
+      table {
+        width: 100% !important;
+        max-width: 100% !important;
+        border-collapse: collapse !important;
+        page-break-inside: auto !important;
+        margin-top: 8px !important;
+        margin-bottom: 8px !important;
+      }
+      thead {
+        display: table-header-group !important;
+      }
+      tfoot {
+        display: table-footer-group !important;
+      }
+      tr {
+        page-break-inside: avoid !important;
+        page-break-after: auto !important;
+      }
+      th, td {
+        border: 1px solid #cbd5e1 !important;
+        padding: 6px 8px !important;
+        text-align: left !important;
+        vertical-align: middle !important;
+      }
+      th {
+        background-color: #1f4fb2 !important;
+        color: #ffffff !important;
+        font-weight: 700 !important;
+      }
+      .no-print, .action-btn, .header-btn, button, .actions-cell, .actions-header {
+        display: none !important;
+      }
+    </style>
+  `;
   
   // 1. Copy all <link rel="stylesheet">
-  const links = document.querySelectorAll('link[rel="stylesheet"]');
-  links.forEach(link => {
-    styleMarkup += link.outerHTML + "\n";
-  });
+  if (typeof document !== 'undefined') {
+    const links = document.querySelectorAll('link[rel="stylesheet"]');
+    links.forEach(link => {
+      styleMarkup += link.outerHTML + "\n";
+    });
 
-  // 2. Copy all inline <style> tags
-  const styles = document.querySelectorAll('style:not(#iframe-print-style)');
-  styles.forEach(style => {
-    if (style.innerHTML && style.innerHTML.trim()) {
-      styleMarkup += `<style>${style.innerHTML}</style>\n`;
-    }
-  });
+    // 2. Copy all inline <style> tags
+    const styles = document.querySelectorAll('style:not(#iframe-print-style)');
+    styles.forEach(style => {
+      if (style.innerHTML && style.innerHTML.trim()) {
+        styleMarkup += `<style>${style.innerHTML}</style>\n`;
+      }
+    });
 
-  // 3. Copy CSSOM rules for dynamic styles (Emotion, Material UI, Tailwind)
-  try {
-    if (typeof document !== 'undefined' && document.styleSheets) {
-      for (let i = 0; i < document.styleSheets.length; i++) {
-        const sheet = document.styleSheets[i];
-        if (sheet.ownerNode && sheet.ownerNode.id === 'iframe-print-style') continue;
-        try {
-          if (sheet.cssRules && sheet.cssRules.length > 0) {
-            let rulesText = '';
-            for (let j = 0; j < sheet.cssRules.length; j++) {
-              rulesText += sheet.cssRules[j].cssText + '\n';
+    // 3. Copy CSSOM rules for dynamic styles (Emotion, Material UI, Tailwind)
+    try {
+      if (document.styleSheets) {
+        for (let i = 0; i < document.styleSheets.length; i++) {
+          const sheet = document.styleSheets[i];
+          if (sheet.ownerNode && sheet.ownerNode.id === 'iframe-print-style') continue;
+          try {
+            if (sheet.cssRules && sheet.cssRules.length > 0) {
+              let rulesText = '';
+              for (let j = 0; j < sheet.cssRules.length; j++) {
+                rulesText += sheet.cssRules[j].cssText + '\n';
+              }
+              if (rulesText) {
+                styleMarkup += `<style>${rulesText}</style>\n`;
+              }
             }
-            if (rulesText) {
-              styleMarkup += `<style>${rulesText}</style>\n`;
-            }
+          } catch (cssomErr) {
+            // Cross-origin stylesheet access restricted
           }
-        } catch (cssomErr) {
-          // Cross-origin stylesheet access restricted
         }
       }
-    }
-  } catch (e) {}
+    } catch (e) {}
+  }
 
   return styleMarkup;
 }
@@ -55,7 +116,8 @@ function getDocumentStyles() {
 /**
  * Deep clones a DOM element and synchronizes form values (inputs, selects, textareas)
  */
-function cloneWithFormValues(element) {
+export function cloneWithFormValues(element) {
+  if (!element) return null;
   const clone = element.cloneNode(true);
   
   const origInputs = element.querySelectorAll('input, select, textarea');
@@ -97,6 +159,7 @@ export function printElement(elementOrSelector, options = {}) {
 
   if (!target) {
     target = document.getElementById('printable-area') || 
+             document.querySelector('.standard-display') ||
              document.querySelector('.print-modal-box') || 
              document.querySelector('.document-modal') ||
              document.querySelector('.report-container') ||
@@ -108,6 +171,9 @@ export function printElement(elementOrSelector, options = {}) {
   
   if (target) {
     const cloned = cloneWithFormValues(target);
+    // Remove unwanted UI buttons inside cloned element
+    const unwanted = cloned.querySelectorAll('.header-btn, .action-btn, button, .search-filter-bar, .actions-cell, .actions-header, .no-print');
+    unwanted.forEach(el => el.remove());
     printHtml(cloned.outerHTML, title, options);
   } else {
     window.print();
@@ -115,7 +181,7 @@ export function printElement(elementOrSelector, options = {}) {
 }
 
 /**
- * Core print HTML renderer with preview dialog
+ * Core print HTML renderer with isolated hidden iframe & visual modal preview
  */
 export function printHtml(html, title = "Print Document", options = {}) {
   // Safe content fallback
@@ -126,283 +192,148 @@ export function printHtml(html, title = "Print Document", options = {}) {
         <p>The selected record or report does not contain printable data.</p>
        </div>`;
 
-  // Save existing title
   const oldTitle = document.title;
   if (title) {
     document.title = title;
   }
 
-  // 1. Collect all head stylesheets
   const headStyles = getDocumentStyles();
 
-  // 2. Create unique container
+  // Create or retrieve hidden print iframe for direct, isolated printing
+  // CRITICAL: Set 100% width/height with opacity: 0 and z-index: -9999 (NOT width: 0, height: 0, or visibility: hidden)
+  // so browser layout engine calculates full table layout geometry and prevents blank pages!
+  let iframe = document.getElementById("erp-hidden-print-frame");
+  if (iframe) {
+    iframe.remove();
+  }
+
+  iframe = document.createElement("iframe");
+  iframe.id = "erp-hidden-print-frame";
+  iframe.style.position = "absolute";
+  iframe.style.left = "-9999px";
+  iframe.style.top = "-9999px";
+  iframe.style.width = "1024px";
+  iframe.style.height = "768px";
+  iframe.style.border = "0";
+  iframe.style.opacity = "1";
+  iframe.style.visibility = "visible";
+  iframe.style.pointerEvents = "none";
+  iframe.style.zIndex = "-9999";
+  document.body.appendChild(iframe);
+
+  const fullHtmlDoc = `
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>${title}</title>
+        ${headStyles}
+        <style>
+          body {
+            padding: 16px !important;
+            background: #ffffff !important;
+            color: #0f172a !important;
+          }
+          .header-banner {
+            border-bottom: 2px solid #1f4fb2;
+            padding-bottom: 8px;
+            margin-bottom: 16px;
+          }
+        </style>
+      </head>
+      <body>
+        <div style="width: 100%; max-width: 100%;">
+          ${safeContent}
+        </div>
+      </body>
+    </html>
+  `;
+
+  // Write content to iframe and trigger print
+  try {
+    const doc = iframe.contentWindow.document;
+    doc.open();
+    doc.write(fullHtmlDoc);
+    doc.close();
+
+    // Trigger iframe print
+    const triggerIframePrint = () => {
+      try {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+        setTimeout(() => {
+          document.title = oldTitle;
+          if (iframe && iframe.parentNode) {
+            iframe.remove();
+          }
+        }, 1500);
+      } catch (err) {
+        console.warn("Iframe print error, falling back to modal:", err);
+        showModalFallback(safeContent, title, headStyles, oldTitle);
+      }
+    };
+
+    if (iframe.contentWindow.document.readyState === 'complete') {
+      setTimeout(triggerIframePrint, 250);
+    } else {
+      iframe.onload = () => setTimeout(triggerIframePrint, 250);
+    }
+  } catch (e) {
+    console.warn("Iframe write failed, falling back to modal:", e);
+    showModalFallback(safeContent, title, headStyles, oldTitle);
+  }
+}
+
+/**
+ * Modal Fallback if iframe print is blocked by browser sandbox
+ */
+function showModalFallback(safeContent, title, headStyles, oldTitle) {
   const containerId = "iframe-print-container";
   let container = document.getElementById(containerId);
-  if (container) {
-    container.remove();
-  }
+  if (container) container.remove();
+
   container = document.createElement("div");
   container.id = containerId;
+  container.style.position = "fixed";
+  container.style.inset = "0";
+  container.style.zIndex = "999999";
+  container.style.backgroundColor = "rgba(15, 23, 42, 0.75)";
+  container.style.backdropFilter = "blur(4px)";
+  container.style.display = "flex";
+  container.style.justifyContent = "center";
+  container.style.alignItems = "center";
+  container.style.padding = "20px";
+  container.style.overflowY = "auto";
 
-  // 3. Wrap HTML inside a styled print preview modal box
   container.innerHTML = `
-    ${headStyles}
-    <div class="print-modal-box">
-      <div class="print-toolbar">
-        <span style="font-weight: 700; font-size: 15px; text-transform: uppercase; letter-spacing: 0.5px; display: flex; align-items: center; gap: 8px;">
-          <span>📄</span> ${title}
-        </span>
-        <div style="display: flex; gap: 10px; align-items: center;">
-          <button id="print-btn-action" style="
-            background: #10b981; 
-            color: white; 
-            border: none; 
-            padding: 8px 18px; 
-            border-radius: 5px; 
-            cursor: pointer; 
-            font-weight: 700;
-            font-size: 13px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.15);
-            transition: background 0.15s ease;
-          ">
-            🖨 Print Now
-          </button>
-          <button id="close-btn-action" style="
-            background: #ef4444; 
-            color: white; 
-            border: none; 
-            padding: 8px 18px; 
-            border-radius: 5px; 
-            cursor: pointer; 
-            font-weight: 700;
-            font-size: 13px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.15);
-            transition: background 0.15s ease;
-          ">
-            ✕ Close
-          </button>
+    <div style="background: #ffffff; border-radius: 8px; width: 900px; max-width: 95vw; max-height: 92vh; display: flex; flex-direction: column; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.3); overflow: hidden;">
+      <div style="background: #1f4fb2; color: #ffffff; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-weight: 700; font-size: 16px; text-transform: uppercase;">📄 ${title}</span>
+        <div style="display: flex; gap: 10px;">
+          <button id="modal-print-btn" style="background: #ffffff; color: #1f4fb2; border: none; padding: 6px 16px; border-radius: 4px; font-weight: bold; cursor: pointer;">🖨 Print Now</button>
+          <button id="modal-close-btn" style="background: rgba(255,255,255,0.2); color: #ffffff; border: none; padding: 6px 12px; border-radius: 4px; font-weight: bold; cursor: pointer;">✕ Close</button>
         </div>
       </div>
-      <div class="print-content" id="print-content-inner">
+      <div style="padding: 24px; overflow-y: auto; flex: 1;" id="modal-print-body">
         ${safeContent}
       </div>
     </div>
   `;
 
-  // 4. Create printing style
-  const styleId = "iframe-print-style";
-  let style = document.getElementById(styleId);
-  if (style) {
-    style.remove();
-  }
-  style = document.createElement("style");
-  style.id = styleId;
-  style.innerHTML = `
-    @media screen {
-      #iframe-print-container {
-        position: fixed !important;
-        top: 0 !important;
-        left: 0 !important;
-        width: 100vw !important;
-        height: 100vh !important;
-        background: rgba(15, 23, 42, 0.75) !important;
-        backdrop-filter: blur(4px) !important;
-        display: flex !important;
-        flex-direction: column !important;
-        justify-content: center !important;
-        align-items: center !important;
-        z-index: 9999999 !important;
-        box-sizing: border-box !important;
-        padding: 20px 16px !important;
-        font-family: 'Segoe UI', system-ui, -apple-system, sans-serif !important;
-      }
-      .print-modal-box {
-        background: #ffffff !important;
-        width: 100% !important;
-        max-width: 960px !important;
-        height: auto !important;
-        max-height: 94vh !important;
-        border-radius: 8px !important;
-        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35) !important;
-        display: flex !important;
-        flex-direction: column !important;
-        overflow: hidden !important;
-        border: 1px solid #cbd5e1 !important;
-      }
-      .print-toolbar {
-        display: flex !important;
-        justify-content: space-between !important;
-        align-items: center !important;
-        background: #1e3a8a !important;
-        color: white !important;
-        padding: 12px 20px !important;
-        font-family: inherit !important;
-        user-select: none !important;
-      }
-      #print-btn-action:hover {
-        background: #059669 !important;
-      }
-      #close-btn-action:hover {
-        background: #dc2626 !important;
-      }
-      .print-content {
-        background: #ffffff !important;
-        padding: 28px !important;
-        overflow-y: auto !important;
-        flex: 1 !important;
-        box-sizing: border-box !important;
-        color: #1e293b !important;
-      }
-    }
-    @media print {
-      @page {
-        size: auto;
-        margin: 6mm 8mm;
-      }
-      html, body {
-        margin: 0 !important;
-        padding: 0 !important;
-        height: auto !important;
-        min-height: auto !important;
-        overflow: visible !important;
-        background: #ffffff !important;
-        color: #000000 !important;
-        width: 100% !important;
-        position: static !important;
-      }
-      /* When print modal is active, hide everything outside the print container */
-      body.print-modal-active > *:not(#iframe-print-container) {
-        display: none !important;
-      }
-      body.print-modal-active #iframe-print-container {
-        display: block !important;
-        position: static !important;
-        width: 100% !important;
-        height: auto !important;
-        min-height: auto !important;
-        background: #ffffff !important;
-        padding: 0 !important;
-        margin: 0 !important;
-        overflow: visible !important;
-        box-shadow: none !important;
-        border: none !important;
-        backdrop-filter: none !important;
-        opacity: 1 !important;
-        visibility: visible !important;
-      }
-      body.print-modal-active #iframe-print-container * {
-        visibility: visible !important;
-      }
-      body.print-modal-active .print-modal-box {
-        display: block !important;
-        box-shadow: none !important;
-        border-radius: 0 !important;
-        border: none !important;
-        width: 100% !important;
-        max-width: 100% !important;
-        height: auto !important;
-        max-height: none !important;
-        background: #ffffff !important;
-        overflow: visible !important;
-        padding: 0 !important;
-        margin: 0 !important;
-      }
-      body.print-modal-active .print-toolbar {
-        display: none !important;
-      }
-      body.print-modal-active .print-content {
-        display: block !important;
-        width: 100% !important;
-        height: auto !important;
-        max-height: none !important;
-        overflow: visible !important;
-        padding: 0 !important;
-        margin: 0 !important;
-        background: #ffffff !important;
-        color: #000000 !important;
-      }
-      table {
-        width: 100% !important;
-        border-collapse: collapse !important;
-        page-break-inside: auto !important;
-      }
-      tr {
-        page-break-inside: avoid !important;
-        page-break-after: auto !important;
-      }
-      thead {
-        display: table-header-group !important;
-      }
-      tfoot {
-        display: table-footer-group !important;
-      }
-      * {
-        -webkit-print-color-adjust: exact !important;
-        print-color-adjust: exact !important;
-      }
-      .no-print, .action-btn, button:not(#print-btn-action) {
-        display: none !important;
-      }
-    }
-  `;
-
-  document.body.classList.add("print-modal-active");
-  document.body.appendChild(style);
   document.body.appendChild(container);
+  document.body.classList.add("print-modal-active");
 
-  // 5. Action handlers & cleanup
   const cleanup = () => {
     document.title = oldTitle;
     document.body.classList.remove("print-modal-active");
     if (container && container.parentNode) container.remove();
-    if (style && style.parentNode) style.remove();
-    document.removeEventListener("keydown", handleKeyDown);
-    window.removeEventListener("afterprint", cleanup);
   };
 
-  const handleKeyDown = (e) => {
-    if (e.key === "Escape") {
-      cleanup();
-    }
-  };
-
-  const handlePrintTrigger = () => {
-    try {
-      window.focus();
-      window.print();
-    } catch (e) {
-      console.warn("Direct window.print() error:", e);
-    }
-  };
-
-  const printBtn = document.getElementById("print-btn-action");
-  const closeBtn = document.getElementById("close-btn-action");
-
-  if (printBtn) {
-    printBtn.addEventListener("click", handlePrintTrigger);
-  }
-  if (closeBtn) {
-    closeBtn.addEventListener("click", cleanup);
-  }
-
-  // Close when clicking outside modal box
-  container.addEventListener("click", (e) => {
-    if (e.target === container) {
-      cleanup();
-    }
+  document.getElementById("modal-close-btn")?.addEventListener("click", cleanup);
+  document.getElementById("modal-print-btn")?.addEventListener("click", () => {
+    window.print();
   });
-
-  document.addEventListener("keydown", handleKeyDown);
-  window.addEventListener("afterprint", cleanup);
-
-  // Auto-trigger print dialog after small render delay
-  setTimeout(handlePrintTrigger, 350);
 }
 
 export default printHtml;

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import api from '../../utils/api.js'
+import { printHtml } from '../../utils/printHelper.js'
 import './ReportPage.css'
 
 /**
@@ -47,7 +48,49 @@ const OutstandingSummaryReport = () => {
   }, [asOnDate])
 
   const handlePrint = () => {
-    window.print()
+    const rowsHtml = safeReportData.map((row, idx) => `
+      <tr style="background-color: ${idx % 2 === 0 ? '#ffffff' : '#f8fafc'};">
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center;">${idx + 1}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: 600;">${row.party_name || '-'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center;">${row.party_type || row.type || '-'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; font-weight: bold; color: ${row.type === 'Receivable' ? '#059669' : '#dc2626'};">${parseFloat(row.balance || 0).toFixed(2)}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center; font-weight: bold;">${row.type || 'Receivable'}</td>
+      </tr>
+    `).join('');
+
+    const html = `
+      <div style="font-family: Arial, sans-serif; color: #0f172a; padding: 12px;">
+        <div style="border-bottom: 2px solid #1f4fb2; padding-bottom: 8px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: flex-end;">
+          <div>
+            <h2 style="margin: 0; color: #1f4fb2; font-size: 20px;">OUTSTANDING SUMMARY REPORT</h2>
+            <div style="font-size: 11px; color: #64748b; margin-top: 4px;">
+              As On Date: <strong>${asOnDate || 'Current'}</strong> | Printed on: ${new Date().toLocaleString()}
+            </div>
+          </div>
+          <div style="text-align: right; font-size: 11px; color: #475569;">
+            Total Receivables: <strong style="color:#059669">₹ ${totalReceivable.toFixed(2)}</strong> | 
+            Total Payables: <strong style="color:#dc2626">₹ ${totalPayable.toFixed(2)}</strong>
+          </div>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+          <thead>
+            <tr style="background-color: #1f4fb2; color: #ffffff;">
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: center;">#</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: left;">Party Name</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: center;">Category</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: right;">Outstanding Balance (₹)</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: center;">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml || '<tr><td colspan="5" style="text-align:center; padding: 14px;">No outstanding summary available</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    printHtml(html, 'Outstanding_Summary_Report');
   }
 
   const safeReportData = Array.isArray(reportData) ? reportData : []

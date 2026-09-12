@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import axios from 'axios'
+import { printHtml } from '../utils/printHelper.js'
 import './ReportPage.css'
 
 /**
@@ -228,7 +229,43 @@ const ReportPage = ({ reportType, title }) => {
   }
 
   const handlePrint = () => {
-    window.print()
+    const cols = config.columns || [];
+    const headersHtml = cols.map(col => `<th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: left;">${col.label}</th>`).join('');
+    
+    const rowsHtml = safeData.map((row, idx) => `
+      <tr style="background-color: ${idx % 2 === 0 ? '#ffffff' : '#f8fafc'};">
+        ${cols.map(col => `<td style="padding: 6px 8px; border: 1px solid #cbd5e1;">${row[col.key] !== undefined && row[col.key] !== null ? row[col.key] : '-'}</td>`).join('')}
+      </tr>
+    `).join('');
+
+    const html = `
+      <div style="font-family: Arial, sans-serif; color: #0f172a; padding: 12px;">
+        <div style="border-bottom: 2px solid #1f4fb2; padding-bottom: 8px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: flex-end;">
+          <div>
+            <h2 style="margin: 0; color: #1f4fb2; font-size: 20px;">${title?.toUpperCase() || 'REPORT'}</h2>
+            <div style="font-size: 11px; color: #64748b; margin-top: 4px;">
+              Printed on: ${new Date().toLocaleString()}
+            </div>
+          </div>
+          <div style="text-align: right; font-size: 12px; color: #475569;">
+            Total Records: <strong>${safeData.length}</strong>
+          </div>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+          <thead>
+            <tr style="background-color: #1f4fb2; color: #ffffff;">
+              ${headersHtml}
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml || `<tr><td colspan="${cols.length || 1}" style="text-align:center; padding: 14px;">No records found</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    printHtml(html, title ? title.replace(/\s+/g, '_') : 'Report');
   }
 
   const handleClear = () => {

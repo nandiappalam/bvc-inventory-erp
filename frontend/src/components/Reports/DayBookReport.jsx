@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import api from '../../services/api.js'
+import { printHtml } from '../../utils/printHelper.js'
 export const safeArray = (arr) => Array.isArray(arr) ? arr : [];
 import './ReportPage.css'
 
@@ -64,7 +65,75 @@ const DayBookReport = () => {
   }, [fromDate, toDate])
 
   const handlePrint = () => {
-    window.print()
+    const rowsHtml = safeReportData.map((row, idx) => `
+      <tr style="background-color: ${idx % 2 === 0 ? '#ffffff' : '#f8fafc'};">
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center;">${row.voucher_date || row.date || '-'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: bold; color: #1f4fb2;">${row.voucher_no || '-'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1;">${row.voucher_type || '-'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: 600;">${row.account_name || row.particulars || '-'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; color: ${parseFloat(row.debit) > 0 ? '#059669' : 'inherit'};">${parseFloat(row.debit || 0) > 0 ? parseFloat(row.debit).toFixed(2) : '-'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; color: ${parseFloat(row.credit) > 0 ? '#d97706' : 'inherit'};">${parseFloat(row.credit || 0) > 0 ? parseFloat(row.credit).toFixed(2) : '-'}</td>
+      </tr>
+    `).join('');
+
+    const html = `
+      <div style="font-family: Arial, sans-serif; color: #0f172a; padding: 12px;">
+        <div style="border-bottom: 2px solid #1f4fb2; padding-bottom: 8px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: flex-end;">
+          <div>
+            <h2 style="margin: 0; color: #1f4fb2; font-size: 20px;">DAY BOOK REPORT</h2>
+            <div style="font-size: 11px; color: #64748b; margin-top: 4px;">
+              Period: <strong>${fromDate || 'Start'}</strong> to <strong>${toDate || 'End'}</strong> | Printed on: ${new Date().toLocaleString()}
+            </div>
+          </div>
+          <div style="text-align: right; font-size: 12px; color: #475569;">
+            Total Vouchers: <strong>${safeReportData.length}</strong>
+          </div>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 16px;">
+          <tr style="background: #f1f5f9;">
+            <td style="padding: 8px 12px; border: 1px solid #cbd5e1; width: 50%;">
+              <div style="font-size: 10px; color: #64748b;">Total Debit Amount</div>
+              <div style="font-size: 14px; font-weight: bold; color: #059669;">₹ ${totalDebit.toFixed(2)}</div>
+            </td>
+            <td style="padding: 8px 12px; border: 1px solid #cbd5e1; width: 50%;">
+              <div style="font-size: 10px; color: #64748b;">Total Credit Amount</div>
+              <div style="font-size: 14px; font-weight: bold; color: #d97706;">₹ ${totalCredit.toFixed(2)}</div>
+            </td>
+          </tr>
+        </table>
+
+        <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+          <thead>
+            <tr style="background-color: #1f4fb2; color: #ffffff;">
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: center;">Date</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: left;">Voucher No</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: left;">Type</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: left;">Particulars</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: right;">Debit (₹)</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: right;">Credit (₹)</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml || '<tr><td colspan="6" style="text-align:center; padding: 14px;">No vouchers recorded</td></tr>'}
+          </tbody>
+          <tfoot>
+            <tr style="background-color: #e2e8f0; font-weight: bold;">
+              <td colspan="4" style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right;">Grand Total:</td>
+              <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; color: #059669;">₹ ${totalDebit.toFixed(2)}</td>
+              <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; color: #d97706;">₹ ${totalCredit.toFixed(2)}</td>
+            </tr>
+          </tfoot>
+        </table>
+
+        <div style="margin-top: 24px; border-top: 1px solid #cbd5e1; padding-top: 8px; font-size: 10px; color: #64748b; display: flex; justify-content: space-between;">
+          <span>BVC ERP System - Day Book Report</span>
+          <span>Printed on ${new Date().toLocaleString()}</span>
+        </div>
+      </div>
+    `;
+
+    printHtml(html, 'Day_Book_Report');
   }
 
   // Ensure data is always an array

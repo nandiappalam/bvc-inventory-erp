@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../../utils/api.js'
+import { printHtml } from '../../utils/printHelper.js'
 import './ReportPage.css'
 
 /**
@@ -49,7 +50,53 @@ const OutstandingDetailsReport = () => {
   }, [asOnDate])
 
   const handlePrint = () => {
-    window.print()
+    const rowsHtml = safeReportData.map((row, idx) => `
+      <tr style="background-color: ${idx % 2 === 0 ? '#ffffff' : '#f8fafc'};">
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: 600;">${row.party_name || '-'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: bold; color: #1f4fb2;">${row.bill_no || '-'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center;">${row.bill_date || '-'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center;">${row.due_date || '-'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right;">${row.overdue_days || 0}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; font-weight: bold; color: ${row.type === 'Receivable' ? '#059669' : '#dc2626'};">${parseFloat(row.amount || 0).toFixed(2)}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center; font-weight: bold;">${row.type || 'Receivable'}</td>
+      </tr>
+    `).join('');
+
+    const html = `
+      <div style="font-family: Arial, sans-serif; color: #0f172a; padding: 12px;">
+        <div style="border-bottom: 2px solid #1f4fb2; padding-bottom: 8px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: flex-end;">
+          <div>
+            <h2 style="margin: 0; color: #1f4fb2; font-size: 20px;">OUTSTANDING DETAILS REPORT</h2>
+            <div style="font-size: 11px; color: #64748b; margin-top: 4px;">
+              As On Date: <strong>${asOnDate || 'Current'}</strong> | Printed on: ${new Date().toLocaleString()}
+            </div>
+          </div>
+          <div style="text-align: right; font-size: 11px; color: #475569;">
+            Receivables: <strong style="color:#059669">₹ ${totalReceivable.toFixed(2)}</strong> | 
+            Payables: <strong style="color:#dc2626">₹ ${totalPayable.toFixed(2)}</strong>
+          </div>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+          <thead>
+            <tr style="background-color: #1f4fb2; color: #ffffff;">
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: left;">Party Name</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: left;">Bill No</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: center;">Bill Date</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: center;">Due Date</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: right;">Overdue (Days)</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: right;">Amount (₹)</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: center;">Type</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml || '<tr><td colspan="7" style="text-align:center; padding: 14px;">No outstanding records found</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    printHtml(html, 'Outstanding_Details_Report');
   }
 
   const safeReportData = Array.isArray(reportData) ? reportData : []

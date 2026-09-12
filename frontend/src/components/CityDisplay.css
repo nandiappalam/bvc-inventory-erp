@@ -326,3 +326,49 @@
     background-color: #e8f0ff;
     text-decoration: underline;
 }
+
+/* Print Overrides for Master Table Displays */
+@media print {
+  .standard-display,
+  .container,
+  .table-wrapper {
+    max-height: none !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    overflow-x: visible !important;
+    overflow-y: visible !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+  .data-table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    page-break-inside: auto !important;
+  }
+  .data-table th {
+    position: static !important;
+    background-color: #1f4fb2 !important;
+    color: #ffffff !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  .data-table td {
+    border: 1px solid #cbd5e1 !important;
+    padding: 6px 8px !important;
+  }
+  .data-table tr {
+    page-break-inside: avoid !important;
+  }
+  .screen-header .header-btn,
+  .search-filter-bar,
+  .actions-cell,
+  .actions-header,
+  .notification-banner {
+    display: none !important;
+  }
+}
+

@@ -373,50 +373,10 @@ router.get('/godown-stock', async (req, res) => {
       const targetGId = g.id;
       const normGName = norm(gName);
 
-      // Collect item keys (item_name + lot_no) matching this godown across stock, stock_lots, item_transfers
+      // Collect item keys (item_name + lot_no) matching this godown across stock, stock_lots
       const itemMap = new Map();
 
-      // 1. Process stock_lots for this godown
-      const lotsForG = lotRows.filter(l =>
-        String(l.godown_id) === String(targetGId) ||
-        norm(l.godown_name) === normGName ||
-        (normGName.includes('main') && (!l.godown_name || norm(l.godown_name) === 'maingodown'))
-      );
-
-      lotsForG.forEach((l, idx) => {
-        const key = `${(l.item_name || '').toLowerCase()}:::${(l.lot_no || '').toLowerCase()}`;
-        const availQty = parseFloat(l.available_qty) || 0;
-        const openQty = parseFloat(l.opening_qty) || 0;
-        const uWt = parseFloat(l.weight) || 50;
-        const rate = parseFloat(l.rate) || 0;
-
-        itemMap.set(key, {
-          item_id: l.item_id || (idx + 1),
-          item_code: l.item_code || `ITM${100 + idx}`,
-          item_name: l.item_name,
-          category: l.category || 'General',
-          weight: uWt,
-          unit: l.unit || 'kg',
-          lot_no: l.lot_no || 'LOT0010',
-          opening_qty: openQty,
-          in_qty: 0,
-          out_qty: Math.max(0, openQty - availQty),
-          qty: availQty,
-          current_qty: availQty,
-          available_qty: availQty,
-          purchase_rate: rate,
-          rate: rate,
-          stock_value: availQty * rate,
-          amount: availQty * rate,
-          godown_id: targetGId,
-          godown_name: gName,
-          last_transaction_date: l.last_transaction_date ? String(l.last_transaction_date).split('T')[0] : todayStr,
-          last_updated_date: l.last_transaction_date ? String(l.last_transaction_date).split('T')[0] : todayStr,
-          status: availQty > 0 ? 'In Stock' : 'Out of Stock'
-        });
-      });
-
-      // 2. Process stock ledger entries for this godown
+      // 1. Process stock ledger entries for this godown (the absolute source of truth)
       const stockForG = stockTxnRows.filter(s =>
         String(s.godown_id) === String(targetGId) ||
         norm(s.godown_name) === normGName ||
@@ -432,32 +392,59 @@ router.get('/godown-stock', async (req, res) => {
         const uWt = parseFloat(s.weight) || 50;
         const rate = parseFloat(s.rate) || 0;
 
-        if (itemMap.has(key)) {
-          // Sync in_qty / out_qty from stock ledger
-          const existing = itemMap.get(key);
-          existing.in_qty = inQty;
-          existing.out_qty = outQty;
-          // If available_qty was not set properly in stock_lots, use stock table available_qty
-          if (existing.available_qty === 0 && availQty > 0) {
-            existing.available_qty = availQty;
-            existing.current_qty = availQty;
-            existing.stock_value = availQty * rate;
-            existing.amount = availQty * rate;
-            existing.status = 'In Stock';
-          }
-        } else {
+        itemMap.set(key, {
+          item_id: s.item_id || (idx + 1),
+          item_code: s.item_code || `ITM${100 + idx}`,
+          item_name: s.item_name,
+          category: s.category || 'General',
+          weight: uWt,
+          unit: s.unit || 'kg',
+          lot_no: s.lot_no || 'LOT0010',
+          opening_qty: openQty,
+          in_qty: inQty,
+          out_qty: outQty,
+          qty: availQty,
+          current_qty: availQty,
+          available_qty: availQty,
+          purchase_rate: rate,
+          rate: rate,
+          stock_value: availQty * rate,
+          amount: availQty * rate,
+          godown_id: targetGId,
+          godown_name: gName,
+          last_transaction_date: s.last_transaction_date || todayStr,
+          last_updated_date: s.last_transaction_date || todayStr,
+          status: availQty > 0 ? 'In Stock' : 'Out of Stock'
+        });
+      });
+
+      // 2. Process stock_lots for this godown (to catch any lot records not captured by the ledger)
+      const lotsForG = lotRows.filter(l =>
+        String(l.godown_id) === String(targetGId) ||
+        norm(l.godown_name) === normGName ||
+        (normGName.includes('main') && (!l.godown_name || norm(l.godown_name) === 'maingodown'))
+      );
+
+      lotsForG.forEach((l, idx) => {
+        const key = `${(l.item_name || '').toLowerCase()}:::${(l.lot_no || '').toLowerCase()}`;
+        if (!itemMap.has(key)) {
+          const availQty = parseFloat(l.available_qty) || 0;
+          const openQty = parseFloat(l.opening_qty) || 0;
+          const uWt = parseFloat(l.weight) || 50;
+          const rate = parseFloat(l.rate) || 0;
+
           itemMap.set(key, {
-            item_id: s.item_id || (idx + 1),
-            item_code: s.item_code || `ITM${100 + idx}`,
-            item_name: s.item_name,
-            category: s.category || 'General',
+            item_id: l.item_id || (idx + 1000),
+            item_code: l.item_code || `ITM${1000 + idx}`,
+            item_name: l.item_name,
+            category: l.category || 'General',
             weight: uWt,
-            unit: s.unit || 'kg',
-            lot_no: s.lot_no || 'LOT0010',
+            unit: l.unit || 'kg',
+            lot_no: l.lot_no || 'LOT0010',
             opening_qty: openQty,
-            in_qty: inQty,
-            out_qty: outQty,
-            qty: openQty + inQty,
+            in_qty: 0,
+            out_qty: Math.max(0, openQty - availQty),
+            qty: availQty,
             current_qty: availQty,
             available_qty: availQty,
             purchase_rate: rate,
@@ -466,8 +453,8 @@ router.get('/godown-stock', async (req, res) => {
             amount: availQty * rate,
             godown_id: targetGId,
             godown_name: gName,
-            last_transaction_date: s.last_transaction_date || todayStr,
-            last_updated_date: s.last_transaction_date || todayStr,
+            last_transaction_date: l.last_transaction_date ? String(l.last_transaction_date).split('T')[0] : todayStr,
+            last_updated_date: l.last_transaction_date ? String(l.last_transaction_date).split('T')[0] : todayStr,
             status: availQty > 0 ? 'In Stock' : 'Out of Stock'
           });
         }
@@ -477,7 +464,7 @@ router.get('/godown-stock', async (req, res) => {
         const openQ = parseFloat(i.opening_qty) || 0;
         const inQ = parseFloat(i.in_qty) || 0;
         const outQ = parseFloat(i.out_qty) || 0;
-        const availQ = openQ + inQ - outQ;
+        const availQ = parseFloat(i.available_qty) || 0;
         const uWt = parseFloat(i.weight) || 50;
         const rVal = parseFloat(i.rate) || 0;
         const stkWt = availQ * uWt;

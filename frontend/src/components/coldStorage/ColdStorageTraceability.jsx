@@ -30,6 +30,7 @@ import {
   Print as PrintIcon
 } from '@mui/icons-material';
 import { api } from '../../services/api';
+import { printHtml } from '../../utils/printHelper';
 
 const ColdStorageTraceability = () => {
   const [loading, setLoading] = useState(false);
@@ -56,6 +57,130 @@ const ColdStorageTraceability = () => {
     }
   };
 
+  const handlePrintTrace = () => {
+    if (traceResults.length === 0) {
+      alert('No traceability records to print. Please perform a search first.');
+      return;
+    }
+
+    const cardsHtml = traceResults.map((trace, idx) => {
+      const csRows = (trace.cold_storage_lots_list || []).map((csLot, cIdx) => `
+        <tr>
+          <td style="padding: 5px 8px; border: 1px solid #cbd5e1; text-align: center;">${cIdx + 1}</td>
+          <td style="padding: 5px 8px; border: 1px solid #cbd5e1; font-weight: bold; color: #1f4fb2;">${csLot.cold_storage_lot_no}</td>
+          <td style="padding: 5px 8px; border: 1px solid #cbd5e1;">${csLot.cold_storage_name}</td>
+          <td style="padding: 5px 8px; border: 1px solid #cbd5e1; text-align: right;">${parseFloat(csLot.in_qty || 0).toFixed(2)} ${trace.unit}</td>
+          <td style="padding: 5px 8px; border: 1px solid #cbd5e1; text-align: right; color: #d97706;">${parseFloat(csLot.out_qty || 0).toFixed(2)} ${trace.unit}</td>
+          <td style="padding: 5px 8px; border: 1px solid #cbd5e1; text-align: right; font-weight: bold; color: #059669;">${parseFloat(csLot.current_balance || 0).toFixed(2)} ${trace.unit}</td>
+        </tr>
+      `).join('');
+
+      const movRows = (trace.movements || []).map((m, mIdx) => `
+        <tr>
+          <td style="padding: 5px 8px; border: 1px solid #cbd5e1; text-align: center;">${mIdx + 1}</td>
+          <td style="padding: 5px 8px; border: 1px solid #cbd5e1;">${m.voucher_date}</td>
+          <td style="padding: 5px 8px; border: 1px solid #cbd5e1; font-weight: bold;">${m.voucher_no}</td>
+          <td style="padding: 5px 8px; border: 1px solid #cbd5e1; text-align: center; color: ${m.voucher_type === 'IN' ? '#1f4fb2' : '#d97706'}; font-weight: bold;">${m.voucher_type === 'IN' ? 'COLD INWARD' : 'COLD OUTWARD'}</td>
+          <td style="padding: 5px 8px; border: 1px solid #cbd5e1;">${m.cold_storage_name}</td>
+          <td style="padding: 5px 8px; border: 1px solid #cbd5e1;">${m.voucher_type === 'IN' ? m.source_godown_name : m.destination_godown_name}</td>
+          <td style="padding: 5px 8px; border: 1px solid #cbd5e1; text-align: center;">${m.cold_storage_lot_no || '-'}</td>
+          <td style="padding: 5px 8px; border: 1px solid #cbd5e1; text-align: right; font-weight: bold;">${parseFloat(m.quantity || 0).toFixed(2)} ${m.unit || trace.unit}</td>
+        </tr>
+      `).join('');
+
+      return `
+        <div style="border: 1px solid #cbd5e1; border-radius: 6px; padding: 14px; margin-bottom: 20px; page-break-inside: avoid;">
+          <div style="display: flex; justify-content: space-between; border-bottom: 2px solid #1f4fb2; padding-bottom: 8px; margin-bottom: 12px;">
+            <div>
+              <span style="font-size: 16px; font-weight: bold; color: #1f4fb2;">Purchase Lot: ${trace.purchase_lot_no}</span>
+              <span style="font-size: 14px; margin-left: 12px; font-weight: bold; color: #334155;">- ${trace.item_name}</span>
+            </div>
+            <div style="font-size: 12px; color: #64748b;">
+              Supplier: <strong>${trace.supplier_name || 'N/A'}</strong> | Purchase Date: <strong>${trace.purchase_date || 'N/A'}</strong>
+            </div>
+          </div>
+
+          <table style="width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 11px; background: #f8fafc;">
+            <tr>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; width: 25%;">
+                <div style="color: #64748b; font-size: 10px;">Total Purchased</div>
+                <div style="font-size: 13px; font-weight: bold;">${parseFloat(trace.original_purchase_qty || 0).toFixed(2)} ${trace.unit}</div>
+              </td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; width: 25%;">
+                <div style="color: #64748b; font-size: 10px;">Transferred to Cold Storage</div>
+                <div style="font-size: 13px; font-weight: bold; color: #1f4fb2;">${parseFloat(trace.transferred_to_cold_storage_qty || 0).toFixed(2)} ${trace.unit}</div>
+              </td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; width: 25%;">
+                <div style="color: #64748b; font-size: 10px;">Cold Storage Balance</div>
+                <div style="font-size: 13px; font-weight: bold; color: #059669;">${parseFloat(trace.current_cold_storage_balance || 0).toFixed(2)} ${trace.unit}</div>
+              </td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; width: 25%;">
+                <div style="color: #64748b; font-size: 10px;">Issued / Consumed</div>
+                <div style="font-size: 13px; font-weight: bold; color: #d97706;">${parseFloat(trace.issued_to_production_qty || 0).toFixed(2)} ${trace.unit}</div>
+              </td>
+            </tr>
+          </table>
+
+          <h4 style="margin: 8px 0 4px 0; color: #1f4fb2; font-size: 12px;">Cold Storage Sub-Lot Breakdown</h4>
+          <table style="width: 100%; border-collapse: collapse; font-size: 10px; margin-bottom: 12px;">
+            <thead>
+              <tr style="background: #f1f5f9;">
+                <th style="padding: 4px 6px; border: 1px solid #cbd5e1; text-align: center;">#</th>
+                <th style="padding: 4px 6px; border: 1px solid #cbd5e1; text-align: left;">CS Lot #</th>
+                <th style="padding: 4px 6px; border: 1px solid #cbd5e1; text-align: left;">Cold Storage</th>
+                <th style="padding: 4px 6px; border: 1px solid #cbd5e1; text-align: right;">Inward</th>
+                <th style="padding: 4px 6px; border: 1px solid #cbd5e1; text-align: right;">Issued Out</th>
+                <th style="padding: 4px 6px; border: 1px solid #cbd5e1; text-align: right;">Current Balance</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${csRows || '<tr><td colspan="6" style="text-align:center; padding: 6px;">No CS lots</td></tr>'}
+            </tbody>
+          </table>
+
+          <h4 style="margin: 8px 0 4px 0; color: #1f4fb2; font-size: 12px;">Movement Audit Trail</h4>
+          <table style="width: 100%; border-collapse: collapse; font-size: 10px;">
+            <thead>
+              <tr style="background: #f1f5f9;">
+                <th style="padding: 4px 6px; border: 1px solid #cbd5e1; text-align: center;">#</th>
+                <th style="padding: 4px 6px; border: 1px solid #cbd5e1; text-align: left;">Date</th>
+                <th style="padding: 4px 6px; border: 1px solid #cbd5e1; text-align: left;">Voucher #</th>
+                <th style="padding: 4px 6px; border: 1px solid #cbd5e1; text-align: center;">Type</th>
+                <th style="padding: 4px 6px; border: 1px solid #cbd5e1; text-align: left;">Cold Storage</th>
+                <th style="padding: 4px 6px; border: 1px solid #cbd5e1; text-align: left;">Source / Target</th>
+                <th style="padding: 4px 6px; border: 1px solid #cbd5e1; text-align: center;">CS Lot #</th>
+                <th style="padding: 4px 6px; border: 1px solid #cbd5e1; text-align: right;">Qty</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${movRows || '<tr><td colspan="8" style="text-align:center; padding: 6px;">No movements</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }).join('');
+
+    const html = `
+      <div style="font-family: Arial, sans-serif; color: #0f172a; padding: 10px;">
+        <div style="border-bottom: 2px solid #1f4fb2; padding-bottom: 8px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: flex-end;">
+          <div>
+            <h2 style="margin: 0; color: #1f4fb2; font-size: 20px;">LOT TRACEABILITY AUDIT REPORT</h2>
+            <div style="font-size: 11px; color: #64748b; margin-top: 3px;">
+              Query: <strong>${searchQuery || 'All'}</strong> | Printed on: ${new Date().toLocaleString()}
+            </div>
+          </div>
+          <div style="text-align: right; font-size: 12px; color: #475569;">
+            Total Traces: <strong>${traceResults.length}</strong>
+          </div>
+        </div>
+
+        ${cardsHtml}
+      </div>
+    `;
+
+    printHtml(html, 'Lot_Traceability_Report');
+  };
+
   return (
     <Box sx={{ p: { xs: 2, md: 3 }, width: '100%', maxWidth: '100%', margin: '0 auto' }}>
       {/* Title */}
@@ -66,7 +191,7 @@ const ColdStorageTraceability = () => {
             Lot Traceability: Purchase Lot → Cold Storage Lot → Inventory / Production
           </Typography>
         </Box>
-        <IconButton onClick={() => window.print()} title="Print Trace Report">
+        <IconButton onClick={handlePrintTrace} color="primary" title="Print Trace Report">
           <PrintIcon />
         </IconButton>
       </Box>

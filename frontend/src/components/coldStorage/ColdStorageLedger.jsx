@@ -25,6 +25,7 @@ import {
   Print as PrintIcon
 } from '@mui/icons-material';
 import { api } from '../../services/api';
+import { printHtml } from '../../utils/printHelper';
 
 const ColdStorageLedger = () => {
   const [loading, setLoading] = useState(false);
@@ -92,6 +93,64 @@ const ColdStorageLedger = () => {
     fetchLedger();
   };
 
+  const handlePrint = () => {
+    const rowsHtml = ledgerData.map((row, idx) => {
+      const isIn = row.voucher_type === 'IN';
+      const qty = parseFloat(row.quantity || 0);
+      return `
+        <tr style="background-color: ${idx % 2 === 0 ? '#ffffff' : '#f8fafc'};">
+          <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center;">${idx + 1}</td>
+          <td style="padding: 6px 8px; border: 1px solid #cbd5e1;">${row.voucher_date || '-'}</td>
+          <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: bold; color: ${isIn ? '#1f4fb2' : '#d97706'};">${row.voucher_no || '-'}</td>
+          <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center; font-weight: bold;">${isIn ? 'INWARD' : 'OUTWARD'}</td>
+          <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: 600;">${row.item_name || '-'}</td>
+          <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center;">${row.cold_storage_lot_no || '-'}</td>
+          <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center;">${row.purchase_lot_no || '-'}</td>
+          <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; color: #059669; font-weight: ${isIn ? 'bold' : 'normal'};">${isIn ? `+${qty.toFixed(2)} ${row.unit || 'KG'}` : '-'}</td>
+          <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; color: #dc2626; font-weight: ${!isIn ? 'bold' : 'normal'};">${!isIn ? `-${qty.toFixed(2)} ${row.unit || 'KG'}` : '-'}</td>
+          <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; font-weight: bold; color: #1f4fb2;">${row.running_balance ? row.running_balance.toFixed(2) : '0.00'} ${row.unit || 'KG'}</td>
+          <td style="padding: 6px 8px; border: 1px solid #cbd5e1;">${row.remarks || '-'}</td>
+        </tr>
+      `;
+    }).join('');
+
+    const html = `
+      <div style="font-family: Arial, sans-serif; color: #0f172a; padding: 12px;">
+        <div style="border-bottom: 2px solid #1f4fb2; padding-bottom: 8px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: flex-end;">
+          <div>
+            <h2 style="margin: 0; color: #1f4fb2; font-size: 20px;">COLD STORAGE ITEM & LOT MOVEMENT LEDGER</h2>
+            <div style="font-size: 11px; color: #64748b; margin-top: 4px;">
+              Printed on: ${new Date().toLocaleString()} | Total Transactions: <strong>${ledgerData.length}</strong>
+            </div>
+          </div>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+          <thead>
+            <tr style="background-color: #1f4fb2; color: #ffffff;">
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: center;">#</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: left;">Date</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: left;">Voucher No</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: center;">Type</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: left;">Item Name</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: center;">CS Lot #</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: center;">Purchase Lot #</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: right;">Inward (+)</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: right;">Outward (-)</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: right;">Running Balance</th>
+              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: left;">Remarks</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml || '<tr><td colspan="11" style="text-align:center; padding: 14px;">No ledger movement records found</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    printHtml(html, 'Cold_Storage_Ledger');
+  };
+
   return (
     <Box sx={{ p: { xs: 2, md: 3 }, width: '100%', maxWidth: '100%', margin: '0 auto' }}>
       {/* Title */}
@@ -102,7 +161,7 @@ const ColdStorageLedger = () => {
             Cold Storage Item & Lot Movement Ledger
           </Typography>
         </Box>
-        <IconButton onClick={() => window.print()} title="Print Ledger">
+        <IconButton onClick={handlePrint} title="Print Ledger">
           <PrintIcon />
         </IconButton>
       </Box>

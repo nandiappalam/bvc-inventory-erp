@@ -100,14 +100,16 @@ button.action-btn.warning {
   html, body, #root, #root > *, main, 
   .MuiBox-root, .MuiContainer-root, .MuiPaper-root, 
   .MuiCard-root, .MuiCardContent-root, .MuiTableContainer-root, 
-  .table-container, table, tbody, tr, td, th {
+  .table-container, .table-wrapper, .standard-display, .container,
+  table, tbody, tr, td, th {
     height: auto !important;
     min-height: 0 !important;
     max-height: none !important;
     overflow: visible !important;
+    overflow-x: visible !important;
+    overflow-y: visible !important;
     background: #ffffff !important;
-    color: #000000 !important;
-    position: static !important;
+    color: #0f172a !important;
     float: none !important;
     box-shadow: none !important;
     transform: none !important;
@@ -133,10 +135,14 @@ button.action-btn.warning {
   .MuiPagination-root,
   button,
   .action-btn,
+  .header-btn,
+  .search-filter-bar,
   .report-filters,
   .erp-bottom-bar,
   .action-bar,
-  .btn-print {
+  .btn-print,
+  .actions-cell,
+  .actions-header {
     display: none !important;
   }
 
@@ -151,6 +157,9 @@ button.action-btn.warning {
     display: block !important;
     width: 100% !important;
     height: auto !important;
+    overflow: visible !important;
+    overflow-x: visible !important;
+    overflow-y: visible !important;
   }
 
   .MuiDialog-paper {
@@ -161,6 +170,8 @@ button.action-btn.warning {
     box-shadow: none !important;
     border: none !important;
     overflow: visible !important;
+    overflow-x: visible !important;
+    overflow-y: visible !important;
   }
 
   /* Table layout for print */

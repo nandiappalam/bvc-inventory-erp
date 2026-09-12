@@ -30,6 +30,7 @@ import {
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../services/api';
+import { printHtml } from '../../utils/printHelper';
 
 const ColdStorageStock = () => {
   const navigate = useNavigate();
@@ -95,6 +96,91 @@ const ColdStorageStock = () => {
   const totalOutwardQty = filteredData.reduce((sum, item) => sum + parseFloat(item.out_qty || 0), 0);
   const totalAvailableQty = filteredData.reduce((sum, item) => sum + parseFloat(item.available_qty || 0), 0);
   const totalAvailableWt = filteredData.reduce((sum, item) => sum + parseFloat(item.available_wt || 0), 0);
+
+  const handlePrintReport = () => {
+    const rowsHtml = filteredData.map((row, idx) => `
+      <tr style="background-color: ${idx % 2 === 0 ? '#ffffff' : '#f8fafc'};">
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center;">${idx + 1}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: bold; color: #1f4fb2;">${row.cold_storage_name || '-'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: 600;">${row.item_name || '-'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center;">${row.cold_storage_lot_no || '-'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center;">${row.purchase_lot_no || '-'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right;">${parseFloat(row.in_qty || 0).toFixed(2)} ${row.unit || 'KG'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; color: #d97706;">${parseFloat(row.out_qty || 0).toFixed(2)} ${row.unit || 'KG'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; font-weight: bold; color: ${row.available_qty > 0 ? '#059669' : '#dc2626'};">${parseFloat(row.available_qty || 0).toFixed(2)} ${row.unit || 'KG'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; font-weight: bold;">${parseFloat(row.available_wt || 0).toFixed(2)} KG</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center; font-weight: 600; color: ${row.available_qty > 0 ? '#059669' : '#64748b'};">${row.available_qty > 0 ? 'In Stock' : 'Exhausted'}</td>
+      </tr>
+    `).join('');
+
+    const activeCsName = selectedCs 
+      ? (coldStorages.find(c => String(c.id) === String(selectedCs))?.godown_name || selectedCs)
+      : 'All Facilities';
+
+    const html = `
+      <div style="font-family: Arial, sans-serif; color: #0f172a; padding: 10px;">
+        <div style="border-bottom: 2px solid #1f4fb2; padding-bottom: 10px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: flex-end;">
+          <div>
+            <h2 style="margin: 0; color: #1f4fb2; font-size: 20px; text-transform: uppercase;">Cold Storage Live Stock Balance Report</h2>
+            <div style="font-size: 12px; color: #64748b; margin-top: 4px;">
+              Facility: <strong>${activeCsName}</strong> | Printed on: ${new Date().toLocaleString()}
+            </div>
+          </div>
+          <div style="text-align: right; font-size: 12px; color: #475569;">
+            Total Records: <strong>${filteredData.length}</strong>
+          </div>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 16px;">
+          <tr style="background: #f1f5f9;">
+            <td style="padding: 8px 12px; border: 1px solid #cbd5e1; width: 25%;">
+              <div style="font-size: 10px; color: #64748b;">Total Inward Stored Qty</div>
+              <div style="font-size: 14px; font-weight: bold; color: #1f4fb2;">${totalInwardQty.toFixed(2)}</div>
+            </td>
+            <td style="padding: 8px 12px; border: 1px solid #cbd5e1; width: 25%;">
+              <div style="font-size: 10px; color: #64748b;">Total Issued Outward Qty</div>
+              <div style="font-size: 14px; font-weight: bold; color: #d97706;">${totalOutwardQty.toFixed(2)}</div>
+            </td>
+            <td style="padding: 8px 12px; border: 1px solid #cbd5e1; width: 25%;">
+              <div style="font-size: 10px; color: #64748b;">Net Available Balance</div>
+              <div style="font-size: 14px; font-weight: bold; color: #059669;">${totalAvailableQty.toFixed(2)}</div>
+            </td>
+            <td style="padding: 8px 12px; border: 1px solid #cbd5e1; width: 25%;">
+              <div style="font-size: 10px; color: #64748b;">Net Stored Weight</div>
+              <div style="font-size: 14px; font-weight: bold; color: #4f46e5;">${totalAvailableWt.toFixed(2)} KG</div>
+            </td>
+          </tr>
+        </table>
+
+        <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+          <thead>
+            <tr style="background-color: #1f4fb2; color: #ffffff;">
+              <th style="padding: 8px 6px; border: 1px solid #1f4fb2; text-align: center; color: #fff;">#</th>
+              <th style="padding: 8px 6px; border: 1px solid #1f4fb2; text-align: left; color: #fff;">Cold Storage Facility</th>
+              <th style="padding: 8px 6px; border: 1px solid #1f4fb2; text-align: left; color: #fff;">Item Name</th>
+              <th style="padding: 8px 6px; border: 1px solid #1f4fb2; text-align: center; color: #fff;">CS Lot #</th>
+              <th style="padding: 8px 6px; border: 1px solid #1f4fb2; text-align: center; color: #fff;">Original Lot #</th>
+              <th style="padding: 8px 6px; border: 1px solid #1f4fb2; text-align: right; color: #fff;">In Qty</th>
+              <th style="padding: 8px 6px; border: 1px solid #1f4fb2; text-align: right; color: #fff;">Out Qty</th>
+              <th style="padding: 8px 6px; border: 1px solid #1f4fb2; text-align: right; color: #fff;">Balance Qty</th>
+              <th style="padding: 8px 6px; border: 1px solid #1f4fb2; text-align: right; color: #fff;">Balance Wt</th>
+              <th style="padding: 8px 6px; border: 1px solid #1f4fb2; text-align: center; color: #fff;">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml.length > 0 ? rowsHtml : '<tr><td colspan="10" style="text-align:center; padding: 20px; color: #64748b;">No stock records found</td></tr>'}
+          </tbody>
+        </table>
+        
+        <div style="margin-top: 24px; border-top: 1px solid #cbd5e1; padding-top: 8px; font-size: 10px; color: #64748b; display: flex; justify-content: space-between;">
+          <span>BVC ERP System - Cold Storage Management</span>
+          <span>Stock Balance Report</span>
+        </div>
+      </div>
+    `;
+
+    printHtml(html, 'Cold Storage Stock Balance Report');
+  };
 
   return (
     <Box sx={{ p: { xs: 2, md: 3 }, width: '100%', maxWidth: '100%', margin: '0 auto' }}>
@@ -220,7 +306,7 @@ const ColdStorageStock = () => {
             >
               Refresh
             </Button>
-            <IconButton onClick={() => window.print()} title="Print Report">
+            <IconButton onClick={handlePrintReport} title="Print Report" color="primary">
               <PrintIcon />
             </IconButton>
           </Grid>
