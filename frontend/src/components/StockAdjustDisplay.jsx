@@ -52,7 +52,7 @@ const StockAdjustDisplay = () => {
     const html = `
       <div style="font-family: Arial, sans-serif; padding: 25px; color: #1e293b;">
         <div style="border-bottom: 2px solid #1f4fb2; padding-bottom: 10px; margin-bottom: 20px;">
-          <h1 style="color: #1f4fb2; margin: 0;">A.S.MOORTHY & CO</h1>
+          <h1 style="color: #1f4fb2; margin: 0;">BVC</h1>
           <p style="margin: 5px 0 0 0; font-size: 14px; font-weight: bold;">Stock Adjustment Voucher</p>
         </div>
         <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px; font-size: 14px;">

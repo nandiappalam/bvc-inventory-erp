@@ -111,7 +111,7 @@ const PackingDisplay = () => {
     const html = `
       <div style="font-family: Arial, sans-serif; padding: 25px; color: #1e293b; max-width: 900px; margin: 0 auto;">
         <div style="border-bottom: 2px solid #1f4fb2; padding-bottom: 10px; margin-bottom: 20px;">
-          <h1 style="color: #1f4fb2; margin: 0; font-size: 24px;">A.S.MOORTHY & CO</h1>
+          <h1 style="color: #1f4fb2; margin: 0; font-size: 24px;">BVC</h1>
           <p style="margin: 5px 0 0 0; font-size: 15px; font-weight: bold; color: #475569;">Packing Display Statement</p>
         </div>
 

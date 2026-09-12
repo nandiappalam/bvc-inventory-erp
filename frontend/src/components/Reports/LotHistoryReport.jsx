@@ -113,7 +113,7 @@ const LotHistoryReport = () => {
     const html = `
       <div style="font-family: Arial, sans-serif; padding: 20px; color: #334155;">
         <div style="border-bottom: 3px solid #1f4fb2; padding-bottom: 10px; margin-bottom: 15px; text-align: center;">
-          <h1 style="color: #1f4fb2; margin: 0; font-size: 24px;">A.S.MOORTHY & CO</h1>
+          <h1 style="color: #1f4fb2; margin: 0; font-size: 24px;">BVC</h1>
           <p style="margin: 5px 0 0 0; font-size: 14px; font-weight: bold; text-transform: uppercase;">Lot History & Traceability Report</p>
           <p style="margin: 3px 0 0 0; font-size: 12px; color: #64748b;">
             ${lotNo ? `Lot No: ${lotNo}` : 'All Lots'}
