@@ -23,7 +23,8 @@ import {
   DialogContent,
   DialogActions,
   Divider,
-  Chip
+  Chip,
+  Autocomplete
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -131,6 +132,17 @@ const ColdStorageIn = () => {
   const handleLotSelect = (index, lotKey) => {
     const selectedLot = availableLots.find(l => `${l.item_name}_${l.purchase_lot_no}` === lotKey);
     if (selectedLot) {
+      if (selectedLot.current_godown) {
+        setSourceGodownName(selectedLot.current_godown);
+        if (selectedLot.current_godown_id) {
+          setSourceGodownId(selectedLot.current_godown_id);
+        } else {
+          const matchedG = godowns.find(g => (g.godown_name || g.name || '').toLowerCase() === selectedLot.current_godown.toLowerCase());
+          if (matchedG) {
+            setSourceGodownId(matchedG.id);
+          }
+        }
+      }
       const updated = [...items];
       const autoCsLot = `CS-${selectedLot.purchase_lot_no}`;
       const lotWeight = parseFloat(selectedLot.weight || selectedLot.per_weight || (selectedLot.total_weight && selectedLot.purchased_qty ? (selectedLot.total_weight / selectedLot.purchased_qty) : 1)) || 1;
@@ -409,13 +421,26 @@ const ColdStorageIn = () => {
                 </Grid>
 
                 <Grid item xs={12} sm={4.5}>
-                  <TextField
-                    fullWidth
-                    size="small"
-                    label="Source Godown / Origin"
+                  <Autocomplete
+                    freeSolo
+                    options={godowns.map((g) => g.godown_name || g.name || '')}
                     value={sourceGodownName}
-                    onChange={(e) => setSourceGodownName(e.target.value)}
-                    placeholder="e.g. Main Raw Material Warehouse"
+                    onInputChange={(event, newInputValue) => {
+                      setSourceGodownName(newInputValue);
+                      const matched = godowns.find(g => (g.godown_name || g.name || '').toLowerCase() === (newInputValue || '').toLowerCase());
+                      if (matched) {
+                        setSourceGodownId(matched.id);
+                      }
+                    }}
+                    renderInput={(params) => (
+                      <TextField
+                        {...params}
+                        size="small"
+                        label="Source Godown / Origin"
+                        placeholder="Select or enter source godown"
+                        required
+                      />
+                    )}
                   />
                 </Grid>
 

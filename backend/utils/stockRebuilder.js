@@ -249,11 +249,12 @@ async function rebuildStockLedger() {
       const wt = parseFloat(row.total_wt) || (qty * (parseFloat(row.weight) || 1));
       const godownId = row.cold_storage_id || null;
       const godownName = row.cold_storage_name || 'Cold Storage';
-      getOrCreateLot(row.item_name, row.cold_storage_lot_no, qty, 0, row.date, 'Cold Storage IN', row.voucher_id, godownId);
+      const lotNo = row.purchase_lot_no || row.cold_storage_lot_no || 'LOT-TRANSFER';
+      getOrCreateLot(row.item_name, lotNo, qty, 0, row.date, 'Cold Storage In', row.voucher_id, godownId);
       await db.run(`
-        INSERT INTO stock (date, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, godown_id)
-        VALUES (?, ?, ?, ?, ?, 0, 0, 'Cold Storage IN', ?, ?, ?)
-      `, [row.date, row.item_name, row.cold_storage_lot_no || '', qty, wt, row.voucher_id, godownName, godownId]);
+        INSERT INTO stock (date, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, godown_id, remarks)
+        VALUES (?, ?, ?, ?, ?, 0, 0, 'Cold Storage In', ?, ?, ?, ?)
+      `, [row.date, row.item_name, lotNo, qty, wt, row.voucher_id, godownName, godownId, `Received in ${godownName} (CS Lot: ${row.cold_storage_lot_no || ''})`]);
 
       // Deduct from source purchase lot
       if (row.purchase_lot_no) {
@@ -262,12 +263,17 @@ async function rebuildStockLedger() {
           const srcLot = lotMap.get(srcKey);
           srcLot.remaining_quantity = Math.max(0, srcLot.remaining_quantity - qty);
         }
-        const srcGodownName = row.source_godown_name || 'Main Godown';
-        const srcGodownId = row.source_godown_id || 1;
+        let srcGodownName = row.source_godown_name;
+        let srcGodownId = row.source_godown_id;
+        if (!srcGodownName || srcGodownName === 'Main Godown') {
+          const resolved = await resolveOutflowGodown(row.item_name, row.purchase_lot_no, 3, 'Raw Material Godown');
+          srcGodownName = resolved.godownName;
+          srcGodownId = resolved.godownId;
+        }
         await db.run(`
-          INSERT INTO stock (date, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, godown_id)
-          VALUES (?, ?, ?, ?, ?, 0, 0, 'Cold Storage Transfer', ?, ?, ?)
-        `, [row.date, row.item_name, row.purchase_lot_no, -qty, -wt, row.voucher_id, srcGodownName, srcGodownId]);
+          INSERT INTO stock (date, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, godown_id, remarks)
+          VALUES (?, ?, ?, ?, ?, 0, 0, 'Cold Storage Transfer Out', ?, ?, ?, ?)
+        `, [row.date, row.item_name, row.purchase_lot_no, -qty, -wt, row.voucher_id, srcGodownName, srcGodownId, `Transferred to ${godownName} (CS Lot: ${row.cold_storage_lot_no || ''})`]);
       }
     }
 
@@ -279,26 +285,19 @@ async function rebuildStockLedger() {
       const destGodownId = row.destination_godown_id || 1;
       const destGodownName = row.destination_godown_name || 'Main Godown';
       const destLotNo = row.purchase_lot_no || row.cold_storage_lot_no;
-      getOrCreateLot(row.item_name, destLotNo, qty, 0, row.date, 'Cold Storage Return', row.voucher_id, destGodownId);
+      getOrCreateLot(row.item_name, destLotNo, qty, 0, row.date, 'Cold Storage Transfer In', row.voucher_id, destGodownId);
       await db.run(`
-        INSERT INTO stock (date, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, godown_id)
-        VALUES (?, ?, ?, ?, ?, 0, 0, 'Cold Storage Return', ?, ?, ?)
-      `, [row.date, row.item_name, destLotNo, qty, wt, row.voucher_id, destGodownName, destGodownId]);
+        INSERT INTO stock (date, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, godown_id, remarks)
+        VALUES (?, ?, ?, ?, ?, 0, 0, 'Cold Storage Transfer In', ?, ?, ?, ?)
+      `, [row.date, row.item_name, destLotNo, qty, wt, row.voucher_id, destGodownName, destGodownId, `Received from Cold Storage: ${row.cold_storage_name || 'Cold Storage'}`]);
 
       // Deduct from Cold Storage lot
-      if (row.cold_storage_lot_no) {
-        const csKey = `${row.item_name.trim().toUpperCase()}:::${row.cold_storage_lot_no.trim().toUpperCase()}`;
-        if (lotMap.has(csKey)) {
-          const csLot = lotMap.get(csKey);
-          csLot.remaining_quantity = Math.max(0, csLot.remaining_quantity - qty);
-        }
-        const csGodownName = row.cold_storage_name || 'Cold Storage';
-        const csGodownId = row.cold_storage_id || null;
-        await db.run(`
-          INSERT INTO stock (date, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, godown_id)
-          VALUES (?, ?, ?, ?, ?, 0, 0, 'Cold Storage OUT', ?, ?, ?)
-        `, [row.date, row.item_name, row.cold_storage_lot_no, -qty, -wt, row.voucher_id, csGodownName, csGodownId]);
-      }
+      const csGodownName = row.cold_storage_name || 'Cold Storage';
+      const csGodownId = row.cold_storage_id || null;
+      await db.run(`
+        INSERT INTO stock (date, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, godown_id, remarks)
+        VALUES (?, ?, ?, ?, ?, 0, 0, 'Cold Storage Transfer Out', ?, ?, ?, ?)
+      `, [row.date, row.item_name, destLotNo, -qty, -wt, row.voucher_id, csGodownName, csGodownId, `Transferred to ${destGodownName}`]);
     }
 
     // 3. Process Outflow Transactions

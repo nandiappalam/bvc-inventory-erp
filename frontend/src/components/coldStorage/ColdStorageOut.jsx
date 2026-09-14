@@ -23,7 +23,8 @@ import {
   DialogContent,
   DialogActions,
   Divider,
-  Chip
+  Chip,
+  Autocomplete
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -53,13 +54,15 @@ const ColdStorageOut = () => {
   // Master lists
   const [coldStorages, setColdStorages] = useState([]);
   const [csLots, setCsLots] = useState([]);
+  const [godowns, setGodowns] = useState([]);
 
   // Form State
   const [voucherNo, setVoucherNo] = useState('');
   const [voucherDate, setVoucherDate] = useState(today);
   const [coldStorageId, setColdStorageId] = useState('');
   const [coldStorageName, setColdStorageName] = useState('');
-  const [destinationGodownName, setDestinationGodownName] = useState('Production Floor / Processing');
+  const [destinationGodownId, setDestinationGodownId] = useState('');
+  const [destinationGodownName, setDestinationGodownName] = useState('Main Godown');
   const [remarks, setRemarks] = useState('');
 
   // Items State
@@ -98,6 +101,18 @@ const ColdStorageOut = () => {
           setColdStorageId(csRes.data[0].id);
           setColdStorageName(csRes.data[0].godown_name);
           loadCsLots(csRes.data[0].id);
+        }
+      }
+
+      // 3. All Godowns for destination selection
+      const gRes = await api('/cold-storage/all-godowns');
+      const gList = (gRes && gRes.data) ? gRes.data : [];
+      if (gList.length > 0) {
+        setGodowns(gList);
+        const mainG = gList.find(g => (g.godown_name || '').toLowerCase().includes('main') || (g.godown_name || '').toLowerCase().includes('production'));
+        if (mainG) {
+          setDestinationGodownId(mainG.id);
+          setDestinationGodownName(mainG.godown_name);
         }
       }
     } catch (err) {
@@ -238,6 +253,7 @@ const ColdStorageOut = () => {
         voucher_date: voucherDate,
         cold_storage_id: coldStorageId,
         cold_storage_name: coldStorageName,
+        destination_godown_id: destinationGodownId,
         destination_godown_name: destinationGodownName,
         remarks,
         items: validItems
@@ -436,13 +452,26 @@ const ColdStorageOut = () => {
                 </Grid>
 
                 <Grid item xs={12} sm={4.5}>
-                  <TextField
-                    fullWidth
-                    size="small"
-                    label="Destination / Issue Purpose"
+                  <Autocomplete
+                    freeSolo
+                    options={godowns.map((g) => g.godown_name || '')}
                     value={destinationGodownName}
-                    onChange={(e) => setDestinationGodownName(e.target.value)}
-                    placeholder="e.g. Production Department / Main Processing"
+                    onInputChange={(event, newInputValue) => {
+                      setDestinationGodownName(newInputValue);
+                      const matched = godowns.find(g => (g.godown_name || '').toLowerCase() === (newInputValue || '').toLowerCase());
+                      if (matched) {
+                        setDestinationGodownId(matched.id);
+                      }
+                    }}
+                    renderInput={(params) => (
+                      <TextField
+                        {...params}
+                        size="small"
+                        label="Destination Godown / Issue Purpose"
+                        placeholder="Select destination godown or enter purpose"
+                        required
+                      />
+                    )}
                   />
                 </Grid>
 

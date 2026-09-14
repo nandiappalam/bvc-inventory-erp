@@ -3842,13 +3842,22 @@ const categoryReportHandler = async (req, res) => {
     let rows = [];
 
     if (categoryKey === 'stock') {
+      try {
+        const { syncColdStorageStock } = require('./coldStorage');
+        if (typeof syncColdStorageStock === 'function') {
+          await syncColdStorageStock(db);
+        }
+      } catch (e) {
+        console.warn('Notice in syncColdStorageStock from report:', e.message);
+      }
+
       let where = 'WHERE 1=1';
       const params = [];
       if (item) { where += ' AND (LOWER(s.item_name) LIKE LOWER(?) OR CAST(im.id AS TEXT) = ?)'; params.push(`%${item}%`, item); }
       if (godown) { where += ' AND (LOWER(g.godown_name) LIKE LOWER(?) OR LOWER(s.godown) LIKE LOWER(?) OR CAST(s.godown_id AS TEXT) = ?)'; params.push(`%${godown}%`, `%${godown}%`, godown); }
-      if (lot_no) { where += ' AND LOWER(s.lot_no) LIKE LOWER(?)'; params.push(`%${lot_no}%`); }
+      if (lot_no) { where += ' AND (LOWER(s.lot_no) LIKE LOWER(?) OR LOWER(s.remarks) LIKE LOWER(?))'; params.push(`%${lot_no}%`, `%${lot_no}%`); }
       if (item_group) { where += ' AND (LOWER(im.item_group) LIKE LOWER(?) OR LOWER(im.type) LIKE LOWER(?))'; params.push(`%${item_group}%`, `%${item_group}%`); }
-      if (search) { where += ' AND (LOWER(s.item_name) LIKE LOWER(?) OR LOWER(s.lot_no) LIKE LOWER(?) OR LOWER(im.item_group) LIKE LOWER(?) OR LOWER(g.godown_name) LIKE LOWER(?))'; params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`); }
+      if (search) { where += ' AND (LOWER(s.item_name) LIKE LOWER(?) OR LOWER(s.lot_no) LIKE LOWER(?) OR LOWER(im.item_group) LIKE LOWER(?) OR LOWER(g.godown_name) LIKE LOWER(?) OR LOWER(s.godown) LIKE LOWER(?) OR LOWER(s.remarks) LIKE LOWER(?))'; params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`); }
 
       if (sub_type === 'urad') {
         where += ` AND (LOWER(s.item_name) LIKE '%urad%' OR LOWER(im.item_group) LIKE '%urad%' OR LOWER(im.type) LIKE '%urad%')`;
@@ -3924,19 +3933,19 @@ const categoryReportHandler = async (req, res) => {
           if (itemGroup === 'Finished Goods' || itemGroup === 'General') {
             itemGroup = 'Raw Material';
           }
-          if (!godownName || godownName === 'Main Warehouse' || godownName === 'Main Godown') {
+          if (!godownName || godownName === 'Main Warehouse') {
             godownName = 'Raw Material Godown';
           }
         } else if (category === 'FG') {
           if (itemGroup === 'Raw Material' || itemGroup === 'General') {
             itemGroup = 'Finished Goods';
           }
-          if (!godownName || godownName === 'Main Warehouse' || godownName === 'Main Godown') {
+          if (!godownName || godownName === 'Main Warehouse') {
             godownName = 'Finished Goods Godown';
           }
         } else if (category === 'PM') {
           itemGroup = 'Packing Material';
-          if (!godownName || godownName === 'Main Warehouse' || godownName === 'Main Godown') {
+          if (!godownName || godownName === 'Main Warehouse') {
             godownName = 'Packing Store';
           }
         } else if (category === 'Wastage') {
