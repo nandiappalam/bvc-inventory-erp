@@ -17,31 +17,117 @@ const ensureQcCleanConstraints = async () => {
 };
 ensureQcCleanConstraints();
 
+// Dynamic tenant table guard
+const ensureQcTables = async () => {
+  try {
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS qc_inspections (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        qc_no TEXT UNIQUE,
+        purchase_id INTEGER,
+        purchase_item_id INTEGER,
+        rm_lot_no TEXT NOT NULL,
+        inspection_date TEXT,
+        inspector TEXT,
+        overall_result TEXT,
+        remarks TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+  } catch (e) {}
+
+  try {
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS qc_inspection_params (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        qc_id INTEGER NOT NULL,
+        param_key TEXT NOT NULL,
+        param_value TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+  } catch (e) {}
+
+  try {
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS incoming_quality_reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        iqr_no TEXT UNIQUE,
+        qc_id INTEGER NOT NULL,
+        rm_lot_no TEXT NOT NULL,
+        report_file TEXT,
+        uploaded_date TEXT,
+        uploaded_by TEXT,
+        version INTEGER DEFAULT 1,
+        remarks TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+  } catch (e) {}
+
+  try {
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS qc_approval_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        qc_id INTEGER NOT NULL,
+        approval_level TEXT NOT NULL,
+        approved_by TEXT,
+        approved_date TEXT,
+        remarks TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+  } catch (e) {}
+
+  try {
+    await db.run("ALTER TABLE stock_lots ADD COLUMN unloading_status TEXT DEFAULT 'PENDING_DECISION'");
+  } catch (e) {}
+  try {
+    await db.run("ALTER TABLE stock_lots ADD COLUMN godown_id INTEGER");
+  } catch (e) {}
+  try {
+    await db.run("ALTER TABLE stock_lots ADD COLUMN godown_name TEXT");
+  } catch (e) {}
+  try {
+    await db.run("ALTER TABLE stock_lots ADD COLUMN qc_status TEXT DEFAULT 'QC_PENDING'");
+  } catch (e) {}
+  try {
+    await db.run("ALTER TABLE stock_lots ADD COLUMN rate REAL DEFAULT 0");
+  } catch (e) {}
+  try {
+    await db.run("ALTER TABLE stock_lots ADD COLUMN purchase_id INTEGER");
+  } catch (e) {}
+  try {
+    await db.run("ALTER TABLE stock_lots ADD COLUMN usable_for_production INTEGER DEFAULT 0");
+  } catch (e) {}
+  try {
+    await db.run("ALTER TABLE stock_lots ADD COLUMN approval_status TEXT DEFAULT 'PENDING_APPROVAL'");
+  } catch (e) {}
+  try {
+    await db.run("ALTER TABLE stock_lots ADD COLUMN approval_date TEXT");
+  } catch (e) {}
+  try {
+    await db.run("ALTER TABLE purchase_returns ADD COLUMN return_inv_no TEXT");
+  } catch (e) {}
+  try {
+    await db.run("ALTER TABLE purchase_return_items ADD COLUMN lot_no TEXT");
+  } catch (e) {}
+};
+
+// Ensure tables exist on every request
+router.use(async (req, res, next) => {
+  try {
+    await ensureQcTables();
+  } catch (e) {}
+  next();
+});
+
 // GET /api/qc/pending or /api/quality/pending
 router.get('/pending', asyncHandler(async (req, res) => {
   const showAll = req.query.all === 'true';
-  
-  // Ensure unloading_status, rate, and qc_status columns exist in SQLite
-  try {
-    await db.run("ALTER TABLE stock_lots ADD COLUMN unloading_status TEXT DEFAULT 'PENDING_DECISION'");
-  } catch (e) {
-    // Column already exists
-  }
-  try {
-    await db.run("ALTER TABLE stock_lots ADD COLUMN rate REAL DEFAULT 0");
-  } catch (e) {
-    // Column already exists
-  }
-  try {
-    await db.run("ALTER TABLE stock_lots ADD COLUMN qc_status TEXT DEFAULT 'QC_PENDING'");
-  } catch (e) {
-    // Column already exists
-  }
-  try {
-    await db.run("ALTER TABLE stock_lots ADD COLUMN purchase_id INTEGER");
-  } catch (e) {
-    // Column already exists
-  }
 
   let queryStr = `
     SELECT 
@@ -52,11 +138,11 @@ router.get('/pending', asyncHandler(async (req, res) => {
       sl.rate,
       sl.qc_status,
       COALESCE(sl.unloading_status, 'PENDING_DECISION') as unloading_status,
-      COALESCE(p.id, pi.purchase_id, sl.purchase_id) as purchase_id,
-      COALESCE(p.s_no, p.id, pi.purchase_id, sl.purchase_id) as receipt_no,
+      COALESCE(CAST(p.id AS TEXT), CAST(pi.purchase_id AS TEXT), CAST(sl.purchase_id AS TEXT), '') as purchase_id,
+      COALESCE(CAST(p.s_no AS TEXT), CAST(p.id AS TEXT), CAST(pi.purchase_id AS TEXT), CAST(sl.purchase_id AS TEXT), '') as receipt_no,
       p.date as receipt_date,
       p.inv_date as invoice_date,
-      COALESCE(sm.print_name, sm.name, p.supplier, '') as supplier_name,
+      COALESCE(CAST(sm.print_name AS TEXT), CAST(sm.name AS TEXT), CAST(p.supplier AS TEXT), '') as supplier_name,
       COALESCE(pi.per_unit_weight, 50) as unit_weight,
       COALESCE(pi.total_weight, (sl.quantity * COALESCE(pi.per_unit_weight, 50))) as total_weight
     FROM stock_lots sl
@@ -76,41 +162,54 @@ router.get('/pending', asyncHandler(async (req, res) => {
 
   queryStr += ` ORDER BY COALESCE(p.date, sl.created_at) DESC `;
 
-  const pendingLots = await db.query(queryStr);
-  res.json({ success: true, data: pendingLots.rows });
+  let rows = [];
+  try {
+    const pendingLots = await db.query(queryStr);
+    rows = pendingLots.rows || [];
+  } catch (err) {
+    console.error('Error fetching pending lots:', err.message);
+  }
+  res.json({ success: true, data: rows });
 }));
 
 // GET /api/qc/history or /api/quality/purchase-lab-testing
 router.get(['/history', '/purchase-lab-testing'], asyncHandler(async (req, res) => {
-  const history = await db.query(`
-    SELECT 
-      qi.id,
-      qi.id as qcId,
-      qi.qc_no,
-      COALESCE(p.id, qi.purchase_id) as purchaseId,
-      qi.rm_lot_no as lotNo,
-      qi.inspection_date as inspectionDate,
-      qi.inspector as analyst,
-      qi.overall_result as overallResult,
-      qi.remarks,
-      COALESCE(sl.item_name, pi.item_name, '') as item,
-      COALESCE(sl.quantity, pi.qty, 0) as quantity,
-      p.date as receiptDate,
-      COALESCE(sm.print_name, sm.name, p.supplier, '') as supplier
-    FROM qc_inspections qi
-    LEFT JOIN stock_lots sl ON qi.rm_lot_no = sl.lot_no
-    LEFT JOIN purchase_items pi ON qi.rm_lot_no = pi.lot_no
-    LEFT JOIN purchases p ON (
-      CAST(p.id AS TEXT) = CAST(pi.purchase_id AS TEXT) 
-      OR CAST(p.id AS TEXT) = CAST(qi.purchase_id AS TEXT) 
-      OR ('PUR-' || CAST(p.id AS TEXT)) = CAST(qi.purchase_id AS TEXT) 
-      OR ('PUR-' || CAST(p.s_no AS TEXT)) = CAST(qi.purchase_id AS TEXT)
-      OR CAST(p.id AS TEXT) = CAST(sl.purchase_id AS TEXT)
-    )
-    LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = CAST(p.supplier AS TEXT) OR sm.print_name = CAST(p.supplier AS TEXT))
-    ORDER BY qi.inspection_date DESC, qi.id DESC
-  `);
-  const normalizedRows = (history.rows || []).map(r => ({
+  let rows = [];
+  try {
+    const history = await db.query(`
+      SELECT 
+        qi.id,
+        qi.id as qcId,
+        qi.qc_no,
+        COALESCE(CAST(p.id AS TEXT), CAST(qi.purchase_id AS TEXT), '') as purchaseId,
+        qi.rm_lot_no as lotNo,
+        qi.inspection_date as inspectionDate,
+        qi.inspector as analyst,
+        qi.overall_result as overallResult,
+        qi.remarks,
+        COALESCE(sl.item_name, pi.item_name, '') as item,
+        COALESCE(sl.quantity, pi.qty, 0) as quantity,
+        p.date as receiptDate,
+        COALESCE(CAST(sm.print_name AS TEXT), CAST(sm.name AS TEXT), CAST(p.supplier AS TEXT), '') as supplier
+      FROM qc_inspections qi
+      LEFT JOIN stock_lots sl ON qi.rm_lot_no = sl.lot_no
+      LEFT JOIN purchase_items pi ON qi.rm_lot_no = pi.lot_no
+      LEFT JOIN purchases p ON (
+        CAST(p.id AS TEXT) = CAST(pi.purchase_id AS TEXT) 
+        OR CAST(p.id AS TEXT) = CAST(qi.purchase_id AS TEXT) 
+        OR ('PUR-' || CAST(p.id AS TEXT)) = CAST(qi.purchase_id AS TEXT) 
+        OR ('PUR-' || CAST(p.s_no AS TEXT)) = CAST(qi.purchase_id AS TEXT)
+        OR CAST(p.id AS TEXT) = CAST(sl.purchase_id AS TEXT)
+      )
+      LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = CAST(p.supplier AS TEXT) OR sm.print_name = CAST(p.supplier AS TEXT))
+      ORDER BY qi.inspection_date DESC, qi.id DESC
+    `);
+    rows = history.rows || [];
+  } catch (err) {
+    console.error('Error querying history in /qc/history:', err.message);
+  }
+
+  const normalizedRows = rows.map(r => ({
     ...r,
     id: r.id || r.qcid,
     qcId: r.qcid || r.id || r.qcId,
@@ -130,17 +229,6 @@ router.get(['/history', '/purchase-lab-testing'], asyncHandler(async (req, res) 
 
 // GET /api/quality/registers
 router.get('/registers', asyncHandler(async (req, res) => {
-  // Defensive column checks
-  try {
-    await db.run("ALTER TABLE stock_lots ADD COLUMN unloading_status TEXT DEFAULT 'PENDING_DECISION'");
-  } catch (e) {}
-  try {
-    await db.run("ALTER TABLE stock_lots ADD COLUMN godown_id INTEGER");
-  } catch (e) {}
-  try {
-    await db.run("ALTER TABLE stock_lots ADD COLUMN godown_name TEXT");
-  } catch (e) {}
-
   // Load godown master map to guarantee accurate godown name resolution
   const godownDict = {
     '1': 'Main Godown',
@@ -159,86 +247,97 @@ router.get('/registers', asyncHandler(async (req, res) => {
     });
   } catch (e) {}
 
-  const qcList = await db.query(`
-    SELECT 
-      qi.id,
-      qi.qc_no,
-      COALESCE(p.id, qi.purchase_id) as purchase_id,
-      p.inv_no as invoice_no,
-      COALESCE(p.s_no, p.id, qi.purchase_id) as receipt_no,
-      qi.rm_lot_no,
-      qi.inspection_date,
-      qi.overall_result,
-      COALESCE(sl.item_name, pi.item_name, '') as item_name,
-      COALESCE(sl.quantity, pi.qty, 0) as quantity,
-      COALESCE(sl.unloading_status, 'PENDING_DECISION') as unloading_status,
-      COALESCE(sl.godown_id, p.godown) as godown_id,
-      COALESCE(g.godown_name, g.print_name, sl.godown_name, '') as godown_name,
-      COALESCE(sm.print_name, sm.name, p.supplier, '') as supplier_name
-    FROM qc_inspections qi
-    LEFT JOIN stock_lots sl ON qi.rm_lot_no = sl.lot_no
-    LEFT JOIN purchase_items pi ON qi.rm_lot_no = pi.lot_no
-    LEFT JOIN purchases p ON (
-      CAST(p.id AS TEXT) = CAST(pi.purchase_id AS TEXT) 
-      OR CAST(p.id AS TEXT) = CAST(qi.purchase_id AS TEXT) 
-      OR ('PUR-' || CAST(p.id AS TEXT)) = CAST(qi.purchase_id AS TEXT) 
-      OR ('PUR-' || CAST(p.s_no AS TEXT)) = CAST(qi.purchase_id AS TEXT)
-      OR CAST(p.id AS TEXT) = CAST(sl.purchase_id AS TEXT)
-    )
-    LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = CAST(p.supplier AS TEXT) OR sm.print_name = CAST(p.supplier AS TEXT))
-    LEFT JOIN godown_master g ON (
-      CAST(g.id AS TEXT) = CAST(sl.godown_id AS TEXT) 
-      OR g.godown_name = CAST(sl.godown_id AS TEXT)
-      OR CAST(g.id AS TEXT) = CAST(p.godown AS TEXT)
-      OR g.godown_name = CAST(p.godown AS TEXT)
-    )
-    ORDER BY qi.inspection_date DESC, qi.id DESC
-  `);
+  let qcRows = [];
+  try {
+    const qcList = await db.query(`
+      SELECT 
+        qi.id,
+        qi.qc_no,
+        COALESCE(CAST(p.id AS TEXT), CAST(qi.purchase_id AS TEXT), '') as purchase_id,
+        p.inv_no as invoice_no,
+        COALESCE(CAST(p.s_no AS TEXT), CAST(p.id AS TEXT), CAST(qi.purchase_id AS TEXT), '') as receipt_no,
+        qi.rm_lot_no,
+        qi.inspection_date,
+        qi.overall_result,
+        COALESCE(sl.item_name, pi.item_name, '') as item_name,
+        COALESCE(sl.quantity, pi.qty, 0) as quantity,
+        COALESCE(sl.unloading_status, 'PENDING_DECISION') as unloading_status,
+        COALESCE(CAST(sl.godown_id AS TEXT), CAST(p.godown AS TEXT), '') as godown_id,
+        COALESCE(g.godown_name, g.print_name, sl.godown_name, '') as godown_name,
+        COALESCE(CAST(sm.print_name AS TEXT), CAST(sm.name AS TEXT), CAST(p.supplier AS TEXT), '') as supplier_name
+      FROM qc_inspections qi
+      LEFT JOIN stock_lots sl ON qi.rm_lot_no = sl.lot_no
+      LEFT JOIN purchase_items pi ON qi.rm_lot_no = pi.lot_no
+      LEFT JOIN purchases p ON (
+        CAST(p.id AS TEXT) = CAST(pi.purchase_id AS TEXT) 
+        OR CAST(p.id AS TEXT) = CAST(qi.purchase_id AS TEXT) 
+        OR ('PUR-' || CAST(p.id AS TEXT)) = CAST(qi.purchase_id AS TEXT) 
+        OR ('PUR-' || CAST(p.s_no AS TEXT)) = CAST(qi.purchase_id AS TEXT)
+        OR CAST(p.id AS TEXT) = CAST(sl.purchase_id AS TEXT)
+      )
+      LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = CAST(p.supplier AS TEXT) OR sm.print_name = CAST(p.supplier AS TEXT))
+      LEFT JOIN godown_master g ON (
+        CAST(g.id AS TEXT) = CAST(sl.godown_id AS TEXT) 
+        OR g.godown_name = CAST(sl.godown_id AS TEXT)
+        OR CAST(g.id AS TEXT) = CAST(p.godown AS TEXT)
+        OR g.godown_name = CAST(p.godown AS TEXT)
+      )
+      ORDER BY qi.inspection_date DESC, qi.id DESC
+    `);
+    qcRows = qcList.rows || [];
+  } catch (err) {
+    console.error('Error fetching qcList in /quality/registers:', err.message);
+  }
 
-  for (let row of qcList.rows) {
-    const isReturned = await db.query(`
-      SELECT pr.id, pr.return_inv_no 
-      FROM purchase_return_items pri
-      INNER JOIN purchase_returns pr ON CAST(pri.purchase_return_id AS TEXT) = CAST(pr.id AS TEXT)
-      WHERE pri.lot_no = ?
-    `, [row.rm_lot_no]);
-    
-    if (isReturned.rows && isReturned.rows.length > 0) {
-      row.unloading_status = 'RETURNED';
-      row.return_registered = true;
-      row.return_inv_no = isReturned.rows[0].return_inv_no;
-    }
+  for (let row of qcRows) {
+    try {
+      const isReturned = await db.query(`
+        SELECT pr.id, pr.return_inv_no 
+        FROM purchase_return_items pri
+        INNER JOIN purchase_returns pr ON CAST(pri.purchase_return_id AS TEXT) = CAST(pr.id AS TEXT)
+        WHERE pri.lot_no = ?
+      `, [row.rm_lot_no]);
+      
+      if (isReturned.rows && isReturned.rows.length > 0) {
+        row.unloading_status = 'RETURNED';
+        row.return_registered = true;
+        row.return_inv_no = isReturned.rows[0].return_inv_no;
+      }
+    } catch (e) {}
 
     const rowGId = String(row.godown_id || '').trim();
     if (!row.godown_name || !isNaN(row.godown_name) || String(row.godown_name).startsWith('Godown ID:') || String(row.godown_name).startsWith('Godown:')) {
       row.godown_name = godownDict[rowGId] || godownDict[String(row.godown_name).replace(/[^0-9]/g, '')] || row.godown_name || (rowGId ? `Godown ${rowGId}` : 'Main Godown');
     }
 
-    const allocs = await db.query(`
-      SELECT sl.id, sl.godown_id, sl.godown_name, sl.quantity, sl.remaining_quantity, sl.unloading_status,
-             COALESCE(g.godown_name, g.print_name, sl.godown_name, '') as godown_name
-      FROM stock_lots sl
-      LEFT JOIN godown_master g ON (
-        CAST(g.id AS TEXT) = CAST(sl.godown_id AS TEXT) 
-        OR g.godown_name = CAST(sl.godown_id AS TEXT)
-      )
-      WHERE sl.lot_no = ?
-    `, [row.rm_lot_no]);
+    let allocationList = [];
+    try {
+      const allocs = await db.query(`
+        SELECT sl.id, sl.godown_id, sl.godown_name, sl.quantity, sl.remaining_quantity, sl.unloading_status,
+               COALESCE(g.godown_name, g.print_name, sl.godown_name, '') as godown_name
+        FROM stock_lots sl
+        LEFT JOIN godown_master g ON (
+          CAST(g.id AS TEXT) = CAST(sl.godown_id AS TEXT) 
+          OR g.godown_name = CAST(sl.godown_id AS TEXT)
+        )
+        WHERE sl.lot_no = ?
+      `, [row.rm_lot_no]);
 
-    const allocationList = (allocs.rows || []).map(alloc => {
-      const aGId = String(alloc.godown_id || '').trim();
-      let resolvedGName = alloc.godown_name;
-      if (!resolvedGName || !isNaN(resolvedGName) || String(resolvedGName).startsWith('Godown ID:') || String(resolvedGName).startsWith('Godown:')) {
-        resolvedGName = godownDict[aGId] || godownDict[String(resolvedGName).replace(/[^0-9]/g, '')] || resolvedGName || (aGId ? `Godown ${aGId}` : 'Main Godown');
-      }
-      if (alloc.id && resolvedGName) {
-        db.run("UPDATE stock_lots SET godown_name = ? WHERE id = ?", [resolvedGName, alloc.id]).catch(() => {});
-      }
-      return {
-        ...alloc,
-        godown_name: resolvedGName
-      };
-    });
+      allocationList = (allocs.rows || []).map(alloc => {
+        const aGId = String(alloc.godown_id || '').trim();
+        let resolvedGName = alloc.godown_name;
+        if (!resolvedGName || !isNaN(resolvedGName) || String(resolvedGName).startsWith('Godown ID:') || String(resolvedGName).startsWith('Godown:')) {
+          resolvedGName = godownDict[aGId] || godownDict[String(resolvedGName).replace(/[^0-9]/g, '')] || resolvedGName || (aGId ? `Godown ${aGId}` : 'Main Godown');
+        }
+        if (alloc.id && resolvedGName) {
+          db.run("UPDATE stock_lots SET godown_name = ? WHERE id = ?", [resolvedGName, alloc.id]).catch(() => {});
+        }
+        return {
+          ...alloc,
+          godown_name: resolvedGName
+        };
+      });
+    } catch (e) {}
 
     if (allocationList.length > 0) {
       row.allocations = allocationList;
@@ -264,38 +363,79 @@ router.get('/registers', asyncHandler(async (req, res) => {
     }
   }
 
-  const iqrList = await db.query(`
-    SELECT 
-      iqr.id,
-      iqr.iqr_no,
-      iqr.qc_id,
-      iqr.rm_lot_no,
-      iqr.uploaded_date,
-      iqr.remarks,
-      qi.overall_result,
-      COALESCE(sl.item_name, pi.item_name, '') as item_name,
-      COALESCE(sl.unloading_status, 'PENDING_DECISION') as unloading_status,
-      COALESCE(sm.print_name, sm.name, p.supplier, '') as supplier_name
-    FROM incoming_quality_reports iqr
-    LEFT JOIN qc_inspections qi ON CAST(iqr.qc_id AS TEXT) = CAST(qi.id AS TEXT)
-    LEFT JOIN stock_lots sl ON iqr.rm_lot_no = sl.lot_no
-    LEFT JOIN purchase_items pi ON (iqr.rm_lot_no = pi.lot_no OR (qi.rm_lot_no IS NOT NULL AND qi.rm_lot_no = pi.lot_no))
-    LEFT JOIN purchases p ON (
-      CAST(p.id AS TEXT) = CAST(pi.purchase_id AS TEXT) 
-      OR CAST(p.id AS TEXT) = CAST(qi.purchase_id AS TEXT) 
-      OR ('PUR-' || CAST(p.id AS TEXT)) = CAST(qi.purchase_id AS TEXT) 
-      OR ('PUR-' || CAST(p.s_no AS TEXT)) = CAST(qi.purchase_id AS TEXT)
-      OR CAST(p.id AS TEXT) = CAST(sl.purchase_id AS TEXT)
-    )
-    LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = CAST(p.supplier AS TEXT) OR sm.print_name = CAST(p.supplier AS TEXT))
-    ORDER BY iqr.uploaded_date DESC, iqr.id DESC
-  `);
+  let iqrRows = [];
+  try {
+    const iqrList = await db.query(`
+      SELECT 
+        iqr.id,
+        iqr.iqr_no,
+        iqr.qc_id,
+        iqr.rm_lot_no,
+        iqr.uploaded_date,
+        iqr.remarks,
+        qi.overall_result,
+        COALESCE(sl.item_name, pi.item_name, '') as item_name,
+        COALESCE(sl.unloading_status, 'PENDING_DECISION') as unloading_status,
+        COALESCE(CAST(sm.print_name AS TEXT), CAST(sm.name AS TEXT), CAST(p.supplier AS TEXT), '') as supplier_name
+      FROM incoming_quality_reports iqr
+      LEFT JOIN qc_inspections qi ON CAST(iqr.qc_id AS TEXT) = CAST(qi.id AS TEXT)
+      LEFT JOIN stock_lots sl ON iqr.rm_lot_no = sl.lot_no
+      LEFT JOIN purchase_items pi ON (iqr.rm_lot_no = pi.lot_no OR (qi.rm_lot_no IS NOT NULL AND qi.rm_lot_no = pi.lot_no))
+      LEFT JOIN purchases p ON (
+        CAST(p.id AS TEXT) = CAST(pi.purchase_id AS TEXT) 
+        OR CAST(p.id AS TEXT) = CAST(qi.purchase_id AS TEXT) 
+        OR ('PUR-' || CAST(p.id AS TEXT)) = CAST(qi.purchase_id AS TEXT) 
+        OR ('PUR-' || CAST(p.s_no AS TEXT)) = CAST(qi.purchase_id AS TEXT)
+        OR CAST(p.id AS TEXT) = CAST(sl.purchase_id AS TEXT)
+      )
+      LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = CAST(p.supplier AS TEXT) OR sm.print_name = CAST(p.supplier AS TEXT))
+      ORDER BY iqr.uploaded_date DESC, iqr.id DESC
+    `);
+    iqrRows = iqrList.rows || [];
+  } catch (err) {
+    console.error('Error fetching iqrList in /quality/registers:', err.message);
+  }
+
+  // Ensure every inspected QC lot appears in the IQR register even if not manually uploaded yet
+  const existingIqrLotMap = new Set(iqrRows.map(r => r.rm_lot_no));
+  for (let q of qcRows) {
+    if (q.rm_lot_no && !existingIqrLotMap.has(q.rm_lot_no)) {
+      iqrRows.push({
+        id: q.id,
+        iqr_no: `IQR-${q.rm_lot_no}`,
+        qc_id: q.id,
+        rm_lot_no: q.rm_lot_no,
+        uploaded_date: q.inspection_date,
+        remarks: q.remarks || 'Standard QC Inspection Report',
+        overall_result: q.overall_result,
+        item_name: q.item_name,
+        unloading_status: q.unloading_status,
+        supplier_name: q.supplier_name
+      });
+      existingIqrLotMap.add(q.rm_lot_no);
+    }
+  }
+
+  // Check returns for IQR list as well
+  for (let r of iqrRows) {
+    try {
+      const isReturned = await db.query(`
+        SELECT pr.id, pr.return_inv_no 
+        FROM purchase_return_items pri
+        INNER JOIN purchase_returns pr ON CAST(pri.purchase_return_id AS TEXT) = CAST(pr.id AS TEXT)
+        WHERE pri.lot_no = ?
+      `, [r.rm_lot_no]);
+      if (isReturned.rows && isReturned.rows.length > 0) {
+        r.unloading_status = 'RETURNED';
+      }
+    } catch (e) {}
+  }
 
   res.json({ 
     success: true, 
     data: {
-      qc: qcList.rows,
-      iqr: iqrList.rows
+      qc: qcRows,
+      iqr: iqrRows
     }
   });
 }));
@@ -328,7 +468,7 @@ router.get(['/inspection/:id', '/purchase-lab-testing/:id'], asyncHandler(async 
         qi.id,
         qi.id as qcId,
         qi.qc_no,
-        COALESCE(p.id, qi.purchase_id) as purchaseId,
+        COALESCE(CAST(p.id AS TEXT), CAST(qi.purchase_id AS TEXT), '') as purchaseId,
         qi.rm_lot_no as lotNo,
         qi.inspection_date as inspectionDate,
         qi.inspector as analyst,
@@ -342,7 +482,7 @@ router.get(['/inspection/:id', '/purchase-lab-testing/:id'], asyncHandler(async 
         sl.lot_no as sl_lot_no,
         pi.lot_no as pi_lot_no,
         g.godown_name,
-        COALESCE(sm.print_name, sm.name, p.supplier, '') as supplier,
+        COALESCE(CAST(sm.print_name AS TEXT), CAST(sm.name AS TEXT), CAST(p.supplier AS TEXT), '') as supplier,
         p.date as receipt_date,
         p.inv_date as invoice_date,
         COALESCE(pi.per_unit_weight, 50) as unit_weight,
@@ -389,7 +529,7 @@ router.get(['/inspection/:id', '/purchase-lab-testing/:id'], asyncHandler(async 
           p.date as receipt_date,
           p.inv_date as invoice_date,
           COALESCE(p.inv_no, CAST(p.s_no AS TEXT), CAST(p.id AS TEXT)) as invoice_no,
-          COALESCE(sm.print_name, sm.name, p.supplier, 'Standard Supplier') as supplier,
+          COALESCE(CAST(sm.print_name AS TEXT), CAST(sm.name AS TEXT), CAST(p.supplier AS TEXT), 'Standard Supplier') as supplier,
           COALESCE(g.godown_name, 'KNJ Godown') as godown_name
         FROM purchases p
         LEFT JOIN purchase_items pi ON CAST(pi.purchase_id AS TEXT) = CAST(p.id AS TEXT)
@@ -449,7 +589,7 @@ router.get(['/inspection/:id', '/purchase-lab-testing/:id'], asyncHandler(async 
     // Try finding latest stock lot or purchase as template
     try {
       const anyStockLot = await db.query(`
-        SELECT sl.*, COALESCE(sm.print_name, sm.name, 'Standard Supplier') as supplier_name
+        SELECT sl.*, COALESCE(CAST(sm.print_name AS TEXT), CAST(sm.name AS TEXT), 'Standard Supplier') as supplier_name
         FROM stock_lots sl
         LEFT JOIN purchases p ON CAST(p.id AS TEXT) = CAST(sl.purchase_id AS TEXT)
         LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = CAST(p.supplier AS TEXT) OR sm.print_name = CAST(p.supplier AS TEXT))
@@ -558,7 +698,7 @@ router.get(['/inspection/:id', '/purchase-lab-testing/:id'], asyncHandler(async 
     try {
       const purLookup = await db.query(`
         SELECT 
-          COALESCE(sm.print_name, sm.name, p.supplier, '') as supplier_name,
+          COALESCE(CAST(sm.print_name AS TEXT), CAST(sm.name AS TEXT), CAST(p.supplier AS TEXT), '') as supplier_name,
           p.date as receipt_date,
           p.inv_date as invoice_date,
           p.inv_no as invoice_no,

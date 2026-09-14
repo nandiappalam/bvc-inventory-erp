@@ -130,13 +130,18 @@ export default function QualityControlList() {
     setLoading(true);
     setError('');
 
-    Promise.all([
+    Promise.allSettled([
       api('/qc/pending'),
       api('/quality/registers'),
       api('/masters/all/godowns'),
       api('/vehicle-movements')
     ])
-      .then(([pendingRes, registersRes, godownsRes, vehiclesRes]) => {
+      .then(([pendingSettled, registersSettled, godownsSettled, vehiclesSettled]) => {
+        const pendingRes = pendingSettled.status === 'fulfilled' ? pendingSettled.value : null;
+        const registersRes = registersSettled.status === 'fulfilled' ? registersSettled.value : null;
+        const godownsRes = godownsSettled.status === 'fulfilled' ? godownsSettled.value : null;
+        const vehiclesRes = vehiclesSettled.status === 'fulfilled' ? vehiclesSettled.value : null;
+
         if (pendingRes?.success) {
           setPendingLots(pendingRes.data || []);
         }

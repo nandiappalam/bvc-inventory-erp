@@ -141,11 +141,14 @@ export default function QualityControlCreate() {
     if (!isReadOnly) {
       setLoading(true);
       setError('');
-      Promise.all([
+      Promise.allSettled([
         api(`/masters/all/item_master`),
         api(`/qc/pending?all=true`)
       ])
-      .then(([itemsRes, pendingRes]) => {
+      .then(([itemsSettled, pendingSettled]) => {
+        const itemsRes = itemsSettled.status === 'fulfilled' ? itemsSettled.value : null;
+        const pendingRes = pendingSettled.status === 'fulfilled' ? pendingSettled.value : null;
+
         // Parse item master
         const itemsData = itemsRes?.data || itemsRes || [];
         const itemsArr = Array.isArray(itemsData) ? itemsData : [];

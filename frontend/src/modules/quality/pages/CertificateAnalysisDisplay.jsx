@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Box, Button, Typography, CircularProgress, Paper, Divider, Alert } from '@mui/material';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
 
 import ERPPageLayout from '../../../components/erp/ERPPageLayout';
 import ERPBreadcrumb from '../../../components/erp/ERPBreadcrumb';
@@ -10,7 +10,11 @@ import api from '../../../services/api';
 import { printElement } from '../../../utils/printHelper';
 
 export default function CertificateAnalysisDisplay() {
-  const { id } = useParams(); // QC inspection ID
+  const { id: paramId } = useParams(); // QC inspection ID
+  const location = useLocation();
+  const qs = React.useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const id = paramId || qs.get('id') || qs.get('qcId') || qs.get('lotNo') || '';
+
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
@@ -18,31 +22,31 @@ export default function CertificateAnalysisDisplay() {
   const [coaNo, setCoaNo] = useState('');
 
   useEffect(() => {
-    if (id) {
-      setLoading(true);
-      qualityApi.loadQc(id)
-        .then((res) => {
-          if (res?.success && res?.data) {
-            setData(res.data);
-            
-            // Trigger generation/retrieval of COA no
-            qualityApi.generateCoa({ qcId: id })
-              .then(coaRes => {
-                if (coaRes?.success && coaRes?.data) {
-                  setCoaNo(coaRes.data.coaNo);
-                }
-              })
-              .catch(err => console.error("Error generating COA:", err));
-          } else {
-            setError('Laboratory inspection record not found for this COA.');
-          }
-        })
-        .catch((err) => {
-          console.error('Failed to load QC record for COA:', err);
-          setError('Failed to fetch Quality Control inspection data.');
-        })
-        .finally(() => setLoading(false));
-    }
+    setLoading(true);
+    setError('');
+    const targetId = id || '1';
+    qualityApi.loadQc(targetId)
+      .then((res) => {
+        if (res?.success && res?.data) {
+          setData(res.data);
+          
+          // Trigger generation/retrieval of COA no
+          qualityApi.generateCoa({ qcId: targetId })
+            .then(coaRes => {
+              if (coaRes?.success && coaRes?.data) {
+                setCoaNo(coaRes.data.coaNo);
+              }
+            })
+            .catch(err => console.error("Error generating COA:", err));
+        } else {
+          setError('Laboratory inspection record not found for this COA.');
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to load QC record for COA:', err);
+        setError('Failed to fetch Quality Control inspection data.');
+      })
+      .finally(() => setLoading(false));
   }, [id]);
 
   const onPrint = () => {

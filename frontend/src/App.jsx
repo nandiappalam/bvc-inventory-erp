@@ -389,7 +389,8 @@ const AppLayout = () => {
           <Route path="/entry/quality-control-display" element={<QualityControlList />} />
           <Route path="/entry/incoming-quality-list" element={<IncomingQualityList />} />
           <Route path="/entry/incoming-quality-create" element={<IncomingQualityCreate />} />
-          <Route path="/entry/incoming-quality-view" element={<IncomingQualityView />} />
+          <Route path="/entry/incoming-quality-view/:id" element={<IncomingQualityReportDisplay />} />
+          <Route path="/entry/incoming-quality-view" element={<IncomingQualityReportDisplay />} />
           <Route path="/entry/incoming-quality-display" element={<IncomingQualityList />} />
 
           {/* Quality, Compliance & Controlled Documents (D1-D11, P1-P8, C1-C10) */}
@@ -417,8 +418,11 @@ const AppLayout = () => {
           <Route path="/quality/dashboard" element={<QualityDashboard />} />
           <Route path="/quality/purchase-lab-testing-create" element={<PurchaseLabTestingCreate />} />
           <Route path="/quality/purchase-lab-testing-display/:id" element={<PurchaseLabTestingDisplay />} />
+          <Route path="/quality/purchase-lab-testing-display" element={<PurchaseLabTestingDisplay />} />
           <Route path="/quality/iqr-display/:id" element={<IncomingQualityReportDisplay />} />
+          <Route path="/quality/iqr-display" element={<IncomingQualityReportDisplay />} />
           <Route path="/quality/coa-display/:id" element={<CertificateAnalysisDisplay />} />
+          <Route path="/quality/coa-display" element={<CertificateAnalysisDisplay />} />
           <Route path="/quality/parameter-master" element={<ParameterMaster />} />
           <Route path="/quality/qc-template-master" element={<QCTemplateMaster />} />
 

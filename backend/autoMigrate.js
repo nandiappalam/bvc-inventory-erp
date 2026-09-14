@@ -129,10 +129,73 @@ module.exports = async function autoMigrate() {
                 remarks TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )'; EXCEPTION WHEN OTHERS THEN END;
+
+            -- qc tables
+            BEGIN EXECUTE 'CREATE TABLE IF NOT EXISTS "' || sch || '"."qc_inspections" (
+                id SERIAL PRIMARY KEY,
+                qc_no TEXT UNIQUE,
+                purchase_id INTEGER,
+                purchase_item_id INTEGER,
+                rm_lot_no TEXT NOT NULL,
+                inspection_date TEXT,
+                inspector TEXT,
+                overall_result TEXT,
+                remarks TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )'; EXCEPTION WHEN OTHERS THEN END;
+
+            BEGIN EXECUTE 'CREATE TABLE IF NOT EXISTS "' || sch || '"."qc_inspection_params" (
+                id SERIAL PRIMARY KEY,
+                qc_id INTEGER NOT NULL,
+                param_key TEXT NOT NULL,
+                param_value TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )'; EXCEPTION WHEN OTHERS THEN END;
+
+            BEGIN EXECUTE 'CREATE TABLE IF NOT EXISTS "' || sch || '"."incoming_quality_reports" (
+                id SERIAL PRIMARY KEY,
+                iqr_no TEXT UNIQUE,
+                qc_id INTEGER NOT NULL,
+                rm_lot_no TEXT NOT NULL,
+                report_file TEXT,
+                uploaded_date TEXT,
+                uploaded_by TEXT,
+                version INTEGER DEFAULT 1,
+                remarks TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )'; EXCEPTION WHEN OTHERS THEN END;
+
+            BEGIN EXECUTE 'CREATE TABLE IF NOT EXISTS "' || sch || '"."qc_approval_history" (
+                id SERIAL PRIMARY KEY,
+                qc_id INTEGER NOT NULL,
+                approval_level TEXT NOT NULL,
+                approved_by TEXT,
+                approved_date TEXT,
+                remarks TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )'; EXCEPTION WHEN OTHERS THEN END;
+
+            -- stock_lots columns
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."stock_lots" ADD COLUMN IF NOT EXISTS "unloading_status" TEXT DEFAULT ''PENDING_DECISION'''; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."stock_lots" ADD COLUMN IF NOT EXISTS "godown_id" INTEGER'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."stock_lots" ADD COLUMN IF NOT EXISTS "godown_name" TEXT'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."stock_lots" ADD COLUMN IF NOT EXISTS "qc_status" TEXT DEFAULT ''QC_PENDING'''; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."stock_lots" ADD COLUMN IF NOT EXISTS "rate" REAL DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."stock_lots" ADD COLUMN IF NOT EXISTS "purchase_id" INTEGER'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."stock_lots" ADD COLUMN IF NOT EXISTS "usable_for_production" INTEGER DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."stock_lots" ADD COLUMN IF NOT EXISTS "approval_status" TEXT DEFAULT ''PENDING_APPROVAL'''; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."stock_lots" ADD COLUMN IF NOT EXISTS "approval_date" TEXT'; EXCEPTION WHEN OTHERS THEN END;
+
+            -- purchase_returns and items
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchase_returns" ADD COLUMN IF NOT EXISTS "return_inv_no" TEXT'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchase_return_items" ADD COLUMN IF NOT EXISTS "lot_no" TEXT'; EXCEPTION WHEN OTHERS THEN END;
           END LOOP;
         END $$;
       `);
-      console.log('✅ [Postgres] Multi-tenant schemas successfully migrated for cold storage, godown_master, purchases, and purchase_items.');
+      console.log('✅ [Postgres] Multi-tenant schemas successfully migrated for cold storage, godown_master, purchases, purchase_items, qc_inspections, and stock_lots.');
     } catch (pgMigrateErr) {
       console.log('Notice running multi-tenant schema migration in autoMigrate:', pgMigrateErr.message);
     }
