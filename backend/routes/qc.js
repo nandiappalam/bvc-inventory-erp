@@ -141,6 +141,24 @@ router.get('/registers', asyncHandler(async (req, res) => {
     await db.run("ALTER TABLE stock_lots ADD COLUMN godown_name TEXT");
   } catch (e) {}
 
+  // Load godown master map to guarantee accurate godown name resolution
+  const godownDict = {
+    '1': 'Main Godown',
+    '2': 'Godown 1',
+    '3': 'Raw Material Godown',
+    '4': 'Finished Goods Godown'
+  };
+  try {
+    const gRows = await db.query("SELECT id, godown_name, print_name FROM godown_master");
+    (gRows.rows || []).forEach(g => {
+      const gName = g.godown_name || g.print_name;
+      if (gName) {
+        godownDict[String(g.id)] = gName;
+        godownDict[String(gName).toLowerCase()] = gName;
+      }
+    });
+  } catch (e) {}
+
   const qcList = await db.query(`
     SELECT 
       qi.id,
@@ -154,8 +172,8 @@ router.get('/registers', asyncHandler(async (req, res) => {
       COALESCE(sl.item_name, pi.item_name, '') as item_name,
       COALESCE(sl.quantity, pi.qty, 0) as quantity,
       COALESCE(sl.unloading_status, 'PENDING_DECISION') as unloading_status,
-      sl.godown_id,
-      g.godown_name,
+      COALESCE(sl.godown_id, p.godown) as godown_id,
+      COALESCE(g.godown_name, g.print_name, sl.godown_name, '') as godown_name,
       COALESCE(sm.print_name, sm.name, p.supplier, '') as supplier_name
     FROM qc_inspections qi
     LEFT JOIN stock_lots sl ON qi.rm_lot_no = sl.lot_no
@@ -168,7 +186,12 @@ router.get('/registers', asyncHandler(async (req, res) => {
       OR CAST(p.id AS TEXT) = CAST(sl.purchase_id AS TEXT)
     )
     LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = CAST(p.supplier AS TEXT) OR sm.print_name = CAST(p.supplier AS TEXT))
-    LEFT JOIN godown_master g ON (CAST(g.id AS TEXT) = CAST(sl.godown_id AS TEXT) OR g.godown_name = CAST(sl.godown_id AS TEXT))
+    LEFT JOIN godown_master g ON (
+      CAST(g.id AS TEXT) = CAST(sl.godown_id AS TEXT) 
+      OR g.godown_name = CAST(sl.godown_id AS TEXT)
+      OR CAST(g.id AS TEXT) = CAST(p.godown AS TEXT)
+      OR g.godown_name = CAST(p.godown AS TEXT)
+    )
     ORDER BY qi.inspection_date DESC, qi.id DESC
   `);
 
@@ -186,26 +209,58 @@ router.get('/registers', asyncHandler(async (req, res) => {
       row.return_inv_no = isReturned.rows[0].return_inv_no;
     }
 
+    const rowGId = String(row.godown_id || '').trim();
+    if (!row.godown_name || !isNaN(row.godown_name) || String(row.godown_name).startsWith('Godown ID:') || String(row.godown_name).startsWith('Godown:')) {
+      row.godown_name = godownDict[rowGId] || godownDict[String(row.godown_name).replace(/[^0-9]/g, '')] || row.godown_name || (rowGId ? `Godown ${rowGId}` : 'Main Godown');
+    }
+
     const allocs = await db.query(`
-      SELECT sl.id, sl.godown_id, sl.quantity, sl.remaining_quantity, sl.unloading_status, g.godown_name
+      SELECT sl.id, sl.godown_id, sl.godown_name, sl.quantity, sl.remaining_quantity, sl.unloading_status,
+             COALESCE(g.godown_name, g.print_name, sl.godown_name, '') as godown_name
       FROM stock_lots sl
-      LEFT JOIN godown_master g ON (CAST(g.id AS TEXT) = CAST(sl.godown_id AS TEXT) OR g.godown_name = CAST(sl.godown_id AS TEXT))
+      LEFT JOIN godown_master g ON (
+        CAST(g.id AS TEXT) = CAST(sl.godown_id AS TEXT) 
+        OR g.godown_name = CAST(sl.godown_id AS TEXT)
+      )
       WHERE sl.lot_no = ?
     `, [row.rm_lot_no]);
-    row.allocations = allocs.rows || [];
-    if (allocs.rows && allocs.rows.length > 0) {
-      const isUnloaded = allocs.rows.some(a => a.unloading_status === 'UNLOADED');
+
+    const allocationList = (allocs.rows || []).map(alloc => {
+      const aGId = String(alloc.godown_id || '').trim();
+      let resolvedGName = alloc.godown_name;
+      if (!resolvedGName || !isNaN(resolvedGName) || String(resolvedGName).startsWith('Godown ID:') || String(resolvedGName).startsWith('Godown:')) {
+        resolvedGName = godownDict[aGId] || godownDict[String(resolvedGName).replace(/[^0-9]/g, '')] || resolvedGName || (aGId ? `Godown ${aGId}` : 'Main Godown');
+      }
+      if (alloc.id && resolvedGName) {
+        db.run("UPDATE stock_lots SET godown_name = ? WHERE id = ?", [resolvedGName, alloc.id]).catch(() => {});
+      }
+      return {
+        ...alloc,
+        godown_name: resolvedGName
+      };
+    });
+
+    if (allocationList.length > 0) {
+      row.allocations = allocationList;
+      const isUnloaded = allocationList.some(a => a.unloading_status === 'UNLOADED');
       if (isUnloaded) {
         row.unloading_status = 'UNLOADED';
       }
-      const isRet = allocs.rows.some(a => a.unloading_status === 'RETURNED');
+      const isRet = allocationList.some(a => a.unloading_status === 'RETURNED');
       if (isRet) {
         row.unloading_status = 'RETURNED';
       }
-      const totalAllocQty = allocs.rows.reduce((sum, a) => sum + (parseFloat(a.quantity) || 0), 0);
+      const totalAllocQty = allocationList.reduce((sum, a) => sum + (parseFloat(a.quantity) || 0), 0);
       if (totalAllocQty > 0) {
         row.quantity = totalAllocQty;
       }
+    } else {
+      row.allocations = [{
+        godown_id: row.godown_id,
+        godown_name: row.godown_name || godownDict[rowGId] || 'Main Godown',
+        quantity: row.quantity,
+        unloading_status: row.unloading_status
+      }];
     }
   }
 
@@ -1097,19 +1152,38 @@ router.post('/confirm-disposal', asyncHandler(async (req, res) => {
   // 2. Re-create stock_lots records for each godown allocation
   await db.run('DELETE FROM stock_lots WHERE lot_no = ?', [lotNo]);
 
+  const godownFallbackMap = {
+    '1': 'Main Godown',
+    '2': 'Godown 1',
+    '3': 'Raw Material Godown',
+    '4': 'Finished Goods Godown'
+  };
+
   const todayStr = new Date().toISOString().split('T')[0];
   for (const alloc of finalAllocations) {
+    let godownName = godownFallbackMap[String(alloc.godownId)] || '';
+    try {
+      const gRes = await db.query('SELECT godown_name, print_name, name FROM godown_master WHERE id = ? OR godown_name = ? OR name = ? LIMIT 1', [alloc.godownId, alloc.godownId, alloc.godownId]);
+      if (gRes.rows && gRes.rows.length > 0) {
+        godownName = gRes.rows[0].godown_name || gRes.rows[0].print_name || gRes.rows[0].name || godownName;
+      }
+    } catch (e) {}
+    if (!godownName) {
+      godownName = `Godown ${alloc.godownId}`;
+    }
+
     await db.run(
       `INSERT INTO stock_lots (
-         item_id, item_name, lot_no, purchase_id, godown_id, quantity, remaining_quantity, 
+         item_id, item_name, lot_no, purchase_id, godown_id, godown_name, quantity, remaining_quantity, 
          rate, qc_status, usable_for_production, approval_status, approval_date, unloading_status
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'APPROVED', ?, 'UNLOADED')`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'APPROVED', ?, 'UNLOADED')`,
       [
         itemId,
         itemName,
         lotNo,
         finalPurchaseId,
         alloc.godownId,
+        godownName,
         alloc.qty,
         alloc.qty,
         rate,

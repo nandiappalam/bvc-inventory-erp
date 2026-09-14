@@ -83,8 +83,8 @@ async function runAllPendingMigrations() {
         // Ensure default taxes exist
         for (const tax of DEFAULT_TAX_RATES) {
           await compDb.run(
-            `INSERT OR IGNORE INTO tax_master (tax_name, tax_percent, cgst, sgst, igst, status) VALUES (?, ?, ?, ?, ?, ?)`,
-            [tax.tax_name, tax.tax_percent, tax.cgst, tax.sgst, tax.igst, 'Active']
+            `INSERT OR IGNORE INTO tax_master (tax_name, hsn_code, gst_rate, cgst_rate, sgst_rate, igst_rate, status) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [tax.tax_name, '0000', tax.tax_percent || 0, tax.cgst || 0, tax.sgst || 0, tax.igst || 0, 'Active']
           );
         }
 

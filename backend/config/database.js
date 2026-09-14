@@ -311,6 +311,278 @@ function replaceStrftime(sql) {
   return result;
 }
 
+function replaceRound(sql) {
+  const marker = 'ROUND';
+  let result = '';
+  let i = 0;
+  while (i < sql.length) {
+    const idx = sql.toUpperCase().indexOf(marker, i);
+    if (idx === -1) {
+      result += sql.slice(i);
+      break;
+    }
+    if (idx > 0 && /[a-zA-Z0-9_]/.test(sql[idx - 1])) {
+      result += sql.slice(i, idx + marker.length);
+      i = idx + marker.length;
+      continue;
+    }
+    result += sql.slice(i, idx);
+    let cur = idx + marker.length;
+    while (cur < sql.length && /\s/.test(sql[cur])) cur++;
+    if (sql[cur] !== '(') {
+      result += marker;
+      i = idx + marker.length;
+      continue;
+    }
+    cur++;
+    let depth = 1;
+    let inSingleQuote = false;
+    let inDoubleQuote = false;
+    let args = [];
+    let curArg = '';
+
+    while (cur < sql.length && depth > 0) {
+      const char = sql[cur];
+      if (char === "'" && !inDoubleQuote) {
+        if (inSingleQuote && sql[cur + 1] === "'") {
+          curArg += "''";
+          cur += 2;
+          continue;
+        }
+        inSingleQuote = !inSingleQuote;
+        curArg += char;
+        cur++;
+        continue;
+      }
+      if (char === '"' && !inSingleQuote) {
+        inDoubleQuote = !inDoubleQuote;
+        curArg += char;
+        cur++;
+        continue;
+      }
+      if (!inSingleQuote && !inDoubleQuote) {
+        if (char === '(') {
+          depth++;
+          curArg += char;
+        } else if (char === ')') {
+          depth--;
+          if (depth === 0) {
+            args.push(curArg.trim());
+            curArg = '';
+          } else {
+            curArg += char;
+          }
+        } else if (char === ',' && depth === 1) {
+          args.push(curArg.trim());
+          curArg = '';
+        } else {
+          curArg += char;
+        }
+      } else {
+        curArg += char;
+      }
+      cur++;
+    }
+
+    if (depth !== 0 || args.length === 0) {
+      result += marker;
+      i = idx + marker.length;
+      continue;
+    }
+
+    const innerArg0 = replaceRound(args[0]);
+    if (args.length >= 2) {
+      const decimals = args[1].trim();
+      result += `ROUND((${innerArg0})::numeric, ${decimals})`;
+    } else {
+      result += `ROUND((${innerArg0})::numeric)`;
+    }
+    i = cur;
+  }
+  return result;
+}
+
+function replacePrintf(sql) {
+  const marker = 'PRINTF';
+  let result = '';
+  let i = 0;
+  while (i < sql.length) {
+    const idx = sql.toUpperCase().indexOf(marker, i);
+    if (idx === -1) {
+      result += sql.slice(i);
+      break;
+    }
+    if (idx > 0 && /[a-zA-Z0-9_]/.test(sql[idx - 1])) {
+      result += sql.slice(i, idx + marker.length);
+      i = idx + marker.length;
+      continue;
+    }
+    result += sql.slice(i, idx);
+    let cur = idx + marker.length;
+    while (cur < sql.length && /\s/.test(sql[cur])) cur++;
+    if (sql[cur] !== '(') {
+      result += marker;
+      i = idx + marker.length;
+      continue;
+    }
+    cur++;
+    let depth = 1;
+    let inSingleQuote = false;
+    let inDoubleQuote = false;
+    let args = [];
+    let curArg = '';
+
+    while (cur < sql.length && depth > 0) {
+      const char = sql[cur];
+      if (char === "'" && !inDoubleQuote) {
+        if (inSingleQuote && sql[cur + 1] === "'") {
+          curArg += "''";
+          cur += 2;
+          continue;
+        }
+        inSingleQuote = !inSingleQuote;
+        curArg += char;
+        cur++;
+        continue;
+      }
+      if (char === '"' && !inSingleQuote) {
+        inDoubleQuote = !inDoubleQuote;
+        curArg += char;
+        cur++;
+        continue;
+      }
+      if (!inSingleQuote && !inDoubleQuote) {
+        if (char === '(') {
+          depth++;
+          curArg += char;
+        } else if (char === ')') {
+          depth--;
+          if (depth === 0) {
+            args.push(curArg.trim());
+            curArg = '';
+          } else {
+            curArg += char;
+          }
+        } else if (char === ',' && depth === 1) {
+          args.push(curArg.trim());
+          curArg = '';
+        } else {
+          curArg += char;
+        }
+      } else {
+        curArg += char;
+      }
+      cur++;
+    }
+
+    if (depth !== 0 || args.length === 0) {
+      result += marker;
+      i = idx + marker.length;
+      continue;
+    }
+
+    const fmt = args[0].replace(/['"]/g, '').trim();
+    const padMatch = fmt.match(/^%0?(\d+)d$/);
+    if (padMatch && args[1]) {
+      const width = padMatch[1];
+      result += `LPAD(CAST(COALESCE(${args[1]}, 0) AS TEXT), ${width}, '0')`;
+    } else if (args[1]) {
+      result += `CAST(${args[1]} AS TEXT)`;
+    } else {
+      result += `''`;
+    }
+    i = cur;
+  }
+  return result;
+}
+
+function replaceJsonExtract(sql) {
+  const marker = 'JSON_EXTRACT';
+  let result = '';
+  let i = 0;
+  while (i < sql.length) {
+    const idx = sql.toUpperCase().indexOf(marker, i);
+    if (idx === -1) {
+      result += sql.slice(i);
+      break;
+    }
+    if (idx > 0 && /[a-zA-Z0-9_]/.test(sql[idx - 1])) {
+      result += sql.slice(i, idx + marker.length);
+      i = idx + marker.length;
+      continue;
+    }
+    result += sql.slice(i, idx);
+    let cur = idx + marker.length;
+    while (cur < sql.length && /\s/.test(sql[cur])) cur++;
+    if (sql[cur] !== '(') {
+      result += marker;
+      i = idx + marker.length;
+      continue;
+    }
+    cur++;
+    let depth = 1;
+    let inSingleQuote = false;
+    let inDoubleQuote = false;
+    let args = [];
+    let curArg = '';
+
+    while (cur < sql.length && depth > 0) {
+      const char = sql[cur];
+      if (char === "'" && !inDoubleQuote) {
+        if (inSingleQuote && sql[cur + 1] === "'") {
+          curArg += "''";
+          cur += 2;
+          continue;
+        }
+        inSingleQuote = !inSingleQuote;
+        curArg += char;
+        cur++;
+        continue;
+      }
+      if (char === '"' && !inSingleQuote) {
+        inDoubleQuote = !inDoubleQuote;
+        curArg += char;
+        cur++;
+        continue;
+      }
+      if (!inSingleQuote && !inDoubleQuote) {
+        if (char === '(') {
+          depth++;
+          curArg += char;
+        } else if (char === ')') {
+          depth--;
+          if (depth === 0) {
+            args.push(curArg.trim());
+            curArg = '';
+          } else {
+            curArg += char;
+          }
+        } else if (char === ',' && depth === 1) {
+          args.push(curArg.trim());
+          curArg = '';
+        } else {
+          curArg += char;
+        }
+      } else {
+        curArg += char;
+      }
+      cur++;
+    }
+
+    if (depth !== 0 || args.length < 2) {
+      result += marker;
+      i = idx + marker.length;
+      continue;
+    }
+
+    const col = args[0].trim();
+    const path = args[1].replace(/['"]/g, '').replace(/^\$\.?/, '').trim();
+    result += `((${col})::jsonb->>'${path}')`;
+    i = cur;
+  }
+  return result;
+}
+
 // ============================================================================
 // SQL NORMALIZER & TRANSLATOR (SQLite <-> PostgreSQL)
 // ============================================================================
@@ -378,11 +650,13 @@ function translateSqlForPostgres(sql, companyId = 1) {
   // 4b. Translate SQLite SQL functions for PostgreSQL using paren-matching parsers
   transformed = replaceGroupConcat(transformed);
   transformed = replaceStrftime(transformed);
+  transformed = replaceRound(transformed);
+  transformed = replacePrintf(transformed);
+  transformed = replaceJsonExtract(transformed);
 
   transformed = transformed.replace(/DATE\s*\(\s*['"]now['"]\s*\)/gi, 'CURRENT_DATE');
   transformed = transformed.replace(/DATETIME\s*\(\s*['"]now['"]\s*(?:,\s*['"][^'"]*['"])?\s*\)/gi, 'CURRENT_TIMESTAMP');
   transformed = transformed.replace(/IFNULL\s*\(/gi, 'COALESCE(');
-  transformed = transformed.replace(/ROUND\s*\(\s*([^,]+?)\s*,\s*(\d+)\s*\)/gi, 'ROUND(($1)::numeric, $2)');
 
   // 4b2. Safe integer casting for PostgreSQL to prevent "invalid input syntax for integer" on text columns
   transformed = transformed.replace(/CAST\s*\(\s*([a-zA-Z0-9_."]+)\s+AS\s+INTEGER\s*\)/gi, "CAST(NULLIF(regexp_replace(CAST($1 AS TEXT), '\\D', '', 'g'), '') AS INTEGER)");
@@ -739,7 +1013,15 @@ async function createCompanyDatabase(companyId, companyCode) {
           `INSERT INTO tax_master (tax_name, hsn_code, gst_rate, cgst_rate, sgst_rate, igst_rate, status) 
            VALUES ($1, $2, $3, $4, $5, $6, $7) 
            ON CONFLICT DO NOTHING`,
-          [tax.tax_name, tax.hsn_code || '0000', tax.gst_rate || 0, tax.cgst_rate || 0, tax.sgst_rate || 0, tax.igst_rate || 0, 'Active']
+          [
+            tax.tax_name, 
+            tax.hsn_code || '0000', 
+            tax.gst_rate !== undefined ? tax.gst_rate : (tax.tax_percent || 0), 
+            tax.cgst_rate !== undefined ? tax.cgst_rate : (tax.cgst || 0), 
+            tax.sgst_rate !== undefined ? tax.sgst_rate : (tax.sgst || 0), 
+            tax.igst_rate !== undefined ? tax.igst_rate : (tax.igst || 0), 
+            'Active'
+          ]
         );
       }
 
@@ -798,7 +1080,15 @@ async function createCompanyDatabase(companyId, companyCode) {
             await new Promise((res) => {
               compDb.run(
                 `INSERT OR IGNORE INTO tax_master (tax_name, hsn_code, gst_rate, cgst_rate, sgst_rate, igst_rate, status) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-                [tax.tax_name, tax.hsn_code || '0000', tax.gst_rate || 0, tax.cgst_rate || 0, tax.sgst_rate || 0, tax.igst_rate || 0, 'Active'],
+                [
+                  tax.tax_name, 
+                  tax.hsn_code || '0000', 
+                  tax.gst_rate !== undefined ? tax.gst_rate : (tax.tax_percent || 0), 
+                  tax.cgst_rate !== undefined ? tax.cgst_rate : (tax.cgst || 0), 
+                  tax.sgst_rate !== undefined ? tax.sgst_rate : (tax.sgst || 0), 
+                  tax.igst_rate !== undefined ? tax.igst_rate : (tax.igst || 0), 
+                  'Active'
+                ],
                 () => res()
               );
             });
@@ -839,6 +1129,33 @@ async function createCompanyDatabase(companyId, companyCode) {
 // ============================================================================
 // RESTORE DATABASE FUNCTIONALITY (SQLite & PostgreSQL)
 // ============================================================================
+function isSQLiteDatabaseFile(filePath) {
+  try {
+    if (!fs.existsSync(filePath)) return false;
+    const stat = fs.statSync(filePath);
+    if (stat.size < 100) return false;
+    const buf = Buffer.alloc(16);
+    const fd = fs.openSync(filePath, 'r');
+    fs.readSync(fd, buf, 0, 16, 0);
+    fs.closeSync(fd);
+    return buf.toString('utf8', 0, 15) === 'SQLite format 3';
+  } catch (e) {
+    return false;
+  }
+}
+
+function parseBackupJson(filePath) {
+  try {
+    if (!fs.existsSync(filePath)) return null;
+    const raw = fs.readFileSync(filePath, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') {
+      return parsed;
+    }
+  } catch (e) {}
+  return null;
+}
+
 async function restoreDatabase(tempFilePath, companyId = 1) {
   const cId = parseInt(companyId, 10) || 1;
   if (!fs.existsSync(tempFilePath)) {
@@ -850,41 +1167,85 @@ async function restoreDatabase(tempFilePath, companyId = 1) {
     fs.mkdirSync(backupDir, { recursive: true });
   }
 
+  const isSQLite = isSQLiteDatabaseFile(tempFilePath);
+  const jsonData = !isSQLite ? parseBackupJson(tempFilePath) : null;
+
+  if (!isSQLite && !jsonData) {
+    throw new Error('Integrity check failed: uploaded file is neither a valid SQLite database nor a valid JSON backup export.');
+  }
+
   if (isPostgres) {
-    // In PostgreSQL mode: Restore tables from the uploaded SQLite backup file
+    // In PostgreSQL mode: Restore tables from either SQLite backup or JSON backup
     const client = await pgPool.connect();
     try {
-      const tempDb = new sqlite3.Database(tempFilePath, sqlite3.OPEN_READONLY);
-      const tables = await new Promise((resolve) => {
-        tempDb.all("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'", (err, rows) => {
-          if (err) resolve([]);
-          else resolve((rows || []).map((r) => r.name));
-        });
-      });
-
       const schemaName = `company_${cId}`;
       await client.query(`CREATE SCHEMA IF NOT EXISTS ${schemaName};`);
       await client.query(`SET search_path TO ${schemaName}, public;`);
 
-      for (const table of tables) {
-        if (table === 'users' || table === 'companies') continue;
-        const rows = await new Promise((resolve) => {
-          tempDb.all(`SELECT * FROM ${table}`, (err, rows) => {
+      if (isSQLite) {
+        const tempDb = new sqlite3.Database(tempFilePath, sqlite3.OPEN_READONLY);
+        const tables = await new Promise((resolve) => {
+          tempDb.all("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'", (err, rows) => {
             if (err) resolve([]);
-            else resolve(rows || []);
+            else resolve((rows || []).map((r) => r.name));
           });
         });
 
-        if (rows && rows.length > 0) {
+        for (const table of tables) {
+          if (table === 'users' || table === 'companies') continue;
+          const rows = await new Promise((resolve) => {
+            tempDb.all(`SELECT * FROM ${table}`, (err, rows) => {
+              if (err) resolve([]);
+              else resolve(rows || []);
+            });
+          });
+
+          if (rows && rows.length > 0) {
+            try {
+              await client.query(`TRUNCATE TABLE ${schemaName}.${table} CASCADE;`);
+            } catch (e) {}
+
+            for (const row of rows) {
+              const keys = Object.keys(row);
+              const values = Object.values(row);
+              const placeholders = keys.map((_, idx) => `$${idx + 1}`).join(', ');
+              const colList = keys.map((k) => `"${k}"`).join(', ');
+              try {
+                await client.query(
+                  `INSERT INTO ${schemaName}.${table} (${colList}) VALUES (${placeholders}) ON CONFLICT DO NOTHING`,
+                  values
+                );
+              } catch (err) {}
+            }
+          }
+        }
+        tempDb.close();
+      } else if (jsonData) {
+        const tablesObj = jsonData.tables || (typeof jsonData === 'object' && !Array.isArray(jsonData) ? jsonData : {});
+        for (const [table, rows] of Object.entries(tablesObj)) {
+          if (!Array.isArray(rows) || rows.length === 0 || table.startsWith('sqlite_') || table === 'users' || table === 'companies') continue;
+
+          const tblCheck = await client.query(
+            `SELECT column_name FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2`,
+            [schemaName, table]
+          );
+          if (!tblCheck.rows || tblCheck.rows.length === 0) continue;
+          const colSet = new Set(tblCheck.rows.map((r) => r.column_name.toLowerCase()));
+
           try {
             await client.query(`TRUNCATE TABLE ${schemaName}.${table} CASCADE;`);
           } catch (e) {}
 
           for (const row of rows) {
-            const keys = Object.keys(row);
-            const values = Object.values(row);
-            const placeholders = keys.map((_, idx) => `$${idx + 1}`).join(', ');
-            const colList = keys.join(', ');
+            if (!row || typeof row !== 'object') continue;
+            const validKeys = Object.keys(row).filter((k) => colSet.has(k.toLowerCase()));
+            if (validKeys.length === 0) continue;
+            const placeholders = validKeys.map((_, idx) => `$${idx + 1}`).join(', ');
+            const colList = validKeys.map((k) => `"${k}"`).join(', ');
+            const values = validKeys.map((k) => {
+              const v = row[k];
+              return typeof v === 'object' && v !== null ? JSON.stringify(v) : v;
+            });
             try {
               await client.query(
                 `INSERT INTO ${schemaName}.${table} (${colList}) VALUES (${placeholders}) ON CONFLICT DO NOTHING`,
@@ -894,7 +1255,7 @@ async function restoreDatabase(tempFilePath, companyId = 1) {
           }
         }
       }
-      tempDb.close();
+
       console.log(`✅ [PostgreSQL] Restored company_${cId} schema from backup file successfully!`);
       return { success: true, message: 'Database restored successfully into PostgreSQL schema.' };
     } finally {
@@ -914,10 +1275,11 @@ async function restoreDatabase(tempFilePath, companyId = 1) {
     }
 
     const targetDbPath = getCompanyDbPath(cId);
+    let backupPath = null;
 
-    // 2. Backup current target db if it exists
-    if (fs.existsSync(targetDbPath)) {
-      const backupPath = path.join(backupDir, `backup_before_restore_${cId}_${Date.now()}.db`);
+    // 2. Backup current target db if it exists and is a valid SQLite file
+    if (fs.existsSync(targetDbPath) && isSQLiteDatabaseFile(targetDbPath)) {
+      backupPath = path.join(backupDir, `backup_before_restore_${cId}_${Date.now()}.db`);
       try {
         fs.copyFileSync(targetDbPath, backupPath);
         console.log(`📦 Created backup before restore at: ${backupPath}`);
@@ -930,42 +1292,200 @@ async function restoreDatabase(tempFilePath, companyId = 1) {
       } catch (e) {}
     }
 
-    // 3. Copy uploaded file over targetDbPath
-    fs.copyFileSync(tempFilePath, targetDbPath);
+    if (isSQLite) {
+      // Direct SQLite Database Restore
+      // Verify integrity on uploaded file first BEFORE overwriting targetDbPath
+      await new Promise((resolve, reject) => {
+        const testDb = new sqlite3.Database(tempFilePath, sqlite3.OPEN_READONLY, (err) => {
+          if (err) return reject(new Error(`Failed to open uploaded database: ${err.message}`));
+        });
+        testDb.get('PRAGMA integrity_check', (err, row) => {
+          testDb.close(() => {
+            if (err) return reject(new Error(`Integrity check failed: ${err.message}`));
+            if (row && row.integrity_check && row.integrity_check !== 'ok') {
+              console.warn('Restored DB integrity warning:', row.integrity_check);
+            }
+            resolve();
+          });
+        });
+      });
 
-    // 4. Verify integrity of the restored SQLite DB
-    const restoredDb = new sqlite3.Database(targetDbPath, (err) => {
-      if (err) {
-        throw new Error(`Failed to open restored database: ${err.message}`);
-      }
-    });
+      // Clear any leftover WAL / SHM files
+      try {
+        if (fs.existsSync(`${targetDbPath}-wal`)) fs.unlinkSync(`${targetDbPath}-wal`);
+        if (fs.existsSync(`${targetDbPath}-shm`)) fs.unlinkSync(`${targetDbPath}-shm`);
+      } catch (e) {}
 
-    await new Promise((resolve, reject) => {
-      restoredDb.get('PRAGMA integrity_check', (err, row) => {
-        if (err) {
-          reject(new Error(`Integrity check failed: ${err.message}`));
-        } else if (row && row.integrity_check !== 'ok') {
-          console.warn('Restored DB integrity warning:', row.integrity_check);
-          resolve();
-        } else {
-          resolve();
+      // Copy uploaded file over targetDbPath
+      try {
+        fs.copyFileSync(tempFilePath, targetDbPath);
+      } catch (copyErr) {
+        if (backupPath && fs.existsSync(backupPath)) {
+          try { fs.copyFileSync(backupPath, targetDbPath); } catch (e) {}
         }
-      });
-    });
+        throw copyErr;
+      }
 
-    // 5. Configure WAL mode and store in companyDbPool
-    await new Promise((resolve) => {
-      restoredDb.serialize(() => {
-        restoredDb.run('PRAGMA foreign_keys = ON');
-        restoredDb.run('PRAGMA journal_mode = WAL');
-        restoredDb.run('PRAGMA synchronous = NORMAL');
-        restoredDb.run('PRAGMA busy_timeout = 10000', () => resolve());
+      // Open, configure WAL and store in pool
+      const restoredDb = new sqlite3.Database(targetDbPath, (err) => {
+        if (err) throw new Error(`Failed to open restored database: ${err.message}`);
       });
-    });
 
-    companyDbPool.set(cId, restoredDb);
-    console.log(`✅ Company ${cId} database restored successfully from ${tempFilePath}!`);
-    return { success: true, message: 'Database restored successfully!' };
+      await new Promise((resolve) => {
+        restoredDb.serialize(() => {
+          restoredDb.run('PRAGMA foreign_keys = ON');
+          restoredDb.run('PRAGMA journal_mode = WAL');
+          restoredDb.run('PRAGMA synchronous = NORMAL');
+          restoredDb.run('PRAGMA busy_timeout = 10000', () => resolve());
+        });
+      });
+
+      companyDbPool.set(cId, restoredDb);
+      console.log(`✅ Company ${cId} database restored successfully from SQLite backup!`);
+      return { success: true, message: 'Database restored successfully!' };
+    } else {
+      // JSON Backup Restore into SQLite
+      // Ensure target database exists with clean valid schema
+      if (!fs.existsSync(targetDbPath) || !isSQLiteDatabaseFile(targetDbPath)) {
+        if (backupPath && fs.existsSync(backupPath) && isSQLiteDatabaseFile(backupPath)) {
+          fs.copyFileSync(backupPath, targetDbPath);
+        } else {
+          await createCompanyDatabase(cId);
+        }
+      }
+
+      const targetDb = new sqlite3.Database(targetDbPath, (err) => {
+        if (err) throw new Error(`Failed to open target database: ${err.message}`);
+      });
+
+      const tablesObj = jsonData.tables || (typeof jsonData === 'object' && !Array.isArray(jsonData) ? jsonData : {});
+
+      try {
+        await new Promise((resolve, reject) => {
+          targetDb.serialize(async () => {
+            try {
+              await new Promise((res, rej) => targetDb.run('PRAGMA foreign_keys = OFF', (err) => err ? rej(err) : res()));
+              await new Promise((res, rej) => targetDb.run('BEGIN TRANSACTION', (err) => err ? rej(err) : res()));
+
+              // Discover existing tables
+              const existingTables = await new Promise((res, rej) => {
+                targetDb.all("SELECT name FROM sqlite_master WHERE type='table'", (err, rows) => {
+                  if (err) rej(err);
+                  else res(new Set((rows || []).map((r) => r.name)));
+                });
+              });
+
+              for (const [tableName, rows] of Object.entries(tablesObj)) {
+                if (!Array.isArray(rows) || tableName.startsWith('sqlite_')) continue;
+
+                // Ensure table exists in SQLite
+                if (!existingTables.has(tableName)) {
+                  const matchingDdl = COMPANY_TABLES.find((sql) => {
+                    const match = sql.match(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`]?([a-zA-Z0-9_]+)["`]?/i);
+                    return match && match[1].toLowerCase() === tableName.toLowerCase();
+                  });
+                  if (matchingDdl) {
+                    await new Promise((res) => targetDb.run(matchingDdl, () => res()));
+                    existingTables.add(tableName);
+                  } else if (rows.length > 0 && rows[0] && typeof rows[0] === 'object') {
+                    const sample = rows[0];
+                    const cols = Object.keys(sample).map((k) => `"${k}" TEXT`).join(', ');
+                    await new Promise((res) => targetDb.run(`CREATE TABLE IF NOT EXISTS "${tableName}" (${cols})`, () => res()));
+                    existingTables.add(tableName);
+                  }
+                }
+
+                if (!existingTables.has(tableName)) continue;
+
+                // Get table column names
+                const colInfo = await new Promise((res, rej) => {
+                  targetDb.all(`PRAGMA table_info("${tableName}")`, (err, cols) => {
+                    if (err) rej(err);
+                    else res(cols || []);
+                  });
+                });
+                const tableCols = new Set(colInfo.map((c) => c.name));
+
+                // Clear current table data
+                await new Promise((res, rej) => {
+                  targetDb.run(`DELETE FROM "${tableName}"`, (err) => err ? rej(err) : res());
+                });
+
+                // Insert all rows
+                for (const row of rows) {
+                  if (!row || typeof row !== 'object') continue;
+                  const validKeys = Object.keys(row).filter((k) => tableCols.has(k));
+                  if (validKeys.length === 0) continue;
+
+                  const colList = validKeys.map((k) => `"${k}"`).join(', ');
+                  const placeholders = validKeys.map(() => '?').join(', ');
+                  const values = validKeys.map((k) => {
+                    const v = row[k];
+                    if (v !== null && typeof v === 'object') {
+                      return JSON.stringify(v);
+                    }
+                    return v;
+                  });
+
+                  await new Promise((res, rej) => {
+                    targetDb.run(
+                      `INSERT OR REPLACE INTO "${tableName}" (${colList}) VALUES (${placeholders})`,
+                      values,
+                      (err) => err ? rej(err) : res()
+                    );
+                  });
+                }
+              }
+
+              await new Promise((res, rej) => targetDb.run('COMMIT', (err) => err ? rej(err) : res()));
+              await new Promise((res) => targetDb.run('PRAGMA foreign_keys = ON', () => res()));
+              await new Promise((res) => targetDb.run('PRAGMA journal_mode = WAL', () => res()));
+              await new Promise((res) => targetDb.run('PRAGMA synchronous = NORMAL', () => res()));
+              await new Promise((res) => targetDb.run('PRAGMA busy_timeout = 10000', () => res()));
+              resolve();
+            } catch (txErr) {
+              targetDb.run('ROLLBACK', () => {});
+              reject(txErr);
+            }
+          });
+        });
+
+        // Run integrity check
+        await new Promise((resolve, reject) => {
+          targetDb.get('PRAGMA integrity_check', (err, row) => {
+            if (err) {
+              reject(new Error(`Integrity check failed: ${err.message}`));
+            } else if (row && row.integrity_check && row.integrity_check !== 'ok') {
+              console.warn('Restored DB integrity warning:', row.integrity_check);
+              resolve();
+            } else {
+              resolve();
+            }
+          });
+        });
+
+        companyDbPool.set(cId, targetDb);
+        console.log(`✅ Company ${cId} database restored successfully from JSON backup!`);
+        return { success: true, message: 'Database restored successfully from JSON backup!' };
+      } catch (jsonRestoreErr) {
+        try {
+          await new Promise((res) => targetDb.close(() => res()));
+        } catch (e) {}
+
+        // Roll back to previous backup if restore failed
+        if (backupPath && fs.existsSync(backupPath) && isSQLiteDatabaseFile(backupPath)) {
+          try {
+            fs.copyFileSync(backupPath, targetDbPath);
+            console.log(`🔄 Rolled back company ${cId} database to pre-restore backup.`);
+            const restoredFallback = new sqlite3.Database(targetDbPath);
+            companyDbPool.set(cId, restoredFallback);
+          } catch (rbErr) {
+            console.error('Error during rollback:', rbErr.message);
+          }
+        }
+        throw jsonRestoreErr;
+      }
+    }
   }
 }
 
@@ -1294,6 +1814,8 @@ module.exports = {
     const targetDb = explicitCompanyId ? getCompanyDatabaseInstance(explicitCompanyId) : resolveTargetDatabase('', null);
     return new SqliteDbConnection(targetDb, activeCompanyId);
   },
+
+  translateSqlForPostgres,
 
   pool: {
     connect: async (explicitCompanyId = null) => {

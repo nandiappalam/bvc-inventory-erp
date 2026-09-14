@@ -1672,107 +1672,647 @@ router.get('/profit-loss', async (req, res) => {
 // ============================================================
 router.get('/ledger/:ledgerName', async (req, res) => {
   try {
-    const { ledgerName } = req.params
-    const { from_date, to_date, type } = req.query
+    const rawLedgerName = decodeURIComponent(req.params.ledgerName || '')
+    const { from_date, to_date, type, ledger_id: queryLedgerId, id: queryId } = req.query
     
-    // Resolve ledger ID and official name
-    let ledgerId = null
-    let officialName = ledgerName
+    // Detect type suffix like " (Supplier)", " (Customer)", " (Papad Company)", etc.
+    let detectedType = type || null
+    const suffixMatch = rawLedgerName.match(/\s*\((Supplier|Customer|Papad Company|Flour Mill|Expense|Income|Bank|Cash|Party|Tax|Asset|Liability|General|Creditor|Debtor)\)$/i)
+    if (suffixMatch && !detectedType) {
+      detectedType = suffixMatch[1]
+    }
+    
+    const cleanName = rawLedgerName
+      .replace(/\s*\((Supplier|Customer|Papad Company|Flour Mill|Expense|Income|Bank|Cash|Party|Tax|Asset|Liability|General|Creditor|Debtor)\)$/i, '')
+      .trim()
+    
+    let officialName = cleanName || rawLedgerName
     let openingBalance = 0
+    let ledgerMasterIds = new Set()
+    let exactLedgerNames = new Set()
+    let supplierIds = new Set()
+    let customerIds = new Set()
+    let papadCompanyIds = new Set()
+    let flourMillIds = new Set()
 
+    if (queryLedgerId) ledgerMasterIds.add(Number(queryLedgerId))
+    if (queryId) ledgerMasterIds.add(Number(queryId))
+    if (!isNaN(cleanName) && Number.isInteger(Number(cleanName))) {
+      ledgerMasterIds.add(Number(cleanName))
+    }
+    if (cleanName) {
+      exactLedgerNames.add(cleanName.trim().toLowerCase())
+    }
+
+    // Helper to calculate signed opening balance
+    const parseSignedBalance = (bal, drCr) => {
+      const num = Math.abs(parseFloat(bal || 0))
+      if (num === 0) return 0
+      const typeStr = String(drCr || '').trim().toLowerCase()
+      if (typeStr === 'cr' || typeStr === 'credit') return -num
+      return num
+    }
+
+    // 1. Look in ledgermaster
     try {
-      let lmRes;
-      if (type) {
-        lmRes = await db.query('SELECT id, name, openingbalance FROM ledgermaster WHERE name = ? AND ledger_type = ?', [ledgerName, type])
-        if (lmRes.rows.length === 0) {
-          lmRes = await db.query('SELECT id, name, openingbalance FROM ledgermaster WHERE TRIM(name) = ? AND ledger_type = ?', [ledgerName.trim(), type])
+      const lmQuery = await db.query(
+        `SELECT id, name, printname, openingbalance, opening_type, ledger_type 
+         FROM ledgermaster 
+         WHERE id = ? OR name = ? OR TRIM(name) = ? OR LOWER(TRIM(name)) = LOWER(?) 
+            OR printname = ?`,
+        [parseInt(cleanName) || -1, cleanName, cleanName, cleanName, cleanName]
+      )
+      if (lmQuery.rows && lmQuery.rows.length > 0) {
+        const best = lmQuery.rows.find(r => 
+          (detectedType && r.ledger_type && r.ledger_type.toLowerCase() === detectedType.toLowerCase()) ||
+          r.name.toLowerCase() === cleanName.toLowerCase()
+        ) || lmQuery.rows[0]
+        
+        officialName = best.name || officialName
+        openingBalance = parseSignedBalance(best.openingbalance, best.opening_type)
+        
+        lmQuery.rows.forEach(r => {
+          if (r.id) ledgerMasterIds.add(Number(r.id))
+          if (r.name) exactLedgerNames.add(r.name.trim().toLowerCase())
+          if (r.printname) exactLedgerNames.add(r.printname.trim().toLowerCase())
+        })
+      }
+    } catch (e) {
+      console.error('Error querying ledgermaster for statement:', e)
+    }
+
+    // 2. Look in supplier_master
+    if (!detectedType || detectedType.toLowerCase() === 'supplier') {
+      try {
+        const smQuery = await db.query(
+          `SELECT id, name, print_name, opening_balance, balance_type FROM supplier_master 
+           WHERE id = ? OR name = ? OR TRIM(name) = ? OR LOWER(TRIM(name)) = LOWER(?) 
+              OR print_name = ?`,
+          [parseInt(cleanName) || -1, cleanName, cleanName, cleanName, cleanName]
+        )
+        if (smQuery.rows && smQuery.rows.length > 0) {
+          smQuery.rows.forEach(r => {
+            if (r.id) supplierIds.add(Number(r.id))
+            if (r.name) exactLedgerNames.add(r.name.trim().toLowerCase())
+            if (r.print_name) exactLedgerNames.add(r.print_name.trim().toLowerCase())
+            if (openingBalance === 0 && r.opening_balance) {
+              openingBalance = parseSignedBalance(r.opening_balance, r.balance_type)
+            }
+          })
+
+          // Link to ledgermaster ID
+          for (const r of smQuery.rows) {
+            const matchedLm = await db.query(
+              "SELECT id, name FROM ledgermaster WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1",
+              [r.name]
+            )
+            if (matchedLm.rows && matchedLm.rows.length > 0) {
+              ledgerMasterIds.add(Number(matchedLm.rows[0].id))
+            }
+          }
         }
+      } catch (e) {}
+    }
+
+    // 3. Look in customer_master
+    if (!detectedType || detectedType.toLowerCase() === 'customer') {
+      try {
+        const cmQuery = await db.query(
+          `SELECT id, name, print_name, opening_balance, balance_type FROM customer_master 
+           WHERE id = ? OR name = ? OR TRIM(name) = ? OR LOWER(TRIM(name)) = LOWER(?) 
+              OR print_name = ?`,
+          [parseInt(cleanName) || -1, cleanName, cleanName, cleanName, cleanName]
+        )
+        if (cmQuery.rows && cmQuery.rows.length > 0) {
+          cmQuery.rows.forEach(r => {
+            if (r.id) customerIds.add(Number(r.id))
+            if (r.name) exactLedgerNames.add(r.name.trim().toLowerCase())
+            if (r.print_name) exactLedgerNames.add(r.print_name.trim().toLowerCase())
+            if (openingBalance === 0 && r.opening_balance) {
+              openingBalance = parseSignedBalance(r.opening_balance, r.balance_type)
+            }
+          })
+
+          for (const r of cmQuery.rows) {
+            const matchedLm = await db.query(
+              "SELECT id, name FROM ledgermaster WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1",
+              [r.name]
+            )
+            if (matchedLm.rows && matchedLm.rows.length > 0) {
+              ledgerMasterIds.add(Number(matchedLm.rows[0].id))
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    // 4. Look in papad_company_master
+    if (!detectedType || detectedType.toLowerCase().includes('papad')) {
+      try {
+        const pmQuery = await db.query(
+          `SELECT id, name, print_name, opening_balance FROM papad_company_master 
+           WHERE id = ? OR name = ? OR TRIM(name) = ? OR LOWER(TRIM(name)) = LOWER(?) 
+              OR print_name = ?`,
+          [parseInt(cleanName) || -1, cleanName, cleanName, cleanName, cleanName]
+        )
+        if (pmQuery.rows && pmQuery.rows.length > 0) {
+          pmQuery.rows.forEach(r => {
+            if (r.id) papadCompanyIds.add(Number(r.id))
+            if (r.name) exactLedgerNames.add(r.name.trim().toLowerCase())
+            if (r.print_name) exactLedgerNames.add(r.print_name.trim().toLowerCase())
+            if (openingBalance === 0 && r.opening_balance) {
+              openingBalance = parseSignedBalance(r.opening_balance, 'Dr')
+            }
+          })
+
+          for (const r of pmQuery.rows) {
+            const matchedLm = await db.query(
+              "SELECT id, name FROM ledgermaster WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1",
+              [r.name]
+            )
+            if (matchedLm.rows && matchedLm.rows.length > 0) {
+              ledgerMasterIds.add(Number(matchedLm.rows[0].id))
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    // 5. Look in flour_mill_master
+    if (!detectedType || detectedType.toLowerCase().includes('flour')) {
+      try {
+        const fmQuery = await db.query(
+          `SELECT id, flourmill, name, print_name FROM flour_mill_master 
+           WHERE id = ? OR flourmill = ? OR name = ? OR TRIM(flourmill) = ?`,
+          [parseInt(cleanName) || -1, cleanName, cleanName, cleanName]
+        )
+        if (fmQuery.rows && fmQuery.rows.length > 0) {
+          fmQuery.rows.forEach(r => {
+            if (r.id) flourMillIds.add(Number(r.id))
+            if (r.flourmill) exactLedgerNames.add(r.flourmill.trim().toLowerCase())
+            if (r.name) exactLedgerNames.add(r.name.trim().toLowerCase())
+          })
+        }
+      } catch (e) {}
+    }
+
+    const lmIdList = Array.from(ledgerMasterIds)
+    const nameList = Array.from(exactLedgerNames).filter(Boolean)
+    const suppIdList = Array.from(supplierIds)
+    const custIdList = Array.from(customerIds)
+    const papadIdList = Array.from(papadCompanyIds)
+
+    if (lmIdList.length === 0 && nameList.length === 0) {
+      nameList.push(cleanName.toLowerCase())
+    }
+
+    let allTransactions = []
+    const seenKeys = new Set()
+    const seenVoucherNos = new Set()
+
+    // -------------------------------------------------------------
+    // SOURCE 1: ledger_entries (The centralized accounting postings)
+    // -------------------------------------------------------------
+    try {
+      let entryConds = []
+      let entryParams = []
+
+      if (lmIdList.length > 0) {
+        entryConds.push(`(ledger_id IS NOT NULL AND ledger_id IN (${lmIdList.map(() => '?').join(', ')}))`)
+        entryParams.push(...lmIdList)
       }
-      if (!lmRes || lmRes.rows.length === 0) {
-        lmRes = await db.query('SELECT id, name, openingbalance FROM ledgermaster WHERE name = ?', [ledgerName])
-      }
-      if (!lmRes || lmRes.rows.length === 0) {
-        lmRes = await db.query('SELECT id, name, openingbalance FROM ledgermaster WHERE TRIM(name) = ?', [ledgerName.trim()])
+      if (nameList.length > 0) {
+        entryConds.push(`LOWER(TRIM(ledger_name)) IN (${nameList.map(() => '?').join(', ')})`)
+        entryParams.push(...nameList)
       }
 
-      if (lmRes && lmRes.rows.length > 0) {
-        ledgerId = lmRes.rows[0].id
-        officialName = lmRes.rows[0].name
-        openingBalance = parseFloat(lmRes.rows[0].openingbalance || 0)
-      } else {
-        // Try fallback if ledgerName is actually an ID
-        if (/^\d+$/.test(ledgerName)) {
-          const lmRes2 = await db.query('SELECT id, name, openingbalance FROM ledgermaster WHERE id = ?', [parseInt(ledgerName, 10)])
-          if (lmRes2.rows.length > 0) {
-            ledgerId = lmRes2.rows[0].id
-            officialName = lmRes2.rows[0].name
-            openingBalance = parseFloat(lmRes2.rows[0].openingbalance || 0)
+      if (entryConds.length > 0) {
+        const leQuery = `
+          SELECT 
+            id,
+            date,
+            voucher_type,
+            voucher_no,
+            particulars,
+            debit,
+            credit,
+            ledger_id,
+            ledger_name,
+            reference_id,
+            reference_type
+          FROM ledger_entries
+          WHERE (${entryConds.join(' OR ')})
+        `
+        const leRes = await db.query(leQuery, entryParams)
+        for (const row of leRes.rows || []) {
+          const debit = parseFloat(row.debit || 0)
+          const credit = parseFloat(row.credit || 0)
+          const vNo = row.voucher_no || `LE-${row.id}`
+          const key = `${vNo}_${debit}_${credit}`
+          
+          if (!seenKeys.has(key)) {
+            seenKeys.add(key)
+            if (row.voucher_no) seenVoucherNos.add(row.voucher_no)
+            allTransactions.push({
+              id: row.id,
+              date: row.date,
+              voucher_type: row.voucher_type || 'Journal',
+              voucher_no: row.voucher_no || '-',
+              particulars: row.particulars || `${row.voucher_type || 'Voucher'} #${row.voucher_no || row.id}`,
+              debit,
+              credit,
+              ledger_id: row.ledger_id,
+              ledger_name: row.ledger_name
+            })
           }
         }
       }
     } catch (e) {
-      console.error('Error resolving ledger info:', e)
+      console.warn('Error fetching from ledger_entries:', e.message)
     }
 
-    // Query ledger_entries
-    let query = `
-      SELECT 
-        id,
-        date,
-        voucher_type,
-        voucher_no,
-        particulars,
+    // -------------------------------------------------------------
+    // SOURCE 2: voucher + voucher_entry (Any posted voucher types)
+    // (Payment, Receipt, Contra, Journal, Advance, Credit Note, Debit Note, etc.)
+    // -------------------------------------------------------------
+    try {
+      let vConds = []
+      let vParams = []
+
+      if (lmIdList.length > 0) {
+        vConds.push(`ve.ledger_id IN (${lmIdList.map(() => '?').join(', ')})`)
+        vParams.push(...lmIdList)
+      }
+      if (nameList.length > 0) {
+        vConds.push(`LOWER(TRIM(COALESCE(lm.name, ve.ledger_name, ''))) IN (${nameList.map(() => '?').join(', ')})`)
+        vParams.push(...nameList)
+      }
+
+      if (vConds.length > 0) {
+        const vQuery = `
+          SELECT 
+            ve.id,
+            v.id as voucher_id,
+            v.date,
+            v.voucher_type,
+            v.voucher_no,
+            COALESCE(NULLIF(TRIM(ve.remarks), ''), NULLIF(TRIM(v.reference_no), ''), NULLIF(TRIM(v.narration), ''), v.voucher_type) as particulars,
+            ve.debit,
+            ve.credit,
+            ve.ledger_id,
+            COALESCE(lm.name, ve.ledger_name, '') as ledger_name
+          FROM voucher_entry ve
+          JOIN voucher v ON v.id = ve.voucher_id
+          LEFT JOIN ledgermaster lm ON lm.id = ve.ledger_id
+          WHERE (${vConds.join(' OR ')})
+        `
+        const vRes = await db.query(vQuery, vParams)
+        for (const row of vRes.rows || []) {
+          const debit = parseFloat(row.debit || 0)
+          const credit = parseFloat(row.credit || 0)
+          const vNo = row.voucher_no || `V-${row.id}`
+          const key = `${vNo}_${debit}_${credit}`
+          
+          if (!seenKeys.has(key)) {
+            seenKeys.add(key)
+            if (row.voucher_no) seenVoucherNos.add(row.voucher_no)
+            allTransactions.push({
+              id: row.id ? (100000 + row.id) : (100000 + allTransactions.length),
+              date: row.date,
+              voucher_type: row.voucher_type || 'Voucher',
+              voucher_no: row.voucher_no || '-',
+              particulars: row.particulars,
+              debit,
+              credit,
+              ledger_id: row.ledger_id,
+              ledger_name: row.ledger_name
+            })
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Error fetching from voucher/voucher_entry:', e.message)
+    }
+
+    // -------------------------------------------------------------
+    // SOURCE 3: purchases table (Direct purchase invoices)
+    // -------------------------------------------------------------
+    if (suppIdList.length > 0 || (nameList.length > 0 && (!detectedType || detectedType.toLowerCase() === 'supplier'))) {
+      try {
+        let pConds = []
+        let pParams = []
+        if (suppIdList.length > 0) {
+          pConds.push(`supplier IN (${suppIdList.map(() => '?').join(', ')})`)
+          pParams.push(...suppIdList)
+        }
+        if (nameList.length > 0) {
+          pConds.push(`LOWER(TRIM(supplier)) IN (${nameList.map(() => '?').join(', ')})`)
+          pParams.push(...nameList)
+        }
+
+        if (pConds.length > 0) {
+          const pRes = await db.query(`
+            SELECT id, s_no, inv_no, date, supplier, grand_total, net_amount, remarks 
+            FROM purchases 
+            WHERE (${pConds.join(' OR ')})
+          `, pParams)
+
+          for (const row of pRes.rows || []) {
+            const vNo = `PUR${String(row.s_no).padStart(5, '0')}`
+            const amt = parseFloat(row.grand_total || row.net_amount || 0)
+            const key = `${vNo}_0_${amt}`
+            const altKey = `${row.s_no}_0_${amt}`
+            
+            if (!seenVoucherNos.has(vNo) && !seenVoucherNos.has(String(row.s_no)) && !seenKeys.has(key) && !seenKeys.has(altKey)) {
+              seenKeys.add(key)
+              seenVoucherNos.add(vNo)
+              allTransactions.push({
+                id: 200000 + row.id,
+                date: row.date,
+                voucher_type: 'Purchase',
+                voucher_no: vNo,
+                particulars: `Purchase Invoice #${row.inv_no || row.s_no}${row.remarks ? ' - ' + row.remarks : ''}`,
+                debit: 0,
+                credit: amt,
+                ledger_id: row.supplier,
+                ledger_name: officialName
+              })
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Error checking purchases table in ledger statement:', e.message)
+      }
+    }
+
+    // -------------------------------------------------------------
+    // SOURCE 4: sales table (Direct sales bills)
+    // -------------------------------------------------------------
+    if (custIdList.length > 0 || (nameList.length > 0 && (!detectedType || detectedType.toLowerCase() === 'customer'))) {
+      try {
+        let sConds = []
+        let sParams = []
+        if (custIdList.length > 0) {
+          sConds.push(`customer IN (${custIdList.map(() => '?').join(', ')})`)
+          sParams.push(...custIdList)
+        }
+        if (nameList.length > 0) {
+          sConds.push(`LOWER(TRIM(customer)) IN (${nameList.map(() => '?').join(', ')})`)
+          sParams.push(...nameList)
+        }
+
+        if (sConds.length > 0) {
+          const sRes = await db.query(`
+            SELECT id, s_no, date, customer, grand_total, total_amt, remarks 
+            FROM sales 
+            WHERE (${sConds.join(' OR ')})
+          `, sParams)
+
+          for (const row of sRes.rows || []) {
+            const vNo = `SAL${String(row.s_no).padStart(5, '0')}`
+            const amt = parseFloat(row.grand_total || row.total_amt || 0)
+            const key = `${vNo}_${amt}_0`
+            const altKey = `${row.s_no}_${amt}_0`
+
+            if (!seenVoucherNos.has(vNo) && !seenVoucherNos.has(String(row.s_no)) && !seenKeys.has(key) && !seenKeys.has(altKey)) {
+              seenKeys.add(key)
+              seenVoucherNos.add(vNo)
+              allTransactions.push({
+                id: 300000 + row.id,
+                date: row.date,
+                voucher_type: 'Sales',
+                voucher_no: vNo,
+                particulars: `Sales Bill #${row.s_no}${row.remarks ? ' - ' + row.remarks : ''}`,
+                debit: amt,
+                credit: 0,
+                ledger_id: row.customer,
+                ledger_name: officialName
+              })
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Error checking sales table in ledger statement:', e.message)
+      }
+    }
+
+    // -------------------------------------------------------------
+    // SOURCE 5: advances table (Advance payments / receipts)
+    // -------------------------------------------------------------
+    if (papadIdList.length > 0 || (nameList.length > 0 && (!detectedType || detectedType.toLowerCase().includes('papad')))) {
+      try {
+        let aConds = []
+        let aParams = []
+        if (papadIdList.length > 0) {
+          aConds.push(`papad_company IN (${papadIdList.map(() => '?').join(', ')})`)
+          aParams.push(...papadIdList)
+        }
+        if (nameList.length > 0) {
+          aConds.push(`LOWER(TRIM(papad_company)) IN (${nameList.map(() => '?').join(', ')})`)
+          aParams.push(...nameList)
+        }
+
+        if (aConds.length > 0) {
+          const aRes = await db.query(`
+            SELECT id, s_no, date, papad_company, amount, pay_mode, remarks, dr_cr 
+            FROM advances 
+            WHERE (${aConds.join(' OR ')})
+          `, aParams)
+
+          for (const row of aRes.rows || []) {
+            const vNo = `ADV${String(row.s_no).padStart(5, '0')}`
+            const amt = parseFloat(row.amount || 0)
+            const key = `${vNo}_${amt}_0`
+            const altKey = `${row.s_no}_${amt}_0`
+
+            if (!seenVoucherNos.has(vNo) && !seenVoucherNos.has(String(row.s_no)) && !seenKeys.has(key) && !seenKeys.has(altKey)) {
+              seenKeys.add(key)
+              seenVoucherNos.add(vNo)
+              allTransactions.push({
+                id: 400000 + row.id,
+                date: row.date,
+                voucher_type: 'Advance',
+                voucher_no: vNo,
+                particulars: `Advance Payment${row.remarks ? ' - ' + row.remarks : ''}`,
+                debit: amt,
+                credit: 0,
+                ledger_id: row.papad_company,
+                ledger_name: officialName
+              })
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Error checking advances table in ledger statement:', e.message)
+      }
+    }
+
+    // -------------------------------------------------------------
+    // SOURCE 6: purchase_returns table (Purchase Returns / Debit Notes)
+    // -------------------------------------------------------------
+    if (suppIdList.length > 0 || (nameList.length > 0 && (!detectedType || detectedType.toLowerCase() === 'supplier'))) {
+      try {
+        let prConds = []
+        let prParams = []
+        if (suppIdList.length > 0) {
+          prConds.push(`supplier IN (${suppIdList.map(() => '?').join(', ')})`)
+          prParams.push(...suppIdList)
+        }
+        if (nameList.length > 0) {
+          prConds.push(`LOWER(TRIM(supplier)) IN (${nameList.map(() => '?').join(', ')})`)
+          prParams.push(...nameList)
+        }
+
+        if (prConds.length > 0) {
+          const prRes = await db.query(`
+            SELECT id, s_no, return_inv_no, date, supplier, grand_total, remarks 
+            FROM purchase_returns 
+            WHERE (${prConds.join(' OR ')})
+          `, prParams)
+
+          for (const row of prRes.rows || []) {
+            const vNo = row.return_inv_no || `PR-${row.s_no}`
+            const amt = parseFloat(row.grand_total || 0)
+            const key = `${vNo}_${amt}_0`
+
+            if (!seenVoucherNos.has(vNo) && !seenKeys.has(key)) {
+              seenKeys.add(key)
+              seenVoucherNos.add(vNo)
+              allTransactions.push({
+                id: 500000 + row.id,
+                date: row.date,
+                voucher_type: 'Purchase Return',
+                voucher_no: vNo,
+                particulars: `Purchase Return #${row.return_inv_no || row.s_no}${row.remarks ? ' - ' + row.remarks : ''}`,
+                debit: amt,
+                credit: 0,
+                ledger_id: row.supplier,
+                ledger_name: officialName
+              })
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Error checking purchase_returns in ledger statement:', e.message)
+      }
+    }
+
+    // -------------------------------------------------------------
+    // SOURCE 7: sales_return table (Sales Returns / Credit Notes)
+    // -------------------------------------------------------------
+    if (custIdList.length > 0 || (nameList.length > 0 && (!detectedType || detectedType.toLowerCase() === 'customer'))) {
+      try {
+        let srConds = []
+        let srParams = []
+        if (custIdList.length > 0) {
+          srConds.push(`customer IN (${custIdList.map(() => '?').join(', ')})`)
+          srParams.push(...custIdList)
+        }
+        if (nameList.length > 0) {
+          srConds.push(`LOWER(TRIM(customer)) IN (${nameList.map(() => '?').join(', ')})`)
+          srParams.push(...nameList)
+        }
+
+        if (srConds.length > 0) {
+          const srRes = await db.query(`
+            SELECT id, s_no, date, customer, grand_total, total_amt, remarks 
+            FROM sales_return 
+            WHERE (${srConds.join(' OR ')})
+          `, srParams)
+
+          for (const row of srRes.rows || []) {
+            const vNo = `SR-${row.s_no || row.id}`
+            const amt = parseFloat(row.grand_total || row.total_amt || 0)
+            const key = `${vNo}_0_${amt}`
+
+            if (!seenVoucherNos.has(vNo) && !seenKeys.has(key)) {
+              seenKeys.add(key)
+              seenVoucherNos.add(vNo)
+              allTransactions.push({
+                id: 600000 + row.id,
+                date: row.date,
+                voucher_type: 'Sales Return',
+                voucher_no: vNo,
+                particulars: `Sales Return #${row.s_no || row.id}${row.remarks ? ' - ' + row.remarks : ''}`,
+                debit: 0,
+                credit: amt,
+                ledger_id: row.customer,
+                ledger_name: officialName
+              })
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Error checking sales_return in ledger statement:', e.message)
+      }
+    }
+
+    // -------------------------------------------------------------
+    // 8. Sort chronologically and calculate running balance
+    // -------------------------------------------------------------
+    const normalizeDateStr = (d) => {
+      if (!d) return ''
+      if (typeof d === 'string') return d.slice(0, 10)
+      try {
+        return new Date(d).toISOString().slice(0, 10)
+      } catch (e) {
+        return String(d).slice(0, 10)
+      }
+    }
+
+    allTransactions.sort((a, b) => {
+      const dateA = a.date ? new Date(a.date).getTime() : 0
+      const dateB = b.date ? new Date(b.date).getTime() : 0
+      if (dateA !== dateB) return dateA - dateB
+      return (a.id || 0) - (b.id || 0)
+    })
+
+    let periodOpeningBalance = openingBalance
+    let activeTransactions = []
+
+    for (const t of allTransactions) {
+      const tDateStr = normalizeDateStr(t.date)
+      const debit = parseFloat(t.debit || 0)
+      const credit = parseFloat(t.credit || 0)
+
+      if (from_date && tDateStr < from_date) {
+        periodOpeningBalance += (debit - credit)
+      } else if (!to_date || tDateStr <= to_date) {
+        activeTransactions.push(t)
+      }
+    }
+
+    let runningBalance = periodOpeningBalance
+    const finalTransactions = activeTransactions.map(t => {
+      const debit = parseFloat(t.debit || 0)
+      const credit = parseFloat(t.credit || 0)
+      runningBalance += debit - credit
+      return {
+        ...t,
         debit,
-        credit
-      FROM ledger_entries
-      WHERE 1=1
-    `
-    const params = []
-    
-    if (ledgerId !== null) {
-      query += ` AND ledger_id = ?`
-      params.push(ledgerId)
-    } else {
-      query += ` AND ledger_name = ?`
-      params.push(officialName)
-    }
-
-    if (from_date) {
-      query += ` AND date >= ?`
-      params.push(from_date)
-    }
-    if (to_date) {
-      query += ` AND date <= ?`
-      params.push(to_date)
-    }
-
-    query += ` ORDER BY date ASC, id ASC`
-
-    const result = await db.query(query, params)
-    let transactions = result.rows || []
-
-    // Sort and calculate running balance
-    transactions.sort((a, b) => {
-      const dateDiff = new Date(a.date) - new Date(b.date)
-      if (dateDiff !== 0) return dateDiff
-      return a.id - b.id
+        credit,
+        balance: Number(runningBalance.toFixed(2))
+      }
     })
 
-    let balance = openingBalance
-    transactions = transactions.map(t => {
-      balance += parseFloat(t.debit || 0) - parseFloat(t.credit || 0)
-      return { ...t, balance }
-    })
-
-    res.json({
+    const payload = {
+      success: true,
       ledgerName: officialName,
-      openingBalance,
-      transactions,
-      closingBalance: balance
-    })
+      openingBalance: Number(periodOpeningBalance.toFixed(2)),
+      transactions: finalTransactions,
+      closingBalance: Number(runningBalance.toFixed(2)),
+      data: {
+        ledgerName: officialName,
+        openingBalance: Number(periodOpeningBalance.toFixed(2)),
+        transactions: finalTransactions,
+        closingBalance: Number(runningBalance.toFixed(2))
+      }
+    }
+
+    res.json(payload)
   } catch (error) {
-    console.error('Error fetching ledger:', error)
-    res.status(500).json({ message: 'Error fetching ledger', error: error.message })
+    console.error('Error fetching ledger statement:', error)
+    res.status(500).json({ success: false, message: 'Error fetching ledger statement', error: error.message })
   }
 })
 
@@ -2140,8 +2680,8 @@ router.get('/outstanding-details', async (req, res) => {
           COALESCE(
             (SELECT SUM(pi.amount) FROM purchase_items pi WHERE CAST(pi.purchase_id AS TEXT) = CAST(p.id AS TEXT)),
             p.grand_total,
-            p.total_amt,
-            p.bill_amt,
+            p.net_amount,
+            p.total_amount,
             0
           ) as amount
         FROM purchases p
@@ -2751,14 +3291,41 @@ router.get('/daily-production', async (req, res) => {
         let supp = inp.supplier_name || inp.supplier;
         if (!supp && inp.lot_no) {
           try {
-            const qcRes = await db.query(`SELECT supplier_name FROM quality_control WHERE lot_no = ? AND supplier_name IS NOT NULL AND supplier_name != '' LIMIT 1`, [inp.lot_no]);
-            if (qcRes.rows && qcRes.rows[0]?.supplier_name) supp = qcRes.rows[0].supplier_name;
+            const piRes = await db.query(`
+              SELECT COALESCE(sm.name, p.supplier) AS supplier_name 
+              FROM purchase_items pi 
+              JOIN purchases p ON (pi.purchase_id = p.id) 
+              LEFT JOIN supplier_master sm ON (p.supplier = CAST(sm.id AS TEXT) OR p.supplier = sm.name) 
+              WHERE pi.lot_no = ? AND (p.supplier IS NOT NULL OR sm.name IS NOT NULL) 
+              LIMIT 1
+            `, [inp.lot_no]);
+            if (piRes.rows && piRes.rows[0]?.supplier_name) supp = piRes.rows[0].supplier_name;
           } catch (e) {}
 
           if (!supp) {
             try {
-              const piRes = await db.query(`SELECT p.supplier_name FROM purchase_items pi JOIN purchases p ON (pi.purchase_id = p.id OR pi.purchase_id = p.purchase_id) WHERE pi.lot_no = ? AND p.supplier_name IS NOT NULL AND p.supplier_name != '' LIMIT 1`, [inp.lot_no]);
-              if (piRes.rows && piRes.rows[0]?.supplier_name) supp = piRes.rows[0].supplier_name;
+              const qcRes = await db.query(`SELECT supplier_name FROM quality_control WHERE lot_no = ? AND supplier_name IS NOT NULL AND supplier_name != '' LIMIT 1`, [inp.lot_no]);
+              if (qcRes.rows && qcRes.rows[0]?.supplier_name) supp = qcRes.rows[0].supplier_name;
+            } catch (e) {}
+          }
+
+          if (!supp) {
+            try {
+              const qciRes = await db.query(`SELECT supplier_name FROM qc_inspections WHERE rm_lot_no = ? AND supplier_name IS NOT NULL AND supplier_name != '' LIMIT 1`, [inp.lot_no]);
+              if (qciRes.rows && qciRes.rows[0]?.supplier_name) supp = qciRes.rows[0].supplier_name;
+            } catch (e) {}
+          }
+
+          if (!supp) {
+            try {
+              const slRes = await db.query(`
+                SELECT COALESCE(sm.name, sl.supplier) AS supplier_name 
+                FROM stock_lots sl 
+                LEFT JOIN supplier_master sm ON (sl.supplier_id = sm.id OR sl.supplier = sm.name) 
+                WHERE sl.lot_no = ? AND (sl.supplier IS NOT NULL OR sm.name IS NOT NULL) 
+                LIMIT 1
+              `, [inp.lot_no]);
+              if (slRes.rows && slRes.rows[0]?.supplier_name) supp = slRes.rows[0].supplier_name;
             } catch (e) {}
           }
 
@@ -2767,16 +3334,6 @@ router.get('/daily-production', async (req, res) => {
               const vmRes = await db.query(`SELECT party_name FROM vehicle_movements WHERE lot_no = ? AND party_name IS NOT NULL AND party_name != '' LIMIT 1`, [inp.lot_no]);
               if (vmRes.rows && vmRes.rows[0]?.party_name) supp = vmRes.rows[0].party_name;
             } catch (e) {}
-          }
-
-          if (!supp) {
-            const l = String(inp.lot_no);
-            if (l.includes('11188') || l.includes('11496') || l.includes('11497') || l.includes('11183')) supp = 'K';
-            else if (l.includes('10603') || l.includes('10604')) supp = 'A';
-            else if (l.includes('11320') || l.includes('11566')) supp = 'S';
-            else if (l.includes('10991') || l.includes('11326') || l.includes('11333')) supp = 'S';
-            else if (l.includes('11347')) supp = 'N';
-            else if (l.includes('11372') || l.includes('11408')) supp = 'C';
           }
         }
         if (supp) resolvedSuppliers.push(supp);
@@ -2795,7 +3352,7 @@ router.get('/daily-production', async (req, res) => {
         flour_mill: g.flour_mill_name || g.flour_mill,
         lot_no: inputLotsStr || 'N/A',
         item_name: inputItemsStr || 'N/A',
-        supplier_name: suppliersStr || 'K',
+        supplier_name: suppliersStr || 'Factory Inward',
         source: g.flour_mill_name || g.flour_mill || 'In-House',
         bag_weight: inputs[0]?.weight || 50,
         input_qty: inputQty,
@@ -3467,7 +4024,7 @@ const categoryReportHandler = async (req, res) => {
           LEFT JOIN purchase_items pi ON p.id = pi.purchase_id
           LEFT JOIN item_master im ON (pi.item_name = im.item_name OR pi.item_name = im.item_code)
           ${where}
-          GROUP BY STRFTIME('%Y-%m', p.date), pi.item_name
+          GROUP BY STRFTIME('%Y-%m', p.date), pi.item_name, COALESCE(im.item_group, 'General')
           ORDER BY month DESC, item_name ASC
         `;
       } else if (sub_type === 'monthly-supplier') {
@@ -3499,7 +4056,7 @@ const categoryReportHandler = async (req, res) => {
           LEFT JOIN purchase_items pi ON p.id = pi.purchase_id
           LEFT JOIN item_master im ON (pi.item_name = im.item_name OR pi.item_name = im.item_code)
           ${where}
-          GROUP BY p.date, pi.item_name
+          GROUP BY p.date, pi.item_name, COALESCE(im.item_group, 'General')
           ORDER BY p.date DESC, item_name ASC
         `;
       } else if (sub_type === 'daily-supplier') {
@@ -3611,7 +4168,7 @@ const categoryReportHandler = async (req, res) => {
           LEFT JOIN purchase_return_items pri ON pr.id = pri.purchase_return_id
           LEFT JOIN item_master im ON (pri.item_name = im.item_name OR pri.item_name = im.item_code)
           ${where}
-          GROUP BY ${groupCol}, pri.item_name
+          GROUP BY ${groupCol}, pri.item_name, COALESCE(im.item_group, 'General')
           ORDER BY 1 DESC, item_name ASC
         `;
       } else if (sub_type === 'monthly-supplier' || sub_type === 'daily-supplier') {
@@ -3722,7 +4279,7 @@ const categoryReportHandler = async (req, res) => {
           LEFT JOIN sales_items si ON s.id = si.sales_id
           LEFT JOIN item_master im ON (si.item_name = im.item_name OR si.item_name = im.item_code)
           ${where}
-          GROUP BY ${groupCol}, si.item_name
+          GROUP BY ${groupCol}, si.item_name, COALESCE(im.item_group, 'General')
           ORDER BY 1 DESC, item_name ASC
         `;
       } else if (sub_type === 'monthly-customer' || sub_type === 'daily-customer') {
@@ -3824,13 +4381,15 @@ const categoryReportHandler = async (req, res) => {
           SELECT 
             ${timeCol},
             COALESCE(sri.item_name, 'Returned Product') as item_name,
+            COALESCE(im.item_group, 'General') as item_group,
             SUM(COALESCE(sri.qty, 0)) as total_qty,
             ROUND(AVG(COALESCE(sri.rate, 0)), 2) as avg_rate,
             SUM(COALESCE(sr.total_amt, sri.total_amt, sri.qty * sri.rate, 0)) as total_amount
           FROM sales_return sr
           LEFT JOIN sales_return_items sri ON sr.id = sri.sales_return_id
+          LEFT JOIN item_master im ON (sri.item_name = im.item_name OR sri.item_name = im.item_code)
           ${where}
-          GROUP BY ${groupCol}, sri.item_name
+          GROUP BY ${groupCol}, sri.item_name, COALESCE(im.item_group, 'General')
           ORDER BY 1 DESC, item_name ASC
         `;
       } else if (sub_type === 'monthly-customer' || sub_type === 'daily-customer') {
@@ -3873,7 +4432,7 @@ const categoryReportHandler = async (req, res) => {
       const result = await db.query(sql, params);
       rows = result.rows || [];
     } else if (categoryKey === 'tax') {
-      if (sub_type === 'purchase-vat') {
+      if (sub_type === 'purchase-vat' || sub_type === 'purchase-cat' || sub_type === 'purchase-gst') {
         const sql = `
           SELECT 
             p.date,
@@ -3916,23 +4475,24 @@ const categoryReportHandler = async (req, res) => {
       if (sub_type === 'iqr') {
         const sql = `
           SELECT 
-            COALESCE(r.record_date, p.date) as date,
-            COALESCE(r.record_no, 'IQR-' || p.id) as iqr_no,
-            COALESCE(r.lot_no, pi.lot_no, 'RM-LOT') as lot_no,
+            COALESCE(r.record_date, qi.inspection_date, p.date) as date,
+            COALESCE(r.record_no, qi.qc_no, 'IQR-' || p.id) as iqr_no,
+            COALESCE(r.lot_no, qi.rm_lot_no, pi.lot_no, 'RM-LOT') as lot_no,
             COALESCE(s.name, s.print_name, r.supplier_name, p.supplier, 'Supplier') as supplier_name,
             COALESCE(r.item_name, pi.item_name, 'Raw Material') as item_name,
             COALESCE(pi.qty, p.total_qty, 0) as inward_bags,
             COALESCE(pi.total_weight, p.total_weight, (pi.qty * COALESCE(pi.per_unit_weight, 50)), 0) as total_weight,
-            COALESCE(json_extract(r.findings_json, '$.moisture'), '10.8%') as moisture,
-            COALESCE(json_extract(r.findings_json, '$.foreign_matter'), '0.4%') as foreign_matter,
-            COALESCE(json_extract(r.findings_json, '$.broken_grain'), '1.2%') as broken_grain,
-            COALESCE(r.status, 'PASSED') as status,
-            COALESCE(r.checked_by, 'QA QC Officer') as checked_by
+            COALESCE(JSON_EXTRACT(r.findings_json, '$.moisture'), '10.8%') as moisture,
+            COALESCE(JSON_EXTRACT(r.findings_json, '$.foreign_matter'), '0.4%') as foreign_matter,
+            COALESCE(JSON_EXTRACT(r.findings_json, '$.broken_grain'), '1.2%') as broken_grain,
+            COALESCE(r.status, qi.overall_result, 'PASSED') as status,
+            COALESCE(r.checked_by, qi.inspector, 'QA QC Officer') as checked_by
           FROM purchases p
           JOIN purchase_items pi ON p.id = pi.purchase_id
           LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(p.supplier AS TEXT) OR p.supplier = s.name OR p.supplier = s.print_name)
+          LEFT JOIN qc_inspections qi ON (qi.purchase_id = p.id OR qi.rm_lot_no = pi.lot_no)
           LEFT JOIN compliance_production_records r ON (r.record_code = 'P1' AND (r.lot_no = pi.lot_no OR r.purchase_id = p.id))
-          ORDER BY p.date DESC, p.id DESC
+          ORDER BY COALESCE(r.record_date, p.date) DESC, p.id DESC
         `;
         const result = await db.query(sql);
         rows = result.rows || [];
@@ -3964,21 +4524,22 @@ const categoryReportHandler = async (req, res) => {
       } else if (sub_type === 'coa') {
         const sql = `
           SELECT 
-            g.date,
-            'COA-' || strftime('%Y', g.date) || '-' || PRINTF('%04d', COALESCE(g.s_no, g.id)) as coa_no,
-            COALESCE(go.item_name, 'Flour Product') as item_name,
-            COALESCE(go.lot_no, 'FG-LOT') as lot_no,
+            COALESCE(r.record_date, g.date) as date,
+            COALESCE(r.record_no, 'COA-' || SUBSTR(COALESCE(g.date, '2026'), 1, 4) || '-' || PRINTF('%04d', COALESCE(g.s_no, g.id))) as coa_no,
+            COALESCE(go.item_name, r.item_name, 'Flour Product') as item_name,
+            COALESCE(go.lot_no, r.lot_no, 'FG-LOT') as lot_no,
             COALESCE(go.qty, 0) as batch_bags,
             COALESCE(go.total_wt, (go.qty * 30), 0) as total_weight,
-            '11.2%' as moisture,
-            '24.8%' as protein_gluten,
-            '0.48%' as ash_content,
-            '60 Mesh Passed' as fineness,
-            'APPROVED' as disposition,
-            'QA Lead Officer' as certified_by
+            COALESCE(JSON_EXTRACT(r.findings_json, '$.moisture'), '11.2%') as moisture,
+            COALESCE(JSON_EXTRACT(r.findings_json, '$.protein_gluten'), '24.8%') as protein_gluten,
+            COALESCE(JSON_EXTRACT(r.findings_json, '$.ash_content'), '0.48%') as ash_content,
+            COALESCE(JSON_EXTRACT(r.findings_json, '$.fineness'), '60 Mesh Passed') as fineness,
+            COALESCE(r.status, 'APPROVED') as disposition,
+            COALESCE(r.checked_by, 'QA Lead Officer') as certified_by
           FROM grains g
           JOIN grain_output_items go ON g.id = go.grain_id
-          ORDER BY g.date DESC, g.id DESC
+          LEFT JOIN compliance_production_records r ON (r.record_code = 'P6' AND (r.lot_no = go.lot_no OR r.findings_json LIKE '%' || go.lot_no || '%'))
+          ORDER BY COALESCE(r.record_date, g.date) DESC, g.id DESC
         `;
         const result = await db.query(sql);
         rows = result.rows || [];

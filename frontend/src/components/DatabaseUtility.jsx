@@ -42,7 +42,16 @@ const DatabaseUtility = () => {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `bvc_erp_backup_${new Date().toISOString().slice(0, 10)}.db`;
+      const disposition = response.headers.get('content-disposition') || '';
+      let filename = '';
+      const filenameMatch = disposition.match(/filename="?([^";]+)"?/);
+      if (filenameMatch && filenameMatch[1]) {
+        filename = filenameMatch[1].trim();
+      } else {
+        const ext = contentType.includes('json') ? 'json' : 'db';
+        filename = `bvc_erp_backup_${new Date().toISOString().slice(0, 10)}.${ext}`;
+      }
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -60,13 +69,14 @@ const DatabaseUtility = () => {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    if (!file.name.endsWith('.db')) {
-      setStatus({ type: 'error', message: 'Please select a valid SQLite database file (.db).' });
+    const lowerName = file.name.toLowerCase();
+    if (!lowerName.endsWith('.db') && !lowerName.endsWith('.json') && !lowerName.endsWith('.sqlite') && !lowerName.endsWith('.sqlite3')) {
+      setStatus({ type: 'error', message: 'Please select a valid database backup file (.db or .json).' });
       return;
     }
 
     const confirmRestore = window.confirm(
-      'WARNING: Restoring a database backup will overwrite all current data. Are you sure you want to proceed?'
+      'WARNING: Restoring a database backup will overwrite current data with the backup records. Are you sure you want to proceed?'
     );
     if (!confirmRestore) return;
 
@@ -171,7 +181,7 @@ const DatabaseUtility = () => {
             Import / Restore Database Backup
           </Typography>
           <Typography variant="body2" sx={{ color: '#666', mb: 3 }}>
-            Overwrite the current database by uploading a previously downloaded <code>.db</code> backup file. This will restore all your previous records.
+            Overwrite the current database by uploading a previously downloaded <code>.db</code> or <code>.json</code> backup file. This will restore all your previous records.
           </Typography>
 
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
@@ -192,8 +202,8 @@ const DatabaseUtility = () => {
                 '&:hover': { borderColor: '#163a8a', backgroundColor: '#eaf2fb' },
               }}
             >
-              {uploading ? 'Restoring Database...' : 'Select & Upload Backup (.db)'}
-              <input type="file" accept=".db" hidden onChange={handleUpload} />
+              {uploading ? 'Restoring Database...' : 'Select & Upload Backup (.db, .json)'}
+              <input type="file" accept=".db,.json,.sqlite,.sqlite3" hidden onChange={handleUpload} />
             </Button>
           </Box>
         </CardContent>

@@ -72,32 +72,34 @@ router.get('/backup', async (req, res) => {
 });
 
 // Upload/Restore database backup
-router.post('/restore', upload.single('database'), async (req, res) => {
+router.post('/restore', upload.any(), async (req, res) => {
+  const uploadedFile = req.file || (req.files && (req.files.find(f => f.fieldname === 'database' || f.fieldname === 'file' || f.fieldname === 'backup') || req.files[0]));
+  const tempFilePath = uploadedFile ? uploadedFile.path : null;
+
   try {
-    if (!req.file) {
-      return res.status(400).json({ message: 'No database file uploaded' })
+    if (!uploadedFile || !tempFilePath) {
+      return res.status(400).json({ success: false, message: 'No database file uploaded' })
     }
     
-    const tempFilePath = req.file.path
     const companyId = req.headers['x-company-id'] || req.body.company_id || (req.user && req.user.company_id) || 1
     
     // Perform database restoration
-    await db.restoreDatabase(tempFilePath, companyId)
+    const result = await db.restoreDatabase(tempFilePath, companyId)
     
     // Clean up temporary uploaded file
     try {
-      fs.unlinkSync(tempFilePath)
+      if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath)
     } catch (e) {
       console.warn('Could not delete temp uploaded file:', e.message)
     }
     
-    res.json({ success: true, message: 'Database restored successfully!' })
+    res.json({ success: true, message: result?.message || 'Database restored successfully!' })
   } catch (error) {
     console.error('Database restoration error:', error)
     // Clean up temporary file on failure too
-    if (req.file && fs.existsSync(req.file.path)) {
+    if (tempFilePath && fs.existsSync(tempFilePath)) {
       try {
-        fs.unlinkSync(req.file.path)
+        fs.unlinkSync(tempFilePath)
       } catch (e) {}
     }
     res.status(500).json({ success: false, message: 'Failed to restore database', error: error.message })

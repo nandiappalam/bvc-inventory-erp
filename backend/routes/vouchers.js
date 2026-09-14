@@ -223,6 +223,24 @@ async function healAllTransactions() {
       }
     }
 
+    // 4. Ensure any vouchers in voucher_entry are present in ledger_entries
+    try {
+      const missingInLedger = await db.query(`
+        SELECT v.id as v_id, v.voucher_no, v.voucher_type, v.date, ve.ledger_id, ve.ledger_name, ve.debit, ve.credit, ve.remarks
+        FROM voucher_entry ve
+        JOIN voucher v ON v.id = ve.voucher_id
+        WHERE v.voucher_no NOT IN (SELECT DISTINCT voucher_no FROM ledger_entries WHERE voucher_no IS NOT NULL)
+      `);
+      for (const row of missingInLedger.rows || []) {
+        await db.run(`
+          INSERT INTO ledger_entries (ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit, particulars, voucher_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [row.ledger_id, row.ledger_name, row.date, row.voucher_type, row.voucher_no, row.debit || 0, row.credit || 0, row.remarks || '', row.v_id]);
+      }
+    } catch (e) {
+      console.warn('Error syncing voucher_entry to ledger_entries:', e.message);
+    }
+
     await healPurchaseAndSalesVouchers();
     console.log('✓ healAllTransactions completed successfully');
   } catch (error) {
@@ -273,12 +291,42 @@ async function healPurchaseAndSalesVouchers() {
         await db.run('UPDATE voucher SET voucher_type = ?, narration = ? WHERE id = ?', ['Payment', newNarration, v.id]);
         await db.run('UPDATE ledger_entries SET voucher_type = ? WHERE voucher_no = ?', ['Payment', v.voucher_no]);
 
+        // If party is not yet recognized as a supplier in the entries, try resolving from reference_no
+        let suppLedgerId = null;
+        let suppLedgerName = null;
+        if (v.reference_no) {
+          try {
+            const cleanRef = String(v.reference_no).trim();
+            const pRows = await db.query(
+              "SELECT supplier FROM purchases WHERE s_no = ? OR s_no = ? OR inv_no = ? LIMIT 1",
+              [cleanRef, cleanRef.replace(/^PUR-?/i, '').replace(/^0+/, '') || cleanRef, cleanRef]
+            );
+            if (pRows.rows && pRows.rows.length > 0) {
+              const suppVal = pRows.rows[0].supplier;
+              const sMaster = await db.query("SELECT id, name FROM supplier_master WHERE id = ? OR name = ? LIMIT 1", [suppVal, suppVal]);
+              if (sMaster.rows && sMaster.rows.length > 0) {
+                const sName = sMaster.rows[0].name;
+                const lm = await db.query("SELECT id, name FROM ledgermaster WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1", [sName]);
+                if (lm.rows && lm.rows.length > 0) {
+                  suppLedgerId = lm.rows[0].id;
+                  suppLedgerName = lm.rows[0].name;
+                }
+              }
+            }
+          } catch (err) {}
+        }
+
         for (const e of entList) {
           const amt = parseFloat(e.debit || 0) || parseFloat(e.credit || 0);
-          const isSupplier = supplierIds.has(e.ledger_id) || (e.l_name && supplierNames.has(e.l_name.trim().toLowerCase()));
+          const isCashOrBank = (e.l_name && (e.l_name.toLowerCase().includes('cash') || e.l_name.toLowerCase().includes('bank'))) ||
+                               e.ledger_type === 'Cash' || e.ledger_type === 'Bank' || e.ledger_id === 1 || e.ledger_id === 2;
+          const isSupplier = !isCashOrBank && (supplierIds.has(e.ledger_id) || (e.l_name && supplierNames.has(e.l_name.trim().toLowerCase())) || !!suppLedgerId);
+          
           if (isSupplier) {
-            await db.run("UPDATE voucher_entry SET type = 'Dr', debit = ?, credit = 0 WHERE id = ?", [amt, e.id]);
-            await db.run("UPDATE ledger_entries SET debit = ?, credit = 0 WHERE voucher_no = ? AND ledger_id = ?", [amt, v.voucher_no, e.ledger_id]);
+            const targetLedgerId = suppLedgerId || e.ledger_id;
+            const targetLedgerName = suppLedgerName || e.l_name || 'Supplier';
+            await db.run("UPDATE voucher_entry SET type = 'Dr', debit = ?, credit = 0, ledger_id = ?, ledger_name = ? WHERE id = ?", [amt, targetLedgerId, targetLedgerName, e.id]);
+            await db.run("UPDATE ledger_entries SET debit = ?, credit = 0, ledger_id = ?, ledger_name = ? WHERE voucher_no = ? AND (ledger_id = ? OR ledger_id = ?)", [amt, targetLedgerId, targetLedgerName, v.voucher_no, e.ledger_id, targetLedgerId]);
           } else {
             await db.run("UPDATE voucher_entry SET type = 'Cr', debit = 0, credit = ? WHERE id = ?", [amt, e.id]);
             await db.run("UPDATE ledger_entries SET debit = 0, credit = ? WHERE voucher_no = ? AND ledger_id = ?", [amt, v.voucher_no, e.ledger_id]);
@@ -289,12 +337,42 @@ async function healPurchaseAndSalesVouchers() {
         await db.run('UPDATE voucher SET voucher_type = ?, narration = ? WHERE id = ?', ['Receipt', newNarration, v.id]);
         await db.run('UPDATE ledger_entries SET voucher_type = ? WHERE voucher_no = ?', ['Receipt', v.voucher_no]);
 
+        // If party is not yet recognized as a customer in the entries, try resolving from reference_no
+        let custLedgerId = null;
+        let custLedgerName = null;
+        if (v.reference_no) {
+          try {
+            const cleanRef = String(v.reference_no).trim();
+            const sRows = await db.query(
+              "SELECT customer FROM sales WHERE s_no = ? OR s_no = ? LIMIT 1",
+              [cleanRef, cleanRef.replace(/^SAL-?/i, '').replace(/^0+/, '') || cleanRef]
+            );
+            if (sRows.rows && sRows.rows.length > 0) {
+              const custVal = sRows.rows[0].customer;
+              const cMaster = await db.query("SELECT id, name FROM customer_master WHERE id = ? OR name = ? LIMIT 1", [custVal, custVal]);
+              if (cMaster.rows && cMaster.rows.length > 0) {
+                const cName = cMaster.rows[0].name;
+                const lm = await db.query("SELECT id, name FROM ledgermaster WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1", [cName]);
+                if (lm.rows && lm.rows.length > 0) {
+                  custLedgerId = lm.rows[0].id;
+                  custLedgerName = lm.rows[0].name;
+                }
+              }
+            }
+          } catch (err) {}
+        }
+
         for (const e of entList) {
           const amt = parseFloat(e.debit || 0) || parseFloat(e.credit || 0);
-          const isCustomer = customerIds.has(e.ledger_id) || (e.l_name && customerNames.has(e.l_name.trim().toLowerCase()));
+          const isCashOrBank = (e.l_name && (e.l_name.toLowerCase().includes('cash') || e.l_name.toLowerCase().includes('bank'))) ||
+                               e.ledger_type === 'Cash' || e.ledger_type === 'Bank' || e.ledger_id === 1 || e.ledger_id === 2;
+          const isCustomer = !isCashOrBank && (customerIds.has(e.ledger_id) || (e.l_name && customerNames.has(e.l_name.trim().toLowerCase())) || !!custLedgerId);
+
           if (isCustomer) {
-            await db.run("UPDATE voucher_entry SET type = 'Cr', debit = 0, credit = ? WHERE id = ?", [amt, e.id]);
-            await db.run("UPDATE ledger_entries SET debit = 0, credit = ? WHERE voucher_no = ? AND ledger_id = ?", [amt, v.voucher_no, e.ledger_id]);
+            const targetLedgerId = custLedgerId || e.ledger_id;
+            const targetLedgerName = custLedgerName || e.l_name || 'Customer';
+            await db.run("UPDATE voucher_entry SET type = 'Cr', debit = 0, credit = ?, ledger_id = ?, ledger_name = ? WHERE id = ?", [amt, targetLedgerId, targetLedgerName, e.id]);
+            await db.run("UPDATE ledger_entries SET debit = 0, credit = ?, ledger_id = ?, ledger_name = ? WHERE voucher_no = ? AND (ledger_id = ? OR ledger_id = ?)", [amt, targetLedgerId, targetLedgerName, v.voucher_no, e.ledger_id, targetLedgerId]);
           } else {
             await db.run("UPDATE voucher_entry SET type = 'Dr', debit = ?, credit = 0 WHERE id = ?", [amt, e.id]);
             await db.run("UPDATE ledger_entries SET debit = ?, credit = 0 WHERE voucher_no = ? AND ledger_id = ?", [amt, v.voucher_no, e.ledger_id]);
@@ -550,17 +628,35 @@ router.post('/', async (req, res) => {
     // Post to ledger_entries
     const ledgerEntries = [];
     for (const entry of data.entries) {
-      const lmResult = await db.query('SELECT name FROM ledgermaster WHERE id = ?', [entry.ledger_id]);
-      const ledger_name = lmResult.rows[0]?.name || 'Unknown';
+      let ledger_name = '';
+      try {
+        const lmResult = await db.query('SELECT name FROM ledgermaster WHERE id = ?', [entry.ledger_id]);
+        if (lmResult.rows && lmResult.rows.length > 0) ledger_name = lmResult.rows[0].name;
+        if (!ledger_name) {
+          const smResult = await db.query('SELECT name FROM supplier_master WHERE id = ?', [entry.ledger_id]);
+          if (smResult.rows && smResult.rows.length > 0) ledger_name = smResult.rows[0].name;
+        }
+        if (!ledger_name) {
+          const cmResult = await db.query('SELECT name FROM customer_master WHERE id = ?', [entry.ledger_id]);
+          if (cmResult.rows && cmResult.rows.length > 0) ledger_name = cmResult.rows[0].name;
+        }
+        if (!ledger_name) {
+          const pmResult = await db.query('SELECT name FROM papad_company_master WHERE id = ?', [entry.ledger_id]);
+          if (pmResult.rows && pmResult.rows.length > 0) ledger_name = pmResult.rows[0].name;
+        }
+      } catch (e) {}
+
+      if (!ledger_name) ledger_name = 'Unknown';
+
       const particularsText = (entry.remarks && entry.remarks.trim()) 
         ? entry.remarks.trim() 
         : ((data.reference_no && data.reference_no.trim()) 
             ? data.reference_no.trim() 
             : (data.narration || ''));
       ledgerEntries.push(db.run(
-        `INSERT INTO ledger_entries (ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit, particulars) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [entry.ledger_id, ledger_name, data.date, data.voucher_type, voucher_no, entry.debit || 0, entry.credit || 0, particularsText]
+        `INSERT INTO ledger_entries (ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit, particulars, voucher_id) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [entry.ledger_id, ledger_name, data.date, data.voucher_type, voucher_no, entry.debit || 0, entry.credit || 0, particularsText, voucherId]
       ));
     }
     await Promise.all(ledgerEntries);
@@ -626,17 +722,35 @@ router.put('/:id', async (req, res) => {
         [req.params.id, entry.type, entry.ledger_id, entry.debit || 0, entry.credit || 0, entry.remarks || '']
       );
       
-      const lmResult = await db.query('SELECT name FROM ledgermaster WHERE id = ?', [entry.ledger_id]);
-      const ledger_name = lmResult.rows[0]?.name || 'Unknown';
+      let ledger_name = '';
+      try {
+        const lmResult = await db.query('SELECT name FROM ledgermaster WHERE id = ?', [entry.ledger_id]);
+        if (lmResult.rows && lmResult.rows.length > 0) ledger_name = lmResult.rows[0].name;
+        if (!ledger_name) {
+          const smResult = await db.query('SELECT name FROM supplier_master WHERE id = ?', [entry.ledger_id]);
+          if (smResult.rows && smResult.rows.length > 0) ledger_name = smResult.rows[0].name;
+        }
+        if (!ledger_name) {
+          const cmResult = await db.query('SELECT name FROM customer_master WHERE id = ?', [entry.ledger_id]);
+          if (cmResult.rows && cmResult.rows.length > 0) ledger_name = cmResult.rows[0].name;
+        }
+        if (!ledger_name) {
+          const pmResult = await db.query('SELECT name FROM papad_company_master WHERE id = ?', [entry.ledger_id]);
+          if (pmResult.rows && pmResult.rows.length > 0) ledger_name = pmResult.rows[0].name;
+        }
+      } catch (e) {}
+
+      if (!ledger_name) ledger_name = 'Unknown';
+
       const particularsText = (entry.remarks && entry.remarks.trim()) 
         ? entry.remarks.trim() 
         : ((data.reference_no && data.reference_no.trim()) 
             ? data.reference_no.trim() 
             : (data.narration || ''));
       ledgerEntries.push(db.run(
-        `INSERT INTO ledger_entries (ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit, particulars) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [entry.ledger_id, ledger_name, data.date, data.voucher_type, voucher_no, entry.debit || 0, entry.credit || 0, particularsText]
+        `INSERT INTO ledger_entries (ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit, particulars, voucher_id) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [entry.ledger_id, ledger_name, data.date, data.voucher_type, voucher_no, entry.debit || 0, entry.credit || 0, particularsText, req.params.id]
       ));
     }
     await Promise.all(ledgerEntries);
@@ -701,5 +815,6 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
+router.healPurchaseAndSalesVouchers = healPurchaseAndSalesVouchers;
 module.exports = router;
 

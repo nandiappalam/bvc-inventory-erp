@@ -63,6 +63,20 @@ const completedColumns = [
   { key: 'actions', label: 'Actions', sx: { width: '10%', textAlign: 'right' } }
 ];
 
+const DEFAULT_GODOWNS = [
+  { id: 1, godown_name: 'Main Godown', name: 'Main Godown' },
+  { id: 2, godown_name: 'Godown 1', name: 'Godown 1' },
+  { id: 3, godown_name: 'Raw Material Godown', name: 'Raw Material Godown' },
+  { id: 4, godown_name: 'Finished Goods Godown', name: 'Finished Goods Godown' }
+];
+
+const STATIC_GODOWN_MAP = {
+  '1': 'Main Godown',
+  '2': 'Godown 1',
+  '3': 'Raw Material Godown',
+  '4': 'Finished Goods Godown'
+};
+
 export default function QualityControlList() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
@@ -72,11 +86,45 @@ export default function QualityControlList() {
   // States
   const [pendingLots, setPendingLots] = useState([]);
   const [completedTests, setCompletedTests] = useState([]);
-  const [godowns, setGodowns] = useState([]);
+  const [godowns, setGodowns] = useState(DEFAULT_GODOWNS);
   const [vehicleMovementsIn, setVehicleMovementsIn] = useState([]);
   const [allocationsMap, setAllocationsMap] = useState({});
   const [activePrintMovementId, setActivePrintMovementId] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+
+  const getGodownDisplayName = (alloc) => {
+    if (!alloc) return 'Main Godown';
+    const gId = String(alloc.godown_id || alloc.godownId || '').trim();
+    let rawName = String(alloc.godown_name || alloc.name || '').trim();
+
+    // Strip prefixes like "Godown ID: 3", "Godown: 1", etc.
+    const matchIdInName = rawName.match(/^(?:Godown(?:\s*ID)?\s*:\s*)?(\d+)$/i);
+    const resolvedId = matchIdInName ? matchIdInName[1] : (gId || (!isNaN(Number(rawName)) ? rawName : ''));
+
+    // If rawName is already a descriptive non-numeric name, clean it up
+    if (rawName && !matchIdInName && isNaN(Number(rawName)) && !/^godown\s*id/i.test(rawName)) {
+      return rawName.replace(/^Godown\s*:\s*/i, '');
+    }
+
+    // Try finding in loaded godowns state
+    if (resolvedId && godowns && godowns.length > 0) {
+      const found = godowns.find(g => 
+        String(g.id) === resolvedId || 
+        (g.godown_name && String(g.godown_name).toLowerCase() === resolvedId.toLowerCase()) ||
+        (g.name && String(g.name).toLowerCase() === resolvedId.toLowerCase())
+      );
+      if (found) {
+        return found.godown_name || found.name || found.print_name;
+      }
+    }
+
+    // Static fallback dictionary for known master records
+    if (resolvedId && STATIC_GODOWN_MAP[resolvedId]) {
+      return STATIC_GODOWN_MAP[resolvedId];
+    }
+
+    return rawName || (resolvedId ? `Godown ${resolvedId}` : 'Main Godown');
+  };
 
   const loadData = () => {
     setLoading(true);
@@ -112,8 +160,22 @@ export default function QualityControlList() {
           });
           setAllocationsMap(initialMap);
         }
-        if (godownsRes?.success) {
-          setGodowns(godownsRes.data || []);
+
+        const godownItems = (godownsRes && Array.isArray(godownsRes))
+          ? godownsRes
+          : (godownsRes?.data && Array.isArray(godownsRes.data))
+            ? godownsRes.data
+            : (godownsRes?.success && Array.isArray(godownsRes.data))
+              ? godownsRes.data
+              : [];
+
+        if (godownItems.length > 0) {
+          setGodowns(godownItems);
+        } else {
+          api('/masters/godowns').then(res => {
+            const list = Array.isArray(res) ? res : (res?.data || []);
+            if (list.length > 0) setGodowns(list);
+          }).catch(() => {});
         }
         if (Array.isArray(vehiclesRes)) {
           // Filter vehicles with IN status
@@ -734,21 +796,24 @@ export default function QualityControlList() {
                               ✓ Unloaded & Verified
                             </Box>
                             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                              {(row.allocations && row.allocations.length > 0 ? row.allocations : [{ godown_name: row.godown_name, godown_id: row.godown_id, quantity: row.quantity }]).map((alloc, aIdx) => (
-                                <Box key={aIdx} sx={{ display: 'flex', alignItems: 'center', gap: 0.8 }}>
-                                  <StoreIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
-                                  <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '0.85rem' }}>
-                                    {alloc.godown_name || `Godown ID: ${alloc.godown_id}`}:
-                                  </Typography>
-                                  <Chip 
-                                    label={`${alloc.quantity} bags`} 
-                                    size="small" 
-                                    variant="outlined" 
-                                    color="success" 
-                                    sx={{ fontWeight: 800, height: 22, fontSize: '0.75rem' }} 
-                                  />
-                                </Box>
-                              ))}
+                              {(row.allocations && row.allocations.length > 0 ? row.allocations : [{ godown_name: row.godown_name, godown_id: row.godown_id, quantity: row.quantity }]).map((alloc, aIdx) => {
+                                const godownDisplayName = getGodownDisplayName(alloc);
+                                return (
+                                  <Box key={aIdx} sx={{ display: 'flex', alignItems: 'center', gap: 0.8 }}>
+                                    <StoreIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+                                    <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '0.85rem' }}>
+                                      Godown: {godownDisplayName}
+                                    </Typography>
+                                    <Chip 
+                                      label={`${alloc.quantity || row.quantity} bags`} 
+                                      size="small" 
+                                      variant="outlined" 
+                                      color="success" 
+                                      sx={{ fontWeight: 800, height: 22, fontSize: '0.75rem' }} 
+                                    />
+                                  </Box>
+                                );
+                              })}
                             </Box>
                           </Box>
                         ) : (
@@ -765,7 +830,7 @@ export default function QualityControlList() {
                                   >
                                     {godowns.map(g => (
                                       <MenuItem key={g.id} value={g.id}>
-                                        {g.godown_name}
+                                        {g.godown_name || g.name || g.print_name || `Godown ${g.id}`}
                                       </MenuItem>
                                     ))}
                                   </Select>
