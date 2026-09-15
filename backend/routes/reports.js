@@ -2616,29 +2616,91 @@ router.get('/outstanding-details', async (req, res) => {
     const { as_on_date, ledger_name } = req.query
     const toDate = as_on_date || new Date().toISOString().split('T')[0]
     
-    // 1. Get all ledgers to resolve names and types
-    const ledgersRes = await db.query('SELECT id, name, ledger_type FROM ledgermaster')
+    // 1. Get all ledgers to resolve names, types, and groupings
+    const ledgersRes = await db.query('SELECT id, name, ledger_type, under FROM ledgermaster')
     const ledgerMap = {}
     const ledgerTypeMap = {}
+    const ledgerUnderMap = {}
     ;(ledgersRes.rows || []).forEach(row => {
       ledgerMap[String(row.id)] = row.name
-      ledgerTypeMap[row.name.trim().toLowerCase()] = row.ledger_type
+      const n = (row.name || '').trim().toLowerCase()
+      ledgerTypeMap[n] = row.ledger_type || ''
+      ledgerUnderMap[n] = row.under || ''
     })
+
+    // Helper: identify non-party accounts that should NEVER be treated as bills / invoices
+    const isExcludedNonPartyAccount = (ledgerName) => {
+      if (!ledgerName) return true
+      const n = String(ledgerName).trim().toLowerCase()
+      const lt = String(ledgerTypeMap[n] || '').trim().toLowerCase()
+      const u = String(ledgerUnderMap[n] || '').trim().toLowerCase()
+
+      // Obvious non-party ledger types
+      if (['purchase', 'sales', 'tax', 'expense', 'income', 'asset', 'cash', 'bank'].includes(lt)) {
+        return true
+      }
+
+      // Check under group if available
+      if (
+        u.includes('purchase') ||
+        u.includes('sales') ||
+        u.includes('duties & taxes') ||
+        u.includes('direct expenses') ||
+        u.includes('indirect expenses') ||
+        u.includes('direct income') ||
+        u.includes('indirect income') ||
+        u.includes('bank accounts') ||
+        u.includes('cash-in-hand') ||
+        u.includes('fixed assets') ||
+        u.includes('current assets')
+      ) {
+        if (!u.includes('debtor') && !u.includes('creditor') && !u.includes('customer') && !u.includes('supplier')) {
+          return true
+        }
+      }
+
+      // Name based exclusions
+      if (
+        n.startsWith('purchase account') ||
+        n.startsWith('purchases') ||
+        n === 'purchase' ||
+        n.startsWith('sales account') ||
+        n.startsWith('sales') ||
+        n.includes('cgst') ||
+        n.includes('sgst') ||
+        n.includes('igst') ||
+        n.includes('input tax') ||
+        n.includes('output tax') ||
+        n.includes('freight') ||
+        n.includes('wages') ||
+        n.includes('milling') ||
+        n.includes('discount') ||
+        n.includes('round off') ||
+        n.includes('cash in hand') ||
+        n.includes('bank account') ||
+        n.includes('petty cash')
+      ) {
+        return true
+      }
+
+      return false
+    }
 
     // 2. Fetch real Purchases & Sales from active operational transaction tables
     const billsMap = {}
+    const trackedPurchaseKeys = new Set()
+    const trackedSalesKeys = new Set()
+    const purchaseBillsByRef = new Map()
+    const salesBillsByRef = new Map()
 
     // Helper to generate all searchable identifiers for a bill
-    const getBillSearchTokens = (id, sNo, invNo, voucherType) => {
+    const getBillSearchTokens = (id, sNo, invNo, voucherType, voucherNo) => {
       const tokens = new Set()
       const prefix = voucherType === 'Sales' ? 'SAL' : 'PUR'
       
-      if (invNo) {
-        tokens.add(String(invNo).trim().toLowerCase())
-        tokens.add(`${prefix}-${String(invNo).trim()}`.toLowerCase())
-      }
-      if (sNo !== undefined && sNo !== null && String(sNo).trim() !== '') {
-        const sStr = String(sNo).trim().toLowerCase()
+      const addTokenVariants = (val) => {
+        if (val === undefined || val === null || String(val).trim() === '') return
+        const sStr = String(val).trim().toLowerCase()
         tokens.add(sStr)
         tokens.add(`${prefix}-${sStr}`)
         tokens.add(`${prefix}${sStr}`)
@@ -2650,29 +2712,24 @@ router.get('/outstanding-details', async (req, res) => {
           tokens.add(`${prefix}-${String(num).padStart(4, '0')}`.toLowerCase())
         }
       }
-      if (id !== undefined && id !== null && String(id).trim() !== '') {
-        const idStr = String(id).trim().toLowerCase()
-        tokens.add(idStr)
-        tokens.add(`${prefix}-${idStr}`)
-        tokens.add(`${prefix}${idStr}`)
-        const num = parseInt(idStr, 10)
-        if (!isNaN(num)) {
-          tokens.add(`${prefix}${String(num).padStart(5, '0')}`.toLowerCase())
-          tokens.add(`${prefix}-${String(num).padStart(5, '0')}`.toLowerCase())
-          tokens.add(`${prefix}${String(num).padStart(4, '0')}`.toLowerCase())
-        }
-      }
+
+      addTokenVariants(invNo)
+      addTokenVariants(sNo)
+      addTokenVariants(id)
+      addTokenVariants(voucherNo)
+
       return Array.from(tokens)
     }
 
-    // 2a. Real Purchases
+    // 2a. Real Purchases from purchases table
     try {
       let purchaseQuery = `
         SELECT 
           p.id,
           p.s_no,
           p.inv_no,
-          COALESCE(p.inv_no, CAST(p.s_no AS TEXT), CAST(p.id AS TEXT)) as invoice_no,
+          p.voucher_no,
+          COALESCE(p.inv_no, p.voucher_no, CAST(p.s_no AS TEXT), CAST(p.id AS TEXT)) as invoice_no,
           p.date,
           'Purchase' as voucher_type,
           'Payable' as type,
@@ -2701,11 +2758,11 @@ router.get('/outstanding-details', async (req, res) => {
         const vNo = `PUR-${row.invoice_no}`
         const amt = parseFloat(row.amount || 0)
         if (amt > 0) {
-          const tokens = getBillSearchTokens(row.id, row.s_no, row.inv_no || row.invoice_no, 'Purchase')
-          billsMap[vNo] = {
+          const tokens = getBillSearchTokens(row.id, row.s_no, row.inv_no || row.invoice_no, 'Purchase', row.voucher_no)
+          const billObj = {
             id: row.id,
             s_no: row.s_no,
-            voucher_no: row.invoice_no,
+            voucher_no: row.voucher_no || row.invoice_no,
             invoice_no: row.invoice_no,
             inv_no: row.inv_no,
             date: row.date,
@@ -2717,13 +2774,35 @@ router.get('/outstanding-details', async (req, res) => {
             ledger_name: row.ledger_name || 'Supplier',
             searchTokens: tokens
           }
+          billsMap[vNo] = billObj
+
+          // Track identifiers to prevent duplicate entries from voucher / ledger_entries
+          if (row.id) {
+            trackedPurchaseKeys.add(String(row.id).toLowerCase())
+            purchaseBillsByRef.set(String(row.id).toLowerCase(), billObj)
+          }
+          if (row.s_no) {
+            trackedPurchaseKeys.add(String(row.s_no).toLowerCase())
+            trackedPurchaseKeys.add(`pur-${String(row.s_no).toLowerCase()}`)
+            purchaseBillsByRef.set(String(row.s_no).toLowerCase(), billObj)
+          }
+          if (row.inv_no) {
+            trackedPurchaseKeys.add(String(row.inv_no).toLowerCase())
+            trackedPurchaseKeys.add(`pur-${String(row.inv_no).toLowerCase()}`)
+            purchaseBillsByRef.set(String(row.inv_no).toLowerCase(), billObj)
+          }
+          if (row.voucher_no) {
+            trackedPurchaseKeys.add(String(row.voucher_no).toLowerCase())
+            trackedPurchaseKeys.add(`pur-${String(row.voucher_no).toLowerCase()}`)
+            purchaseBillsByRef.set(String(row.voucher_no).toLowerCase(), billObj)
+          }
         }
       })
     } catch (e) {
       console.warn('Error fetching purchases for outstanding details:', e.message)
     }
 
-    // 2b. Real Sales
+    // 2b. Real Sales from sales table
     try {
       let salesQuery = `
         SELECT 
@@ -2753,7 +2832,7 @@ router.get('/outstanding-details', async (req, res) => {
         const amt = parseFloat(row.amount || 0)
         if (amt > 0) {
           const tokens = getBillSearchTokens(row.id, row.s_no, row.invoice_no, 'Sales')
-          billsMap[vNo] = {
+          const billObj = {
             id: row.id,
             s_no: row.s_no,
             voucher_no: row.invoice_no,
@@ -2767,16 +2846,28 @@ router.get('/outstanding-details', async (req, res) => {
             ledger_name: row.ledger_name || 'Customer',
             searchTokens: tokens
           }
+          billsMap[vNo] = billObj
+
+          if (row.id) {
+            trackedSalesKeys.add(String(row.id).toLowerCase())
+            salesBillsByRef.set(String(row.id).toLowerCase(), billObj)
+          }
+          if (row.s_no) {
+            trackedSalesKeys.add(String(row.s_no).toLowerCase())
+            trackedSalesKeys.add(`sal-${String(row.s_no).toLowerCase()}`)
+            salesBillsByRef.set(String(row.s_no).toLowerCase(), billObj)
+          }
         }
       })
     } catch (e) {
       console.warn('Error fetching sales for outstanding details:', e.message)
     }
 
-    // 2c. Scan voucher and ledger_entries for Purchase / Sales vouchers
+    // 2c. Scan voucher and voucher_entry for standalone Purchase / Sales vouchers
     try {
       const vExists = await tableExists('voucher')
-      if (vExists) {
+      const veExists = await tableExists('voucher_entry')
+      if (vExists && veExists) {
         const vQuery = `
           SELECT 
             v.id,
@@ -2785,45 +2876,125 @@ router.get('/outstanding-details', async (req, res) => {
             v.voucher_type,
             v.narration,
             v.reference_no,
-            lm.name as ledger_name,
-            COALESCE(
-              (SELECT SUM(ve2.credit) FROM voucher_entry ve2 WHERE CAST(ve2.voucher_id AS TEXT) = CAST(v.id AS TEXT) AND ve2.credit > 0),
-              (SELECT SUM(ve3.debit) FROM voucher_entry ve3 WHERE CAST(ve3.voucher_id AS TEXT) = CAST(v.id AS TEXT) AND ve3.debit > 0),
-              0
-            ) as amount
+            ve.ledger_name as ve_ledger_name,
+            lm.name as lm_name,
+            lm.ledger_type as lm_ledger_type,
+            lm.under as lm_under,
+            ve.debit,
+            ve.credit
           FROM voucher v
-          LEFT JOIN voucher_entry ve ON CAST(ve.voucher_id AS TEXT) = CAST(v.id AS TEXT)
+          JOIN voucher_entry ve ON CAST(ve.voucher_id AS TEXT) = CAST(v.id AS TEXT)
           LEFT JOIN ledgermaster lm ON CAST(ve.ledger_id AS TEXT) = CAST(lm.id AS TEXT)
           WHERE v.voucher_type IN ('Purchase', 'Sales')
         `
         const vRes = await db.query(vQuery)
+        // Group entries by voucher ID
+        const voucherMap = new Map()
         ;(vRes.rows || []).forEach(row => {
-          const vType = row.voucher_type === 'Purchase' ? 'Purchase' : 'Sales'
-          const prefix = vType === 'Purchase' ? 'PUR' : 'SAL'
-          const vNo = `${prefix}-${row.voucher_no || row.id}`
-          const amt = parseFloat(row.amount || 0)
-          if (amt > 0 && !billsMap[vNo]) {
-            const tokens = getBillSearchTokens(row.id, row.voucher_no, row.voucher_no, vType)
-            billsMap[vNo] = {
+          if (!voucherMap.has(row.id)) {
+            voucherMap.set(row.id, {
               id: row.id,
-              s_no: row.voucher_no,
               voucher_no: row.voucher_no,
-              invoice_no: row.voucher_no,
               date: row.date,
+              voucher_type: row.voucher_type,
+              narration: row.narration || '',
+              reference_no: row.reference_no || '',
+              entries: []
+            })
+          }
+          voucherMap.get(row.id).entries.push({
+            ledger_name: row.lm_name || row.ve_ledger_name || '',
+            ledger_type: row.lm_ledger_type || '',
+            under: row.lm_under || '',
+            debit: parseFloat(row.debit || 0),
+            credit: parseFloat(row.credit || 0)
+          })
+        })
+
+        for (const [voucherId, vData] of voucherMap.entries()) {
+          const vType = vData.voucher_type === 'Purchase' ? 'Purchase' : 'Sales'
+          const refNo = String(vData.reference_no || '').trim().toLowerCase()
+          const vNoStr = String(vData.voucher_no || '').trim().toLowerCase()
+
+          // Check if this voucher already corresponds to a known operational purchase/sale
+          let matchedBill = null
+          if (vType === 'Purchase') {
+            if (refNo && purchaseBillsByRef.has(refNo)) {
+              matchedBill = purchaseBillsByRef.get(refNo)
+            } else if (vNoStr && purchaseBillsByRef.has(vNoStr)) {
+              matchedBill = purchaseBillsByRef.get(vNoStr)
+            } else {
+              const m = (vData.narration || '').match(/Purchase\s+Invoice\s*#?\s*([0-9a-z_-]+)/i)
+              if (m && m[1] && purchaseBillsByRef.has(m[1].toLowerCase())) {
+                matchedBill = purchaseBillsByRef.get(m[1].toLowerCase())
+              }
+            }
+          } else {
+            if (refNo && salesBillsByRef.has(refNo)) {
+              matchedBill = salesBillsByRef.get(refNo)
+            } else if (vNoStr && salesBillsByRef.has(vNoStr)) {
+              matchedBill = salesBillsByRef.get(vNoStr)
+            } else {
+              const m = (vData.narration || '').match(/Sales\s+Invoice\s*#?\s*([0-9a-z_-]+)/i)
+              if (m && m[1] && salesBillsByRef.has(m[1].toLowerCase())) {
+                matchedBill = salesBillsByRef.get(m[1].toLowerCase())
+              }
+            }
+          }
+
+          if (matchedBill) {
+            // Already tracked! Merge voucher_no into search tokens and ensure voucher_no is recorded
+            if (vData.voucher_no) {
+              const extraTokens = getBillSearchTokens(null, null, null, vType, vData.voucher_no)
+              const existingTokens = new Set(matchedBill.searchTokens || [])
+              extraTokens.forEach(t => existingTokens.add(t))
+              matchedBill.searchTokens = Array.from(existingTokens)
+              if (!matchedBill.voucher_no) {
+                matchedBill.voucher_no = vData.voucher_no
+              }
+            }
+            continue // DO NOT CREATE A DUPLICATE BILL!
+          }
+
+          // Standalone manual voucher: find the actual party entry (Creditor for Purchase, Debtor for Sales)
+          let partyEntry = null
+          if (vType === 'Purchase') {
+            partyEntry = vData.entries.find(e => e.credit > 0 && !isExcludedNonPartyAccount(e.ledger_name))
+          } else {
+            partyEntry = vData.entries.find(e => e.debit > 0 && !isExcludedNonPartyAccount(e.ledger_name))
+          }
+
+          // If no legitimate supplier/customer party entry exists (e.g. only Purchase Account), skip!
+          if (!partyEntry) continue
+
+          const prefix = vType === 'Purchase' ? 'PUR' : 'SAL'
+          const billKey = `${prefix}-${vData.voucher_no || vData.id}`
+          const billAmt = vType === 'Purchase' ? partyEntry.credit : partyEntry.debit
+
+          if (billAmt > 0 && !billsMap[billKey]) {
+            const tokens = getBillSearchTokens(vData.id, vData.voucher_no, vData.reference_no, vType, vData.voucher_no)
+            billsMap[billKey] = {
+              id: vData.id,
+              s_no: vData.voucher_no,
+              voucher_no: vData.voucher_no,
+              invoice_no: vData.reference_no || vData.voucher_no,
+              date: vData.date,
               voucher_type: vType,
               type: vType === 'Purchase' ? 'Payable' : 'Receivable',
-              amount: amt,
+              amount: billAmt,
               paid: 0,
-              balance: amt,
-              ledger_name: row.ledger_name || 'Party',
+              balance: billAmt,
+              ledger_name: partyEntry.ledger_name,
               searchTokens: tokens
             }
           }
-        })
+        }
       }
-    } catch (e) {}
+    } catch (e) {
+      console.warn('Error fetching vouchers for outstanding details:', e.message)
+    }
 
-    // 2d. Scan ledger_entries for Purchase / Sales
+    // 2d. Scan ledger_entries for any remaining standalone Purchase / Sales entries
     try {
       const leExists = await tableExists('ledger_entries')
       if (leExists) {
@@ -2835,18 +3006,43 @@ router.get('/outstanding-details', async (req, res) => {
             date,
             ledger_name,
             debit,
-            credit
+            credit,
+            reference_id,
+            reference_type
           FROM ledger_entries
           WHERE voucher_type IN ('Purchase', 'Sales')
         `)
         ;(leRes.rows || []).forEach(row => {
           const vType = row.voucher_type === 'Purchase' ? 'Purchase' : 'Sales'
+          const lName = row.ledger_name || ''
+
+          // Never consider non-party accounts (Purchase Account, Sales Account, Tax, etc.)
+          if (isExcludedNonPartyAccount(lName)) return
+
+          const refId = String(row.reference_id || '').toLowerCase()
+          const vNoStr = String(row.voucher_no || '').toLowerCase()
+
+          // If linked to an operational purchase or sale, skip duplicate
+          if (vType === 'Purchase') {
+            if (row.reference_type === 'purchase' || trackedPurchaseKeys.has(refId) || trackedPurchaseKeys.has(vNoStr)) {
+              return
+            }
+          } else {
+            if (row.reference_type === 'sales' || trackedSalesKeys.has(refId) || trackedSalesKeys.has(vNoStr)) {
+              return
+            }
+          }
+
+          // In purchase: only creditor (credit > 0). In sales: only debtor (debit > 0).
+          const amt = vType === 'Purchase' ? parseFloat(row.credit || 0) : parseFloat(row.debit || 0)
+          if (amt <= 0) return
+
           const prefix = vType === 'Purchase' ? 'PUR' : 'SAL'
-          const vNo = `${prefix}-${row.voucher_no || row.id}`
-          const amt = parseFloat(row.credit || row.debit || 0)
-          if (amt > 0 && !billsMap[vNo]) {
-            const tokens = getBillSearchTokens(row.id, row.voucher_no, row.voucher_no, vType)
-            billsMap[vNo] = {
+          const billKey = `${prefix}-${row.voucher_no || row.id}`
+
+          if (!billsMap[billKey]) {
+            const tokens = getBillSearchTokens(row.id, row.voucher_no, row.voucher_no, vType, row.voucher_no)
+            billsMap[billKey] = {
               id: row.id,
               s_no: row.voucher_no,
               voucher_no: row.voucher_no,
@@ -2857,13 +3053,15 @@ router.get('/outstanding-details', async (req, res) => {
               amount: amt,
               paid: 0,
               balance: amt,
-              ledger_name: row.ledger_name || 'Party',
+              ledger_name: lName,
               searchTokens: tokens
             }
           }
         })
       }
-    } catch (e) {}
+    } catch (e) {
+      console.warn('Error fetching ledger entries for outstanding details:', e.message)
+    }
 
     let allBills = Object.values(billsMap)
 
@@ -3130,14 +3328,24 @@ router.get('/outstanding-details', async (req, res) => {
       })
     }
 
-    // 6. Return outstanding details (Only bills with balance > 0.01)
+    // 6. Return outstanding details (Only bills with balance > 0.01 and legitimate party ledgers)
     let outstandingBills = []
+    const seenFinalBills = new Set()
     resultBills.forEach(b => {
+      // Must not be a non-party account (e.g. Purchase Account, Sales Account)
+      if (isExcludedNonPartyAccount(b.ledger_name)) return
+
       b.paid = Math.round(b.paid * 100) / 100
       b.balance = Math.round(b.balance * 100) / 100
       
       if (b.balance > 0.01) {
-        outstandingBills.push(b)
+        // Prevent duplicate bills for the same party and invoice number
+        const partyKey = cleanPartyKey(b.ledger_name)
+        const dedupeKey = `${b.type}_${partyKey}_${String(b.invoice_no || b.voucher_no || '').trim().toLowerCase()}`
+        if (!seenFinalBills.has(dedupeKey)) {
+          seenFinalBills.add(dedupeKey)
+          outstandingBills.push(b)
+        }
       }
     })
 

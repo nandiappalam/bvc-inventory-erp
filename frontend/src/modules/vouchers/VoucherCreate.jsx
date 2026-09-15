@@ -400,10 +400,46 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
       .then(r => r.json())
       .then(data => {
         const bills = Array.isArray(data) ? data : (data.data || []);
-        const pendingOnly = bills.filter(b => (parseFloat(b.balance) || 0) > 0.01);
-        const mapped = pendingOnly.map((b, idx) => ({
+        const pendingOnly = bills.filter(b => {
+          const bal = parseFloat(b.balance) || 0;
+          if (bal <= 0.01) return false;
+          const lName = (b.ledger_name || '').toLowerCase().trim();
+          // Filter out nominal accounts that are not party ledgers
+          if (
+            lName.includes('purchase account') ||
+            lName === 'purchases' ||
+            lName.includes('sales account') ||
+            lName === 'sales' ||
+            lName.includes('input tax') ||
+            lName.includes('output tax') ||
+            lName.includes('cgst') ||
+            lName.includes('sgst') ||
+            lName.includes('igst') ||
+            lName.includes('duties & taxes') ||
+            lName.includes('discount') ||
+            lName.includes('round off')
+          ) {
+            return false;
+          }
+          return true;
+        });
+
+        // Deduplicate in case any bills still share invoice_no / voucher_no / supplier
+        const seen = new Set();
+        const uniqueBills = [];
+        pendingOnly.forEach(b => {
+          const cleanParty = String(b.ledger_name || '').replace(/\s*\((Supplier|Customer|Creditor|Debtor)\)$/i, '').trim().toLowerCase();
+          const cleanInv = String(b.invoice_no || b.voucher_no || '').trim().toLowerCase();
+          const dedupeKey = `${b.type}_${cleanParty}_${cleanInv}`;
+          if (!seen.has(dedupeKey)) {
+            seen.add(dedupeKey);
+            uniqueBills.push(b);
+          }
+        });
+
+        const mapped = uniqueBills.map((b, idx) => ({
           ...b,
-          key: `${b.ledger_name}_${b.type}_${b.invoice_no}_${idx}`
+          key: `${b.ledger_name}_${b.type}_${b.invoice_no || b.voucher_no}_${idx}`
         }));
         setSearchableBills(mapped);
       })
@@ -887,7 +923,7 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
                     const foundBill = searchableBills.find(b => b.key === val);
                     if (foundBill) {
                       applyBillToVoucher(foundBill);
-                      setQuickAlert(`✓ Auto-filled voucher details for ${foundBill.type === 'Payable' ? 'Purchase Invoice' : 'Sales Bill'} #${foundBill.invoice_no} (${foundBill.ledger_name}). Outstanding Balance: ₹${parseFloat(foundBill.balance).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`);
+                      setQuickAlert(`✓ Auto-filled voucher details for ${foundBill.type === 'Payable' ? 'Purchase Invoice' : 'Sales Bill'} #${foundBill.invoice_no || foundBill.voucher_no} (${foundBill.ledger_name}). Outstanding Balance: ₹${parseFloat(foundBill.balance).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`);
                     }
                   }
                 }}
@@ -896,7 +932,7 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
                 <MenuItem value="">-- Select Pending Purchase Invoice / Sales Bill / Voucher --</MenuItem>
                 {searchableBills.map(b => (
                   <MenuItem key={b.key} value={b.key}>
-                    {b.type === 'Payable' ? '🛒 Purchase Inv' : '🏷️ Sales Bill'} #{b.invoice_no} — {b.ledger_name} (Bal: ₹{parseFloat(b.balance).toLocaleString('en-IN', { minimumFractionDigits: 2 })})
+                    {b.type === 'Payable' ? '🛒 Purchase Inv' : '🏷️ Sales Bill'} #{b.invoice_no || b.voucher_no} — {b.ledger_name} (Bal: ₹{parseFloat(b.balance).toLocaleString('en-IN', { minimumFractionDigits: 2 })})
                   </MenuItem>
                 ))}
               </Select>
