@@ -518,6 +518,89 @@ const getCategoryColumns = (categoryKey, subReportId) => {
         { id: 'inspector', label: 'Fumigator / Lead' }
       ];
     }
+    if (subReportId === 'yield') {
+      return [
+        { id: 'date', label: 'Date' },
+        { id: 'voucher_no', label: 'Grind / Batch No' },
+        { id: 'input_item', label: 'Input RM' },
+        { id: 'input_kg', label: 'Input Qty (kg)', align: 'right', isNumber: true },
+        { id: 'output_item', label: 'Output FG' },
+        { id: 'output_kg', label: 'Output Qty (kg)', align: 'right', isNumber: true },
+        { id: 'wastage_kg', label: 'Wastage (kg)', align: 'right', isNumber: true },
+        { id: 'yield_percentage', label: 'Yield %', align: 'right' }
+      ];
+    }
+    if (subReportId === 'wastage') {
+      return [
+        { id: 'date', label: 'Date' },
+        { id: 'voucher_no', label: 'Grind No' },
+        { id: 'wastage_item', label: 'Wastage Item' },
+        { id: 'wastage_lot', label: 'Wastage Lot' },
+        { id: 'category', label: 'Category' },
+        { id: 'bags', label: 'Bags', align: 'right', isNumber: true },
+        { id: 'per_bag_weight', label: 'Per Bag Wt (kg)', align: 'right', isNumber: true },
+        { id: 'total_weight_kg', label: 'Total Wt (kg)', align: 'right', isNumber: true },
+        { id: 'status', label: 'Status' }
+      ];
+    }
+    if (subReportId === 'ccp') {
+      return [
+        { id: 'date', label: 'Date' },
+        { id: 'voucher_no', label: 'Grind / Ref No' },
+        { id: 'item_name', label: 'Material' },
+        { id: 'lot_number', label: 'Lot No' },
+        { id: 'location', label: 'CCP Location / Step' },
+        { id: 'critical_limit', label: 'Critical Limit' },
+        { id: 'actual_reading', label: 'Observed Reading' },
+        { id: 'status', label: 'Compliance' },
+        { id: 'checked_by', label: 'Audited By' },
+        { id: 'corrective_action', label: 'Corrective Action' }
+      ];
+    }
+    if (subReportId === 'oprp') {
+      return [
+        { id: 'date', label: 'Date' },
+        { id: 'voucher_no', label: 'Grind / Ref No' },
+        { id: 'material', label: 'Material' },
+        { id: 'rm_fg', label: 'RM / FG' },
+        { id: 'lot_number', label: 'Lot No' },
+        { id: 'quantity', label: 'Quantity', align: 'right', isNumber: true },
+        { id: 'alp', label: 'ALP (PPM)' },
+        { id: 'g', label: 'G Count' },
+        { id: 'alp_gram', label: 'ALP Gram', align: 'right', isNumber: true },
+        { id: 'checked_by', label: 'Inspector' },
+        { id: 'remarks', label: 'Remarks' }
+      ];
+    }
+    if (subReportId === 'terminal-inspection') {
+      return [
+        { id: 'date', label: 'Inspection Date' },
+        { id: 'inspection_no', label: 'Report / Inv No' },
+        { id: 'vehicle_no', label: 'Vehicle No' },
+        { id: 'destination', label: 'Customer / Destination' },
+        { id: 'product_name', label: 'Product Name' },
+        { id: 'lot_no', label: 'Lot No' },
+        { id: 'dispatched_qty', label: 'Dispatch Bags', align: 'right', isNumber: true },
+        { id: 'pest_odour_check', label: 'Odor / Pest Integrity' },
+        { id: 'seal_status', label: 'Seal & Security' },
+        { id: 'clearance', label: 'Dispatch Clearance' },
+        { id: 'officer', label: 'QA Officer' }
+      ];
+    }
+    if (subReportId === 'vehicle-inspection') {
+      return [
+        { id: 'date', label: 'Date' },
+        { id: 'vehicle_no', label: 'Vehicle No' },
+        { id: 'transporter', label: 'Transporter' },
+        { id: 'driver_name', label: 'Driver Name' },
+        { id: 'inspection_type', label: 'Loading / Unloading' },
+        { id: 'cleanliness', label: 'Hygiene & Cleanliness' },
+        { id: 'tarpaulin', label: 'Tarpaulin / Covering' },
+        { id: 'physical_condition', label: 'Container Integrity' },
+        { id: 'status', label: 'Inspection Status' },
+        { id: 'inspector', label: 'Inspected By' }
+      ];
+    }
     return [
       { id: 'date', label: 'Date' },
       { id: 'batch_no', label: 'Batch/Lot No' },
