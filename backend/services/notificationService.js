@@ -2,7 +2,13 @@
  * Notification Service for BVC ERP Stock Alerts
  * Handles Automated Email (via SMTP / Nodemailer), SMS, and WhatsApp alerts
  */
-const nodemailer = require('nodemailer');
+let nodemailer = null;
+try {
+  nodemailer = require('nodemailer');
+} catch (e) {
+  // Graceful fallback if nodemailer is not installed locally
+  nodemailer = null;
+}
 
 // Helper to format phone number for WhatsApp / SMS
 function formatPhoneNumber(phone) {
@@ -19,6 +25,10 @@ function formatPhoneNumber(phone) {
 
 // Helper to check and create SMTP transporter
 function getSmtpTransporter() {
+  if (!nodemailer) {
+    return null;
+  }
+
   const host = process.env.SMTP_HOST;
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
