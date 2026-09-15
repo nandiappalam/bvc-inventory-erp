@@ -176,6 +176,68 @@ const CATEGORY_CONFIGS = {
   }
 };
 
+// Helper to extract and format clean parameter text (e.g. "11%", "0.4%")
+const cleanParamDisplay = (val, defaultVal = '—', unit = '%') => {
+  if (val === null || val === undefined || val === '') return defaultVal;
+  if (typeof val === 'number') return `${val}${unit}`;
+  if (typeof val === 'object') {
+    const res = val.actualResult ?? val.actual_result ?? val.result ?? val.value ?? val.val;
+    if (res !== undefined && res !== null && res !== '') {
+      const u = val.unit || unit;
+      return String(res).includes('%') ? String(res) : `${res}${u === '%' ? '%' : ' ' + u}`;
+    }
+    return defaultVal;
+  }
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        const res = parsed.actualResult ?? parsed.actual_result ?? parsed.result ?? parsed.value ?? parsed.val;
+        if (res !== undefined && res !== null && res !== '') {
+          const u = parsed.unit || unit;
+          return String(res).includes('%') ? String(res) : `${res}${u === '%' ? '%' : ' ' + u}`;
+        }
+      } catch (e) {}
+    }
+    return trimmed;
+  }
+  return String(val);
+};
+
+// Formatter for general table report cells
+const formatReportCellValue = (val, col) => {
+  if (val === null || val === undefined || val === '') return '—';
+  
+  // If value is a stringified JSON (like QC parameter JSON), extract actual result cleanly
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        const res = parsed.actualResult ?? parsed.actual_result ?? parsed.result ?? parsed.value ?? parsed.val;
+        if (res !== undefined && res !== null && res !== '') {
+          const unit = parsed.unit || (col?.id?.includes('moisture') || col?.id?.includes('foreign') || col?.id?.includes('broken') ? '%' : '');
+          return String(res).includes('%') ? String(res) : `${res}${unit ? (unit === '%' ? '%' : ' ' + unit) : ''}`;
+        }
+      } catch (e) {}
+    }
+    return trimmed;
+  } else if (typeof val === 'object') {
+    const res = val.actualResult ?? val.actual_result ?? val.result ?? val.value ?? val.val;
+    if (res !== undefined && res !== null && res !== '') {
+      const unit = val.unit || '%';
+      return String(res).includes('%') ? String(res) : `${res}${unit ? (unit === '%' ? '%' : ' ' + unit) : ''}`;
+    }
+  }
+
+  if (col?.isNumber && typeof val === 'number') {
+    return val.toLocaleString();
+  }
+
+  return String(val);
+};
+
 // HTML Generator for IQR Certificate
 const generateIqrCertificateHtml = (record) => {
   const dateStr = record.date || new Date().toISOString().split('T')[0];
@@ -185,9 +247,9 @@ const generateIqrCertificateHtml = (record) => {
   const itemName = record.item_name || 'Raw Material (Urad / Grains)';
   const inwardBags = record.inward_bags || 0;
   const totalWeight = record.total_weight || (inwardBags * 50);
-  const moisture = record.moisture || '10.8%';
-  const foreignMatter = record.foreign_matter || '0.4%';
-  const brokenGrain = record.broken_grain || '1.2%';
+  const moisture = cleanParamDisplay(record.moisture, '10.8%');
+  const foreignMatter = cleanParamDisplay(record.foreign_matter, '0.4%');
+  const brokenGrain = cleanParamDisplay(record.broken_grain, '1.2%');
   const status = record.status || 'PASSED';
   const checkedBy = record.checked_by || 'QA QC Officer';
 
@@ -315,10 +377,10 @@ const generateCoaCertificateHtml = (record) => {
   const itemName = record.item_name || 'Finished Flour Product';
   const batchBags = record.batch_bags || 0;
   const totalWeight = record.total_weight || (batchBags * 30);
-  const moisture = record.moisture || '11.2%';
-  const proteinGluten = record.protein_gluten || '24.8%';
-  const ashContent = record.ash_content || '0.48%';
-  const fineness = record.fineness || '60 Mesh Passed';
+  const moisture = cleanParamDisplay(record.moisture, '11.2%');
+  const proteinGluten = cleanParamDisplay(record.protein_gluten, '24.8%');
+  const ashContent = cleanParamDisplay(record.ash_content, '0.48%');
+  const fineness = cleanParamDisplay(record.fineness, '60 Mesh Passed', '');
   const disposition = record.disposition || 'APPROVED';
   const certifiedBy = record.certified_by || 'QA Lead Officer';
 
@@ -1611,9 +1673,7 @@ const CategoryReportPage = () => {
 
                           return (
                             <TableCell key={col.id} align={col.align || 'left'} sx={{ fontSize: '13px' }}>
-                              {col.isNumber && row[col.id] !== undefined
-                                ? Number(row[col.id]).toLocaleString()
-                                : (row[col.id] || '—')}
+                              {formatReportCellValue(row[col.id], col)}
                             </TableCell>
                           );
                         })}
@@ -1828,19 +1888,19 @@ const CategoryReportPage = () => {
                           <TableRow>
                             <TableCell><strong>Moisture Content</strong></TableCell>
                             <TableCell>Max 12.0%</TableCell>
-                            <TableCell sx={{ fontWeight: 'bold', color: '#16a34a' }}>{selectedRecord.moisture || '10.8%'}</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold', color: '#16a34a' }}>{cleanParamDisplay(selectedRecord.moisture, '10.8%')}</TableCell>
                             <TableCell align="center"><Chip label="PASSED" color="success" size="small" /></TableCell>
                           </TableRow>
                           <TableRow>
                             <TableCell><strong>Foreign Matter / Stones</strong></TableCell>
                             <TableCell>Max 0.50%</TableCell>
-                            <TableCell sx={{ fontWeight: 'bold', color: '#16a34a' }}>{selectedRecord.foreign_matter || '0.4%'}</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold', color: '#16a34a' }}>{cleanParamDisplay(selectedRecord.foreign_matter, '0.4%')}</TableCell>
                             <TableCell align="center"><Chip label="PASSED" color="success" size="small" /></TableCell>
                           </TableRow>
                           <TableRow>
                             <TableCell><strong>Broken Grain</strong></TableCell>
                             <TableCell>Max 2.00%</TableCell>
-                            <TableCell sx={{ fontWeight: 'bold', color: '#16a34a' }}>{selectedRecord.broken_grain || '1.2%'}</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold', color: '#16a34a' }}>{cleanParamDisplay(selectedRecord.broken_grain, '1.2%')}</TableCell>
                             <TableCell align="center"><Chip label="PASSED" color="success" size="small" /></TableCell>
                           </TableRow>
                           <TableRow>
@@ -1855,25 +1915,25 @@ const CategoryReportPage = () => {
                           <TableRow>
                             <TableCell><strong>Moisture %</strong></TableCell>
                             <TableCell>Max 12.5%</TableCell>
-                            <TableCell sx={{ fontWeight: 'bold', color: '#16a34a' }}>{selectedRecord.moisture || '11.2%'}</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold', color: '#16a34a' }}>{cleanParamDisplay(selectedRecord.moisture, '11.2%')}</TableCell>
                             <TableCell align="center"><Chip label="CONFORMS" color="success" size="small" /></TableCell>
                           </TableRow>
                           <TableRow>
                             <TableCell><strong>Protein / Gluten Content</strong></TableCell>
                             <TableCell>Min 22.0%</TableCell>
-                            <TableCell sx={{ fontWeight: 'bold', color: '#16a34a' }}>{selectedRecord.protein_gluten || '24.8%'}</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold', color: '#16a34a' }}>{cleanParamDisplay(selectedRecord.protein_gluten, '24.8%')}</TableCell>
                             <TableCell align="center"><Chip label="CONFORMS" color="success" size="small" /></TableCell>
                           </TableRow>
                           <TableRow>
                             <TableCell><strong>Total Ash Content</strong></TableCell>
                             <TableCell>Max 0.65%</TableCell>
-                            <TableCell sx={{ fontWeight: 'bold', color: '#16a34a' }}>{selectedRecord.ash_content || '0.48%'}</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold', color: '#16a34a' }}>{cleanParamDisplay(selectedRecord.ash_content, '0.48%')}</TableCell>
                             <TableCell align="center"><Chip label="CONFORMS" color="success" size="small" /></TableCell>
                           </TableRow>
                           <TableRow>
                             <TableCell><strong>Granulation / Sieve Fineness</strong></TableCell>
                             <TableCell>Min 98% pass 60 Mesh</TableCell>
-                            <TableCell sx={{ fontWeight: 'bold', color: '#16a34a' }}>{selectedRecord.fineness || '60 Mesh Passed'}</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold', color: '#16a34a' }}>{cleanParamDisplay(selectedRecord.fineness, '60 Mesh Passed', '')}</TableCell>
                             <TableCell align="center"><Chip label="CONFORMS" color="success" size="small" /></TableCell>
                           </TableRow>
                           <TableRow>

@@ -4723,13 +4723,45 @@ const categoryReportHandler = async (req, res) => {
             qcList = qcRes.rows || [];
           } catch (e) {}
 
+          // Helper to extract clean value from string/object/JSON parameter
+          const extractCleanParamValue = (val, defaultVal = '') => {
+            if (val === null || val === undefined || val === '') return defaultVal;
+            if (typeof val === 'number') return `${val}%`;
+            if (typeof val === 'object') {
+              const res = val.actualResult ?? val.actual_result ?? val.result ?? val.value ?? val.val;
+              if (res !== undefined && res !== null && res !== '') {
+                const unit = val.unit || '%';
+                return String(res).includes('%') ? String(res) : `${res}${unit === '%' ? '%' : ' ' + unit}`;
+              }
+              return defaultVal;
+            }
+            if (typeof val === 'string') {
+              const trimmed = val.trim();
+              if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+                try {
+                  const parsed = JSON.parse(trimmed);
+                  const res = parsed.actualResult ?? parsed.actual_result ?? parsed.result ?? parsed.value ?? parsed.val;
+                  if (res !== undefined && res !== null && res !== '') {
+                    const unit = parsed.unit || '%';
+                    return String(res).includes('%') ? String(res) : `${res}${unit === '%' ? '%' : ' ' + unit}`;
+                  }
+                } catch (e) {}
+              }
+              return trimmed;
+            }
+            return String(val);
+          };
+
           // Fetch QC inspection params
           const qcParamMap = {};
           try {
             const paramRes = await db.query(`SELECT qc_id, param_key, param_value FROM qc_inspection_params`);
             for (let param of (paramRes.rows || [])) {
               if (!qcParamMap[param.qc_id]) qcParamMap[param.qc_id] = {};
-              qcParamMap[param.qc_id][param.param_key] = param.param_value;
+              const cleanVal = extractCleanParamValue(param.param_value);
+              const cleanKey = String(param.param_key || '').toLowerCase().replace(/[\s_-]+/g, '');
+              qcParamMap[param.qc_id][param.param_key] = cleanVal;
+              qcParamMap[param.qc_id][cleanKey] = cleanVal;
             }
           } catch (e) {}
 
@@ -4809,9 +4841,13 @@ const categoryReportHandler = async (req, res) => {
             const inwardBags = parseFloat(pi.qty) || parseFloat(pi.total_qty) || (sl ? parseFloat(sl.quantity) : 0) || 0;
             const totalWeight = parseFloat(pi.total_weight) || (parseFloat(pi.qty) * (parseFloat(pi.per_unit_weight) || 50)) || parseFloat(pi.purchase_total_weight) || (sl ? parseFloat(sl.weight) : 0) || (inwardBags * 50);
 
-            const moisture = qcParams.moisture || (sl && sl.moisture ? `${sl.moisture}%` : null) || parsedFindings.moisture || '10.8%';
-            const foreignMatter = qcParams.foreign_matter || qcParams.foreignmatter || parsedFindings.foreign_matter || '0.4%';
-            const brokenGrain = qcParams.broken_grain || qcParams.brokengrain || parsedFindings.broken_grain || '1.2%';
+            const rawMoisture = qcParams.moisture || qcParams.moisturecontent || (sl && sl.moisture ? `${sl.moisture}%` : null) || parsedFindings.moisture || '10.8%';
+            const rawForeignMatter = qcParams.foreignmatter || qcParams.foreign_matter || parsedFindings.foreign_matter || '0.4%';
+            const rawBrokenGrain = qcParams.brokengrain || qcParams.broken_grain || parsedFindings.broken_grain || '1.2%';
+
+            const moisture = extractCleanParamValue(rawMoisture, '10.8%');
+            const foreignMatter = extractCleanParamValue(rawForeignMatter, '0.4%');
+            const brokenGrain = extractCleanParamValue(rawBrokenGrain, '1.2%');
             const status = (qc && qc.overall_result) || (comp && comp.status) || (sl && sl.qc_status) || 'PASSED';
             const checkedBy = (qc && qc.inspector) || (comp && comp.checked_by) || (iqr && iqr.uploaded_by) || 'QA QC Officer';
 
@@ -4823,9 +4859,9 @@ const categoryReportHandler = async (req, res) => {
               item_name: itemName,
               inward_bags: inwardBags,
               total_weight: totalWeight,
-              moisture: typeof moisture === 'number' ? `${moisture}%` : moisture,
-              foreign_matter: typeof foreignMatter === 'number' ? `${foreignMatter}%` : foreignMatter,
-              broken_grain: typeof brokenGrain === 'number' ? `${brokenGrain}%` : brokenGrain,
+              moisture: moisture,
+              foreign_matter: foreignMatter,
+              broken_grain: brokenGrain,
               status: status,
               checked_by: checkedBy
             });
@@ -4840,6 +4876,10 @@ const categoryReportHandler = async (req, res) => {
               const qcParams = qcParamMap[qc.id] || {};
               const sl = stockByLot[lotKey] || null;
 
+              const rawMoisture = qcParams.moisture || qcParams.moisturecontent || (sl && sl.moisture ? `${sl.moisture}%` : '10.8%');
+              const rawForeignMatter = qcParams.foreignmatter || qcParams.foreign_matter || '0.4%';
+              const rawBrokenGrain = qcParams.brokengrain || qcParams.broken_grain || '1.2%';
+
               list.push({
                 date: qc.inspection_date ? String(qc.inspection_date).split('T')[0] : new Date().toISOString().split('T')[0],
                 iqr_no: (iqr && iqr.iqr_no) || qc.qc_no || `IQR-${lotKey}`,
@@ -4848,9 +4888,9 @@ const categoryReportHandler = async (req, res) => {
                 item_name: (sl && sl.item_name) || 'Raw Material',
                 inward_bags: sl ? parseFloat(sl.quantity) || 0 : 0,
                 total_weight: sl ? parseFloat(sl.weight) || 0 : 0,
-                moisture: qcParams.moisture || (sl && sl.moisture ? `${sl.moisture}%` : '10.8%'),
-                foreign_matter: qcParams.foreign_matter || '0.4%',
-                broken_grain: qcParams.broken_grain || '1.2%',
+                moisture: extractCleanParamValue(rawMoisture, '10.8%'),
+                foreign_matter: extractCleanParamValue(rawForeignMatter, '0.4%'),
+                broken_grain: extractCleanParamValue(rawBrokenGrain, '1.2%'),
                 status: qc.overall_result || 'PASSED',
                 checked_by: qc.inspector || (iqr && iqr.uploaded_by) || 'QA QC Officer'
               });
