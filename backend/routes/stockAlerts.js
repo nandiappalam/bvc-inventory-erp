@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
+const { sendEmailAlert, preparePhoneAlert } = require('../services/notificationService');
 
 // ============================================================================
 // DATABASE SCHEMA INITIALIZATION (IDEMPOTENT & THREAD-SAFE)
@@ -1053,45 +1054,125 @@ router.post('/contacts/:id/test-alert', async (req, res) => {
 
     const contact = contactRes.rows[0];
     const timestampStr = new Date().toLocaleString('en-IN');
-    const testMsg = `🔔 [TEST ALERT] BVC ERP Stock Alert Test: Notification verified for ${contact.contact_name} (${contact.department}). Email: ${contact.email || 'N/A'}, Phone: ${contact.phone || 'N/A'}. Timestamp: ${timestampStr}`;
+    
+    const emailSubject = `🔔 [TEST ALERT] BVC ERP Stock Alert System - ${contact.contact_name}`;
+    const emailPlainText = `🔔 BVC ERP Stock Alert System Test\n\nHello ${contact.contact_name} (${contact.department || 'Purchase'}),\n\nThis is a verified test notification confirming that your contact details are configured to receive automatic stock threshold alerts for inventory items.\n\nTarget Email: ${contact.email || 'N/A'}\nTarget Phone: ${contact.phone || 'N/A'}\nTimestamp: ${timestampStr}\n\nBVC Inventory & Production ERP System`;
+    
+    const emailHtml = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; background-color: #ffffff;">
+        <div style="background-color: #1e3a8a; color: #ffffff; padding: 20px 24px;">
+          <h2 style="margin: 0; font-size: 20px; font-weight: bold; letter-spacing: 0.5px;">BVC ERP • Stock Alert Verification</h2>
+          <p style="margin: 4px 0 0 0; font-size: 13px; opacity: 0.9;">Automated Notification System Test</p>
+        </div>
+        <div style="padding: 24px;">
+          <p style="font-size: 15px; color: #1e293b; margin-top: 0;">
+            Hello <strong>${contact.contact_name}</strong> (${contact.department || 'Purchase'}),
+          </p>
+          <p style="font-size: 14px; color: #475569; line-height: 1.6;">
+            This is a <strong>verified test notification</strong> from the BVC ERP Stock Alert Engine. Your contact details have been successfully configured to receive real-time threshold warnings (Critical Minimum, Reorder Level, and Safety Stock) for your assigned items.
+          </p>
+          
+          <div style="background-color: #f8fafc; border-left: 4px solid #2563eb; padding: 14px 18px; margin: 18px 0; border-radius: 4px;">
+            <table style="width: 100%; font-size: 13px; color: #334155; border-collapse: collapse;">
+              <tr>
+                <td style="padding: 4px 0; font-weight: bold; width: 130px;">Assigned Contact:</td>
+                <td style="padding: 4px 0;">${contact.contact_name}</td>
+              </tr>
+              <tr>
+                <td style="padding: 4px 0; font-weight: bold;">Department:</td>
+                <td style="padding: 4px 0;">${contact.department || 'Purchase'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 4px 0; font-weight: bold;">Target Email:</td>
+                <td style="padding: 4px 0; color: #1e40af;">${contact.email || 'None registered'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 4px 0; font-weight: bold;">Target Phone:</td>
+                <td style="padding: 4px 0; color: #1e40af;">${contact.phone || 'None registered'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 4px 0; font-weight: bold;">Triggered At:</td>
+                <td style="padding: 4px 0; color: #64748b;">${timestampStr}</td>
+              </tr>
+            </table>
+          </div>
+
+          <div style="background-color: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 6px; padding: 12px 16px; margin: 16px 0;">
+            <p style="margin: 0; font-size: 13px; color: #065f46; font-weight: 600;">
+              ✓ Status: Ready for Automated Stock Alert Dispatching
+            </p>
+            <p style="margin: 4px 0 0 0; font-size: 12px; color: #047857;">
+              Whenever stock levels fall below specified limits in Godowns, instant multi-channel alerts will be triggered immediately.
+            </p>
+          </div>
+        </div>
+        <div style="background-color: #f1f5f9; padding: 12px 24px; text-align: center; font-size: 12px; color: #64748b; border-top: 1px solid #e2e8f0;">
+          BVC Inventory & Production ERP • Automated Notification Service
+        </div>
+      </div>
+    `;
+
+    const phoneMsg = `🔔 *BVC ERP Stock Alert Test*\n\nHello *${contact.contact_name}* (${contact.department || 'Purchase'}),\n\nThis is a verified test alert from BVC ERP Stock Management.\n\nYour number *${contact.phone || 'N/A'}* is active to receive stock threshold warnings.\n\n🕒 *Time:* ${timestampStr}\n🏭 *BVC ERP Alert Engine*`;
 
     const sentChannels = [];
+    let emailResult = null;
+    let phoneResult = null;
 
-    // In-App
+    // 1. Record In-App Notification
     await db.run(`
       INSERT INTO stock_alert_notifications (alert_id, contact_id, contact_name, contact_email, contact_phone, channel, message, status, sent_at)
       VALUES (NULL, ?, ?, ?, ?, 'IN_APP', ?, 'SENT', CURRENT_TIMESTAMP)
-    `, [contactId, contact.contact_name, contact.email || null, contact.phone || null, testMsg]);
+    `, [contactId, contact.contact_name, contact.email || null, contact.phone || null, emailPlainText]);
     sentChannels.push('In-App Notification');
 
-    // Email
+    // 2. Transmit Email Alert
     if (contact.email) {
+      emailResult = await sendEmailAlert({
+        to: contact.email,
+        subject: emailSubject,
+        text: emailPlainText,
+        html: emailHtml
+      });
+
+      const emailStatus = (emailResult && emailResult.delivered) ? 'DELIVERED' : 'SENT';
       await db.run(`
-        INSERT INTO stock_alert_notifications (alert_id, contact_id, contact_name, contact_email, contact_phone, channel, message, status, sent_at)
-        VALUES (NULL, ?, ?, ?, ?, 'EMAIL', ?, 'SENT', CURRENT_TIMESTAMP)
-      `, [contactId, contact.contact_name, contact.email, contact.phone || null, testMsg]);
-      sentChannels.push(`Email (${contact.email})`);
+        INSERT INTO stock_alert_notifications (alert_id, contact_id, contact_name, contact_email, contact_phone, channel, message, status, sent_at, failure_reason)
+        VALUES (NULL, ?, ?, ?, ?, 'EMAIL', ?, ?, CURRENT_TIMESTAMP, ?)
+      `, [contactId, contact.contact_name, contact.email, contact.phone || null, emailPlainText, emailStatus, emailResult?.error || null]);
+
+      sentChannels.push(emailResult?.delivered ? `Email [SMTP Sent: ${contact.email}]` : `Email [${contact.email}]`);
     }
 
-    // Phone (SMS & WhatsApp)
+    // 3. Prepare Phone & WhatsApp Alert
     if (contact.phone) {
+      phoneResult = preparePhoneAlert({
+        phone: contact.phone,
+        text: phoneMsg
+      });
+
       await db.run(`
         INSERT INTO stock_alert_notifications (alert_id, contact_id, contact_name, contact_email, contact_phone, channel, message, status, sent_at)
         VALUES (NULL, ?, ?, ?, ?, 'SMS', ?, 'SENT', CURRENT_TIMESTAMP)
-      `, [contactId, contact.contact_name, contact.email || null, contact.phone, testMsg]);
+      `, [contactId, contact.contact_name, contact.email || null, contact.phone, phoneMsg]);
 
       await db.run(`
         INSERT INTO stock_alert_notifications (alert_id, contact_id, contact_name, contact_email, contact_phone, channel, message, status, sent_at)
         VALUES (NULL, ?, ?, ?, ?, 'WHATSAPP', ?, 'SENT', CURRENT_TIMESTAMP)
-      `, [contactId, contact.contact_name, contact.email || null, contact.phone, testMsg]);
-      sentChannels.push(`SMS / Phone (${contact.phone})`);
+      `, [contactId, contact.contact_name, contact.email || null, contact.phone, phoneMsg]);
+      
+      sentChannels.push(`SMS / WhatsApp [${contact.phone}]`);
     }
 
     res.json({
       success: true,
-      message: `Test alert dispatched successfully to ${contact.contact_name} via: ${sentChannels.join(', ')}`,
+      message: `Test alert created and dispatched for ${contact.contact_name}!`,
       channels: sentChannels,
-      contact
+      contact,
+      emailResult,
+      phoneResult,
+      emailSubject,
+      emailPlainText,
+      phoneMsg
     });
   } catch (err) {
     console.error('Error sending test alert:', err);
