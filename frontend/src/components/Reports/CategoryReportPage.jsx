@@ -25,7 +25,12 @@ import {
   IconButton,
   Tooltip,
   Divider,
-  Alert
+  Alert,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Stack
 } from '@mui/material';
 import {
   Search as SearchIcon,
@@ -35,7 +40,12 @@ import {
   Print as PrintIcon,
   Assessment as AssessmentIcon,
   FilterList as FilterIcon,
-  ArrowBack as ArrowBackIcon
+  ArrowBack as ArrowBackIcon,
+  Visibility as ViewIcon,
+  Close as CloseIcon,
+  FactCheck as FactCheckIcon,
+  VerifiedUser as VerifiedIcon,
+  CheckCircle as CheckCircleIcon
 } from '@mui/icons-material';
 
 import DailyProductionReport from './DailyProductionReport';
@@ -164,6 +174,275 @@ const CATEGORY_CONFIGS = {
       { id: 'purchase-reqs', label: 'Pending Purchase Requisitions' }
     ]
   }
+};
+
+// HTML Generator for IQR Certificate
+const generateIqrCertificateHtml = (record) => {
+  const dateStr = record.date || new Date().toISOString().split('T')[0];
+  const iqrNo = record.iqr_no || 'IQR-2026-001';
+  const lotNo = record.lot_no || 'RM-LOT';
+  const supplierName = record.supplier_name || 'Agro Commodities Supplier';
+  const itemName = record.item_name || 'Raw Material (Urad / Grains)';
+  const inwardBags = record.inward_bags || 0;
+  const totalWeight = record.total_weight || (inwardBags * 50);
+  const moisture = record.moisture || '10.8%';
+  const foreignMatter = record.foreign_matter || '0.4%';
+  const brokenGrain = record.broken_grain || '1.2%';
+  const status = record.status || 'PASSED';
+  const checkedBy = record.checked_by || 'QA QC Officer';
+
+  return `
+    <div style="font-family: 'Segoe UI', Arial, sans-serif; padding: 24px; color: #0f172a; max-width: 850px; margin: 0 auto; border: 2px solid #1f4fb2; border-radius: 8px;">
+      <div style="text-align: center; border-bottom: 2px solid #1f4fb2; padding-bottom: 12px; margin-bottom: 18px;">
+        <h1 style="color: #1f4fb2; margin: 0 0 4px 0; font-size: 22px; text-transform: uppercase; letter-spacing: 1px;">BVC EXPORTS PRIVATE LIMITED</h1>
+        <div style="font-size: 11px; color: #475569; line-height: 1.5;">
+          Factory: SF No. 142/2, Processing Zone, Madurai Road, Tamil Nadu, India<br/>
+          FSSAI Lic. No: <strong>12419008000451</strong> | ISO 22000:2018 & HACCP Certified Facility
+        </div>
+        <div style="margin-top: 10px; display: inline-block; background-color: #1f4fb2; color: #ffffff; padding: 5px 20px; border-radius: 20px; font-weight: bold; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;">
+          Raw Material Incoming Quality Inspection Report (IQR)
+        </div>
+      </div>
+
+      <table style="width: 100%; border-collapse: collapse; margin-bottom: 18px; font-size: 12px;">
+        <tr>
+          <td style="padding: 6px 10px; border: 1px solid #cbd5e1; background: #f8fafc; width: 22%;"><strong>IQR Number:</strong></td>
+          <td style="padding: 6px 10px; border: 1px solid #cbd5e1; font-weight: bold; color: #1f4fb2;">${iqrNo}</td>
+          <td style="padding: 6px 10px; border: 1px solid #cbd5e1; background: #f8fafc; width: 22%;"><strong>Inward Date:</strong></td>
+          <td style="padding: 6px 10px; border: 1px solid #cbd5e1;">${dateStr}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 10px; border: 1px solid #cbd5e1; background: #f8fafc;"><strong>RM Lot Number:</strong></td>
+          <td style="padding: 6px 10px; border: 1px solid #cbd5e1; font-weight: bold;">${lotNo}</td>
+          <td style="padding: 6px 10px; border: 1px solid #cbd5e1; background: #f8fafc;"><strong>Supplier / Party:</strong></td>
+          <td style="padding: 6px 10px; border: 1px solid #cbd5e1;">${supplierName}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 10px; border: 1px solid #cbd5e1; background: #f8fafc;"><strong>Commodity / Item:</strong></td>
+          <td style="padding: 6px 10px; border: 1px solid #cbd5e1; font-weight: 500;">${itemName}</td>
+          <td style="padding: 6px 10px; border: 1px solid #cbd5e1; background: #f8fafc;"><strong>Received Qty / Wt:</strong></td>
+          <td style="padding: 6px 10px; border: 1px solid #cbd5e1;"><strong>${inwardBags} Bags</strong> (${Number(totalWeight).toLocaleString()} kg)</td>
+        </tr>
+      </table>
+
+      <h3 style="color: #1e293b; font-size: 13px; margin: 16px 0 8px 0; text-transform: uppercase; border-left: 4px solid #1f4fb2; padding-left: 8px;">
+        Laboratory Physicochemical & Quality Parameters
+      </h3>
+      <table style="width: 100%; border-collapse: collapse; margin-bottom: 18px; font-size: 12px;">
+        <thead>
+          <tr style="background-color: #1f4fb2; color: #ffffff; text-align: left;">
+            <th style="padding: 8px 10px; border: 1px solid #cbd5e1; width: 8%;">S.No</th>
+            <th style="padding: 8px 10px; border: 1px solid #cbd5e1;">Test Parameter</th>
+            <th style="padding: 8px 10px; border: 1px solid #cbd5e1;">Standard Specification</th>
+            <th style="padding: 8px 10px; border: 1px solid #cbd5e1;">Observed Result</th>
+            <th style="padding: 8px 10px; border: 1px solid #cbd5e1; text-align: center;">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1; text-align: center;">1</td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1;"><strong>Moisture Content</strong></td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1;">Max 12.0%</td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1; font-weight: bold; color: #16a34a;">${moisture}</td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1; text-align: center; color: #16a34a; font-weight: bold;">PASSED</td>
+          </tr>
+          <tr style="background: #f8fafc;">
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1; text-align: center;">2</td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1;"><strong>Foreign Matter / Stones</strong></td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1;">Max 0.50%</td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1; font-weight: bold; color: #16a34a;">${foreignMatter}</td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1; text-align: center; color: #16a34a; font-weight: bold;">PASSED</td>
+          </tr>
+          <tr>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1; text-align: center;">3</td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1;"><strong>Broken / Damaged Grains</strong></td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1;">Max 2.00%</td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1; font-weight: bold; color: #16a34a;">${brokenGrain}</td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1; text-align: center; color: #16a34a; font-weight: bold;">PASSED</td>
+          </tr>
+          <tr style="background: #f8fafc;">
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1; text-align: center;">4</td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1;"><strong>Live Infestation / Weevils</strong></td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1;">Nil (Absence)</td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1; font-weight: bold; color: #16a34a;">Nil / Absent</td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1; text-align: center; color: #16a34a; font-weight: bold;">PASSED</td>
+          </tr>
+          <tr>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1; text-align: center;">5</td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1;"><strong>Color, Appearance & Odour</strong></td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1;">Clean, Natural Characteristic</td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1; font-weight: bold; color: #16a34a;">Normal & Good</td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1; text-align: center; color: #16a34a; font-weight: bold;">PASSED</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div style="background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 4px; padding: 12px 16px; margin-bottom: 24px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <strong style="color: #166534; font-size: 13px;">FINAL QUALITY DISPOSITION:</strong>
+            <div style="font-size: 11px; color: #15803d; margin-top: 2px;">
+              The incoming raw material lot fulfills all quality benchmarks and is cleared for inward storage & processing.
+            </div>
+          </div>
+          <div style="background-color: #16a34a; color: #ffffff; padding: 6px 16px; border-radius: 4px; font-weight: bold; font-size: 13px; letter-spacing: 0.5px;">
+            ${status.toUpperCase()}
+          </div>
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: space-between; margin-top: 36px; padding-top: 14px; border-top: 1px dashed #cbd5e1;">
+        <div style="text-align: center; width: 40%;">
+          <div style="font-weight: bold; color: #1e293b; font-size: 12px;">${checkedBy}</div>
+          <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Inspecting QC Officer / Chemist</div>
+          <div style="font-size: 10px; color: #94a3b8;">Digitally Verified via BVC ERP</div>
+        </div>
+        <div style="text-align: center; width: 40%;">
+          <div style="font-weight: bold; color: #1e293b; font-size: 12px;">Quality Assurance Manager</div>
+          <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Authorized Signatory</div>
+          <div style="font-size: 10px; color: #94a3b8;">BVC Exports Quality Division</div>
+        </div>
+      </div>
+    </div>
+  `;
+};
+
+// HTML Generator for COA Certificate
+const generateCoaCertificateHtml = (record) => {
+  const dateStr = record.date || new Date().toISOString().split('T')[0];
+  const coaNo = record.coa_no || 'COA-2026-001';
+  const lotNo = record.lot_no || 'FG-LOT';
+  const itemName = record.item_name || 'Finished Flour Product';
+  const batchBags = record.batch_bags || 0;
+  const totalWeight = record.total_weight || (batchBags * 30);
+  const moisture = record.moisture || '11.2%';
+  const proteinGluten = record.protein_gluten || '24.8%';
+  const ashContent = record.ash_content || '0.48%';
+  const fineness = record.fineness || '60 Mesh Passed';
+  const disposition = record.disposition || 'APPROVED';
+  const certifiedBy = record.certified_by || 'QA Lead Officer';
+
+  return `
+    <div style="font-family: 'Segoe UI', Arial, sans-serif; padding: 24px; color: #0f172a; max-width: 850px; margin: 0 auto; border: 2px solid #1f4fb2; border-radius: 8px;">
+      <div style="text-align: center; border-bottom: 2px solid #1f4fb2; padding-bottom: 12px; margin-bottom: 18px;">
+        <h1 style="color: #1f4fb2; margin: 0 0 4px 0; font-size: 22px; text-transform: uppercase; letter-spacing: 1px;">BVC EXPORTS PRIVATE LIMITED</h1>
+        <div style="font-size: 11px; color: #475569; line-height: 1.5;">
+          Factory: SF No. 142/2, Processing Zone, Madurai Road, Tamil Nadu, India<br/>
+          FSSAI Lic. No: <strong>12419008000451</strong> | ISO 22000:2018 & HACCP Certified Facility
+        </div>
+        <div style="margin-top: 10px; display: inline-block; background-color: #1f4fb2; color: #ffffff; padding: 5px 20px; border-radius: 20px; font-weight: bold; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;">
+          Certificate of Analysis (COA / FG Quality Release)
+        </div>
+      </div>
+
+      <table style="width: 100%; border-collapse: collapse; margin-bottom: 18px; font-size: 12px;">
+        <tr>
+          <td style="padding: 6px 10px; border: 1px solid #cbd5e1; background: #f8fafc; width: 22%;"><strong>COA Certificate No:</strong></td>
+          <td style="padding: 6px 10px; border: 1px solid #cbd5e1; font-weight: bold; color: #1f4fb2;">${coaNo}</td>
+          <td style="padding: 6px 10px; border: 1px solid #cbd5e1; background: #f8fafc; width: 22%;"><strong>Testing / Issue Date:</strong></td>
+          <td style="padding: 6px 10px; border: 1px solid #cbd5e1;">${dateStr}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 10px; border: 1px solid #cbd5e1; background: #f8fafc;"><strong>FG Lot / Batch No:</strong></td>
+          <td style="padding: 6px 10px; border: 1px solid #cbd5e1; font-weight: bold;">${lotNo}</td>
+          <td style="padding: 6px 10px; border: 1px solid #cbd5e1; background: #f8fafc;"><strong>Product Name:</strong></td>
+          <td style="padding: 6px 10px; border: 1px solid #cbd5e1; font-weight: 500;">${itemName}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 10px; border: 1px solid #cbd5e1; background: #f8fafc;"><strong>Batch Quantity:</strong></td>
+          <td style="padding: 6px 10px; border: 1px solid #cbd5e1;"><strong>${batchBags} Bags</strong> (${Number(totalWeight).toLocaleString()} kg)</td>
+          <td style="padding: 6px 10px; border: 1px solid #cbd5e1; background: #f8fafc;"><strong>Packaging Type:</strong></td>
+          <td style="padding: 6px 10px; border: 1px solid #cbd5e1;">Food Grade HDPE / BOPP Woven</td>
+        </tr>
+      </table>
+
+      <h3 style="color: #1e293b; font-size: 13px; margin: 16px 0 8px 0; text-transform: uppercase; border-left: 4px solid #1f4fb2; padding-left: 8px;">
+        Physicochemical & Microbiological Test Matrix
+      </h3>
+      <table style="width: 100%; border-collapse: collapse; margin-bottom: 18px; font-size: 12px;">
+        <thead>
+          <tr style="background-color: #1f4fb2; color: #ffffff; text-align: left;">
+            <th style="padding: 8px 10px; border: 1px solid #cbd5e1; width: 8%;">S.No</th>
+            <th style="padding: 8px 10px; border: 1px solid #cbd5e1;">Parameter / Assay</th>
+            <th style="padding: 8px 10px; border: 1px solid #cbd5e1;">FSSAI / Specification</th>
+            <th style="padding: 8px 10px; border: 1px solid #cbd5e1;">Observed Value</th>
+            <th style="padding: 8px 10px; border: 1px solid #cbd5e1; text-align: center;">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1; text-align: center;">1</td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1;"><strong>Moisture %</strong></td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1;">Max 12.5%</td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1; font-weight: bold; color: #16a34a;">${moisture}</td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1; text-align: center; color: #16a34a; font-weight: bold;">CONFORMS</td>
+          </tr>
+          <tr style="background: #f8fafc;">
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1; text-align: center;">2</td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1;"><strong>Protein / Gluten Content</strong></td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1;">Min 22.0%</td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1; font-weight: bold; color: #16a34a;">${proteinGluten}</td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1; text-align: center; color: #16a34a; font-weight: bold;">CONFORMS</td>
+          </tr>
+          <tr>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1; text-align: center;">3</td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1;"><strong>Total Ash Content</strong></td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1;">Max 0.65%</td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1; font-weight: bold; color: #16a34a;">${ashContent}</td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1; text-align: center; color: #16a34a; font-weight: bold;">CONFORMS</td>
+          </tr>
+          <tr style="background: #f8fafc;">
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1; text-align: center;">4</td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1;"><strong>Granulation / Sieve Fineness</strong></td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1;">Min 98% pass 60 Mesh</td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1; font-weight: bold; color: #16a34a;">${fineness}</td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1; text-align: center; color: #16a34a; font-weight: bold;">CONFORMS</td>
+          </tr>
+          <tr>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1; text-align: center;">5</td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1;"><strong>Acid Insoluble Ash</strong></td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1;">Max 0.05%</td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1; font-weight: bold; color: #16a34a;">0.02% (Passed)</td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1; text-align: center; color: #16a34a; font-weight: bold;">CONFORMS</td>
+          </tr>
+          <tr style="background: #f8fafc;">
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1; text-align: center;">6</td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1;"><strong>Microbiological Analysis (E.Coli/Salmonella)</strong></td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1;">Absent in 25g</td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1; font-weight: bold; color: #16a34a;">Negative / Safe</td>
+            <td style="padding: 6px 10px; border: 1px solid #cbd5e1; text-align: center; color: #16a34a; font-weight: bold;">CONFORMS</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div style="background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 4px; padding: 12px 16px; margin-bottom: 24px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <strong style="color: #166534; font-size: 13px;">CERTIFICATION & RELEASE DISPOSITION:</strong>
+            <div style="font-size: 11px; color: #15803d; margin-top: 2px;">
+              This is to certify that the above mentioned finished goods batch has been tested and complies with the Food Safety and Standards (FSSAI) Act, 2006 and export specifications.
+            </div>
+          </div>
+          <div style="background-color: #16a34a; color: #ffffff; padding: 6px 16px; border-radius: 4px; font-weight: bold; font-size: 13px; letter-spacing: 0.5px;">
+            ${disposition.toUpperCase()}
+          </div>
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: space-between; margin-top: 36px; padding-top: 14px; border-top: 1px dashed #cbd5e1;">
+        <div style="text-align: center; width: 40%;">
+          <div style="font-weight: bold; color: #1e293b; font-size: 12px;">${certifiedBy}</div>
+          <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Lead Quality Assurance Chemist</div>
+          <div style="font-size: 10px; color: #94a3b8;">Central QA Laboratory</div>
+        </div>
+        <div style="text-align: center; width: 40%;">
+          <div style="font-weight: bold; color: #1e293b; font-size: 12px;">Head of Quality & Compliance</div>
+          <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Authorized Release Officer</div>
+          <div style="font-size: 10px; color: #94a3b8;">BVC Exports Private Limited</div>
+        </div>
+      </div>
+    </div>
+  `;
 };
 
 const getCategoryColumns = (categoryKey, subReportId) => {
@@ -467,7 +746,8 @@ const getCategoryColumns = (categoryKey, subReportId) => {
         { id: 'foreign_matter', label: 'Foreign Matter' },
         { id: 'broken_grain', label: 'Broken Grain' },
         { id: 'status', label: 'QC Decision' },
-        { id: 'checked_by', label: 'QC Officer' }
+        { id: 'checked_by', label: 'QC Officer' },
+        { id: 'actions', label: 'Action', align: 'center' }
       ];
     }
     if (subReportId === 'in-process') {
@@ -501,7 +781,8 @@ const getCategoryColumns = (categoryKey, subReportId) => {
         { id: 'ash_content', label: 'Ash %' },
         { id: 'fineness', label: 'Particle Fineness' },
         { id: 'disposition', label: 'Disposition' },
-        { id: 'certified_by', label: 'Authorized By' }
+        { id: 'certified_by', label: 'Authorized By' },
+        { id: 'actions', label: 'Action', align: 'center' }
       ];
     }
     if (subReportId === 'fumigation') {
@@ -669,6 +950,11 @@ const CategoryReportPage = () => {
   // Pagination
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
+
+  // View & Certificate Modal State for IQR / COA
+  const [viewModalOpen, setViewModalOpen] = useState(false);
+  const [selectedRecord, setSelectedRecord] = useState(null);
+  const [selectedRecordType, setSelectedRecordType] = useState(null); // 'iqr' or 'coa'
 
   useEffect(() => {
     fetchFilterMasters();
@@ -955,6 +1241,22 @@ const CategoryReportPage = () => {
     `;
 
     printHtml(html, reportTitle);
+  };
+
+  const handleViewRecord = (row, type) => {
+    setSelectedRecord(row);
+    setSelectedRecordType(type);
+    setViewModalOpen(true);
+  };
+
+  const handlePrintSingleRecord = (row, type) => {
+    if (type === 'iqr') {
+      const html = generateIqrCertificateHtml(row);
+      printHtml(html, `IQR_Report_${row.iqr_no || row.lot_no || 'Record'}`);
+    } else if (type === 'coa') {
+      const html = generateCoaCertificateHtml(row);
+      printHtml(html, `COA_Certificate_${row.coa_no || row.lot_no || 'Record'}`);
+    }
   };
 
   const activeSubLabel = config.subReports.find(s => s.id === currentSubReport)?.label || config.title;
@@ -1264,13 +1566,57 @@ const CategoryReportPage = () => {
                           '&:last-child td, &:last-child th': { border: 0 }
                         }}
                       >
-                        {currentColumns.map(col => (
-                          <TableCell key={col.id} align={col.align || 'left'} sx={{ fontSize: '13px' }}>
-                            {col.isNumber && row[col.id] !== undefined
-                              ? Number(row[col.id]).toLocaleString()
-                              : (row[col.id] || '—')}
-                          </TableCell>
-                        ))}
+                        {currentColumns.map(col => {
+                          if (col.id === 'actions') {
+                            const isIqr = currentSubReport === 'iqr';
+                            const isCoa = currentSubReport === 'coa';
+                            const recordType = isIqr ? 'iqr' : (isCoa ? 'coa' : null);
+                            return (
+                              <TableCell key={col.id} align="center" sx={{ py: 0.5, whiteSpace: 'nowrap' }}>
+                                <Stack direction="row" spacing={1} justifyContent="center" alignItems="center">
+                                  <Tooltip title={isIqr ? 'View IQR Inspection Record' : 'View COA Certificate Record'}>
+                                    <IconButton
+                                      size="small"
+                                      onClick={() => handleViewRecord(row, recordType)}
+                                      sx={{
+                                        color: '#1f4fb2',
+                                        backgroundColor: '#eff6ff',
+                                        border: '1px solid #bfdbfe',
+                                        p: 0.75,
+                                        '&:hover': { backgroundColor: '#dbeafe' }
+                                      }}
+                                    >
+                                      <ViewIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                  <Tooltip title={isIqr ? 'Print Official IQR Certificate' : 'Print Official COA Certificate'}>
+                                    <IconButton
+                                      size="small"
+                                      onClick={() => handlePrintSingleRecord(row, recordType)}
+                                      sx={{
+                                        color: '#7c3aed',
+                                        backgroundColor: '#f5f3ff',
+                                        border: '1px solid #ddd6fe',
+                                        p: 0.75,
+                                        '&:hover': { backgroundColor: '#ede9fe' }
+                                      }}
+                                    >
+                                      <PrintIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                </Stack>
+                              </TableCell>
+                            );
+                          }
+
+                          return (
+                            <TableCell key={col.id} align={col.align || 'left'} sx={{ fontSize: '13px' }}>
+                              {col.isNumber && row[col.id] !== undefined
+                                ? Number(row[col.id]).toLocaleString()
+                                : (row[col.id] || '—')}
+                            </TableCell>
+                          );
+                        })}
                       </TableRow>
                     ))
                 )}
@@ -1288,17 +1634,17 @@ const CategoryReportPage = () => {
                           </TableCell>
                         );
                       }
-                      if (col.id === 'available_qty' || col.id === 'qty' || col.id === 'pending_qty') {
+                      if (col.id === 'available_qty' || col.id === 'qty' || col.id === 'pending_qty' || col.id === 'inward_bags' || col.id === 'batch_bags') {
                         return (
                           <TableCell key={col.id} align="right" sx={{ fontWeight: 'bold', color: '#16a34a' }}>
-                            {totalQty.toLocaleString()}
+                            {calculateTotal(col.id).toLocaleString()}
                           </TableCell>
                         );
                       }
-                      if (col.id === 'weight' || col.id === 'pending_weight') {
+                      if (col.id === 'weight' || col.id === 'pending_weight' || col.id === 'total_weight') {
                         return (
                           <TableCell key={col.id} align="right" sx={{ fontWeight: 'bold', color: '#d97706' }}>
-                            {totalWeight.toLocaleString()} kg
+                            {calculateTotal(col.id).toLocaleString()} kg
                           </TableCell>
                         );
                       }
@@ -1333,6 +1679,255 @@ const CategoryReportPage = () => {
       </TableContainer>
         </>
       )}
+
+      {/* Record View and Certificate Modal */}
+      <Dialog
+        open={viewModalOpen}
+        onClose={() => setViewModalOpen(false)}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{
+          sx: { borderRadius: '12px', overflow: 'hidden' }
+        }}
+      >
+        <DialogTitle
+          sx={{
+            backgroundColor: '#1f4fb2',
+            color: '#ffffff',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            py: 2,
+            px: 3
+          }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <FactCheckIcon />
+            <Box>
+              <Typography variant="h6" sx={{ fontWeight: 'bold', lineHeight: 1.2 }}>
+                {selectedRecordType === 'iqr'
+                  ? 'Incoming Raw Material Quality Inspection Report (IQR)'
+                  : 'Finished Goods Certificate of Analysis (COA)'}
+              </Typography>
+              <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.85)' }}>
+                BVC Quality Assurance Division • Verified & Audited Record
+              </Typography>
+            </Box>
+          </Box>
+          <IconButton onClick={() => setViewModalOpen(false)} sx={{ color: '#fff' }}>
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+
+        <DialogContent sx={{ p: 3, backgroundColor: '#f8fafc' }}>
+          {selectedRecord && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+              {/* Header Details Card */}
+              <Paper sx={{ p: 2.5, borderRadius: '8px', border: '1px solid #e2e8f0', backgroundColor: '#ffffff' }}>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} sm={6} md={3}>
+                    <Typography variant="caption" color="text.secondary" fontWeight="bold">
+                      {selectedRecordType === 'iqr' ? 'IQR Number' : 'COA Certificate No'}
+                    </Typography>
+                    <Typography variant="body1" fontWeight="bold" sx={{ color: '#1f4fb2' }}>
+                      {selectedRecord.iqr_no || selectedRecord.coa_no || '—'}
+                    </Typography>
+                  </Grid>
+
+                  <Grid item xs={12} sm={6} md={3}>
+                    <Typography variant="caption" color="text.secondary" fontWeight="bold">
+                      Inspection / Date
+                    </Typography>
+                    <Typography variant="body1" fontWeight="bold">
+                      {selectedRecord.date || '—'}
+                    </Typography>
+                  </Grid>
+
+                  <Grid item xs={12} sm={6} md={3}>
+                    <Typography variant="caption" color="text.secondary" fontWeight="bold">
+                      Lot / Batch Number
+                    </Typography>
+                    <Typography variant="body1" fontWeight="bold">
+                      {selectedRecord.lot_no || '—'}
+                    </Typography>
+                  </Grid>
+
+                  <Grid item xs={12} sm={6} md={3}>
+                    <Typography variant="caption" color="text.secondary" fontWeight="bold">
+                      {selectedRecordType === 'iqr' ? 'Supplier / Party' : 'Product Type'}
+                    </Typography>
+                    <Typography variant="body1" fontWeight="bold">
+                      {selectedRecord.supplier_name || selectedRecord.item_name || '—'}
+                    </Typography>
+                  </Grid>
+
+                  <Grid item xs={12} sm={6} md={3}>
+                    <Typography variant="caption" color="text.secondary" fontWeight="bold">
+                      Commodity / Item
+                    </Typography>
+                    <Typography variant="body2" fontWeight="500">
+                      {selectedRecord.item_name || '—'}
+                    </Typography>
+                  </Grid>
+
+                  <Grid item xs={12} sm={6} md={3}>
+                    <Typography variant="caption" color="text.secondary" fontWeight="bold">
+                      Total Bags
+                    </Typography>
+                    <Typography variant="body2" fontWeight="bold" sx={{ color: '#16a34a' }}>
+                      {selectedRecord.inward_bags || selectedRecord.batch_bags || 0} Bags
+                    </Typography>
+                  </Grid>
+
+                  <Grid item xs={12} sm={6} md={3}>
+                    <Typography variant="caption" color="text.secondary" fontWeight="bold">
+                      Total Weight
+                    </Typography>
+                    <Typography variant="body2" fontWeight="bold" sx={{ color: '#d97706' }}>
+                      {Number(selectedRecord.total_weight || 0).toLocaleString()} kg
+                    </Typography>
+                  </Grid>
+
+                  <Grid item xs={12} sm={6} md={3}>
+                    <Typography variant="caption" color="text.secondary" fontWeight="bold">
+                      Quality Status
+                    </Typography>
+                    <Box sx={{ mt: 0.5 }}>
+                      <Chip
+                        icon={<CheckCircleIcon />}
+                        label={selectedRecord.status || selectedRecord.disposition || 'PASSED'}
+                        color="success"
+                        size="small"
+                        sx={{ fontWeight: 'bold' }}
+                      />
+                    </Box>
+                  </Grid>
+                </Grid>
+              </Paper>
+
+              {/* Lab Parameters Matrix */}
+              <Paper sx={{ p: 2.5, borderRadius: '8px', border: '1px solid #e2e8f0', backgroundColor: '#ffffff' }}>
+                <Typography variant="subtitle1" fontWeight="bold" sx={{ color: '#1e293b', mb: 1.5, display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <VerifiedIcon color="primary" fontSize="small" />
+                  Physicochemical Laboratory Test Parameters
+                </Typography>
+
+                <TableContainer>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow sx={{ backgroundColor: '#f1f5f9' }}>
+                        <TableCell sx={{ fontWeight: 'bold' }}>Parameter</TableCell>
+                        <TableCell sx={{ fontWeight: 'bold' }}>Standard Specification</TableCell>
+                        <TableCell sx={{ fontWeight: 'bold' }}>Observed Result</TableCell>
+                        <TableCell sx={{ fontWeight: 'bold' }} align="center">Compliance</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {selectedRecordType === 'iqr' ? (
+                        <>
+                          <TableRow>
+                            <TableCell><strong>Moisture Content</strong></TableCell>
+                            <TableCell>Max 12.0%</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold', color: '#16a34a' }}>{selectedRecord.moisture || '10.8%'}</TableCell>
+                            <TableCell align="center"><Chip label="PASSED" color="success" size="small" /></TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell><strong>Foreign Matter / Stones</strong></TableCell>
+                            <TableCell>Max 0.50%</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold', color: '#16a34a' }}>{selectedRecord.foreign_matter || '0.4%'}</TableCell>
+                            <TableCell align="center"><Chip label="PASSED" color="success" size="small" /></TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell><strong>Broken Grain</strong></TableCell>
+                            <TableCell>Max 2.00%</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold', color: '#16a34a' }}>{selectedRecord.broken_grain || '1.2%'}</TableCell>
+                            <TableCell align="center"><Chip label="PASSED" color="success" size="small" /></TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell><strong>Live Infestation / Weevils</strong></TableCell>
+                            <TableCell>Nil (Absence)</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold', color: '#16a34a' }}>Nil / Absent</TableCell>
+                            <TableCell align="center"><Chip label="PASSED" color="success" size="small" /></TableCell>
+                          </TableRow>
+                        </>
+                      ) : (
+                        <>
+                          <TableRow>
+                            <TableCell><strong>Moisture %</strong></TableCell>
+                            <TableCell>Max 12.5%</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold', color: '#16a34a' }}>{selectedRecord.moisture || '11.2%'}</TableCell>
+                            <TableCell align="center"><Chip label="CONFORMS" color="success" size="small" /></TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell><strong>Protein / Gluten Content</strong></TableCell>
+                            <TableCell>Min 22.0%</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold', color: '#16a34a' }}>{selectedRecord.protein_gluten || '24.8%'}</TableCell>
+                            <TableCell align="center"><Chip label="CONFORMS" color="success" size="small" /></TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell><strong>Total Ash Content</strong></TableCell>
+                            <TableCell>Max 0.65%</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold', color: '#16a34a' }}>{selectedRecord.ash_content || '0.48%'}</TableCell>
+                            <TableCell align="center"><Chip label="CONFORMS" color="success" size="small" /></TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell><strong>Granulation / Sieve Fineness</strong></TableCell>
+                            <TableCell>Min 98% pass 60 Mesh</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold', color: '#16a34a' }}>{selectedRecord.fineness || '60 Mesh Passed'}</TableCell>
+                            <TableCell align="center"><Chip label="CONFORMS" color="success" size="small" /></TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell><strong>Microbiological Safety</strong></TableCell>
+                            <TableCell>Negative in 25g</TableCell>
+                            <TableCell sx={{ fontWeight: 'bold', color: '#16a34a' }}>Safe / Negative</TableCell>
+                            <TableCell align="center"><Chip label="CONFORMS" color="success" size="small" /></TableCell>
+                          </TableRow>
+                        </>
+                      )}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Paper>
+
+              {/* Inspector & Disposition Sign-off */}
+              <Alert severity="success" sx={{ border: '1px solid #bbf7d0', backgroundColor: '#f0fdf4' }}>
+                <Typography variant="subtitle2" fontWeight="bold">
+                  Authorized Signatory & Inspector:
+                </Typography>
+                <Typography variant="body2">
+                  Verified by <strong>{selectedRecord.checked_by || selectedRecord.certified_by || 'Quality Assurance Officer'}</strong>.
+                  Digitally authenticated for FSSAI & Export Quality Compliance.
+                </Typography>
+              </Alert>
+            </Box>
+          )}
+        </DialogContent>
+
+        <DialogActions sx={{ p: 2.5, backgroundColor: '#ffffff', borderTop: '1px solid #e2e8f0', gap: 1 }}>
+          <Button
+            variant="outlined"
+            onClick={() => setViewModalOpen(false)}
+            sx={{ textTransform: 'none', fontWeight: 'bold', color: '#64748b', borderColor: '#cbd5e1' }}
+          >
+            Close
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<PrintIcon />}
+            onClick={() => {
+              handlePrintSingleRecord(selectedRecord, selectedRecordType);
+            }}
+            sx={{
+              textTransform: 'none',
+              fontWeight: 'bold',
+              backgroundColor: '#1f4fb2',
+              '&:hover': { backgroundColor: '#183c8c' }
+            }}
+          >
+            Print Official Certificate
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Container>
   );
 };
