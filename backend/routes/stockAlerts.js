@@ -460,17 +460,35 @@ async function runEvaluationCore() {
           // Create notification for severity transition
           const msg = `⚠️ ${alertType} STOCK ALERT: ${itemName} stock at ${godownName} is now ${currentQty.toFixed(1)} Kg (Critical: ${critQ} Kg, Min: ${minQ} Kg, Reorder: ${reorderQ} Kg).`;
           for (const c of contacts) {
+            const rawCid = c.contact_id || c.id;
+            const contactId = (rawCid !== '' && rawCid !== null && rawCid !== undefined && !isNaN(parseInt(rawCid, 10)))
+              ? parseInt(rawCid, 10)
+              : null;
+            const alertId = existingActiveAlert.id ? parseInt(existingActiveAlert.id, 10) : null;
+
             if (cfg.in_app_enabled) {
               await db.run(`
                 INSERT INTO stock_alert_notifications (alert_id, contact_id, contact_name, contact_email, contact_phone, channel, message, status, sent_at)
                 VALUES (?, ?, ?, ?, ?, 'IN_APP', ?, 'SENT', CURRENT_TIMESTAMP)
-              `, [existingActiveAlert.id, c.contact_id || c.id, c.contact_name, c.email, c.phone, msg]);
+              `, [alertId, contactId, c.contact_name, c.email || null, c.phone || null, msg]);
             }
             if (cfg.email_enabled && c.email) {
               await db.run(`
                 INSERT INTO stock_alert_notifications (alert_id, contact_id, contact_name, contact_email, contact_phone, channel, message, status, sent_at)
                 VALUES (?, ?, ?, ?, ?, 'EMAIL', ?, 'SENT', CURRENT_TIMESTAMP)
-              `, [existingActiveAlert.id, c.contact_id || c.id, c.contact_name, c.email, c.phone, msg]);
+              `, [alertId, contactId, c.contact_name, c.email || null, c.phone || null, msg]);
+            }
+            if (cfg.sms_enabled && c.phone) {
+              await db.run(`
+                INSERT INTO stock_alert_notifications (alert_id, contact_id, contact_name, contact_email, contact_phone, channel, message, status, sent_at)
+                VALUES (?, ?, ?, ?, ?, 'SMS', ?, 'SENT', CURRENT_TIMESTAMP)
+              `, [alertId, contactId, c.contact_name, c.email || null, c.phone || null, msg]);
+            }
+            if (cfg.whatsapp_enabled && c.phone) {
+              await db.run(`
+                INSERT INTO stock_alert_notifications (alert_id, contact_id, contact_name, contact_email, contact_phone, channel, message, status, sent_at)
+                VALUES (?, ?, ?, ?, ?, 'WHATSAPP', ?, 'SENT', CURRENT_TIMESTAMP)
+              `, [alertId, contactId, c.contact_name, c.email || null, c.phone || null, msg]);
             }
           }
         } else {
@@ -479,38 +497,59 @@ async function runEvaluationCore() {
             UPDATE stock_alerts 
             SET current_qty = ?, minimum_qty = ?, reorder_level = ?, critical_level = ?
             WHERE id = ?
-          `, [currentQty, minQ, reorderQ, critQ, existingActiveAlert.id]);
+          `, [currentQty, minQ, reorderQ, critQ, parseInt(existingActiveAlert.id, 10)]);
         }
       } else {
         // Create new OPEN alert only when no active alert exists for this item + godown
+        const safeCfgId = (cfg.id !== '' && cfg.id != null && !isNaN(parseInt(cfg.id, 10))) ? parseInt(cfg.id, 10) : null;
+        const safeItemId = (cfg.item_id !== '' && cfg.item_id != null && !isNaN(parseInt(cfg.item_id, 10))) ? parseInt(cfg.item_id, 10) : null;
+        const safeGodownId = (cfg.godown_id !== '' && cfg.godown_id != null && !isNaN(parseInt(cfg.godown_id, 10))) ? parseInt(cfg.godown_id, 10) : null;
+
         const insRes = await db.run(`
           INSERT INTO stock_alerts 
           (config_id, item_id, item_name, godown_id, godown_name, alert_type, current_qty, minimum_qty, reorder_level, critical_level, status, triggered_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', CURRENT_TIMESTAMP)
-        `, [cfg.id, cfg.item_id, itemName, cfg.godown_id, godownName, alertType, currentQty, minQ, reorderQ, critQ]);
+        `, [safeCfgId, safeItemId, itemName, safeGodownId, godownName, alertType, currentQty, minQ, reorderQ, critQ]);
 
-        const newAlertId = insRes.lastID;
+        const newAlertId = insRes.lastID ? parseInt(insRes.lastID, 10) : null;
 
         // Generate notifications across configured channels
         const msg = `⚠️ ${alertType} STOCK ALERT: ${itemName} at ${godownName} has reached ${currentQty.toFixed(1)} Kg (Minimum: ${minQ} Kg, Reorder: ${reorderQ} Kg). Please arrange replenishment.`;
         for (const c of contacts) {
+          const rawCid = c.contact_id || c.id;
+          const contactId = (rawCid !== '' && rawCid !== null && rawCid !== undefined && !isNaN(parseInt(rawCid, 10)))
+            ? parseInt(rawCid, 10)
+            : null;
+
           if (cfg.in_app_enabled) {
             await db.run(`
               INSERT INTO stock_alert_notifications (alert_id, contact_id, contact_name, contact_email, contact_phone, channel, message, status, sent_at)
               VALUES (?, ?, ?, ?, ?, 'IN_APP', ?, 'SENT', CURRENT_TIMESTAMP)
-            `, [newAlertId, c.contact_id || c.id, c.contact_name, c.email, c.phone, msg]);
+            `, [newAlertId, contactId, c.contact_name, c.email || null, c.phone || null, msg]);
           }
           if (cfg.email_enabled && c.email) {
             await db.run(`
               INSERT INTO stock_alert_notifications (alert_id, contact_id, contact_name, contact_email, contact_phone, channel, message, status, sent_at)
               VALUES (?, ?, ?, ?, ?, 'EMAIL', ?, 'SENT', CURRENT_TIMESTAMP)
-            `, [newAlertId, c.contact_id || c.id, c.contact_name, c.email, c.phone, msg]);
+            `, [newAlertId, contactId, c.contact_name, c.email || null, c.phone || null, msg]);
+          }
+          if (cfg.sms_enabled && c.phone) {
+            await db.run(`
+              INSERT INTO stock_alert_notifications (alert_id, contact_id, contact_name, contact_email, contact_phone, channel, message, status, sent_at)
+              VALUES (?, ?, ?, ?, ?, 'SMS', ?, 'SENT', CURRENT_TIMESTAMP)
+            `, [newAlertId, contactId, c.contact_name, c.email || null, c.phone || null, msg]);
+          }
+          if (cfg.whatsapp_enabled && c.phone) {
+            await db.run(`
+              INSERT INTO stock_alert_notifications (alert_id, contact_id, contact_name, contact_email, contact_phone, channel, message, status, sent_at)
+              VALUES (?, ?, ?, ?, ?, 'WHATSAPP', ?, 'SENT', CURRENT_TIMESTAMP)
+            `, [newAlertId, contactId, c.contact_name, c.email || null, c.phone || null, msg]);
           }
           if (cfg.offline_enabled) {
             await db.run(`
               INSERT INTO stock_alert_notifications (alert_id, contact_id, contact_name, contact_email, contact_phone, channel, message, status, sent_at)
               VALUES (?, ?, ?, ?, ?, 'OFFLINE', ?, 'SENT', CURRENT_TIMESTAMP)
-            `, [newAlertId, c.contact_id || c.id, c.contact_name, c.email, c.phone, msg]);
+            `, [newAlertId, contactId, c.contact_name, c.email || null, c.phone || null, msg]);
           }
         }
       }
@@ -521,14 +560,14 @@ async function runEvaluationCore() {
           UPDATE stock_alerts 
           SET status = 'RESOLVED', current_qty = ?, resolved_at = CURRENT_TIMESTAMP, resolved_reason = ?
           WHERE id = ?
-        `, [currentQty, `Stock replenished to ${currentQty.toFixed(1)} Kg (above Reorder Level: ${reorderQ} Kg)`, existingActiveAlert.id]);
+        `, [currentQty, `Stock replenished to ${currentQty.toFixed(1)} Kg (above Reorder Level: ${reorderQ} Kg)`, parseInt(existingActiveAlert.id, 10)]);
 
         // Auto-resolve notifications
         await db.run(`
           UPDATE stock_alert_notifications 
           SET status = 'RESOLVED' 
           WHERE alert_id = ? AND status = 'PENDING'
-        `, [existingActiveAlert.id]);
+        `, [parseInt(existingActiveAlert.id, 10)]);
       }
     }
 
@@ -690,18 +729,49 @@ router.post('/evaluate', async (req, res) => {
 // 4. GET /api/stock-alerts/config - List all configurations
 router.get('/config', async (req, res) => {
   try {
-    const query = `
-      SELECT sac.*, 
-        GROUP_CONCAT(c.contact_name, ', ') as assigned_contacts,
-        GROUP_CONCAT(c.id, ',') as contact_ids
-      FROM stock_alert_config sac
-      LEFT JOIN stock_alert_config_contacts sac_c ON sac.id = sac_c.config_id
-      LEFT JOIN stock_alert_contacts c ON sac_c.contact_id = c.id
-      GROUP BY sac.id
-      ORDER BY sac.item_name ASC, sac.godown_name ASC
-    `;
-    const result = await db.query(query);
-    res.json({ success: true, configs: result.rows || [] });
+    const configsRes = await db.query(`
+      SELECT * FROM stock_alert_config
+      ORDER BY item_name ASC, godown_name ASC
+    `);
+    const configs = configsRes.rows || [];
+
+    // Fetch mappings and contact details
+    let mappingRows = [];
+    try {
+      const mappingRes = await db.query(`
+        SELECT sac_c.config_id, sac_c.contact_id, sac_c.is_primary, c.contact_name, c.email, c.phone, c.department
+        FROM stock_alert_config_contacts sac_c
+        JOIN stock_alert_contacts c ON sac_c.contact_id = c.id
+        ORDER BY sac_c.is_primary DESC, c.contact_name ASC
+      `);
+      mappingRows = mappingRes.rows || [];
+    } catch (e) {
+      mappingRows = [];
+    }
+    
+    const contactMap = new Map();
+    const contactIdMap = new Map();
+    for (const m of mappingRows) {
+      const cfgId = m.config_id;
+      if (!contactMap.has(cfgId)) {
+        contactMap.set(cfgId, []);
+        contactIdMap.set(cfgId, []);
+      }
+      contactMap.get(cfgId).push(m.contact_name);
+      contactIdMap.get(cfgId).push(m.contact_id);
+    }
+
+    const enrichedConfigs = configs.map(cfg => {
+      const cNames = contactMap.get(cfg.id) || [];
+      const cIds = contactIdMap.get(cfg.id) || [];
+      return {
+        ...cfg,
+        assigned_contacts: cNames.join(', '),
+        contact_ids: cIds.join(',')
+      };
+    });
+
+    res.json({ success: true, configs: enrichedConfigs });
   } catch (err) {
     console.error('Error fetching stock alert configs:', err);
     res.status(500).json({ success: false, error: err.message });
@@ -728,49 +798,75 @@ router.post('/config', async (req, res) => {
       contact_ids = []
     } = req.body;
 
-    if (!item_name) {
+    if (!item_name || !String(item_name).trim()) {
       return res.status(400).json({ success: false, message: 'Item name is required' });
     }
 
+    const cleanItemName = String(item_name).trim();
+    const cleanGodownName = (godown_name && String(godown_name).trim()) ? String(godown_name).trim() : 'All Godowns';
+
+    const parsedItemId = (item_id !== '' && item_id !== null && item_id !== undefined && !isNaN(parseInt(item_id, 10))) 
+      ? parseInt(item_id, 10) 
+      : null;
+    const parsedGodownId = (godown_id !== '' && godown_id !== null && godown_id !== undefined && !isNaN(parseInt(godown_id, 10))) 
+      ? parseInt(godown_id, 10) 
+      : null;
+    const parsedMinQty = parseFloat(minimum_qty) || 0;
+    const parsedReorder = parseFloat(reorder_level) || 0;
+    const parsedCritical = parseFloat(critical_level) || 0;
+    const parsedAlertEnabled = (alert_enabled === 1 || alert_enabled === '1' || alert_enabled === true) ? 1 : 0;
+    const parsedInApp = (in_app_enabled === 1 || in_app_enabled === '1' || in_app_enabled === true) ? 1 : 0;
+    const parsedEmail = (email_enabled === 1 || email_enabled === '1' || email_enabled === true) ? 1 : 0;
+    const parsedSms = (sms_enabled === 1 || sms_enabled === '1' || sms_enabled === true) ? 1 : 0;
+    const parsedWhatsapp = (whatsapp_enabled === 1 || whatsapp_enabled === '1' || whatsapp_enabled === true) ? 1 : 0;
+    const parsedOffline = (offline_enabled === 1 || offline_enabled === '1' || offline_enabled === true) ? 1 : 0;
+
     // Check if configuration already exists for this item + godown
     const existing = await db.query(
-      'SELECT id FROM stock_alert_config WHERE LOWER(item_name) = LOWER(?) AND LOWER(godown_name) = LOWER(?)',
-      [item_name, godown_name]
+      'SELECT id FROM stock_alert_config WHERE LOWER(TRIM(item_name)) = LOWER(TRIM(?)) AND LOWER(TRIM(godown_name)) = LOWER(TRIM(?))',
+      [cleanItemName, cleanGodownName]
     );
 
     let configId;
     if (existing.rows && existing.rows.length > 0) {
-      configId = existing.rows[0].id;
+      configId = parseInt(existing.rows[0].id, 10);
       await db.run(`
         UPDATE stock_alert_config
         SET item_id = ?, minimum_qty = ?, reorder_level = ?, critical_level = ?,
             alert_enabled = ?, in_app_enabled = ?, email_enabled = ?, sms_enabled = ?,
             whatsapp_enabled = ?, offline_enabled = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
-      `, [item_id, minimum_qty, reorder_level, critical_level, alert_enabled, in_app_enabled, email_enabled, sms_enabled, whatsapp_enabled, offline_enabled, configId]);
+      `, [parsedItemId, parsedMinQty, parsedReorder, parsedCritical, parsedAlertEnabled, parsedInApp, parsedEmail, parsedSms, parsedWhatsapp, parsedOffline, configId]);
     } else {
       const ins = await db.run(`
         INSERT INTO stock_alert_config
         (item_id, item_name, godown_id, godown_name, minimum_qty, reorder_level, critical_level, alert_enabled, in_app_enabled, email_enabled, sms_enabled, whatsapp_enabled, offline_enabled)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, [item_id, item_name, godown_id, godown_name, minimum_qty, reorder_level, critical_level, alert_enabled, in_app_enabled, email_enabled, sms_enabled, whatsapp_enabled, offline_enabled]);
-      configId = ins.lastID;
+      `, [parsedItemId, cleanItemName, parsedGodownId, cleanGodownName, parsedMinQty, parsedReorder, parsedCritical, parsedAlertEnabled, parsedInApp, parsedEmail, parsedSms, parsedWhatsapp, parsedOffline]);
+      configId = ins.lastID ? parseInt(ins.lastID, 10) : null;
     }
 
-    // Update contacts mapping
-    await db.run('DELETE FROM stock_alert_config_contacts WHERE config_id = ?', [configId]);
-    if (Array.isArray(contact_ids) && contact_ids.length > 0) {
-      for (let i = 0; i < contact_ids.length; i++) {
-        const cId = contact_ids[i];
-        await db.run(`
-          INSERT INTO stock_alert_config_contacts (config_id, contact_id, is_primary, is_cc)
-          VALUES (?, ?, ?, ?)
-        `, [configId, cId, i === 0 ? 1 : 0, i > 0 ? 1 : 0]);
+    // Update contacts mapping safely
+    if (configId) {
+      await db.run('DELETE FROM stock_alert_config_contacts WHERE config_id = ?', [configId]);
+      if (Array.isArray(contact_ids) && contact_ids.length > 0) {
+        for (let i = 0; i < contact_ids.length; i++) {
+          const rawCid = contact_ids[i];
+          const cId = (rawCid !== '' && rawCid !== null && rawCid !== undefined && !isNaN(parseInt(rawCid, 10)))
+            ? parseInt(rawCid, 10)
+            : null;
+          if (cId) {
+            await db.run(`
+              INSERT INTO stock_alert_config_contacts (config_id, contact_id, is_primary, is_cc)
+              VALUES (?, ?, ?, ?)
+            `, [configId, cId, i === 0 ? 1 : 0, i > 0 ? 1 : 0]);
+          }
+        }
       }
     }
 
     // Re-evaluate immediately
-    await evaluateStockAlerts();
+    await evaluateStockAlerts(true);
 
     res.json({ success: true, message: 'Stock alert configuration saved successfully', configId });
   } catch (err) {
@@ -782,7 +878,11 @@ router.post('/config', async (req, res) => {
 // 6. PUT /api/stock-alerts/config/:id - Update configuration
 router.put('/config/:id', async (req, res) => {
   try {
-    const { id } = req.params;
+    const configId = parseInt(req.params.id, 10);
+    if (!configId || isNaN(configId)) {
+      return res.status(400).json({ success: false, message: 'Invalid configuration ID' });
+    }
+
     const {
       minimum_qty,
       reorder_level,
@@ -796,26 +896,42 @@ router.put('/config/:id', async (req, res) => {
       contact_ids
     } = req.body;
 
+    const parsedMinQty = parseFloat(minimum_qty) || 0;
+    const parsedReorder = parseFloat(reorder_level) || 0;
+    const parsedCritical = parseFloat(critical_level) || 0;
+    const parsedAlertEnabled = (alert_enabled === 1 || alert_enabled === '1' || alert_enabled === true) ? 1 : 0;
+    const parsedInApp = (in_app_enabled === 1 || in_app_enabled === '1' || in_app_enabled === true) ? 1 : 0;
+    const parsedEmail = (email_enabled === 1 || email_enabled === '1' || email_enabled === true) ? 1 : 0;
+    const parsedSms = (sms_enabled === 1 || sms_enabled === '1' || sms_enabled === true) ? 1 : 0;
+    const parsedWhatsapp = (whatsapp_enabled === 1 || whatsapp_enabled === '1' || whatsapp_enabled === true) ? 1 : 0;
+    const parsedOffline = (offline_enabled === 1 || offline_enabled === '1' || offline_enabled === true) ? 1 : 0;
+
     await db.run(`
       UPDATE stock_alert_config
       SET minimum_qty = ?, reorder_level = ?, critical_level = ?,
           alert_enabled = ?, in_app_enabled = ?, email_enabled = ?, sms_enabled = ?,
           whatsapp_enabled = ?, offline_enabled = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
-    `, [minimum_qty, reorder_level, critical_level, alert_enabled, in_app_enabled, email_enabled, sms_enabled, whatsapp_enabled, offline_enabled, id]);
+    `, [parsedMinQty, parsedReorder, parsedCritical, parsedAlertEnabled, parsedInApp, parsedEmail, parsedSms, parsedWhatsapp, parsedOffline, configId]);
 
     if (Array.isArray(contact_ids)) {
-      await db.run('DELETE FROM stock_alert_config_contacts WHERE config_id = ?', [id]);
+      await db.run('DELETE FROM stock_alert_config_contacts WHERE config_id = ?', [configId]);
       for (let i = 0; i < contact_ids.length; i++) {
-        await db.run(`
-          INSERT INTO stock_alert_config_contacts (config_id, contact_id, is_primary, is_cc)
-          VALUES (?, ?, ?, ?)
-        `, [id, contact_ids[i], i === 0 ? 1 : 0, i > 0 ? 1 : 0]);
+        const rawCid = contact_ids[i];
+        const cId = (rawCid !== '' && rawCid !== null && rawCid !== undefined && !isNaN(parseInt(rawCid, 10)))
+          ? parseInt(rawCid, 10)
+          : null;
+        if (cId) {
+          await db.run(`
+            INSERT INTO stock_alert_config_contacts (config_id, contact_id, is_primary, is_cc)
+            VALUES (?, ?, ?, ?)
+          `, [configId, cId, i === 0 ? 1 : 0, i > 0 ? 1 : 0]);
+        }
       }
     }
 
     // Re-evaluate immediately
-    await evaluateStockAlerts();
+    await evaluateStockAlerts(true);
 
     res.json({ success: true, message: 'Stock alert configuration updated successfully' });
   } catch (err) {
@@ -827,10 +943,13 @@ router.put('/config/:id', async (req, res) => {
 // 7. DELETE /api/stock-alerts/config/:id - Delete configuration
 router.delete('/config/:id', async (req, res) => {
   try {
-    const { id } = req.params;
-    await db.run('DELETE FROM stock_alert_config_contacts WHERE config_id = ?', [id]);
-    await db.run('DELETE FROM stock_alert_config WHERE id = ?', [id]);
-    await evaluateStockAlerts();
+    const configId = parseInt(req.params.id, 10);
+    if (!configId || isNaN(configId)) {
+      return res.status(400).json({ success: false, message: 'Invalid configuration ID' });
+    }
+    await db.run('DELETE FROM stock_alert_config_contacts WHERE config_id = ?', [configId]);
+    await db.run('DELETE FROM stock_alert_config WHERE id = ?', [configId]);
+    await evaluateStockAlerts(true);
     res.json({ success: true, message: 'Configuration deleted successfully' });
   } catch (err) {
     console.error('Error deleting stock alert config:', err);
@@ -852,16 +971,24 @@ router.get('/contacts', async (req, res) => {
 // 9. POST /api/stock-alerts/contacts - Create contact
 router.post('/contacts', async (req, res) => {
   try {
-    const { contact_name, department = 'Purchase', phone, email, active = 1 } = req.body;
-    if (!contact_name) {
+    const { contact_name, department = 'Purchase', phone = '', email = '', active = 1 } = req.body;
+    if (!contact_name || !String(contact_name).trim()) {
       return res.status(400).json({ success: false, message: 'Contact name is required' });
     }
+    const cleanName = String(contact_name).trim();
+    const cleanDept = String(department || 'Purchase').trim();
+    const cleanPhone = String(phone || '').trim();
+    const cleanEmail = String(email || '').trim();
+    const parsedActive = (active === 1 || active === '1' || active === true) ? 1 : 0;
+
     const ins = await db.run(`
       INSERT INTO stock_alert_contacts (contact_name, department, phone, email, active)
       VALUES (?, ?, ?, ?, ?)
-    `, [contact_name, department, phone, email, active]);
+    `, [cleanName, cleanDept, cleanPhone, cleanEmail, parsedActive]);
 
-    res.json({ success: true, message: 'Contact created successfully', contactId: ins.lastID });
+    const newContactId = ins.lastID ? parseInt(ins.lastID, 10) : null;
+
+    res.json({ success: true, message: 'Contact created successfully', contactId: newContactId });
   } catch (err) {
     console.error('Error creating contact:', err);
     res.status(500).json({ success: false, error: err.message });
@@ -871,13 +998,22 @@ router.post('/contacts', async (req, res) => {
 // 10. PUT /api/stock-alerts/contacts/:id - Update contact
 router.put('/contacts/:id', async (req, res) => {
   try {
-    const { id } = req.params;
+    const contactId = parseInt(req.params.id, 10);
+    if (!contactId || isNaN(contactId)) {
+      return res.status(400).json({ success: false, message: 'Invalid contact ID' });
+    }
     const { contact_name, department, phone, email, active } = req.body;
+    const cleanName = String(contact_name || '').trim();
+    const cleanDept = String(department || 'Purchase').trim();
+    const cleanPhone = String(phone || '').trim();
+    const cleanEmail = String(email || '').trim();
+    const parsedActive = (active === 1 || active === '1' || active === true) ? 1 : 0;
+
     await db.run(`
       UPDATE stock_alert_contacts
       SET contact_name = ?, department = ?, phone = ?, email = ?, active = ?
       WHERE id = ?
-    `, [contact_name, department, phone, email, active, id]);
+    `, [cleanName, cleanDept, cleanPhone, cleanEmail, parsedActive, contactId]);
 
     res.json({ success: true, message: 'Contact updated successfully' });
   } catch (err) {
@@ -889,9 +1025,12 @@ router.put('/contacts/:id', async (req, res) => {
 // 11. DELETE /api/stock-alerts/contacts/:id - Delete contact
 router.delete('/contacts/:id', async (req, res) => {
   try {
-    const { id } = req.params;
-    await db.run('DELETE FROM stock_alert_config_contacts WHERE contact_id = ?', [id]);
-    await db.run('DELETE FROM stock_alert_contacts WHERE id = ?', [id]);
+    const contactId = parseInt(req.params.id, 10);
+    if (!contactId || isNaN(contactId)) {
+      return res.status(400).json({ success: false, message: 'Invalid contact ID' });
+    }
+    await db.run('DELETE FROM stock_alert_config_contacts WHERE contact_id = ?', [contactId]);
+    await db.run('DELETE FROM stock_alert_contacts WHERE id = ?', [contactId]);
     res.json({ success: true, message: 'Contact deleted successfully' });
   } catch (err) {
     console.error('Error deleting contact:', err);
@@ -899,17 +1038,81 @@ router.delete('/contacts/:id', async (req, res) => {
   }
 });
 
-// 12. POST /api/stock-alerts/resolve/:id - Manually resolve / acknowledge alert
+// 12. POST /api/stock-alerts/contacts/:id/test-alert - Trigger immediate alert test to contact (Email & Phone)
+router.post('/contacts/:id/test-alert', async (req, res) => {
+  try {
+    const contactId = parseInt(req.params.id, 10);
+    if (!contactId || isNaN(contactId)) {
+      return res.status(400).json({ success: false, message: 'Invalid contact ID' });
+    }
+
+    const contactRes = await db.query('SELECT * FROM stock_alert_contacts WHERE id = ?', [contactId]);
+    if (!contactRes.rows || contactRes.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Contact not found' });
+    }
+
+    const contact = contactRes.rows[0];
+    const timestampStr = new Date().toLocaleString('en-IN');
+    const testMsg = `🔔 [TEST ALERT] BVC ERP Stock Alert Test: Notification verified for ${contact.contact_name} (${contact.department}). Email: ${contact.email || 'N/A'}, Phone: ${contact.phone || 'N/A'}. Timestamp: ${timestampStr}`;
+
+    const sentChannels = [];
+
+    // In-App
+    await db.run(`
+      INSERT INTO stock_alert_notifications (alert_id, contact_id, contact_name, contact_email, contact_phone, channel, message, status, sent_at)
+      VALUES (NULL, ?, ?, ?, ?, 'IN_APP', ?, 'SENT', CURRENT_TIMESTAMP)
+    `, [contactId, contact.contact_name, contact.email || null, contact.phone || null, testMsg]);
+    sentChannels.push('In-App Notification');
+
+    // Email
+    if (contact.email) {
+      await db.run(`
+        INSERT INTO stock_alert_notifications (alert_id, contact_id, contact_name, contact_email, contact_phone, channel, message, status, sent_at)
+        VALUES (NULL, ?, ?, ?, ?, 'EMAIL', ?, 'SENT', CURRENT_TIMESTAMP)
+      `, [contactId, contact.contact_name, contact.email, contact.phone || null, testMsg]);
+      sentChannels.push(`Email (${contact.email})`);
+    }
+
+    // Phone (SMS & WhatsApp)
+    if (contact.phone) {
+      await db.run(`
+        INSERT INTO stock_alert_notifications (alert_id, contact_id, contact_name, contact_email, contact_phone, channel, message, status, sent_at)
+        VALUES (NULL, ?, ?, ?, ?, 'SMS', ?, 'SENT', CURRENT_TIMESTAMP)
+      `, [contactId, contact.contact_name, contact.email || null, contact.phone, testMsg]);
+
+      await db.run(`
+        INSERT INTO stock_alert_notifications (alert_id, contact_id, contact_name, contact_email, contact_phone, channel, message, status, sent_at)
+        VALUES (NULL, ?, ?, ?, ?, 'WHATSAPP', ?, 'SENT', CURRENT_TIMESTAMP)
+      `, [contactId, contact.contact_name, contact.email || null, contact.phone, testMsg]);
+      sentChannels.push(`SMS / Phone (${contact.phone})`);
+    }
+
+    res.json({
+      success: true,
+      message: `Test alert dispatched successfully to ${contact.contact_name} via: ${sentChannels.join(', ')}`,
+      channels: sentChannels,
+      contact
+    });
+  } catch (err) {
+    console.error('Error sending test alert:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 13. POST /api/stock-alerts/resolve/:id - Manually resolve / acknowledge alert
 router.post('/resolve/:id', async (req, res) => {
   try {
-    const { id } = req.params;
+    const alertId = parseInt(req.params.id, 10);
+    if (!alertId || isNaN(alertId)) {
+      return res.status(400).json({ success: false, message: 'Invalid alert ID' });
+    }
     const todayStr = new Date().toLocaleDateString('en-IN');
     const { reason = `Manually verified and marked as reviewed on ${todayStr}` } = req.body;
     await db.run(`
       UPDATE stock_alerts
       SET status = 'ACKNOWLEDGED', resolved_at = CURRENT_TIMESTAMP, resolved_reason = ?
       WHERE id = ?
-    `, [reason, id]);
+    `, [reason, alertId]);
 
     res.json({ success: true, message: 'Alert marked as reviewed successfully' });
   } catch (err) {
@@ -918,7 +1121,7 @@ router.post('/resolve/:id', async (req, res) => {
   }
 });
 
-// 13. POST /api/stock-alerts/sync-offline - Sync offline pending notifications
+// 14. POST /api/stock-alerts/sync-offline - Sync offline pending notifications
 router.post('/sync-offline', async (req, res) => {
   try {
     await db.run(`

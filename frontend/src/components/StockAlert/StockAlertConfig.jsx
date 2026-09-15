@@ -212,10 +212,34 @@ const StockAlertConfig = () => {
   };
 
   const handleSave = async () => {
-    if (!formData.item_name) {
+    if (!formData.item_name || !String(formData.item_name).trim()) {
       setMessage({ type: 'error', text: 'Please select an item' });
       return;
     }
+
+    const payload = {
+      ...formData,
+      item_name: String(formData.item_name).trim(),
+      godown_name: formData.godown_name || 'All Godowns',
+      item_id: (formData.item_id !== '' && formData.item_id != null && !isNaN(parseInt(formData.item_id, 10)))
+        ? parseInt(formData.item_id, 10)
+        : null,
+      godown_id: (formData.godown_id !== '' && formData.godown_id != null && !isNaN(parseInt(formData.godown_id, 10)))
+        ? parseInt(formData.godown_id, 10)
+        : null,
+      minimum_qty: parseFloat(formData.minimum_qty) || 0,
+      reorder_level: parseFloat(formData.reorder_level) || 0,
+      critical_level: parseFloat(formData.critical_level) || 0,
+      alert_enabled: formData.alert_enabled ? 1 : 0,
+      in_app_enabled: formData.in_app_enabled ? 1 : 0,
+      email_enabled: formData.email_enabled ? 1 : 0,
+      sms_enabled: formData.sms_enabled ? 1 : 0,
+      whatsapp_enabled: formData.whatsapp_enabled ? 1 : 0,
+      offline_enabled: formData.offline_enabled ? 1 : 0,
+      contact_ids: Array.isArray(formData.contact_ids)
+        ? formData.contact_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id))
+        : []
+    };
 
     try {
       const endpoint = editId ? `/stock-alerts/config/${editId}` : '/stock-alerts/config';
@@ -223,7 +247,7 @@ const StockAlertConfig = () => {
 
       const json = await api(endpoint, {
         method,
-        body: formData
+        body: payload
       });
 
       if (json && json.success) {
@@ -508,29 +532,37 @@ const StockAlertConfig = () => {
             {/* Assign Contacts */}
             <Grid item xs={12}>
               <Typography variant="subtitle2" sx={{ fontWeight: 'bold', color: '#1e293b', mb: 1 }}>
-                Assigned Contacts (Multiple Selection)
+                Assigned Contacts (Alert recipients for this item)
               </Typography>
-              <Box sx={{ border: '1px solid #cbd5e1', borderRadius: '4px', p: 1.5, maxHeight: '160px', overflowY: 'auto' }}>
-                <Grid container spacing={1}>
-                  {contactsList.map(c => (
-                    <Grid item xs={12} sm={6} key={c.id}>
-                      <FormControlLabel
-                        control={
+              <Box sx={{ border: '1px solid #cbd5e1', borderRadius: '4px', p: 1.5, maxHeight: '180px', overflowY: 'auto', backgroundColor: '#f8fafc' }}>
+                {contactsList.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary">
+                    No contacts created yet. Please add contacts in "Manage Contacts".
+                  </Typography>
+                ) : (
+                  <Grid container spacing={1}>
+                    {contactsList.map(c => (
+                      <Grid item xs={12} sm={6} key={c.id}>
+                        <Box sx={{ display: 'flex', alignItems: 'flex-start', p: 0.5, border: '1px solid #e2e8f0', borderRadius: '4px', backgroundColor: '#ffffff' }}>
                           <Checkbox
                             checked={formData.contact_ids.includes(c.id)}
                             onChange={() => handleContactToggle(c.id)}
                             size="small"
+                            sx={{ p: 0.5, mr: 0.5 }}
                           />
-                        }
-                        label={
-                          <Typography variant="body2">
-                            <strong>{c.contact_name}</strong> ({c.department})
-                          </Typography>
-                        }
-                      />
-                    </Grid>
-                  ))}
-                </Grid>
+                          <Box sx={{ flex: 1, minWidth: 0 }}>
+                            <Typography variant="body2" sx={{ fontWeight: 'bold', fontSize: '13px', color: '#1e293b' }}>
+                              {c.contact_name} <span style={{ fontWeight: 'normal', color: '#64748b' }}>({c.department})</span>
+                            </Typography>
+                            <Typography variant="caption" sx={{ display: 'block', color: '#1e40af', fontSize: '11px', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                              ✉️ {c.email || 'No email'} | 📞 {c.phone || 'No phone'}
+                            </Typography>
+                          </Box>
+                        </Box>
+                      </Grid>
+                    ))}
+                  </Grid>
+                )}
               </Box>
             </Grid>
 

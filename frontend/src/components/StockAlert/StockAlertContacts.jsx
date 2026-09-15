@@ -36,7 +36,9 @@ import {
   Close as CloseIcon,
   People as ContactsIcon,
   Email as EmailIcon,
-  Phone as PhoneIcon
+  Phone as PhoneIcon,
+  NotificationsActive as AlertBellIcon,
+  Send as SendIcon
 } from '@mui/icons-material';
 import { Link, useNavigate } from 'react-router-dom';
 import api from '../../services/api.js';
@@ -101,6 +103,31 @@ const StockAlertContacts = () => {
     setOpenModal(true);
   };
 
+  const [testingId, setTestingId] = useState(null);
+
+  const handleTestAlert = async (contact) => {
+    setTestingId(contact.id);
+    try {
+      const json = await api(`/stock-alerts/contacts/${contact.id}/test-alert`, {
+        method: 'POST'
+      });
+      if (json && json.success) {
+        setMessage({
+          type: 'success',
+          text: `🔔 Test Alert Sent! Dispatched notification to ${contact.contact_name} via: ${json.channels?.join(', ') || 'configured channels'}`
+        });
+        window.dispatchEvent(new CustomEvent('stock-alerts-updated'));
+      } else {
+        setMessage({ type: 'error', text: json?.message || 'Failed to dispatch test alert' });
+      }
+    } catch (err) {
+      console.error('Error sending test alert:', err);
+      setMessage({ type: 'error', text: err.message || 'Error sending test alert' });
+    } finally {
+      setTestingId(null);
+    }
+  };
+
   const handleDelete = async (id) => {
     if (!window.confirm('Are you sure you want to delete this alert contact?')) return;
     try {
@@ -120,13 +147,22 @@ const StockAlertContacts = () => {
       return;
     }
 
+    const payload = {
+      ...formData,
+      contact_name: formData.contact_name.trim(),
+      department: formData.department || 'Purchase',
+      phone: (formData.phone || '').trim(),
+      email: (formData.email || '').trim(),
+      active: formData.active ? 1 : 0
+    };
+
     try {
       const endpoint = editId ? `/stock-alerts/contacts/${editId}` : '/stock-alerts/contacts';
       const method = editId ? 'PUT' : 'POST';
 
       const json = await api(endpoint, {
         method,
-        body: formData
+        body: payload
       });
 
       if (json && json.success) {
@@ -244,13 +280,39 @@ const StockAlertContacts = () => {
                       />
                     </TableCell>
                     <TableCell sx={{ textAlign: 'center' }}>
-                      <Stack direction="row" spacing={1} justifyContent="center">
-                        <IconButton size="small" onClick={() => handleOpenEdit(contact)} color="primary">
-                          <EditIcon fontSize="small" />
-                        </IconButton>
-                        <IconButton size="small" onClick={() => handleDelete(contact.id)} color="error">
-                          <DeleteIcon fontSize="small" />
-                        </IconButton>
+                      <Stack direction="row" spacing={1} justifyContent="center" alignItems="center">
+                        <Tooltip title="Send Test Stock Alert (Dispatches alert to Email & Phone)">
+                          <span>
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              color="warning"
+                              startIcon={testingId === contact.id ? <CircularProgress size={14} color="inherit" /> : <SendIcon />}
+                              disabled={testingId === contact.id}
+                              onClick={() => handleTestAlert(contact)}
+                              sx={{
+                                fontSize: '11px',
+                                py: 0.25,
+                                px: 1,
+                                height: '26px',
+                                textTransform: 'none',
+                                fontWeight: 'bold'
+                              }}
+                            >
+                              Test Alert
+                            </Button>
+                          </span>
+                        </Tooltip>
+                        <Tooltip title="Edit Contact">
+                          <IconButton size="small" onClick={() => handleOpenEdit(contact)} color="primary">
+                            <EditIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="Delete Contact">
+                          <IconButton size="small" onClick={() => handleDelete(contact.id)} color="error">
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
                       </Stack>
                     </TableCell>
                   </TableRow>
