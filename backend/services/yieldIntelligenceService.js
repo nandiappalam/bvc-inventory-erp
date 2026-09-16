@@ -62,13 +62,14 @@ function calculateBatchYieldMetrics(inputKg, outputKg, byProductKg = 0, wastageK
  */
 async function getBatchYieldList(filters = {}) {
   const { status, limit = 50 } = filters;
+  const numLimit = parseInt(limit, 10) || 50;
   const batches = [];
 
   // 1. Fetch real batches from grains table (grain grinding / milling)
   const grainRes = await db.query(`
     SELECT 
       g.id,
-      COALESCE(NULLIF(g.work_order_no, ''), 'MILL-' || g.s_no) as batchNo,
+      COALESCE(NULLIF(g.work_order_no, ''), 'MILL-' || CAST(g.s_no AS TEXT)) as batchNo,
       SUBSTR(COALESCE(g.date, g.created_at, ''), 1, 10) as batchDate,
       COALESCE(fmm.flourmill, g.flour_mill, 'BVC MILL') as machineLine,
       COALESCE(goi.item_name, 'Urad Flour') as productName,
@@ -83,7 +84,7 @@ async function getBatchYieldList(filters = {}) {
     LEFT JOIN grain_output_items goi ON g.id = goi.grain_id
     ORDER BY g.id DESC
     LIMIT ?
-  `, [limit]);
+  `, [numLimit]);
 
   for (const gr of (grainRes.rows || [])) {
     const inputKg = parseFloat(gr.inputKg) || 0;
@@ -137,7 +138,7 @@ async function getBatchYieldList(filters = {}) {
     WHERE wo.work_order_no NOT IN (SELECT COALESCE(work_order_no, '') FROM grains WHERE work_order_no IS NOT NULL)
     ORDER BY wo.id DESC
     LIMIT ?
-  `, [limit]);
+  `, [numLimit]);
 
   for (const wo of (woRes.rows || [])) {
     const totalWastage = (parseFloat(wo.rejection_wt) || 0) + 

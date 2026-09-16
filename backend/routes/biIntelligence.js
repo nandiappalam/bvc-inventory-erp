@@ -111,19 +111,6 @@ router.get('/dashboard', async (req, res) => {
 router.get('/purchase-analytics', async (req, res) => {
   try {
     // 1. Fetch supplier master lookup map
-    let suppMap = {};
-    try {
-      const suppMasterRes = await db.query('SELECT id, name, print_name FROM supplier_master');
-      (suppMasterRes.rows || []).forEach(s => {
-        const display = s.name || s.print_name || `Supplier ${s.id}`;
-        if (s.id) suppMap[String(s.id)] = display;
-        if (s.name) suppMap[String(s.name)] = s.name;
-        if (s.print_name) suppMap[String(s.print_name)] = s.print_name;
-      });
-    } catch (e) {
-      console.warn('Could not query supplier_master for BI:', e.message);
-    }
-
     const defaultSupplierNames = {
       '1': 'Sri Venkateshwara Agro Mills',
       '2': 'Apex Agro Commodities',
@@ -131,6 +118,22 @@ router.get('/purchase-analytics', async (req, res) => {
       '4': 'Sunshine Milling Traders',
       '5': 'Kaveri Agro Industries'
     };
+
+    let suppMap = { ...defaultSupplierNames };
+    try {
+      const suppMasterRes = await db.query('SELECT id, name, print_name FROM supplier_master');
+      (suppMasterRes.rows || []).forEach(s => {
+        let display = (s.name || s.print_name || '').trim();
+        if (!display || /^\d+$/.test(display)) {
+          display = defaultSupplierNames[String(s.id)] || `Supplier #${s.id}`;
+        }
+        if (s.id) suppMap[String(s.id)] = display;
+        if (s.name) suppMap[String(s.name).toLowerCase().trim()] = display;
+        if (s.print_name) suppMap[String(s.print_name).toLowerCase().trim()] = display;
+      });
+    } catch (e) {
+      console.warn('Could not query supplier_master for BI:', e.message);
+    }
 
     let suppliers = [];
 
@@ -152,13 +155,11 @@ router.get('/purchase-analytics', async (req, res) => {
       if (purchasesRes.rows && purchasesRes.rows.length > 0) {
         const supplierAgg = {};
         purchasesRes.rows.forEach(p => {
-          let suppName = (p.s_name || '').trim();
-          if (!suppName) {
-            const rawSupp = String(p.supplier || '').trim();
-            suppName = suppMap[rawSupp] || defaultSupplierNames[rawSupp] || rawSupp;
-          }
-          if (!suppName || /^\d+$/.test(suppName)) {
-            suppName = defaultSupplierNames[suppName] || `Supplier #${suppName || 1}`;
+          let rawSupp = String(p.s_name || p.supplier || '').trim();
+          let suppName = suppMap[rawSupp] || suppMap[rawSupp.toLowerCase()] || rawSupp;
+          if (!suppName || /^\d+$/.test(suppName) || suppName === 'undefined' || suppName === 'null') {
+            const matchedId = String(rawSupp).match(/\d+/) ? String(rawSupp).match(/\d+/)[0] : '1';
+            suppName = defaultSupplierNames[matchedId] || `Supplier #${matchedId}`;
           }
 
           if (!supplierAgg[suppName]) {

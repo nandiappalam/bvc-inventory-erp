@@ -64,11 +64,11 @@ async function searchLots(query = '', filters = {}) {
       pi.item_name as itemName, 
       COALESCE(sm.name, p.supplier) as supplierName, 
       SUBSTR(COALESCE(p.date, p.inv_date, ''), 1, 10) as purchaseDate, 
-      COALESCE(NULLIF(p.voucher_no, ''), NULLIF(p.inv_no, ''), NULLIF(p.po_no, ''), 'PUR-' || p.s_no) as voucherNo
+      COALESCE(NULLIF(p.voucher_no, ''), NULLIF(p.inv_no, ''), NULLIF(p.po_no, ''), 'PUR-' || CAST(p.s_no AS TEXT)) as voucherNo
     FROM purchase_items pi
     JOIN purchases p ON pi.purchase_id = p.id
     LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = p.supplier)
-    WHERE pi.lot_no IS NOT NULL AND pi.lot_no != '' ${q ? 'AND (LOWER(pi.lot_no) LIKE ? OR LOWER(pi.item_name) LIKE ? OR LOWER(COALESCE(sm.name, p.supplier, "")) LIKE ?)' : ''}
+    WHERE pi.lot_no IS NOT NULL AND pi.lot_no != '' ${q ? "AND (LOWER(pi.lot_no) LIKE ? OR LOWER(pi.item_name) LIKE ? OR LOWER(COALESCE(sm.name, p.supplier, '')) LIKE ?)" : ''}
     LIMIT 50
   `, q ? [`%${q}%`, `%${q}%`, `%${q}%`] : []);
 

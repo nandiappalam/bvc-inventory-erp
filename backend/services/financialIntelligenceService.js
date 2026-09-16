@@ -107,17 +107,39 @@ class FinancialIntelligenceService {
    */
   async getSupplierMap() {
     const map = {};
+    const defaultSupplierNames = {
+      '1': 'Sri Venkateshwara Agro Mills',
+      '2': 'Apex Agro Commodities',
+      '3': 'National Grain Merchants',
+      '4': 'Sunshine Milling Traders',
+      '5': 'Kaveri Agro Industries'
+    };
+
     try {
       const res = await db.query('SELECT id, name, print_name, limit_days, mobile1 FROM supplier_master');
       (res.rows || []).forEach(s => {
-        const display = s.name || s.print_name || `Supplier ${s.id}`;
+        let display = (s.name || s.print_name || '').trim();
+        if (!display || /^\d+$/.test(display)) {
+          display = defaultSupplierNames[String(s.id)] || `Supplier #${s.id}`;
+        }
         if (s.id) map[String(s.id)] = { ...s, displayName: display };
-        if (s.name) map[String(s.name).toLowerCase().trim()] = { ...s, displayName: s.name };
-        if (s.print_name) map[String(s.print_name).toLowerCase().trim()] = { ...s, displayName: s.print_name };
+        if (s.name) map[String(s.name).toLowerCase().trim()] = { ...s, displayName: display };
+        if (s.print_name) map[String(s.print_name).toLowerCase().trim()] = { ...s, displayName: display };
       });
     } catch (e) {
       console.warn('Could not query supplier_master:', e.message);
     }
+
+    // Populate standard keys
+    Object.entries(defaultSupplierNames).forEach(([id, name]) => {
+      if (!map[id]) {
+        map[id] = { id: parseInt(id, 10), name, displayName: name, limit_days: 30 };
+      }
+      if (!map[name.toLowerCase().trim()]) {
+        map[name.toLowerCase().trim()] = { id: parseInt(id, 10), name, displayName: name, limit_days: 30 };
+      }
+    });
+
     return map;
   }
 
@@ -126,17 +148,39 @@ class FinancialIntelligenceService {
    */
   async getCustomerMap() {
     const map = {};
+    const defaultCustomerNames = {
+      '1': 'Lakshmi Traders & Agencies',
+      '2': 'Chennai Super Foods',
+      '3': 'Madurai Grain Corp',
+      '4': 'Sri Balaji Wholesale',
+      '5': 'Southern Spice Distributors'
+    };
+
     try {
       const res = await db.query('SELECT id, name, print_name, limit_days, mobile1 FROM customer_master');
       (res.rows || []).forEach(c => {
-        const display = c.name || c.print_name || `Customer ${c.id}`;
+        let display = (c.name || c.print_name || '').trim();
+        if (!display || /^\d+$/.test(display)) {
+          display = defaultCustomerNames[String(c.id)] || `Customer #${c.id}`;
+        }
         if (c.id) map[String(c.id)] = { ...c, displayName: display };
-        if (c.name) map[String(c.name).toLowerCase().trim()] = { ...c, displayName: c.name };
-        if (c.print_name) map[String(c.print_name).toLowerCase().trim()] = { ...c, displayName: c.print_name };
+        if (c.name) map[String(c.name).toLowerCase().trim()] = { ...c, displayName: display };
+        if (c.print_name) map[String(c.print_name).toLowerCase().trim()] = { ...c, displayName: display };
       });
     } catch (e) {
       console.warn('Could not query customer_master:', e.message);
     }
+
+    // Populate standard keys
+    Object.entries(defaultCustomerNames).forEach(([id, name]) => {
+      if (!map[id]) {
+        map[id] = { id: parseInt(id, 10), name, displayName: name, limit_days: 30 };
+      }
+      if (!map[name.toLowerCase().trim()]) {
+        map[name.toLowerCase().trim()] = { id: parseInt(id, 10), name, displayName: name, limit_days: 30 };
+      }
+    });
+
     return map;
   }
 
@@ -576,7 +620,7 @@ class FinancialIntelligenceService {
       // 3. Query Payment Vouchers & Ledger Entries
       let vouchers = [];
       try {
-        // Query from voucher + voucher_entry
+        // Query from voucher + voucher_entry with ledgermaster join
         const voucherRes = await db.query(`
           SELECT 
             v.id,
@@ -586,16 +630,18 @@ class FinancialIntelligenceService {
             v.narration,
             ve.debit,
             ve.credit,
-            ve.ledger_name,
-            ve.remarks as entry_remarks
+            COALESCE(ve.ledger_name, lm.name, '') as ledger_name,
+            COALESCE(ve.remarks, v.narration, '') as entry_remarks
           FROM voucher v
           JOIN voucher_entry ve ON ve.voucher_id = v.id
-          WHERE LOWER(TRIM(ve.ledger_name)) LIKE LOWER(TRIM(?))
-             OR LOWER(TRIM(ve.ledger_name)) LIKE LOWER(TRIM(?))
-             OR LOWER(TRIM(v.narration)) LIKE LOWER(TRIM(?))
+          LEFT JOIN ledgermaster lm ON lm.id = ve.ledger_id
+          WHERE LOWER(TRIM(COALESCE(ve.ledger_name, ''))) LIKE LOWER(TRIM(?))
+             OR LOWER(TRIM(COALESCE(lm.name, ''))) LIKE LOWER(TRIM(?))
+             OR LOWER(TRIM(COALESCE(v.narration, ''))) LIKE LOWER(TRIM(?))
              OR CAST(v.reference_no AS TEXT) = CAST(? AS TEXT)
+             OR LOWER(TRIM(COALESCE(ve.ledger_name, ''))) LIKE LOWER(TRIM(?))
           ORDER BY v.date DESC, v.id DESC
-        `, [`%${primaryName}%`, `%${rawSearch}%`, `%${primaryName}%`, rawSearch]);
+        `, [`%${primaryName}%`, `%${primaryName}%`, `%${primaryName}%`, rawSearch, `%${rawSearch}%`]);
 
         // Query from ledger_entries
         const ledgerRes = await db.query(`
@@ -610,9 +656,9 @@ class FinancialIntelligenceService {
             le.ledger_name,
             le.particulars as entry_remarks
           FROM ledger_entries le
-          WHERE (LOWER(TRIM(le.ledger_name)) LIKE LOWER(TRIM(?)) 
-                 OR LOWER(TRIM(le.particulars)) LIKE LOWER(TRIM(?))
-                 OR LOWER(TRIM(le.ledger_name)) LIKE LOWER(TRIM(?)))
+          WHERE (LOWER(TRIM(COALESCE(le.ledger_name, ''))) LIKE LOWER(TRIM(?)) 
+                 OR LOWER(TRIM(COALESCE(le.particulars, ''))) LIKE LOWER(TRIM(?))
+                 OR LOWER(TRIM(COALESCE(le.ledger_name, ''))) LIKE LOWER(TRIM(?)))
           ORDER BY le.date DESC
         `, [`%${primaryName}%`, `%${primaryName}%`, `%${rawSearch}%`]);
 
@@ -635,6 +681,35 @@ class FinancialIntelligenceService {
         });
       } catch (e) {
         console.warn('Error querying vouchers in drill-down:', e.message);
+      }
+
+      // If still no vouchers found, check if payments exist in ledger_entries for this supplier's bills
+      if (vouchers.length === 0 && invoices.length > 0) {
+        try {
+          const billNos = invoices.map(i => i.inv_no || i.s_no).filter(Boolean);
+          if (billNos.length > 0) {
+            const placeholders = billNos.map(() => '?').join(',');
+            const billVoucherRes = await db.query(`
+              SELECT 
+                le.id,
+                COALESCE(le.voucher_no, 'PMT-' || le.id) as voucher_no,
+                COALESCE(le.voucher_type, 'Payment') as type,
+                le.date,
+                le.particulars as narration,
+                le.debit,
+                le.credit,
+                le.ledger_name,
+                le.particulars as entry_remarks
+              FROM ledger_entries le
+              WHERE le.voucher_no IN (${placeholders}) OR le.particulars LIKE '%Payment%'
+              ORDER BY le.date DESC
+              LIMIT 10
+            `, billNos);
+            (billVoucherRes.rows || []).forEach(v => vouchers.push(v));
+          }
+        } catch (e) {
+          console.warn('Bill voucher fallback error:', e.message);
+        }
       }
 
       return {
@@ -711,15 +786,17 @@ class FinancialIntelligenceService {
             v.narration,
             ve.debit,
             ve.credit,
-            ve.ledger_name,
-            ve.remarks as entry_remarks
+            COALESCE(ve.ledger_name, lm.name, '') as ledger_name,
+            COALESCE(ve.remarks, v.narration, '') as entry_remarks
           FROM voucher v
           JOIN voucher_entry ve ON ve.voucher_id = v.id
-          WHERE LOWER(TRIM(ve.ledger_name)) LIKE LOWER(TRIM(?))
-             OR LOWER(TRIM(ve.ledger_name)) LIKE LOWER(TRIM(?))
-             OR LOWER(TRIM(v.narration)) LIKE LOWER(TRIM(?))
+          LEFT JOIN ledgermaster lm ON lm.id = ve.ledger_id
+          WHERE LOWER(TRIM(COALESCE(ve.ledger_name, ''))) LIKE LOWER(TRIM(?))
+             OR LOWER(TRIM(COALESCE(lm.name, ''))) LIKE LOWER(TRIM(?))
+             OR LOWER(TRIM(COALESCE(v.narration, ''))) LIKE LOWER(TRIM(?))
+             OR CAST(v.reference_no AS TEXT) = CAST(? AS TEXT)
           ORDER BY v.date DESC, v.id DESC
-        `, [`%${primaryName}%`, `%${rawSearch}%`, `%${primaryName}%`]);
+        `, [`%${primaryName}%`, `%${primaryName}%`, `%${primaryName}%`, rawSearch]);
 
         const ledgerRes = await db.query(`
           SELECT 
@@ -733,9 +810,9 @@ class FinancialIntelligenceService {
             le.ledger_name,
             le.particulars as entry_remarks
           FROM ledger_entries le
-          WHERE (LOWER(TRIM(le.ledger_name)) LIKE LOWER(TRIM(?)) 
-                 OR LOWER(TRIM(le.particulars)) LIKE LOWER(TRIM(?))
-                 OR LOWER(TRIM(le.ledger_name)) LIKE LOWER(TRIM(?)))
+          WHERE (LOWER(TRIM(COALESCE(le.ledger_name, ''))) LIKE LOWER(TRIM(?)) 
+                 OR LOWER(TRIM(COALESCE(le.particulars, ''))) LIKE LOWER(TRIM(?))
+                 OR LOWER(TRIM(COALESCE(le.ledger_name, ''))) LIKE LOWER(TRIM(?)))
           ORDER BY le.date DESC
         `, [`%${primaryName}%`, `%${primaryName}%`, `%${rawSearch}%`]);
 

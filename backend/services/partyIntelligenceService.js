@@ -5,8 +5,8 @@ class PartyIntelligenceService {
    * High-Level Dashboard Summary for Party Intelligence
    */
   async getDashboardSummary() {
-    const suppCountRes = await db.query('SELECT COUNT(*) as cnt FROM supplier_master WHERE status = "Active"');
-    const custCountRes = await db.query('SELECT COUNT(*) as cnt FROM customer_master WHERE status = "Active"');
+    const suppCountRes = await db.query("SELECT COUNT(*) as cnt FROM supplier_master WHERE status = 'Active'");
+    const custCountRes = await db.query("SELECT COUNT(*) as cnt FROM customer_master WHERE status = 'Active'");
     
     const purSumRes = await db.query('SELECT SUM(COALESCE(grand_total, net_amount, total_amount, 0)) as total_pur, SUM(total_weight) as total_wt FROM purchases');
     const salesSumRes = await db.query('SELECT SUM(COALESCE(grand_total, total_amount, 0)) as total_sales, SUM(total_weight) as total_wt FROM sales');

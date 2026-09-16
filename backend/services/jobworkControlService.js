@@ -35,11 +35,11 @@ async function getJobworkDashboardStats() {
   const excessWastageKg = Math.max(0, actualDifference - allowedWastageKg);
 
   // Active contractors count
-  const contractorsCountRes = await db.query('SELECT COUNT(*) as cnt FROM contractor_master WHERE status = "Active"');
+  const contractorsCountRes = await db.query("SELECT COUNT(*) as cnt FROM contractor_master WHERE status = 'Active'");
   const activeContractors = parseInt(contractorsCountRes.rows?.[0]?.cnt || 0, 10);
 
   // Open orders count
-  const openOrdersCountRes = await db.query('SELECT COUNT(*) as cnt FROM jobwork_orders WHERE status IN ("Issued", "In Process", "Partially Received")');
+  const openOrdersCountRes = await db.query("SELECT COUNT(*) as cnt FROM jobwork_orders WHERE status IN ('Issued', 'In Process', 'Partially Received')");
   const openOrders = parseInt(openOrdersCountRes.rows?.[0]?.cnt || 0, 10);
 
   return {
