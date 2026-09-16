@@ -1403,6 +1403,324 @@ module.exports = async function autoMigrate() {
     console.log('Notice seeding tax ledgers:', err.message);
   }
 
+  // ============================================================================
+  // PHASES 4-7: LOT GENEALOGY, PRODUCTION PLANNING, BOM & JOBWORK SCHEMAS
+  // ============================================================================
+  try {
+    // 1. Lot Genealogy & Operations
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS lot_genealogy (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        parent_lot_no TEXT,
+        child_lot_no TEXT,
+        quantity REAL DEFAULT 0,
+        uom TEXT DEFAULT 'KG',
+        transaction_type TEXT NOT NULL,
+        transaction_id INTEGER,
+        transaction_no TEXT,
+        remarks TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS lot_operations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        operation_type TEXT NOT NULL,
+        source_lots TEXT,
+        target_lots TEXT,
+        quantity REAL DEFAULT 0,
+        reason TEXT,
+        operator TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // 2. BOM Headers & Items (Phase 6)
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS bom_headers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bom_code TEXT UNIQUE,
+        bom_name TEXT NOT NULL,
+        product_id INTEGER,
+        product_name TEXT NOT NULL,
+        version TEXT DEFAULT 'V1',
+        batch_qty REAL DEFAULT 100,
+        uom TEXT DEFAULT 'KG',
+        status TEXT DEFAULT 'Active',
+        effective_from DATE,
+        effective_to DATE,
+        standard_yield_pct REAL DEFAULT 100,
+        yield_tolerance_pct REAL DEFAULT 2,
+        created_by TEXT DEFAULT 'Admin',
+        approved_by TEXT,
+        remarks TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS bom_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bom_id INTEGER NOT NULL,
+        item_id INTEGER,
+        item_name TEXT NOT NULL,
+        quantity REAL DEFAULT 0,
+        uom TEXT DEFAULT 'KG',
+        scrap_pct REAL DEFAULT 0,
+        item_type TEXT DEFAULT 'Raw Material',
+        is_optional INTEGER DEFAULT 0,
+        sequence_order INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (bom_id) REFERENCES bom_headers(id) ON DELETE CASCADE
+      )
+    `);
+
+    // 3. Production Plans & Batch Tracking (Phase 5)
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS production_plans (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        plan_no TEXT UNIQUE,
+        plan_date DATE NOT NULL,
+        target_date DATE,
+        status TEXT DEFAULT 'Planned',
+        remarks TEXT,
+        created_by TEXT DEFAULT 'Admin',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS production_plan_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        plan_id INTEGER NOT NULL,
+        product_id INTEGER,
+        product_name TEXT NOT NULL,
+        bom_id INTEGER,
+        bom_version TEXT,
+        target_qty REAL DEFAULT 0,
+        uom TEXT DEFAULT 'KG',
+        machine_line TEXT,
+        shift TEXT,
+        status TEXT DEFAULT 'Pending',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (plan_id) REFERENCES production_plans(id) ON DELETE CASCADE
+      )
+    `);
+
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS yield_standards (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_name TEXT NOT NULL,
+        process_name TEXT NOT NULL,
+        standard_yield_pct REAL DEFAULT 72,
+        tolerance_pct REAL DEFAULT 2,
+        allowed_wastage_pct REAL DEFAULT 5,
+        allowed_loss_pct REAL DEFAULT 5,
+        effective_from DATE,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS production_batches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        batch_no TEXT UNIQUE,
+        plan_id INTEGER,
+        plan_no TEXT,
+        work_order_id INTEGER,
+        work_order_no TEXT,
+        bom_id INTEGER,
+        product_name TEXT NOT NULL,
+        batch_date DATE NOT NULL,
+        machine_line TEXT,
+        operator_name TEXT,
+        shift TEXT,
+        total_input_kg REAL DEFAULT 0,
+        total_output_kg REAL DEFAULT 0,
+        by_product_kg REAL DEFAULT 0,
+        wastage_kg REAL DEFAULT 0,
+        process_loss_kg REAL DEFAULT 0,
+        actual_yield_pct REAL DEFAULT 0,
+        standard_yield_pct REAL DEFAULT 72,
+        yield_variance_pct REAL DEFAULT 0,
+        mass_balance_diff_kg REAL DEFAULT 0,
+        mass_balance_status TEXT DEFAULT 'BALANCED',
+        yield_status TEXT DEFAULT 'WITHIN_STANDARD',
+        exception_notes TEXT,
+        investigation_status TEXT DEFAULT 'NONE',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // 4. Jobwork / Contractor Master & Orders (Phase 7)
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS contractor_master (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT UNIQUE NOT NULL,
+        code TEXT,
+        type TEXT DEFAULT 'Papad Contractor',
+        contact_person TEXT,
+        phone TEXT,
+        email TEXT,
+        address TEXT,
+        gst_no TEXT,
+        processing_rate_per_kg REAL DEFAULT 0,
+        expected_yield_pct REAL DEFAULT 90,
+        allowed_wastage_pct REAL DEFAULT 3,
+        credit_limit_days INTEGER DEFAULT 30,
+        opening_material_balance_kg REAL DEFAULT 0,
+        opening_financial_balance REAL DEFAULT 0,
+        status TEXT DEFAULT 'Active',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS jobwork_orders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_no TEXT UNIQUE,
+        contractor_id INTEGER,
+        contractor_name TEXT NOT NULL,
+        order_date DATE NOT NULL,
+        expected_delivery_date DATE,
+        status TEXT DEFAULT 'Issued',
+        total_issued_qty_kg REAL DEFAULT 0,
+        expected_output_kg REAL DEFAULT 0,
+        received_output_kg REAL DEFAULT 0,
+        pending_output_kg REAL DEFAULT 0,
+        allowed_wastage_kg REAL DEFAULT 0,
+        actual_wastage_kg REAL DEFAULT 0,
+        excess_wastage_kg REAL DEFAULT 0,
+        jobwork_charges REAL DEFAULT 0,
+        paid_amount REAL DEFAULT 0,
+        payable_amount REAL DEFAULT 0,
+        remarks TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS jobwork_order_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        jobwork_id INTEGER NOT NULL,
+        item_id INTEGER,
+        item_name TEXT NOT NULL,
+        lot_no TEXT,
+        issued_qty_kg REAL DEFAULT 0,
+        rate REAL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (jobwork_id) REFERENCES jobwork_orders(id) ON DELETE CASCADE
+      )
+    `);
+
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS jobwork_receipts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        receipt_no TEXT UNIQUE,
+        jobwork_id INTEGER NOT NULL,
+        jobwork_no TEXT,
+        receipt_date DATE NOT NULL,
+        contractor_name TEXT NOT NULL,
+        output_item_name TEXT NOT NULL,
+        output_lot_no TEXT,
+        received_qty_kg REAL DEFAULT 0,
+        actual_wastage_kg REAL DEFAULT 0,
+        allowed_wastage_kg REAL DEFAULT 0,
+        excess_wastage_kg REAL DEFAULT 0,
+        qc_status TEXT DEFAULT 'ACCEPTED',
+        qc_notes TEXT,
+        charges_amount REAL DEFAULT 0,
+        remarks TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (jobwork_id) REFERENCES jobwork_orders(id) ON DELETE CASCADE
+      )
+    `);
+
+    // Seed default BOMs and Yield Standards if none exist
+    const bomCheck = await db.query('SELECT COUNT(*) as cnt FROM bom_headers');
+    if ((bomCheck.rows?.[0]?.cnt || 0) === 0) {
+      console.log('Seeding initial manufacturing BOMs and Formulas...');
+      // 1. Urad Flour BOM (From Urad Whole)
+      await db.run(`
+        INSERT INTO bom_headers (bom_code, bom_name, product_name, version, batch_qty, uom, status, standard_yield_pct, yield_tolerance_pct, remarks)
+        VALUES ('BOM-FLOUR-01', 'Standard Urad Flour Milling Recipe', 'Urad Flour', 'V1', 1000, 'KG', 'Active', 72, 2, 'Standard whole urad to flour conversion with 72% yield and 18% bran')
+      `);
+      const bom1Res = await db.query("SELECT id FROM bom_headers WHERE bom_code = 'BOM-FLOUR-01'");
+      const bom1Id = bom1Res.rows?.[0]?.id;
+      if (bom1Id) {
+        await db.run("INSERT INTO bom_items (bom_id, item_name, quantity, uom, scrap_pct, item_type) VALUES (?, 'Urad Whole', 1000, 'KG', 5, 'Raw Material')", [bom1Id]);
+      }
+
+      // 2. Papad Product A Multi-level BOM
+      await db.run(`
+        INSERT INTO bom_headers (bom_code, bom_name, product_name, version, batch_qty, uom, status, standard_yield_pct, yield_tolerance_pct, remarks)
+        VALUES ('BOM-PAPAD-01', 'Special Appalam / Papad Recipe A', 'Special Papad 100g', 'V1', 100, 'KG', 'Active', 90, 2, 'Standard papad formulation with spices and salt')
+      `);
+      const bom2Res = await db.query("SELECT id FROM bom_headers WHERE bom_code = 'BOM-PAPAD-01'");
+      const bom2Id = bom2Res.rows?.[0]?.id;
+      if (bom2Id) {
+        await db.run("INSERT INTO bom_items (bom_id, item_name, quantity, uom, scrap_pct, item_type) VALUES (?, 'Urad Flour', 70, 'KG', 1, 'Intermediate')", [bom2Id]);
+        await db.run("INSERT INTO bom_items (bom_id, item_name, quantity, uom, scrap_pct, item_type) VALUES (?, 'Spices Mix', 5, 'KG', 0, 'Additive')", [bom2Id]);
+        await db.run("INSERT INTO bom_items (bom_id, item_name, quantity, uom, scrap_pct, item_type) VALUES (?, 'Edible Salt', 3, 'KG', 0, 'Additive')", [bom2Id]);
+        await db.run("INSERT INTO bom_items (bom_id, item_name, quantity, uom, scrap_pct, item_type) VALUES (?, 'Gingelly Oil', 2, 'KG', 0, 'Additive')", [bom2Id]);
+        await db.run("INSERT INTO bom_items (bom_id, item_name, quantity, uom, scrap_pct, item_type) VALUES (?, 'Packaging Box 100g', 1000, 'Nos', 1, 'Packaging')", [bom2Id]);
+      }
+    }
+
+    // Seed Yield Standards
+    const ysCheck = await db.query('SELECT COUNT(*) as cnt FROM yield_standards');
+    if ((ysCheck.rows?.[0]?.cnt || 0) === 0) {
+      await db.run("INSERT INTO yield_standards (product_name, process_name, standard_yield_pct, tolerance_pct, allowed_wastage_pct, allowed_loss_pct) VALUES ('Urad Flour', 'Flour Milling', 72, 2, 18, 5)");
+      await db.run("INSERT INTO yield_standards (product_name, process_name, standard_yield_pct, tolerance_pct, allowed_wastage_pct, allowed_loss_pct) VALUES ('Special Papad', 'Papad Dough & Pressing', 90, 2, 3, 2)");
+      await db.run("INSERT INTO yield_standards (product_name, process_name, standard_yield_pct, tolerance_pct, allowed_wastage_pct, allowed_loss_pct) VALUES ('Moong Flour', 'Flour Milling', 74, 2, 16, 5)");
+    }
+
+    // Seed Contractor Master from existing Papad Companies & Flour Mills
+    const contractorsCheck = await db.query('SELECT COUNT(*) as cnt FROM contractor_master');
+    if ((contractorsCheck.rows?.[0]?.cnt || 0) === 0) {
+      console.log('Synchronizing existing Papad Companies and Flour Mills into Contractor Master...');
+      const papadCompanies = await db.query('SELECT * FROM papad_company_master');
+      for (const pc of (papadCompanies.rows || [])) {
+        await db.run(`
+          INSERT INTO contractor_master (name, code, type, contact_person, phone, address, gst_no, processing_rate_per_kg, expected_yield_pct, allowed_wastage_pct, status)
+          VALUES (?, ?, 'Papad Contractor', ?, ?, ?, ?, ?, 90, 3, ?)
+        `, [
+          pc.name,
+          `CTR-PAP-${pc.id}`,
+          pc.contact_person || pc.name,
+          pc.mobile || pc.phone_off || '',
+          pc.address || pc.address1 || '',
+          pc.gst_no || '',
+          pc.wages_kg || 12,
+          pc.status || 'Active'
+        ]);
+      }
+
+      const flourMills = await db.query('SELECT * FROM flour_mill_master');
+      for (const fm of (flourMills.rows || [])) {
+        await db.run(`
+          INSERT INTO contractor_master (name, code, type, contact_person, phone, address, gst_no, processing_rate_per_kg, expected_yield_pct, allowed_wastage_pct, status)
+          VALUES (?, ?, 'Flour Mill Contractor', ?, ?, ?, ?, ?, 72, 5, ?)
+        `, [
+          fm.flourmill,
+          `CTR-MIL-${fm.id}`,
+          fm.contact_person || fm.flourmill,
+          fm.mobile1 || fm.phone_off || '',
+          fm.address1 || '',
+          fm.gst_number || '',
+          fm.wages_kg || 2.5,
+          fm.status || 'Active'
+        ]);
+      }
+    }
+  } catch (schemaErr) {
+    console.log('Notice creating manufacturing & traceability tables in autoMigrate:', schemaErr.message);
+  }
+
   // Sync Flour Out & Papad In stock
   await syncFlourOutAndPapadInStock();
 

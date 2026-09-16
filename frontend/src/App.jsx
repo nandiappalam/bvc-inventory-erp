@@ -19,6 +19,23 @@ import UserCreatePage from './components/UserCreatePage'
 import UserDisplayPage from './components/UserDisplayPage'
 import UserChangePassword from './components/UserChangePassword'
 import Dashboard from './components/Dashboard'
+import CommandCenterMain from './components/command-center/CommandCenterMain'
+import CommandCenterDetails from './components/command-center/CommandCenterDetails'
+import CommandCenterReturnBanner from './components/command-center/CommandCenterReturnBanner'
+import ProcurementPlanningDashboard from './modules/procurementPlanning/ProcurementPlanningDashboard'
+import InventoryIntelligenceDashboard from './modules/inventoryIntelligence/InventoryIntelligenceDashboard'
+import LotGenealogyDashboard from './modules/lotGenealogy/LotGenealogyDashboard'
+import BOMDashboard from './modules/bom/BOMDashboard'
+import ProductionPlanningDashboard from './modules/productionPlanning/ProductionPlanningDashboard'
+import JobworkControlDashboard from './modules/jobwork/JobworkControlDashboard'
+
+// Enterprise Intelligence Modules (Phases 8–13)
+import ColdStorageIntelligenceDashboard from './modules/coldStorage/ColdStorageIntelligenceDashboard'
+import FinancialControlCenter from './modules/financialIntelligence/FinancialControlCenter'
+import PartyIntelligenceCenter from './modules/partyIntelligence/PartyIntelligenceCenter'
+import OrderFulfillmentDashboard from './modules/fulfillment/OrderFulfillmentDashboard'
+import WarehouseMobileView from './modules/warehouseMobile/WarehouseMobileView'
+import BarcodeQRManager from './modules/barcodeQr/BarcodeQRManager'
 import CrudPage from './components/CrudPage'
 import Navigation from './components/Navigation'
 
@@ -204,6 +221,13 @@ import {
 import CategoryReportPage from './components/Reports/CategoryReportPage'
 import ComplianceHub from './components/compliance/ComplianceHub'
 
+// Phase 14-18 Connected Roadmap Modules
+import ComplianceSystemCenter from './modules/complianceSystem/ComplianceSystemCenter'
+import CustomerComplaintCenter from './modules/customerComplaint/CustomerComplaintCenter'
+import RecallManagementCenter from './modules/recallManagement/RecallManagementCenter'
+import BusinessIntelligenceCenter from './modules/businessIntelligence/BusinessIntelligenceCenter'
+import AiIntelligenceCenter from './modules/aiIntelligence/AiIntelligenceCenter'
+
 const theme = createTheme({
   palette: {
     primary: { main: '#1976d2' },
@@ -239,9 +263,29 @@ const AppLayout = () => {
             padding: '0 !important',
           }
         }}>
+        <CommandCenterReturnBanner />
         <Routes>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/command-center" element={<CommandCenterMain />} />
+          <Route path="/command-center/details" element={<CommandCenterDetails />} />
+          <Route path="/procurement-planning" element={<ProcurementPlanningDashboard />} />
+          <Route path="/inventory-intelligence" element={<InventoryIntelligenceDashboard />} />
+          <Route path="/lot-genealogy" element={<LotGenealogyDashboard />} />
+          <Route path="/bom-master" element={<BOMDashboard />} />
+          <Route path="/bom" element={<BOMDashboard />} />
+          <Route path="/production-planning" element={<ProductionPlanningDashboard />} />
+          <Route path="/yield-intelligence" element={<ProductionPlanningDashboard />} />
+          <Route path="/jobwork-control" element={<JobworkControlDashboard />} />
+          <Route path="/jobwork" element={<JobworkControlDashboard />} />
+          
+          {/* Enterprise Intelligence Suites (Phases 8–13) */}
+          <Route path="/cold-storage-intelligence" element={<ColdStorageIntelligenceDashboard />} />
+          <Route path="/financial-intelligence" element={<FinancialControlCenter />} />
+          <Route path="/party-intelligence" element={<PartyIntelligenceCenter />} />
+          <Route path="/order-fulfillment" element={<OrderFulfillmentDashboard />} />
+          <Route path="/warehouse-mobile" element={<WarehouseMobileView />} />
+          <Route path="/barcode-qr" element={<BarcodeQRManager />} />
           <Route path="/city-update" element={<CityUpdate />} />
           <Route path="/ptrans-update" element={<PTransUpdate />} />
           <Route path="/area-update" element={<AreaUpdate />} />
@@ -513,6 +557,13 @@ const AppLayout = () => {
           {/* Dynamic Master Routes (config-driven) */}
           <Route path="/master/:module/create" element={<ModuleFormRoute />} />
           <Route path="/master/:module/display" element={<ModuleDisplayRoute />} />
+
+          {/* Phase 14–18 Connected Roadmap Routes */}
+          <Route path="/automated-compliance" element={<ComplianceSystemCenter />} />
+          <Route path="/customer-complaint" element={<CustomerComplaintCenter />} />
+          <Route path="/recall-management" element={<RecallManagementCenter />} />
+          <Route path="/business-intelligence" element={<BusinessIntelligenceCenter />} />
+          <Route path="/ai-intelligence" element={<AiIntelligenceCenter />} />
         </Routes>
       </Box>
     </>

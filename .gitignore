@@ -22,4 +22,6 @@ target
 /playwright/.auth/
 
 docs/
+
 bun.lock
+18 Phases Implemented document

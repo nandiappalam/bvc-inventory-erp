@@ -305,7 +305,7 @@ const PurchaseRequestDashboard = () => {
                           ₹{(d.total_amount || 0).toLocaleString('en-IN')}
                         </Typography>
                       </Box>
-                      <LinearProgress variant="determinate" value={pct} sx={{ height: 8, borderRadius: 4, backgroundColor: '#eaf2fb' }} />
+                      <LinearProgress variant="determinate" value={Number.isNaN(Number(pct)) ? 0 : Math.max(0, Math.min(100, Number(pct)))} sx={{ height: 8, borderRadius: 4, backgroundColor: '#eaf2fb' }} />
                     </Box>
                   );
                 })

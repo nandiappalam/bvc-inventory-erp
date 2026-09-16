@@ -153,6 +153,29 @@ app.use('/api/qc', require('./routes/qc'))
 app.use('/api/quality', require('./routes/qc'))
 app.use('/api/compliance', require('./routes/compliance'))
 app.use('/api/documents', require('./routes/compliance'))
+app.use('/api/command-center', require('./routes/commandCenter'))
+app.use('/api/procurement-planning', require('./routes/procurementPlanning'))
+app.use('/api/inventory-intelligence', require('./routes/inventoryIntelligence'))
+app.use('/api/lot-genealogy', require('./routes/lotGenealogy'))
+app.use('/api/bom', require('./routes/bom'))
+app.use('/api/production-planning-mgmt', require('./routes/productionPlanningManagement'))
+app.use('/api/yield-intelligence', require('./routes/yieldIntelligence'))
+app.use('/api/jobwork-control', require('./routes/jobworkControl'))
+
+// Phases 8–13 Enterprise Intelligence Modules
+app.use('/api/cold-storage-intelligence', require('./routes/coldStorageIntelligence'))
+app.use('/api/financial-intelligence', require('./routes/financialIntelligence'))
+app.use('/api/party-intelligence', require('./routes/partyIntelligence'))
+app.use('/api/order-fulfillment', require('./routes/orderFulfillment'))
+app.use('/api/warehouse-ops', require('./routes/warehouseOps'))
+app.use('/api/barcode-qr', require('./routes/barcodeQr'))
+app.use('/api/central-notifications', require('./routes/centralNotifications'))
+
+// Phases 14–18 Compliance, Complaint, Recall, BI & AI Modules
+app.use('/api/compliance-system', require('./routes/complianceSystem'))
+app.use('/api/complaint-recall', require('./routes/complaintRecall'))
+app.use('/api/bi-intelligence', require('./routes/biIntelligence'))
+app.use('/api/ai-intelligence', require('./routes/aiIntelligence'))
 
 // System Health and Diagnostic Routes
 const systemHealthRouter = require('./routes/systemHealth')
@@ -713,6 +736,14 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
 
   // Initialize master tables
   await initializeMasterTables()
+
+  // Initialize Phases 8-13 Enterprise Intelligence Tables
+  const { initPhases8To13Tables } = require('./config/phases8to13Init');
+  await initPhases8To13Tables();
+
+  // Initialize Phases 14-18 Compliance, Complaint, Recall, BI & AI Tables
+  const { initPhases14To18Tables } = require('./config/phases14to18Init');
+  await initPhases14To18Tables();
 
   // Mark Database Health Service as ready to serve application traffic
   const databaseHealth = require('./services/DatabaseHealthService');

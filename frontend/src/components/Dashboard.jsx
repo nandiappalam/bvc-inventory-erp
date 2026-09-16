@@ -56,6 +56,11 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import PointOfSaleIcon from '@mui/icons-material/PointOfSale';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import AcUnitIcon from '@mui/icons-material/AcUnit';
+import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
+import PeopleAltIcon from '@mui/icons-material/PeopleAlt';
+import QrCode2Icon from '@mui/icons-material/QrCode2';
+import WarehouseIcon from '@mui/icons-material/Warehouse';
 
 ChartJS.register(
   CategoryScale,
@@ -360,6 +365,12 @@ const Dashboard = () => {
     { title: 'Quality Control', icon: <ScienceIcon sx={{ color: '#059669' }} />, path: '/quality/dashboard', bg: '#d1fae5', desc: 'Lab & QC Reports' },
     { title: 'Stock Report', icon: <AssessmentIcon sx={{ color: '#2563eb' }} />, path: '/report/stock-report', bg: '#dbeafe', desc: 'Real-time Inventory' },
     { title: 'Day Book', icon: <AccountBalanceBookIcon sx={{ color: '#475569' }} />, path: '/reports/day-book', bg: '#f1f5f9', desc: 'Financial Day Log' },
+    { title: 'Cold Storage IQ', icon: <AcUnitIcon sx={{ color: '#0284c7' }} />, path: '/cold-storage-intelligence', bg: '#e0f2fe', desc: 'Chambers & Audit' },
+    { title: 'Financial Control', icon: <AccountBalanceIcon sx={{ color: '#16a34a' }} />, path: '/financial-intelligence', bg: '#dcfce7', desc: 'Aging & Cash Flow' },
+    { title: 'Party IQ 360°', icon: <PeopleAltIcon sx={{ color: '#8b5cf6' }} />, path: '/party-intelligence', bg: '#f3e8ff', desc: 'Vendor & Customer 360' },
+    { title: 'Order Fulfillment', icon: <LocalShippingIcon sx={{ color: '#ea580c' }} />, path: '/order-fulfillment', bg: '#ffedd5', desc: 'Sales Order Pipeline' },
+    { title: 'Warehouse Mobile', icon: <WarehouseIcon sx={{ color: '#0d9488' }} />, path: '/warehouse-mobile', bg: '#ccfbf1', desc: 'Touch Fast Ops' },
+    { title: 'Barcode/QR 360°', icon: <QrCode2Icon sx={{ color: '#4f46e5' }} />, path: '/barcode-qr', bg: '#e0e7ff', desc: 'Instant Code Trace' },
   ];
 
   const getActivityBadgeColor = (type) => {

@@ -5,11 +5,11 @@ import {
   Typography,
   Drawer,
   List,
-  ListItem,
   ListItemText,
   ListItemButton,
   Collapse,
   IconButton,
+  Button,
   Box,
   Tooltip,
 } from '@mui/material';
@@ -18,15 +18,16 @@ import ExpandLess from '@mui/icons-material/ExpandLess';
 import ExpandMore from '@mui/icons-material/ExpandMore';
 import MenuIcon from '@mui/icons-material/Menu';
 import DashboardIcon from '@mui/icons-material/Dashboard';
-import ExitToAppIcon from '@mui/icons-material/ExitToApp';
+import DashboardCustomizeIcon from '@mui/icons-material/DashboardCustomize';
 import LogoutIcon from '@mui/icons-material/Logout';
 import CalculateIcon from '@mui/icons-material/Calculate';
 import RecyclingIcon from '@mui/icons-material/Recycling';
 import CalculatorModal from './CalculatorModal';
 import RecycleBinModal from './RecycleBinModal';
 import StockAlertBell from './StockAlert/StockAlertBell';
+import CentralNotificationsBell from './CentralNotificationsBell';
 import SystemStatus from './SystemStatus';
-import { useAuth, MODULE_CATEGORIES, PERMISSION_TYPES } from '../context/AuthContext';
+import { useAuth, PERMISSION_TYPES } from '../context/AuthContext';
 
 // ERP Theme Colors
 const themeColors = {
@@ -89,6 +90,44 @@ const modulePermissionMap = {
   'Deduction Purchase': 'Deduction Purchase',
 };
 
+// Non-clickable category label
+const NavSectionHeader = ({ title }) => (
+  <Box sx={{ px: 2, pt: 2, pb: 0.5 }}>
+    <Typography
+      variant="caption"
+      sx={{
+        color: '#64748b',
+        fontWeight: 800,
+        fontSize: '10px',
+        letterSpacing: '0.8px',
+        textTransform: 'uppercase',
+        display: 'block',
+      }}
+    >
+      {title}
+    </Typography>
+  </Box>
+);
+
+// Non-clickable sub-group label inside an expanded module list
+const NavSubGroupHeader = ({ title }) => (
+  <Box sx={{ pl: 3, pr: 2, pt: 1.5, pb: 0.5 }}>
+    <Typography
+      variant="caption"
+      sx={{
+        color: '#64748b',
+        fontWeight: 700,
+        fontSize: '9.5px',
+        letterSpacing: '0.6px',
+        textTransform: 'uppercase',
+        display: 'block',
+      }}
+    >
+      {title}
+    </Typography>
+  </Box>
+);
+
 const EntryModuleItem = ({ module, actions, generatePath, toggleDrawer, hasPermission, isAdmin }) => {
   const [open, setOpen] = useState(false);
   const location = useLocation();
@@ -109,8 +148,8 @@ const EntryModuleItem = ({ module, actions, generatePath, toggleDrawer, hasPermi
 
   // Check if any child is active
   const isActive = moduleActions.some(action => {
-    const path = generatePath('entry', module, action)
-    return location.pathname === path
+    const path = generatePath('entry', module, action);
+    return location.pathname === path;
   });
 
   return (
@@ -138,8 +177,8 @@ const EntryModuleItem = ({ module, actions, generatePath, toggleDrawer, hasPermi
       <Collapse in={open} timeout="auto" unmountOnExit>
         <List component="div" disablePadding>
           {moduleActions.map((action) => {
-            const path = generatePath('entry', module, action)
-            const isItemActive = location.pathname === path
+            const path = generatePath('entry', module, action);
+            const isItemActive = location.pathname === path;
             
             // Check specific permission based on action
             let canAccess = isAdmin;
@@ -176,13 +215,13 @@ const EntryModuleItem = ({ module, actions, generatePath, toggleDrawer, hasPermi
                   }}
                 />
               </ListItemButton>
-            )
+            );
           })}
         </List>
       </Collapse>
     </>
-  )
-}
+  );
+};
 
 const MasterModuleItem = ({ module, actions, generatePath, toggleDrawer, hasPermission, isAdmin }) => {
   const [open, setOpen] = useState(false);
@@ -200,8 +239,8 @@ const MasterModuleItem = ({ module, actions, generatePath, toggleDrawer, hasPerm
 
   // Check if any child is active
   const isActive = actions.some(action => {
-    const path = generatePath('master', module, action)
-    return location.pathname === path
+    const path = generatePath('master', module, action);
+    return location.pathname === path;
   });
 
   return (
@@ -229,8 +268,8 @@ const MasterModuleItem = ({ module, actions, generatePath, toggleDrawer, hasPerm
       <Collapse in={open} timeout="auto" unmountOnExit>
         <List component="div" disablePadding>
           {actions.map((action) => {
-            const path = generatePath('master', module, action)
-            const isItemActive = location.pathname === path
+            const path = generatePath('master', module, action);
+            const isItemActive = location.pathname === path;
 
             // Check specific permission based on action
             let canAccess = isAdmin;
@@ -267,13 +306,13 @@ const MasterModuleItem = ({ module, actions, generatePath, toggleDrawer, hasPerm
                   }}
                 />
               </ListItemButton>
-            )
+            );
           })}
         </List>
       </Collapse>
     </>
-  )
-}
+  );
+};
 
 const Navigation = () => {
   const location = useLocation();
@@ -304,139 +343,397 @@ const Navigation = () => {
   const [coldStorageOpen, setColdStorageOpen] = useState(false);
   const [qualityOpen, setQualityOpen] = useState(false);
   const [documentsOpen, setDocumentsOpen] = useState(false);
+  const [manufacturingOpen, setManufacturingOpen] = useState(false);
+  const [intelligenceOpen, setIntelligenceOpen] = useState(true);
   const [reportOpen, setReportOpen] = useState(false);
   const [accountsOpen, setAccountsOpen] = useState(false);
   const [featuresOpen, setFeaturesOpen] = useState(false);
   const [companyOpen, setCompanyOpen] = useState(false);
 
-  const entryModules = [
-    'Purchase Request',
-    'Purchase Order',
-    'Purchase',
-    'Purchase Return',
-    'Quality Control',
-    'Incoming Quality',
-    'Advance',
-    'Flour Out',
-    'Flour Out Return',
-    'Work Order Slip',
-    'Grind',
-    'Papad In',
-    'Papad Return',
-    'Packing',
-    'Open',
-    'Quotation',
-    'Sales',
-    'Sales Order',
-    'Sales Export',
-    'Sales Export Order',
-    'Sales Return',
-    'Stock Adjust',
-    'Godown Transfer',
-    'Weight Conversion',
-    'Voucher',
-    'Vehicle Movement',
-    'Cheque Printing',
+  // Grouped Entry Modules
+  const entryGroups = [
+    {
+      groupTitle: 'Procurement',
+      modules: ['Purchase Request', 'Purchase Order', 'Purchase', 'Purchase Return']
+    },
+    {
+      groupTitle: 'Quality & Inward',
+      modules: ['Quality Control', 'Incoming Quality', 'Vehicle Movement']
+    },
+    {
+      groupTitle: 'Manufacturing / Production',
+      modules: ['Work Order Slip', 'Grind', 'Flour Out', 'Flour Out Return', 'Papad In', 'Papad Return', 'Packing']
+    },
+    {
+      groupTitle: 'Sales & Distribution',
+      modules: ['Quotation', 'Sales Order', 'Sales', 'Sales Export', 'Sales Export Order', 'Sales Return']
+    },
+    {
+      groupTitle: 'Inventory & Movement',
+      modules: ['Open', 'Stock Adjust', 'Godown Transfer', 'Weight Conversion']
+    },
+    {
+      groupTitle: 'Finance & Other Entries',
+      modules: ['Voucher', 'Advance', 'Cheque Printing']
+    }
   ];
 
-  const masterModules = [
-    'Item',
-    'Item Group',
-    'Deduction Sales',
-    'Deduction Purchase',
-    'Customer',
-    'Suppliers',
-    'Flour Mill',
-    'Papad Company',
-    'Weight',
-    'Ledger Group',
-    'Ledger',
-    'Area',
-    'City',
-    'Consignee',
-    'P.Trans',
-    'Sender',
-    'Transport',
-    'Godown',
-    'Tax',
+  // Grouped Master Modules
+  const masterGroups = [
+    {
+      groupTitle: 'Items & Classification',
+      modules: ['Item', 'Item Group', 'Weight', 'Tax']
+    },
+    {
+      groupTitle: 'Customers & Suppliers',
+      modules: ['Customer', 'Suppliers']
+    },
+    {
+      groupTitle: 'Manufacturing Masters',
+      modules: ['Flour Mill', 'Papad Company']
+    },
+    {
+      groupTitle: 'Logistics & Location',
+      modules: ['Godown', 'Area', 'City', 'Consignee', 'P.Trans', 'Sender', 'Transport']
+    },
+    {
+      groupTitle: 'Accounts & Deductions',
+      modules: ['Ledger Group', 'Ledger', 'Deduction Sales', 'Deduction Purchase']
+    }
   ];
 
-  const coldStorageModules = [
-    { name: 'Cold Storage IN (CSI)', path: '/cold-storage/in' },
-    { name: 'Cold Storage OUT (CSO)', path: '/cold-storage/out' },
-    { name: 'Stock Balance', path: '/cold-storage/stock' },
-    { name: 'Voucher Register', path: '/cold-storage/vouchers' },
-    { name: 'Movement Ledger', path: '/cold-storage/ledger' },
-    { name: 'Lot Traceability', path: '/cold-storage/traceability' },
-    { name: 'Facility Master', path: '/cold-storage/master' },
+  // Grouped Cold Storage Modules
+  const coldStorageGroups = [
+    {
+      groupTitle: 'Operations',
+      items: [
+        { name: 'Cold Storage IN (CSI)', path: '/cold-storage/in' },
+        { name: 'Cold Storage OUT (CSO)', path: '/cold-storage/out' }
+      ]
+    },
+    {
+      groupTitle: 'Stock',
+      items: [
+        { name: 'Stock Balance', path: '/cold-storage/stock' }
+      ]
+    },
+    {
+      groupTitle: 'Transactions',
+      items: [
+        { name: 'Voucher Register', path: '/cold-storage/vouchers' },
+        { name: 'Movement Ledger', path: '/cold-storage/ledger' }
+      ]
+    },
+    {
+      groupTitle: 'Traceability',
+      items: [
+        { name: 'Lot Traceability', path: '/cold-storage/traceability' }
+      ]
+    },
+    {
+      groupTitle: 'Configuration',
+      items: [
+        { name: 'Facility Master', path: '/cold-storage/master' }
+      ]
+    }
   ];
 
-
-  const reportModules = [
-    { name: 'Stock Reports', path: '/reports/category/stock', permission: 'Stock Report' },
-    { name: 'Godown Wise Stock Report', path: '/reports/godown-stock', permission: 'Godown Stock Report' },
-    { name: 'Stock Alert & Reorder Report', path: '/features/stock-alert-dashboard', permission: 'Stock Report' },
-    { name: 'Purchase Reports', path: '/reports/category/purchase', permission: 'Purchase Register' },
-    { name: 'Purchase Return Reports', path: '/reports/category/purchase-return', permission: 'Purchase Return Register' },
-    { name: 'Sales Reports', path: '/reports/category/sales', permission: 'Sales Register' },
-    { name: 'Sales Return Reports', path: '/reports/category/sales-return', permission: 'Sales Return Register' },
-    { name: 'Tax Reports', path: '/reports/category/tax', permission: 'Voucher' },
-    { name: 'Production Reports', path: '/reports/category/production', permission: 'Daily Production' },
-    { name: 'Pending Reports', path: '/reports/category/pending', permission: 'Purchase Request' },
-    { name: 'All Reports Hub', path: '/reports', permission: 'Stock Report' }
+  // Grouped Quality Modules
+  const qualityGroups = [
+    {
+      groupTitle: 'Quality Operations',
+      items: [
+        { name: 'Quality Dashboard', path: '/quality/dashboard', permission: 'Quality Control' },
+        { name: 'Purchase Lab Entry', path: '/quality/purchase-lab-testing-create', permission: 'Quality Control' }
+      ]
+    },
+    {
+      groupTitle: 'Quality Configuration',
+      items: [
+        { name: 'Parameter Registry', path: '/quality/parameter-master', permission: 'Quality Control' },
+        { name: 'QC Template Master', path: '/quality/qc-template-master', permission: 'Quality Control' }
+      ]
+    }
   ];
 
-  // Accounts modules with paths
-  const accountsModules = [
-    { name: 'Voucher Register', path: '/entry/voucher-create', permission: 'Voucher' },
-    { name: 'Voucher Book', path: '/entry/voucher-display', permission: 'Voucher' },
-    { name: 'General Ledger', path: '/reports/ledger-statement', permission: 'Ledger Statement' },
-    { name: 'Supplier Ledger', path: '/reports/ledger-statement', permission: 'Ledger Statement' },
-    { name: 'Day Book', path: '/reports/day-book', permission: 'Day Book' },
-    { name: 'Trial Balance', path: '/reports/trial-balance', permission: 'Trial Balance' },
-    { name: 'Balance Sheet', path: '/reports/balance-sheet', permission: 'Balance Sheet' },
-    { name: 'Profit & Loss', path: '/reports/profit-loss', permission: 'Profit & Loss' },
-    { name: 'Outstanding Summary', path: '/reports/outstanding-summary', permission: 'Outstanding Summary' },
-    { name: 'Outstanding Details', path: '/reports/outstanding-details', permission: 'Outstanding Details' },
+  // Grouped Documents Modules
+  const documentsGroups = [
+    {
+      groupTitle: 'Dashboard',
+      items: [
+        { name: 'Document Dashboard', path: '/documents/dashboard', permission: 'Quality Control' }
+      ]
+    },
+    {
+      groupTitle: 'Operational Records',
+      items: [
+        { name: 'Production Records (P1–P8)', path: '/documents/production', permission: 'Quality Control' },
+        { name: 'Cleaning Records (C1–C10)', path: '/documents/cleaning', permission: 'Quality Control' }
+      ]
+    },
+    {
+      groupTitle: 'Controlled Documents',
+      items: [
+        { name: 'Controlled Documents (D1–D11)', path: '/documents/controlled', permission: 'Quality Control' }
+      ]
+    },
+    {
+      groupTitle: 'Document Administration',
+      items: [
+        { name: 'Document Templates', path: '/documents/templates', permission: 'Quality Control' },
+        { name: 'Document Schedule', path: '/documents/schedule', permission: 'Quality Control' },
+        { name: 'Document Register', path: '/documents/register', permission: 'Quality Control' }
+      ]
+    },
+    {
+      groupTitle: 'Document Monitoring',
+      items: [
+        { name: 'Pending Documents', path: '/documents/pending', permission: 'Quality Control' },
+        { name: 'Expiring Documents', path: '/documents/expiring', permission: 'Quality Control' }
+      ]
+    }
   ];
 
-  const featuresModules = [
-    { name: 'Stock Alert Dashboard', path: '/features/stock-alert-dashboard', permission: 'User' },
-    { name: 'Stock Alert Configuration', path: '/features/stock-alert-config', permission: 'User' },
-    { name: 'Alert Contacts Master', path: '/features/stock-alert-contacts', permission: 'User' },
-    { name: 'User Activities Display', path: '/features/user-activities', permission: 'User' },
-    { name: 'Setup', path: '/features/setup', permission: 'User' },
-    { name: 'General Setup', path: '/features/general-setup', permission: 'User' },
-    { name: 'User Creation', path: '/features/user-create', permission: 'User' },
-    { name: 'User Display', path: '/features/user-display', permission: 'User' },
-    { name: 'User Change Password', path: '/features/change-password', permission: 'User' },
-    { name: 'Financial Year', path: '/features/financial-year', permission: 'User' },
-    { name: 'Financial Year Creation', path: '/features/financial-year-create', permission: 'User' },
-    { name: 'Backup & Restore', path: '/db-utility', permission: 'User' },
+  // Grouped Manufacturing Modules
+  const manufacturingGroups = [
+    {
+      groupTitle: 'Traceability',
+      items: [
+        { name: 'Lot Genealogy & Traceability', path: '/lot-genealogy' }
+      ]
+    },
+    {
+      groupTitle: 'Product Definition',
+      items: [
+        { name: 'BOM & Formulation Master', path: '/bom-master' }
+      ]
+    },
+    {
+      groupTitle: 'Planning',
+      items: [
+        { name: 'Production Planning & MRP', path: '/production-planning' }
+      ]
+    },
+    {
+      groupTitle: 'Production Intelligence',
+      items: [
+        { name: 'Yield Intelligence & Mass Balance', path: '/yield-intelligence' }
+      ]
+    },
+    {
+      groupTitle: 'Jobwork',
+      items: [
+        { name: 'Jobwork & Contractor Control', path: '/jobwork-control' }
+      ]
+    }
+  ];
+
+  // Grouped Operations & Intelligence Modules
+  const enterpriseGroups = [
+    {
+      groupTitle: 'Cold Storage',
+      items: [
+        { name: 'Cold Storage Intelligence', path: '/cold-storage-intelligence' }
+      ]
+    },
+    {
+      groupTitle: 'Finance',
+      items: [
+        { name: 'Financial Control Center', path: '/financial-intelligence' }
+      ]
+    },
+    {
+      groupTitle: 'Business Partners',
+      items: [
+        { name: 'Party 360° Intelligence', path: '/party-intelligence' }
+      ]
+    },
+    {
+      groupTitle: 'Sales Operations',
+      items: [
+        { name: 'Order Fulfillment Pipeline', path: '/order-fulfillment' }
+      ]
+    },
+    {
+      groupTitle: 'Warehouse',
+      items: [
+        { name: 'Warehouse Mobile Ops', path: '/warehouse-mobile' }
+      ]
+    },
+    {
+      groupTitle: 'Identification',
+      items: [
+        { name: 'Barcode & QR Master 360°', path: '/barcode-qr' }
+      ]
+    },
+    {
+      groupTitle: 'Compliance',
+      items: [
+        { name: 'Automated Compliance', path: '/automated-compliance' }
+      ]
+    },
+    {
+      groupTitle: 'Customer Quality',
+      items: [
+        { name: 'Customer Complaint & Traceability', path: '/customer-complaint' }
+      ]
+    },
+    {
+      groupTitle: 'Food Safety',
+      items: [
+        { name: 'Recall Management', path: '/recall-management' }
+      ]
+    },
+    {
+      groupTitle: 'Analytics',
+      items: [
+        { name: 'Business Intelligence', path: '/business-intelligence' }
+      ]
+    },
+    {
+      groupTitle: 'AI',
+      items: [
+        { name: 'AI Intelligence', path: '/ai-intelligence' }
+      ]
+    }
+  ];
+
+  // Grouped Report Modules
+  const reportGroups = [
+    {
+      groupTitle: 'Planning',
+      items: [
+        { name: 'Procurement Planning', path: '/procurement-planning', permission: 'Purchase Request' }
+      ]
+    },
+    {
+      groupTitle: 'Inventory',
+      items: [
+        { name: 'Inventory Intelligence', path: '/inventory-intelligence', permission: 'Stock Report' },
+        { name: 'Stock Reports', path: '/reports/category/stock', permission: 'Stock Report' },
+        { name: 'Godown Wise Stock Report', path: '/reports/godown-stock', permission: 'Godown Stock Report' },
+        { name: 'Stock Alert & Reorder Report', path: '/features/stock-alert-dashboard', permission: 'Stock Report' }
+      ]
+    },
+    {
+      groupTitle: 'Purchase',
+      items: [
+        { name: 'Purchase Reports', path: '/reports/category/purchase', permission: 'Purchase Register' },
+        { name: 'Purchase Return Reports', path: '/reports/category/purchase-return', permission: 'Purchase Return Register' }
+      ]
+    },
+    {
+      groupTitle: 'Sales',
+      items: [
+        { name: 'Sales Reports', path: '/reports/category/sales', permission: 'Sales Register' },
+        { name: 'Sales Return Reports', path: '/reports/category/sales-return', permission: 'Sales Return Register' }
+      ]
+    },
+    {
+      groupTitle: 'Tax',
+      items: [
+        { name: 'Tax Reports', path: '/reports/category/tax', permission: 'Voucher' }
+      ]
+    },
+    {
+      groupTitle: 'Production',
+      items: [
+        { name: 'Production Reports', path: '/reports/category/production', permission: 'Daily Production' }
+      ]
+    },
+    {
+      groupTitle: 'Pending',
+      items: [
+        { name: 'Pending Reports', path: '/reports/category/pending', permission: 'Purchase Request' }
+      ]
+    },
+    {
+      groupTitle: 'Reports Hub',
+      items: [
+        { name: 'All Reports Hub', path: '/reports', permission: 'Stock Report' }
+      ]
+    }
+  ];
+
+  // Grouped Accounts Modules
+  const accountsGroups = [
+    {
+      groupTitle: 'Vouchers',
+      items: [
+        { name: 'Voucher Register', path: '/entry/voucher-create', permission: 'Voucher' },
+        { name: 'Voucher Book', path: '/entry/voucher-display', permission: 'Voucher' }
+      ]
+    },
+    {
+      groupTitle: 'Ledgers',
+      items: [
+        { name: 'General Ledger', path: '/reports/ledger-statement', permission: 'Ledger Statement' },
+        { name: 'Supplier Ledger', path: '/reports/ledger-statement', permission: 'Ledger Statement' }
+      ]
+    },
+    {
+      groupTitle: 'Financial Statements',
+      items: [
+        { name: 'Day Book', path: '/reports/day-book', permission: 'Day Book' },
+        { name: 'Trial Balance', path: '/reports/trial-balance', permission: 'Trial Balance' },
+        { name: 'Profit & Loss', path: '/reports/profit-loss', permission: 'Profit & Loss' },
+        { name: 'Balance Sheet', path: '/reports/balance-sheet', permission: 'Balance Sheet' }
+      ]
+    },
+    {
+      groupTitle: 'Outstanding',
+      items: [
+        { name: 'Outstanding Summary', path: '/reports/outstanding-summary', permission: 'Outstanding Summary' },
+        { name: 'Outstanding Details', path: '/reports/outstanding-details', permission: 'Outstanding Details' }
+      ]
+    }
+  ];
+
+  // Grouped Features Modules
+  const featuresGroups = [
+    {
+      groupTitle: 'Stock Alerts',
+      items: [
+        { name: 'Stock Alert Dashboard', path: '/features/stock-alert-dashboard', permission: 'User' },
+        { name: 'Stock Alert Configuration', path: '/features/stock-alert-config', permission: 'User' },
+        { name: 'Alert Contacts Master', path: '/features/stock-alert-contacts', permission: 'User' }
+      ]
+    },
+    {
+      groupTitle: 'User & Security',
+      items: [
+        { name: 'User Activities Display', path: '/features/user-activities', permission: 'User' },
+        { name: 'User Creation', path: '/features/user-create', permission: 'User' },
+        { name: 'User Display', path: '/features/user-display', permission: 'User' },
+        { name: 'User Change Password', path: '/features/change-password', permission: 'User' }
+      ]
+    },
+    {
+      groupTitle: 'System Setup',
+      items: [
+        { name: 'Setup', path: '/features/setup', permission: 'User' },
+        { name: 'General Setup', path: '/features/general-setup', permission: 'User' }
+      ]
+    },
+    {
+      groupTitle: 'Financial Year',
+      items: [
+        { name: 'Financial Year', path: '/features/financial-year', permission: 'User' },
+        { name: 'Financial Year Creation', path: '/features/financial-year-create', permission: 'User' }
+      ]
+    },
+    {
+      groupTitle: 'Database',
+      items: [
+        { name: 'Backup & Restore', path: '/db-utility', permission: 'User' }
+      ]
+    }
   ];
 
   const companyModules = [
     { name: 'Select', path: '/company-select', permission: 'Company Select' },
     { name: 'Create', path: '/company-create', permission: 'Company Create' },
-  ];
-
-  const qualityModules = [
-    { name: 'Quality Dashboard', path: '/quality/dashboard', permission: 'Quality Control' },
-    { name: 'Purchase Lab Entry', path: '/quality/purchase-lab-testing-create', permission: 'Quality Control' },
-    { name: 'Parameter Registry', path: '/quality/parameter-master', permission: 'Quality Control' },
-    { name: 'QC Template Master', path: '/quality/qc-template-master', permission: 'Quality Control' },
-  ];
-
-  const documentsModules = [
-    { name: 'Document Dashboard', path: '/documents/dashboard', permission: 'Quality Control' },
-    { name: 'Production Records (P1–P8)', path: '/documents/production', permission: 'Quality Control' },
-    { name: 'Cleaning Records (C1–C10)', path: '/documents/cleaning', permission: 'Quality Control' },
-    { name: 'Controlled Documents (D1–D11)', path: '/documents/controlled', permission: 'Quality Control' },
-    { name: 'Document Templates', path: '/documents/templates', permission: 'Quality Control' },
-    { name: 'Document Schedule', path: '/documents/schedule', permission: 'Quality Control' },
-    { name: 'Pending Documents', path: '/documents/pending', permission: 'Quality Control' },
-    { name: 'Expiring Documents', path: '/documents/expiring', permission: 'Quality Control' },
-    { name: 'Document Register', path: '/documents/register', permission: 'Quality Control' },
+    { name: 'Company List', path: '/company-display', permission: 'Company Select' },
   ];
 
   const crudActions = ['Create', 'Display'];
@@ -469,6 +766,14 @@ const Navigation = () => {
     setDocumentsOpen(!documentsOpen);
   };
 
+  const handleManufacturingClick = () => {
+    setManufacturingOpen(!manufacturingOpen);
+  };
+
+  const handleIntelligenceClick = () => {
+    setIntelligenceOpen(!intelligenceOpen);
+  };
+
   const handleReportClick = () => {
     setReportOpen(!reportOpen);
   };
@@ -491,17 +796,32 @@ const Navigation = () => {
   };
 
   const generatePath = (type, module, action) => {
-    // Replace dots and special chars with hyphens, then collapse multiple hyphens
     const slug = module.toLowerCase()
       .replace(/\s+/g, '-')
       .replace(/\./g, '-')
       .replace(/-+/g, '-')
-      .replace(/^-|-$/g, '')
-    const actionSlug = action.toLowerCase().replace(/\s+/g, '-').replace('/', '-')
-    return `/${type}/${slug}-${actionSlug}`
+      .replace(/^-|-$/g, '');
+    const actionSlug = action.toLowerCase().replace(/\s+/g, '-').replace('/', '-');
+    return `/${type}/${slug}-${actionSlug}`;
   };
 
   const isDashboardActive = location.pathname === '/' || location.pathname === '/dashboard';
+  const isCommandCenterActive = location.pathname.startsWith('/command-center');
+
+  // Check if a report group has at least one visible item
+  const hasVisibleReportItem = (group) => {
+    return isAdmin || group.items.some(item => hasPermission(item.permission, PERMISSION_TYPES.VIEW));
+  };
+
+  // Check if an accounts group has at least one visible item
+  const hasVisibleAccountItem = (group) => {
+    return isAdmin || group.items.some(item => hasPermission(item.permission, PERMISSION_TYPES.VIEW));
+  };
+
+  // Check if a features group has at least one visible item
+  const hasVisibleFeatureItem = (group) => {
+    return isAdmin || group.items.some(item => hasPermission(item.permission, PERMISSION_TYPES.VIEW));
+  };
 
   return (
     <>
@@ -560,6 +880,32 @@ const Navigation = () => {
             </Typography>
             <SystemStatus />
             <StockAlertBell />
+            <CentralNotificationsBell />
+            <Tooltip title="Command Center Overview">
+              <Button
+                component={Link}
+                to="/command-center"
+                size="small"
+                startIcon={<DashboardCustomizeIcon sx={{ fontSize: 16 }} />}
+                sx={{
+                  color: '#ffffff',
+                  backgroundColor: isCommandCenterActive ? 'rgba(255, 255, 255, 0.28)' : 'rgba(255, 255, 255, 0.12)',
+                  border: isCommandCenterActive ? '1px solid rgba(255, 255, 255, 0.6)' : '1px solid rgba(255, 255, 255, 0.25)',
+                  fontWeight: 600,
+                  fontSize: '12px',
+                  textTransform: 'none',
+                  px: 1.25,
+                  py: 0.35,
+                  borderRadius: '6px',
+                  '&:hover': {
+                    backgroundColor: 'rgba(255, 255, 255, 0.32)',
+                    borderColor: '#ffffff'
+                  }
+                }}
+              >
+                Command Center
+              </Button>
+            </Tooltip>
             <Tooltip title="Calculator Tool">
               <IconButton 
                 size="small" 
@@ -601,7 +947,7 @@ const Navigation = () => {
           },
         }}
       >
-        <Box sx={{ width: 260, pt: 2 }}>
+        <Box sx={{ width: 260, pt: 1, pb: 4 }}>
           {/* Dashboard Link */}
           <ListItemButton 
             component={Link} 
@@ -613,7 +959,9 @@ const Navigation = () => {
               '&:hover': {
                 backgroundColor: isDashboardActive ? themeColors.primary : themeColors.lightBlue,
               },
-              py: 2
+              py: 1.25,
+              mx: 1,
+              borderRadius: '6px',
             }}
           >
             <DashboardIcon sx={{
@@ -624,8 +972,40 @@ const Navigation = () => {
               primary="Dashboard"
               primaryTypographyProps={{
                 fontSize: '14px',
-                fontWeight: isDashboardActive ? 'bold' : 'normal',
+                fontWeight: isDashboardActive ? 'bold' : 600,
                 color: isDashboardActive ? themeColors.white : themeColors.textPrimary,
+              }}
+              sx={{ my: 0 }}
+            />
+          </ListItemButton>
+
+          {/* Command Center Link */}
+          <ListItemButton 
+            component={Link} 
+            to="/command-center" 
+            onClick={toggleDrawer}
+            sx={{ 
+              justifyContent: 'flex-start',
+              backgroundColor: isCommandCenterActive ? themeColors.primary : 'transparent',
+              '&:hover': {
+                backgroundColor: isCommandCenterActive ? themeColors.primary : themeColors.lightBlue,
+              },
+              py: 1.25,
+              mx: 1,
+              mt: 0.5,
+              borderRadius: '6px',
+            }}
+          >
+            <DashboardCustomizeIcon sx={{
+              color: isCommandCenterActive ? themeColors.white : themeColors.primary,
+              mr: 1
+            }} />
+            <ListItemText 
+              primary="Command Center"
+              primaryTypographyProps={{
+                fontSize: '14px',
+                fontWeight: isCommandCenterActive ? 'bold' : 600,
+                color: isCommandCenterActive ? themeColors.white : themeColors.textPrimary,
               }}
               sx={{ my: 0 }}
             />
@@ -635,7 +1015,7 @@ const Navigation = () => {
           <ListItemButton
             onClick={handleEntryClick}
             sx={{
-              minHeight: 48,
+              minHeight: 44,
               borderTop: `1px solid ${themeColors.lightBlue}`,
               borderBottom: `1px solid ${themeColors.lightBlue}`,
               backgroundColor: themeColors.lighterBlue,
@@ -655,16 +1035,21 @@ const Navigation = () => {
           </ListItemButton>
           <Collapse in={entryOpen} timeout="auto" unmountOnExit>
             <List component="div" disablePadding>
-              {entryModules.map((module) => (
-                <EntryModuleItem
-                  key={module}
-                  module={module}
-                  actions={crudActions}
-                  generatePath={generatePath}
-                  toggleDrawer={toggleDrawer}
-                  hasPermission={hasPermission}
-                  isAdmin={isAdmin}
-                />
+              {entryGroups.map((group) => (
+                <React.Fragment key={group.groupTitle}>
+                  <NavSubGroupHeader title={group.groupTitle} />
+                  {group.modules.map((module) => (
+                    <EntryModuleItem
+                      key={module}
+                      module={module}
+                      actions={crudActions}
+                      generatePath={generatePath}
+                      toggleDrawer={toggleDrawer}
+                      hasPermission={hasPermission}
+                      isAdmin={isAdmin}
+                    />
+                  ))}
+                </React.Fragment>
               ))}
             </List>
           </Collapse>
@@ -673,7 +1058,7 @@ const Navigation = () => {
           <ListItemButton
             onClick={handleMasterClick}
             sx={{
-              minHeight: 48,
+              minHeight: 44,
               borderTop: `1px solid ${themeColors.lightBlue}`,
               borderBottom: `1px solid ${themeColors.lightBlue}`,
               backgroundColor: themeColors.lighterBlue,
@@ -693,16 +1078,21 @@ const Navigation = () => {
           </ListItemButton>
           <Collapse in={masterOpen} timeout="auto" unmountOnExit>
             <List component="div" disablePadding>
-              {masterModules.map((module) => (
-                <MasterModuleItem
-                  key={module}
-                  module={module}
-                  actions={masterActions}
-                  generatePath={generatePath}
-                  toggleDrawer={toggleDrawer}
-                  hasPermission={hasPermission}
-                  isAdmin={isAdmin}
-                />
+              {masterGroups.map((group) => (
+                <React.Fragment key={group.groupTitle}>
+                  <NavSubGroupHeader title={group.groupTitle} />
+                  {group.modules.map((module) => (
+                    <MasterModuleItem
+                      key={module}
+                      module={module}
+                      actions={masterActions}
+                      generatePath={generatePath}
+                      toggleDrawer={toggleDrawer}
+                      hasPermission={hasPermission}
+                      isAdmin={isAdmin}
+                    />
+                  ))}
+                </React.Fragment>
               ))}
             </List>
           </Collapse>
@@ -711,7 +1101,7 @@ const Navigation = () => {
           <ListItemButton
             onClick={handleColdStorageClick}
             sx={{
-              minHeight: 48,
+              minHeight: 44,
               borderTop: `1px solid ${themeColors.lightBlue}`,
               borderBottom: `1px solid ${themeColors.lightBlue}`,
               backgroundColor: themeColors.lighterBlue,
@@ -731,42 +1121,47 @@ const Navigation = () => {
           </ListItemButton>
           <Collapse in={coldStorageOpen} timeout="auto" unmountOnExit>
             <List component="div" disablePadding>
-              {coldStorageModules.map((module) => {
-                const isActive = location.pathname === module.path;
-                return (
-                  <ListItemButton
-                    key={module.name}
-                    component={Link}
-                    to={module.path}
-                    onClick={toggleDrawer}
-                    sx={{
-                      pl: 4,
-                      backgroundColor: isActive ? themeColors.primary : 'transparent',
-                      '&:hover': {
-                        backgroundColor: isActive ? themeColors.primary : themeColors.lightBlue,
-                      }
-                    }}
-                  >
-                    <ListItemText
-                      primary={module.name}
-                      primaryTypographyProps={{
-                        fontSize: '12px',
-                        fontWeight: isActive ? 'bold' : 'normal',
-                        color: isActive ? themeColors.white : themeColors.textPrimary,
-                      }}
-                    />
-                  </ListItemButton>
-                );
-              })}
+              {coldStorageGroups.map((group) => (
+                <React.Fragment key={group.groupTitle}>
+                  <NavSubGroupHeader title={group.groupTitle} />
+                  {group.items.map((module) => {
+                    const isActive = location.pathname === module.path;
+                    return (
+                      <ListItemButton
+                        key={module.name}
+                        component={Link}
+                        to={module.path}
+                        onClick={toggleDrawer}
+                        sx={{
+                          pl: 4,
+                          backgroundColor: isActive ? themeColors.primary : 'transparent',
+                          '&:hover': {
+                            backgroundColor: isActive ? themeColors.primary : themeColors.lightBlue,
+                          }
+                        }}
+                      >
+                        <ListItemText
+                          primary={module.name}
+                          primaryTypographyProps={{
+                            fontSize: '12px',
+                            fontWeight: isActive ? 'bold' : 'normal',
+                            color: isActive ? themeColors.white : themeColors.textPrimary,
+                          }}
+                        />
+                      </ListItemButton>
+                    );
+                  })}
+                </React.Fragment>
+              ))}
             </List>
           </Collapse>
 
-          {/* Quality & Compliance Section */}
-          {(isAdmin || qualityModules.some(q => hasPermission('Quality Control', PERMISSION_TYPES.VIEW) || hasPermission('Quality Check', PERMISSION_TYPES.VIEW) || hasPermission(q.name, PERMISSION_TYPES.VIEW))) && (
+          {/* Quality Section */}
+          {(isAdmin || qualityGroups.some(g => g.items.some(q => hasPermission('Quality Control', PERMISSION_TYPES.VIEW) || hasPermission('Quality Check', PERMISSION_TYPES.VIEW) || hasPermission(q.name, PERMISSION_TYPES.VIEW)))) && (
             <ListItemButton
               onClick={handleQualityClick}
               sx={{
-                minHeight: 48,
+                minHeight: 44,
                 borderTop: `1px solid ${themeColors.lightBlue}`,
                 borderBottom: `1px solid ${themeColors.lightBlue}`,
                 backgroundColor: themeColors.lighterBlue,
@@ -787,44 +1182,51 @@ const Navigation = () => {
           )}
           <Collapse in={qualityOpen} timeout="auto" unmountOnExit>
             <List component="div" disablePadding>
-              {qualityModules
-                .filter(module => isAdmin || hasPermission('Quality Control', PERMISSION_TYPES.VIEW) || hasPermission('Quality Check', PERMISSION_TYPES.VIEW) || hasPermission(module.name, PERMISSION_TYPES.VIEW))
-                .map((module) => {
-                const isQualityActive = location.pathname === module.path;
+              {qualityGroups.map((group) => {
+                const visibleItems = group.items.filter(m => isAdmin || hasPermission('Quality Control', PERMISSION_TYPES.VIEW) || hasPermission('Quality Check', PERMISSION_TYPES.VIEW) || hasPermission(m.name, PERMISSION_TYPES.VIEW));
+                if (visibleItems.length === 0) return null;
                 return (
-                  <ListItemButton 
-                    key={module.name} 
-                    component={Link} 
-                    to={module.path}
-                    onClick={toggleDrawer}
-                    sx={{ 
-                      pl: 4,
-                      backgroundColor: isQualityActive ? themeColors.primary : 'transparent',
-                      '&:hover': {
-                        backgroundColor: isQualityActive ? themeColors.primary : themeColors.lightBlue,
-                      }
-                    }}
-                  >
-                    <ListItemText 
-                      primary={module.name}
-                      primaryTypographyProps={{
-                        fontSize: '12px',
-                        fontWeight: isQualityActive ? 'bold' : 'normal',
-                        color: isQualityActive ? themeColors.white : themeColors.textPrimary,
-                      }}
-                    />
-                  </ListItemButton>
+                  <React.Fragment key={group.groupTitle}>
+                    <NavSubGroupHeader title={group.groupTitle} />
+                    {visibleItems.map((module) => {
+                      const isQualityActive = location.pathname === module.path;
+                      return (
+                        <ListItemButton 
+                          key={module.name} 
+                          component={Link} 
+                          to={module.path}
+                          onClick={toggleDrawer}
+                          sx={{ 
+                            pl: 4,
+                            backgroundColor: isQualityActive ? themeColors.primary : 'transparent',
+                            '&:hover': {
+                              backgroundColor: isQualityActive ? themeColors.primary : themeColors.lightBlue,
+                            }
+                          }}
+                        >
+                          <ListItemText 
+                            primary={module.name}
+                            primaryTypographyProps={{
+                              fontSize: '12px',
+                              fontWeight: isQualityActive ? 'bold' : 'normal',
+                              color: isQualityActive ? themeColors.white : themeColors.textPrimary,
+                            }}
+                          />
+                        </ListItemButton>
+                      );
+                    })}
+                  </React.Fragment>
                 );
               })}
             </List>
           </Collapse>
 
-          {/* Documents Section (Between Quality and Reports) */}
+          {/* Documents Section */}
           {(isAdmin || hasPermission('Quality Control', PERMISSION_TYPES.VIEW)) && (
             <ListItemButton
               onClick={handleDocumentsClick}
               sx={{
-                minHeight: 48,
+                minHeight: 44,
                 borderTop: `1px solid ${themeColors.lightBlue}`,
                 borderBottom: `1px solid ${themeColors.lightBlue}`,
                 backgroundColor: themeColors.lighterBlue,
@@ -845,39 +1247,171 @@ const Navigation = () => {
           )}
           <Collapse in={documentsOpen} timeout="auto" unmountOnExit>
             <List component="div" disablePadding>
-              {documentsModules.map((docMod) => {
-                const isDocActive = location.pathname === docMod.path;
-                return (
-                  <ListItemButton
-                    key={docMod.name}
-                    component={Link}
-                    to={docMod.path}
-                    onClick={toggleDrawer}
-                    sx={{
-                      pl: 4,
-                      backgroundColor: isDocActive ? themeColors.primary : 'transparent',
-                      '&:hover': {
-                        backgroundColor: isDocActive ? themeColors.primary : themeColors.lightBlue,
-                      }
-                    }}
-                  >
-                    <ListItemText
-                      primary={docMod.name}
-                      primaryTypographyProps={{
-                        fontSize: '12px',
-                        fontWeight: isDocActive ? 'bold' : 'normal',
-                        color: isDocActive ? themeColors.white : themeColors.textPrimary,
-                      }}
-                    />
-                  </ListItemButton>
-                );
-              })}
+              {documentsGroups.map((group) => (
+                <React.Fragment key={group.groupTitle}>
+                  <NavSubGroupHeader title={group.groupTitle} />
+                  {group.items.map((docMod) => {
+                    const isDocActive = location.pathname === docMod.path;
+                    return (
+                      <ListItemButton
+                        key={docMod.name}
+                        component={Link}
+                        to={docMod.path}
+                        onClick={toggleDrawer}
+                        sx={{
+                          pl: 4,
+                          backgroundColor: isDocActive ? themeColors.primary : 'transparent',
+                          '&:hover': {
+                            backgroundColor: isDocActive ? themeColors.primary : themeColors.lightBlue,
+                          }
+                        }}
+                      >
+                        <ListItemText
+                          primary={docMod.name}
+                          primaryTypographyProps={{
+                            fontSize: '12px',
+                            fontWeight: isDocActive ? 'bold' : 'normal',
+                            color: isDocActive ? themeColors.white : themeColors.textPrimary,
+                          }}
+                        />
+                      </ListItemButton>
+                    );
+                  })}
+                </React.Fragment>
+              ))}
             </List>
           </Collapse>
 
-          {/* Report Section - Only show if user has permission */}
-          {(isAdmin || reportModules.some(r => hasPermission(r.permission, PERMISSION_TYPES.VIEW))) && (
-            <ListItemButton onClick={handleReportClick}>
+          {/* Manufacturing Section */}
+          <ListItemButton
+            onClick={handleManufacturingClick}
+            sx={{
+              minHeight: 44,
+              borderTop: `1px solid ${themeColors.lightBlue}`,
+              borderBottom: `1px solid ${themeColors.lightBlue}`,
+              backgroundColor: themeColors.lighterBlue,
+              px: 2,
+            }}
+          >
+            <ListItemText
+              primary="Manufacturing"
+              primaryTypographyProps={{
+                fontSize: '14px',
+                fontWeight: 'bold',
+                color: themeColors.primary,
+              }}
+              sx={{ mr: 1 }}
+            />
+            {manufacturingOpen ? <ExpandLess sx={{ color: themeColors.primary }} /> : <ExpandMore sx={{ color: themeColors.primary }} />}
+          </ListItemButton>
+          <Collapse in={manufacturingOpen} timeout="auto" unmountOnExit>
+            <List component="div" disablePadding>
+              {manufacturingGroups.map((group) => (
+                <React.Fragment key={group.groupTitle}>
+                  <NavSubGroupHeader title={group.groupTitle} />
+                  {group.items.map((mfgMod) => {
+                    const isMfgActive = location.pathname === mfgMod.path;
+                    return (
+                      <ListItemButton
+                        key={mfgMod.name}
+                        component={Link}
+                        to={mfgMod.path}
+                        onClick={toggleDrawer}
+                        sx={{
+                          pl: 4,
+                          backgroundColor: isMfgActive ? themeColors.primary : 'transparent',
+                          '&:hover': {
+                            backgroundColor: isMfgActive ? themeColors.primary : themeColors.lightBlue,
+                          }
+                        }}
+                      >
+                        <ListItemText
+                          primary={mfgMod.name}
+                          primaryTypographyProps={{
+                            fontSize: '12px',
+                            fontWeight: isMfgActive ? 'bold' : 'normal',
+                            color: isMfgActive ? themeColors.white : themeColors.textPrimary,
+                          }}
+                        />
+                      </ListItemButton>
+                    );
+                  })}
+                </React.Fragment>
+              ))}
+            </List>
+          </Collapse>
+
+          {/* Operations & Intelligence Section */}
+          <ListItemButton
+            onClick={handleIntelligenceClick}
+            sx={{
+              minHeight: 44,
+              borderTop: `1px solid ${themeColors.lightBlue}`,
+              borderBottom: `1px solid ${themeColors.lightBlue}`,
+              backgroundColor: themeColors.lighterBlue,
+              px: 2,
+            }}
+          >
+            <ListItemText
+              primary="Operations & Intelligence"
+              primaryTypographyProps={{
+                fontSize: '14px',
+                fontWeight: 'bold',
+                color: themeColors.primary,
+              }}
+              sx={{ mr: 1 }}
+            />
+            {intelligenceOpen ? <ExpandLess sx={{ color: themeColors.primary }} /> : <ExpandMore sx={{ color: themeColors.primary }} />}
+          </ListItemButton>
+          <Collapse in={intelligenceOpen} timeout="auto" unmountOnExit>
+            <List component="div" disablePadding>
+              {enterpriseGroups.map((group) => (
+                <React.Fragment key={group.groupTitle}>
+                  <NavSubGroupHeader title={group.groupTitle} />
+                  {group.items.map((entMod) => {
+                    const isEntActive = location.pathname === entMod.path;
+                    return (
+                      <ListItemButton
+                        key={entMod.name}
+                        component={Link}
+                        to={entMod.path}
+                        onClick={toggleDrawer}
+                        sx={{
+                          pl: 4,
+                          backgroundColor: isEntActive ? themeColors.primary : 'transparent',
+                          '&:hover': {
+                            backgroundColor: isEntActive ? themeColors.primary : themeColors.lightBlue,
+                          }
+                        }}
+                      >
+                        <ListItemText
+                          primary={entMod.name}
+                          primaryTypographyProps={{
+                            fontSize: '12px',
+                            fontWeight: isEntActive ? 'bold' : 'normal',
+                            color: isEntActive ? themeColors.white : themeColors.textPrimary,
+                          }}
+                        />
+                      </ListItemButton>
+                    );
+                  })}
+                </React.Fragment>
+              ))}
+            </List>
+          </Collapse>
+
+          {/* Report Section */}
+          {(isAdmin || reportGroups.some(g => hasVisibleReportItem(g))) && (
+            <ListItemButton
+              onClick={handleReportClick}
+              sx={{
+                minHeight: 44,
+                borderTop: `1px solid ${themeColors.lightBlue}`,
+                borderBottom: `1px solid ${themeColors.lightBlue}`,
+                backgroundColor: themeColors.lighterBlue,
+                px: 2,
+              }}
+            >
               <ListItemText 
                 primary="Report" 
                 primaryTypographyProps={{
@@ -885,47 +1419,64 @@ const Navigation = () => {
                   fontWeight: 'bold',
                   color: themeColors.primary,
                 }}
+                sx={{ mr: 1 }}
               />
               {reportOpen ? <ExpandLess sx={{ color: themeColors.primary }} /> : <ExpandMore sx={{ color: themeColors.primary }} />}
             </ListItemButton>
           )}
           <Collapse in={reportOpen} timeout="auto" unmountOnExit>
             <List component="div" disablePadding>
-              {reportModules
-                .filter(report => isAdmin || hasPermission(report.permission, PERMISSION_TYPES.VIEW))
-                .map((report) => {
-                const isReportActive = location.pathname === report.path
+              {reportGroups.map((group) => {
+                const visibleItems = group.items.filter(item => isAdmin || hasPermission(item.permission, PERMISSION_TYPES.VIEW));
+                if (visibleItems.length === 0) return null;
                 return (
-                  <ListItemButton 
-                    key={report.name} 
-                    component={Link} 
-                    to={report.path}
-                    onClick={toggleDrawer}
-                    sx={{ 
-                      pl: 4,
-                      backgroundColor: isReportActive ? themeColors.primary : 'transparent',
-                      '&:hover': {
-                        backgroundColor: isReportActive ? themeColors.primary : themeColors.lightBlue,
-                      }
-                    }}
-                  >
-                    <ListItemText 
-                      primary={report.name}
-                      primaryTypographyProps={{
-                        fontSize: '12px',
-                        fontWeight: isReportActive ? 'bold' : 'normal',
-                        color: isReportActive ? themeColors.white : themeColors.textPrimary,
-                      }}
-                    />
-                  </ListItemButton>
-                )
+                  <React.Fragment key={group.groupTitle}>
+                    <NavSubGroupHeader title={group.groupTitle} />
+                    {visibleItems.map((report) => {
+                      const isReportActive = location.pathname === report.path;
+                      return (
+                        <ListItemButton 
+                          key={report.name} 
+                          component={Link} 
+                          to={report.path}
+                          onClick={toggleDrawer}
+                          sx={{ 
+                            pl: 4,
+                            backgroundColor: isReportActive ? themeColors.primary : 'transparent',
+                            '&:hover': {
+                              backgroundColor: isReportActive ? themeColors.primary : themeColors.lightBlue,
+                            }
+                          }}
+                        >
+                          <ListItemText 
+                            primary={report.name}
+                            primaryTypographyProps={{
+                              fontSize: '12px',
+                              fontWeight: isReportActive ? 'bold' : 'normal',
+                              color: isReportActive ? themeColors.white : themeColors.textPrimary,
+                            }}
+                          />
+                        </ListItemButton>
+                      );
+                    })}
+                  </React.Fragment>
+                );
               })}
             </List>
           </Collapse>
 
-          {/* Accounts Section - Only show if user has permission */}
-          {(isAdmin || accountsModules.some(a => hasPermission(a.permission, PERMISSION_TYPES.VIEW))) && (
-            <ListItemButton onClick={handleAccountsClick}>
+          {/* Accounts Section */}
+          {(isAdmin || accountsGroups.some(g => hasVisibleAccountItem(g))) && (
+            <ListItemButton
+              onClick={handleAccountsClick}
+              sx={{
+                minHeight: 44,
+                borderTop: `1px solid ${themeColors.lightBlue}`,
+                borderBottom: `1px solid ${themeColors.lightBlue}`,
+                backgroundColor: themeColors.lighterBlue,
+                px: 2,
+              }}
+            >
               <ListItemText 
                 primary="Accounts" 
                 primaryTypographyProps={{
@@ -933,46 +1484,63 @@ const Navigation = () => {
                   fontWeight: 'bold',
                   color: themeColors.primary,
                 }}
+                sx={{ mr: 1 }}
               />
               {accountsOpen ? <ExpandLess sx={{ color: themeColors.primary }} /> : <ExpandMore sx={{ color: themeColors.primary }} />}
             </ListItemButton>
           )}
           <Collapse in={accountsOpen} timeout="auto" unmountOnExit>
             <List component="div" disablePadding>
-              {accountsModules
-                .filter(module => isAdmin || hasPermission(module.permission, PERMISSION_TYPES.VIEW))
-                .map((module) => {
-                const isAccountActive = location.pathname === module.path
+              {accountsGroups.map((group) => {
+                const visibleItems = group.items.filter(item => isAdmin || hasPermission(item.permission, PERMISSION_TYPES.VIEW));
+                if (visibleItems.length === 0) return null;
                 return (
-                  <ListItemButton 
-                    key={module.name} 
-                    component={Link} 
-                    to={module.path}
-                    onClick={toggleDrawer}
-                    sx={{ 
-                      pl: 4,
-                      backgroundColor: isAccountActive ? themeColors.primary : 'transparent',
-                      '&:hover': {
-                        backgroundColor: isAccountActive ? themeColors.primary : themeColors.lightBlue,
-                      }
-                    }}
-                  >
-                    <ListItemText 
-                      primary={module.name}
-                      primaryTypographyProps={{
-                        fontSize: '12px',
-                        fontWeight: isAccountActive ? 'bold' : 'normal',
-                        color: isAccountActive ? themeColors.white : themeColors.textPrimary,
-                      }}
-                    />
-                  </ListItemButton>
-                )
+                  <React.Fragment key={group.groupTitle}>
+                    <NavSubGroupHeader title={group.groupTitle} />
+                    {visibleItems.map((module) => {
+                      const isAccountActive = location.pathname === module.path;
+                      return (
+                        <ListItemButton 
+                          key={module.name} 
+                          component={Link} 
+                          to={module.path}
+                          onClick={toggleDrawer}
+                          sx={{ 
+                            pl: 4,
+                            backgroundColor: isAccountActive ? themeColors.primary : 'transparent',
+                            '&:hover': {
+                              backgroundColor: isAccountActive ? themeColors.primary : themeColors.lightBlue,
+                            }
+                          }}
+                        >
+                          <ListItemText 
+                            primary={module.name}
+                            primaryTypographyProps={{
+                              fontSize: '12px',
+                              fontWeight: isAccountActive ? 'bold' : 'normal',
+                              color: isAccountActive ? themeColors.white : themeColors.textPrimary,
+                            }}
+                          />
+                        </ListItemButton>
+                      );
+                    })}
+                  </React.Fragment>
+                );
               })}
             </List>
           </Collapse>
 
           {/* Features Section */}
-          <ListItemButton onClick={handleFeaturesClick}>
+          <ListItemButton
+            onClick={handleFeaturesClick}
+            sx={{
+              minHeight: 44,
+              borderTop: `1px solid ${themeColors.lightBlue}`,
+              borderBottom: `1px solid ${themeColors.lightBlue}`,
+              backgroundColor: themeColors.lighterBlue,
+              px: 2,
+            }}
+          >
             <ListItemText 
               primary="Features" 
               primaryTypographyProps={{
@@ -980,36 +1548,53 @@ const Navigation = () => {
                 fontWeight: 'bold',
                 color: themeColors.primary,
               }}
+              sx={{ mr: 1 }}
             />
             {featuresOpen ? <ExpandLess sx={{ color: themeColors.primary }} /> : <ExpandMore sx={{ color: themeColors.primary }} />}
           </ListItemButton>
           <Collapse in={featuresOpen} timeout="auto" unmountOnExit>
             <List component="div" disablePadding>
-              {featuresModules
-                .filter(module => isAdmin || hasPermission(module.permission, PERMISSION_TYPES.VIEW))
-                .map((module) => (
-                <ListItemButton 
-                  key={module.name} 
-                  component={Link} 
-                  to={module.path}
-                  onClick={toggleDrawer}
-                  sx={{ pl: 4 }}
-                >
-                  <ListItemText 
-                    primary={module.name}
-                    primaryTypographyProps={{
-                      fontSize: '12px',
-                      color: themeColors.textPrimary,
-                    }}
-                  />
-                </ListItemButton>
-              ))}
+              {featuresGroups.map((group) => {
+                const visibleItems = group.items.filter(item => isAdmin || hasPermission(item.permission, PERMISSION_TYPES.VIEW));
+                if (visibleItems.length === 0) return null;
+                return (
+                  <React.Fragment key={group.groupTitle}>
+                    <NavSubGroupHeader title={group.groupTitle} />
+                    {visibleItems.map((module) => (
+                      <ListItemButton 
+                        key={module.name} 
+                        component={Link} 
+                        to={module.path}
+                        onClick={toggleDrawer}
+                        sx={{ pl: 4 }}
+                      >
+                        <ListItemText 
+                          primary={module.name}
+                          primaryTypographyProps={{
+                            fontSize: '12px',
+                            color: themeColors.textPrimary,
+                          }}
+                        />
+                      </ListItemButton>
+                    ))}
+                  </React.Fragment>
+                );
+              })}
             </List>
           </Collapse>
 
           {/* Company Section */}
           {(isAdmin || companyModules.some(c => hasPermission('Company', PERMISSION_TYPES.VIEW) || hasPermission(c.permission, PERMISSION_TYPES.VIEW) || hasPermission('Company Select', PERMISSION_TYPES.VIEW))) && (
-            <ListItemButton onClick={handleCompanyClick}>
+            <ListItemButton
+              onClick={handleCompanyClick}
+              sx={{
+                minHeight: 44,
+                borderTop: `1px solid ${themeColors.lightBlue}`,
+                borderBottom: `1px solid ${themeColors.lightBlue}`,
+                backgroundColor: themeColors.lighterBlue,
+                px: 2,
+              }}
+            >
               <ListItemText 
                 primary="Company" 
                 primaryTypographyProps={{
@@ -1017,6 +1602,7 @@ const Navigation = () => {
                   fontWeight: 'bold',
                   color: themeColors.primary,
                 }}
+                sx={{ mr: 1 }}
               />
               {companyOpen ? <ExpandLess sx={{ color: themeColors.primary }} /> : <ExpandMore sx={{ color: themeColors.primary }} />}
             </ListItemButton>
@@ -1025,23 +1611,33 @@ const Navigation = () => {
             <List component="div" disablePadding>
               {companyModules
                 .filter(module => isAdmin || hasPermission('Company', PERMISSION_TYPES.VIEW) || hasPermission(module.permission, PERMISSION_TYPES.VIEW) || hasPermission('Company Select', PERMISSION_TYPES.VIEW))
-                .map((module) => (
-                <ListItemButton 
-                  key={module.name} 
-                  component={Link} 
-                  to={module.path}
-                  onClick={toggleDrawer}
-                  sx={{ pl: 4 }}
-                >
-                  <ListItemText 
-                    primary={module.name}
-                    primaryTypographyProps={{
-                      fontSize: '12px',
-                      color: themeColors.textPrimary,
-                    }}
-                  />
-                </ListItemButton>
-              ))}
+                .map((module) => {
+                  const isCompActive = location.pathname === module.path;
+                  return (
+                    <ListItemButton 
+                      key={module.name} 
+                      component={Link} 
+                      to={module.path}
+                      onClick={toggleDrawer}
+                      sx={{ 
+                        pl: 4,
+                        backgroundColor: isCompActive ? themeColors.primary : 'transparent',
+                        '&:hover': {
+                          backgroundColor: isCompActive ? themeColors.primary : themeColors.lightBlue,
+                        }
+                      }}
+                    >
+                      <ListItemText 
+                        primary={module.name}
+                        primaryTypographyProps={{
+                          fontSize: '12px',
+                          fontWeight: isCompActive ? 'bold' : 'normal',
+                          color: isCompActive ? themeColors.white : themeColors.textPrimary,
+                        }}
+                      />
+                    </ListItemButton>
+                  );
+                })}
             </List>
           </Collapse>
 
@@ -1091,7 +1687,7 @@ const Navigation = () => {
       {/* Recycle Bin Dialog Modal */}
       <RecycleBinModal open={recycleBinOpen} onClose={() => setRecycleBinOpen(false)} />
     </>
-  )
-}
+  );
+};
 
-export default Navigation
+export default Navigation;
