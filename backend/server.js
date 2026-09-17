@@ -159,6 +159,7 @@ app.use('/api/inventory-intelligence', require('./routes/inventoryIntelligence')
 app.use('/api/lot-genealogy', require('./routes/lotGenealogy'))
 app.use('/api/bom', require('./routes/bom'))
 app.use('/api/production-planning-mgmt', require('./routes/productionPlanningManagement'))
+app.use('/api/factory-production-planning', require('./routes/factoryProductionPlanning'))
 app.use('/api/yield-intelligence', require('./routes/yieldIntelligence'))
 app.use('/api/jobwork-control', require('./routes/jobworkControl'))
 

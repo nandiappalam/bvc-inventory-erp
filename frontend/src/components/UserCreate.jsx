@@ -31,7 +31,10 @@ const PERMISSION_ACTIONS = [
 const CATEGORY_CONFIG = {
   MASTER: { label: '🟦 Master Modules', color: '#1f4fb2', expandedDefault: true },
   ENTRY: { label: '🟢 Entry Modules', color: '#2e7d32', expandedDefault: true },
+  MANUFACTURING: { label: '🏭 Manufacturing & Planning', color: '#8d6e63', expandedDefault: true },
+  COLD_STORAGE: { label: '❄️ Cold Storage Modules', color: '#00838f', expandedDefault: true },
   QUALITY: { label: '🟠 Quality Control Modules', color: '#d32f2f', expandedDefault: true },
+  ENTERPRISE: { label: '🧠 Enterprise Intelligence Modules', color: '#1565c0', expandedDefault: true },
   REPORTS: { label: '🟣 Report Modules', color: '#7b1fa2', expandedDefault: false },
   ACCOUNTS: { label: '🟡 Accounts Modules', color: '#ed6c02', expandedDefault: false },
   FEATURES: { label: '⚙️ Features & System Modules', color: '#0288d1', expandedDefault: false },
@@ -52,7 +55,10 @@ const UserCreate = () => {
   const [expandedCategories, setExpandedCategories] = useState({
     MASTER: true,
     ENTRY: true,
+    MANUFACTURING: true,
+    COLD_STORAGE: true,
     QUALITY: true,
+    ENTERPRISE: true,
     REPORTS: false,
     ACCOUNTS: false,
     FEATURES: false,

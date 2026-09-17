@@ -30,10 +30,13 @@ async function columnExists(tableName, columnName) {
 
 // Helper function to resolve alias to table name and configuration
 const resolveTableConfig = (tableParam) => {
-  const actualTable = masterTypeAliases[tableParam] ? masterTypeAliases[tableParam].table : tableParam;
+  const normalizedParam = (tableParam || '').replace(/-/g, '_');
+  const actualTable = masterTypeAliases[tableParam] 
+    ? masterTypeAliases[tableParam].table 
+    : (masterTypeAliases[normalizedParam] ? masterTypeAliases[normalizedParam].table : normalizedParam);
   return {
     tableName: actualTable,
-    tableConfig: masterTables[actualTable] || null
+    tableConfig: masterTables[actualTable] || masterTables[normalizedParam] || null
   };
 };
 
@@ -337,18 +340,28 @@ const masterTables = {
 
 // Validate master type to prevent SQL injection
 const validateMasterType = (type) => {
-  if (!type || !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(type)) {
-    return null
+  if (!type || typeof type !== 'string') {
+    return null;
+  }
+  const normalized = type.replace(/-/g, '_');
+  if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(normalized)) {
+    return null;
   }
   // First check if it's directly in aliases
   if (masterTypeAliases[type]) {
-    return type
+    return type;
+  }
+  if (masterTypeAliases[normalized]) {
+    return normalized;
   }
   // Check if it's a table name directly
   if (masterTables[type]) {
-    return type
+    return type;
   }
-  return null
+  if (masterTables[normalized]) {
+    return normalized;
+  }
+  return null;
 }
 
 // Get display field name for a master type

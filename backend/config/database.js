@@ -87,8 +87,28 @@ const TENANT_BUSINESS_TABLES = new Set([
   'transport_master', 'tax_master', 'qc_inspections', 'qc_inspection_params', 'qc_approval_history',
   'incoming_quality_reports', 'compliance_documents', 'compliance_production_records', 'compliance_cleaning_records',
   'vehicle_movements', 'advances', 'open', 'open_items', 'packing', 'packing_items', 'financial_years',
-  'general_setup', 'weight_machine_setup', 'weight_conversion', 'weight_conversion_items', 'work_orders'
+  'general_setup', 'weight_machine_setup', 'weight_conversion', 'weight_conversion_items', 'work_orders',
+  'production_units', 'production_queue', 'cleaning_changeover_orders', 'demand_forecast_records',
+  'production_output_records', 'make_to_stock_recommendations', 'production_plans', 'production_plan_items',
+  'bom_headers', 'bom_items', 'yield_standards', 'production_batches', 'contractor_master',
+  'jobwork_orders', 'jobwork_order_items', 'jobwork_receipts', 'quotations', 'quotation_items',
+  'deduction_purchase', 'deduction_sales', 'sender_group_master', 'consignee_group_master',
+  'person_master', 'ptrans_master', 'cheque_printing', 'grind_ccp_monitoring',
+  'grind_operator_log', 'grind_oprp_monitoring', 'grind_production_verification',
+  'work_order_items', 'work_order_outputs', 'work_order_wastages', 'weightmaster', 'lot_sequence'
 ]);
+
+// Dynamically add any additional tables declared in COMPANY_TABLES
+if (Array.isArray(COMPANY_TABLES)) {
+  COMPANY_TABLES.forEach(sql => {
+    if (typeof sql === 'string') {
+      const match = sql.match(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-zA-Z0-9_]+)/i);
+      if (match && match[1]) {
+        TENANT_BUSINESS_TABLES.add(match[1].toLowerCase());
+      }
+    }
+  });
+}
 
 // ============================================================================
 // HELPER: IS MASTER TABLE QUERY
@@ -734,6 +754,21 @@ function openMasterDatabase() {
 
     for (const tbl of MASTER_TABLES) {
       masterDb.run(tbl.sql);
+    }
+
+    // Auto-migrate master tables columns if missing from earlier schema versions
+    const masterColsToAdd = [
+      { table: 'companies', col: 'code', type: 'TEXT' },
+      { table: 'companies', col: 'address', type: 'TEXT' },
+      { table: 'companies', col: 'gst_number', type: 'TEXT' },
+      { table: 'companies', col: 'contact', type: 'TEXT' },
+      { table: 'companies', col: 'email', type: 'TEXT' },
+      { table: 'companies', col: 'database_name', type: 'TEXT' },
+      { table: 'companies', col: 'database_schema', type: 'TEXT' },
+      { table: 'companies', col: 'status', type: "TEXT DEFAULT 'Active'" }
+    ];
+    for (const mCol of masterColsToAdd) {
+      masterDb.run(`ALTER TABLE ${mCol.table} ADD COLUMN ${mCol.col} ${mCol.type}`, () => {});
     }
   });
 

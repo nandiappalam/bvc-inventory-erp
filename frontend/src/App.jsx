@@ -27,6 +27,7 @@ import InventoryIntelligenceDashboard from './modules/inventoryIntelligence/Inve
 import LotGenealogyDashboard from './modules/lotGenealogy/LotGenealogyDashboard'
 import BOMDashboard from './modules/bom/BOMDashboard'
 import ProductionPlanningDashboard from './modules/productionPlanning/ProductionPlanningDashboard'
+import FactoryProductionPlanningDashboard from './modules/productionPlanning/FactoryProductionPlanningDashboard'
 import JobworkControlDashboard from './modules/jobwork/JobworkControlDashboard'
 
 // Enterprise Intelligence Modules (Phases 8–13)
@@ -274,6 +275,8 @@ const AppLayout = () => {
           <Route path="/lot-genealogy" element={<LotGenealogyDashboard />} />
           <Route path="/bom-master" element={<BOMDashboard />} />
           <Route path="/bom" element={<BOMDashboard />} />
+          <Route path="/factory-production-planning" element={<FactoryProductionPlanningDashboard />} />
+          <Route path="/factory-production-planning-control" element={<FactoryProductionPlanningDashboard />} />
           <Route path="/production-planning" element={<ProductionPlanningDashboard />} />
           <Route path="/yield-intelligence" element={<ProductionPlanningDashboard />} />
           <Route path="/jobwork-control" element={<JobworkControlDashboard />} />

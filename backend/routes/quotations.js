@@ -23,8 +23,8 @@ router.get('/', async (req, res) => {
         q.bill_no as s_no,
         q.bill_no as sNo,
         q.date,
-        COALESCE(cm.name, pcm.name, lm.ledger_name, q.customer) as customer,
-        COALESCE(cm.name, pcm.name, lm.ledger_name, q.customer) as customer_name,
+        COALESCE(cm.name, pcm.name, lm.name, q.customer) as customer,
+        COALESCE(cm.name, pcm.name, lm.name, q.customer) as customer_name,
         q.pay_type,
         q.tax_type,
         q.type,
@@ -50,7 +50,7 @@ router.get('/', async (req, res) => {
       FROM quotations q
       LEFT JOIN customer_master cm ON (CAST(cm.id AS TEXT) = CAST(q.customer AS TEXT) OR cm.name = q.customer)
       LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(q.customer AS TEXT) OR pcm.name = q.customer)
-      LEFT JOIN ledgermaster lm ON (CAST(lm.id AS TEXT) = CAST(q.customer AS TEXT) OR lm.ledger_name = q.customer)
+      LEFT JOIN ledgermaster lm ON (CAST(lm.id AS TEXT) = CAST(q.customer AS TEXT) OR lm.name = q.customer)
       LEFT JOIN quotation_items qi ON q.id = qi.quotation_id
       ORDER BY q.id DESC, qi.id ASC
     `)

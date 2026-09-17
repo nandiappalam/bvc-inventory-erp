@@ -9,7 +9,7 @@ const errorLogger = require('../services/ErrorLoggerService');
 const { authMiddleware } = require('../middleware/authMiddleware');
 
 // Public lightweight health check (used by Render, load balancers, and frontend ping)
-router.get('/health', async (req, res) => {
+router.get(['/health', '/system-health'], async (req, res) => {
   const health = await databaseHealth.checkDatabaseHealth();
   const statusCode = health.database === 'HEALTHY' ? 200 : 503;
   res.status(statusCode).json({

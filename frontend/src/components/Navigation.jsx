@@ -497,6 +497,12 @@ const Navigation = () => {
   // Grouped Manufacturing Modules
   const manufacturingGroups = [
     {
+      groupTitle: 'Production Planning & Control',
+      items: [
+        { name: 'Factory Production Planning & Control', path: '/factory-production-planning' }
+      ]
+    },
+    {
       groupTitle: 'Traceability',
       items: [
         { name: 'Lot Genealogy & Traceability', path: '/lot-genealogy' }

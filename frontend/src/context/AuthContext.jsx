@@ -51,15 +51,32 @@ export const MODULE_CATEGORIES = {
     'Open', 'Quotation', 'Sales', 'Sales Order', 'Sales Export', 'Sales Export Order', 
     'Sales Return', 'Stock Adjust', 'Weight Conversion', 'Voucher', 'Vehicle Movement', 'Cheque Printing'
   ],
+  // Manufacturing & Production Planning Modules
+  MANUFACTURING: [
+    'Factory Production Planning', 'Lot Genealogy', 'BOM Master', 'Production Planning',
+    'Yield Intelligence', 'Jobwork Control'
+  ],
+  // Cold Storage Modules
+  COLD_STORAGE: [
+    'Cold Storage Inward', 'Cold Storage Outward', 'Cold Storage Transfer', 'Cold Storage Stock',
+    'Cold Storage Intelligence'
+  ],
   // Quality Control Modules
   QUALITY: [
     'Quality Dashboard', 'Purchase Lab Entry', 'Parameter Registry', 'QC Template Master', 
-    'Quality Control', 'Incoming Quality'
+    'Quality Control', 'Incoming Quality', 'Compliance Documents'
+  ],
+  // Operations & Enterprise Intelligence
+  ENTERPRISE: [
+    'Financial Control Center', 'Party 360 Intelligence', 'Order Fulfillment Pipeline',
+    'Warehouse Mobile Ops', 'Barcode QR Master', 'Automated Compliance',
+    'Customer Complaint', 'Recall Management', 'Business Intelligence', 'AI Intelligence'
   ],
   // Report Modules
   REPORTS: [
     'Stock Report', 'Stock Status', 'Lot History', 'Purchase Register',
-    'Purchase Return Register', 'Sales Register', 'Sales Return Register', 'Papad Ledger'
+    'Purchase Return Register', 'Sales Register', 'Sales Return Register', 'Papad Ledger',
+    'Daily Production', 'Godown Stock Report', 'Procurement Planning', 'Inventory Intelligence'
   ],
   // Accounts Modules
   ACCOUNTS: [
