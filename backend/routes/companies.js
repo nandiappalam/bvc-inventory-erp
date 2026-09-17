@@ -7,18 +7,38 @@ const bcrypt = require('bcryptjs');
 // API ROUTES FOR COMPANIES (Master Database)
 // ============================================================================
 
+// Helper function to normalize company record fields
+function normalizeCompany(r) {
+  if (!r) return null;
+  return {
+    id: r.id,
+    code: r.code || r.company_code || r.comp_code || `COMP_${r.id}`,
+    name: r.name || r.company_name || r.comp_name || r.print_name || `Company ${r.id}`,
+    address: r.address || r.address1 || r.address_line1 || r.location || r.city || '',
+    gst_number: r.gst_number || r.gst_no || r.gstin || r.gst || '',
+    contact: r.contact || r.phone || r.phone_off || r.mobile || r.mobile1 || r.phone_number || '',
+    email: r.email || r.email_id || r.mail || '',
+    state: r.state || 'Tamil Nadu',
+    state_code: r.state_code || '33',
+    tax_reg_type: r.tax_reg_type || 'Regular',
+    status: r.status || 'Active',
+    database_name: r.database_name || (db.isPostgres ? `company_${r.id}` : `company_${r.id}.db`),
+    database_schema: r.database_schema || (db.isPostgres ? `company_${r.id}` : null)
+  };
+}
+
 // Helper function to ensure default Company 1 exists
 async function ensureDefaultCompanyExists() {
   try {
     const existing = await db.master.query("SELECT * FROM companies WHERE status != 'Inactive' OR status IS NULL");
     if (existing.rows && existing.rows.length > 0) {
-      return existing.rows;
+      return existing.rows.map(normalizeCompany);
     }
 
     console.log('🌱 [Companies] Auto-provisioning default Company 1...');
     await db.master.run(`
       INSERT OR IGNORE INTO companies (id, code, name, address, gst_number, contact, email, database_name, database_schema, status)
-      VALUES (1, ?, ?, ?, ?, ?, ?, ?, 'Active')
+      VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, 'Active')
     `, [
       'COMP_BVC',
       'BVC Exports Pvt Ltd',
@@ -47,26 +67,17 @@ async function ensureDefaultCompanyExists() {
     }
 
     const seeded = await db.master.query("SELECT * FROM companies WHERE status != 'Inactive' OR status IS NULL ORDER BY id ASC");
-    return seeded.rows || [];
+    return (seeded.rows || []).map(normalizeCompany);
   } catch (err) {
     console.warn('⚠️ Notice during ensureDefaultCompanyExists:', err.message);
     const fallback = await db.master.query("SELECT * FROM companies ORDER BY id ASC");
-    return fallback.rows || [];
+    return (fallback.rows || []).map(normalizeCompany);
   }
 }
 
-// GET all companies
+// GET all companies (Fast, instant response without blocking DDL migrations)
 router.get(['/', '/list'], async (req, res) => {
   try {
-    // In PostgreSQL mode, dynamically discover and sync all existing company schemas
-    if (db.isPostgres && typeof db.syncPostgresTenantSchemas === 'function') {
-      try {
-        await db.syncPostgresTenantSchemas();
-      } catch (syncErr) {
-        console.warn('Notice syncing tenant schemas in GET /companies:', syncErr.message);
-      }
-    }
-
     let result = await db.master.query("SELECT * FROM companies WHERE status != 'Inactive' OR status IS NULL ORDER BY id ASC");
     let rows = result.rows || [];
 
@@ -78,10 +89,12 @@ router.get(['/', '/list'], async (req, res) => {
 
     // If companies list is still empty, auto-ensure default Company 1
     if (rows.length === 0) {
-      rows = await ensureDefaultCompanyExists();
+      const seeded = await ensureDefaultCompanyExists();
+      return res.json(seeded);
     }
 
-    res.json(rows);
+    const normalized = rows.map(normalizeCompany);
+    res.json(normalized);
   } catch (error) {
     console.error('Error fetching companies:', error);
     try {
@@ -112,7 +125,7 @@ router.get('/:id', async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ message: 'Company not found' });
     }
-    res.json(result.rows[0]);
+    res.json(normalizeCompany(result.rows[0]));
   } catch (error) {
     console.error('Error fetching company:', error);
     res.status(500).json({ message: 'Error fetching company', error: error.message });

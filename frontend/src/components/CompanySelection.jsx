@@ -118,24 +118,32 @@ const CompanySelection = () => {
     }
   };
   const handlePrint = (company) => {
+    const code = company.code || company.company_code || '-';
+    const address = company.address || company.address1 || company.location || company.city || '-';
+    const gst = company.gst_number || company.gst_no || company.gstin || '-';
+    const contact = company.contact || company.phone || company.mobile || company.phone_off || '-';
+    const email = company.email || company.email_id || '-';
+    const state = company.state || 'Tamil Nadu';
+    const stateCode = company.state_code || '33';
+
     const html = `
       <div style="font-family: Arial, sans-serif; padding: 20px; color: #0f172a;">
         <div style="border-bottom: 2px solid #1f4fb2; padding-bottom: 10px; margin-bottom: 15px;">
-          <h2 style="color: #1f4fb2; margin: 0;">${company.name}</h2>
+          <h2 style="color: #1f4fb2; margin: 0;">${company.name || `Company ${company.id}`}</h2>
           <p style="margin: 4px 0 0; color: #64748b; font-size: 13px;">Company Master Record</p>
         </div>
         <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
-          <tr><td style="padding: 8px 0; font-weight: bold; width: 140px; border-bottom: 1px solid #e2e8f0;">Company Code:</td><td style="padding: 8px 0; border-bottom: 1px solid #e2e8f0;">${company.code || 'N/A'}</td></tr>
-          <tr><td style="padding: 8px 0; font-weight: bold; border-bottom: 1px solid #e2e8f0;">Address:</td><td style="padding: 8px 0; border-bottom: 1px solid #e2e8f0;">${company.address || 'N/A'}</td></tr>
-          <tr><td style="padding: 8px 0; font-weight: bold; border-bottom: 1px solid #e2e8f0;">GST Number:</td><td style="padding: 8px 0; border-bottom: 1px solid #e2e8f0;">${company.gst_number || 'N/A'}</td></tr>
-          <tr><td style="padding: 8px 0; font-weight: bold; border-bottom: 1px solid #e2e8f0;">State / Code:</td><td style="padding: 8px 0; border-bottom: 1px solid #e2e8f0;">${company.state || 'Tamil Nadu'} (${company.state_code || '33'})</td></tr>
-          <tr><td style="padding: 8px 0; font-weight: bold; border-bottom: 1px solid #e2e8f0;">Contact Number:</td><td style="padding: 8px 0; border-bottom: 1px solid #e2e8f0;">${company.contact || 'N/A'}</td></tr>
-          <tr><td style="padding: 8px 0; font-weight: bold; border-bottom: 1px solid #e2e8f0;">Email:</td><td style="padding: 8px 0; border-bottom: 1px solid #e2e8f0;">${company.email || 'N/A'}</td></tr>
+          <tr><td style="padding: 8px 0; font-weight: bold; width: 140px; border-bottom: 1px solid #e2e8f0;">Company Code:</td><td style="padding: 8px 0; border-bottom: 1px solid #e2e8f0;">${code}</td></tr>
+          <tr><td style="padding: 8px 0; font-weight: bold; border-bottom: 1px solid #e2e8f0;">Address:</td><td style="padding: 8px 0; border-bottom: 1px solid #e2e8f0;">${address}</td></tr>
+          <tr><td style="padding: 8px 0; font-weight: bold; border-bottom: 1px solid #e2e8f0;">GST Number:</td><td style="padding: 8px 0; border-bottom: 1px solid #e2e8f0;">${gst}</td></tr>
+          <tr><td style="padding: 8px 0; font-weight: bold; border-bottom: 1px solid #e2e8f0;">State / Code:</td><td style="padding: 8px 0; border-bottom: 1px solid #e2e8f0;">${state} (${stateCode})</td></tr>
+          <tr><td style="padding: 8px 0; font-weight: bold; border-bottom: 1px solid #e2e8f0;">Contact Number:</td><td style="padding: 8px 0; border-bottom: 1px solid #e2e8f0;">${contact}</td></tr>
+          <tr><td style="padding: 8px 0; font-weight: bold; border-bottom: 1px solid #e2e8f0;">Email:</td><td style="padding: 8px 0; border-bottom: 1px solid #e2e8f0;">${email}</td></tr>
           <tr><td style="padding: 8px 0; font-weight: bold; border-bottom: 1px solid #e2e8f0;">Status:</td><td style="padding: 8px 0; border-bottom: 1px solid #e2e8f0;">${company.status || 'Active'}</td></tr>
         </table>
       </div>
     `;
-    printHtml(html, `Company Details - ${company.name}`);
+    printHtml(html, `Company Details - ${company.name || 'Company'}`);
   };
 
   if (loading) { return (<Box sx={{display:'flex',justifyContent:'center',alignItems:'center',minHeight:'100vh',background:`linear-gradient(135deg,${themeColors.primary}0%,${themeColors.secondary}100%)`}}><CircularProgress sx={{color:themeColors.white}}/></Box>); }
@@ -215,11 +223,11 @@ const CompanySelection = () => {
                 <TableBody>
                   {companies.map((company)=>(
                     <TableRow key={company.id} hover>
-                      <TableCell sx={{fontWeight:'bold',color:themeColors.primary}}>{company.name}</TableCell>
-                      <TableCell>{company.address||'N/A'}</TableCell>
-                      <TableCell>{company.gst_number||'N/A'}</TableCell>
-                      <TableCell>{company.contact||'N/A'}</TableCell>
-                      <TableCell>{company.email||'N/A'}</TableCell>
+                      <TableCell sx={{fontWeight:'bold',color:themeColors.primary}}>{company.name || company.company_name || `Company ${company.id}`}</TableCell>
+                      <TableCell>{company.address || company.address1 || company.location || company.city || '-'}</TableCell>
+                      <TableCell>{company.gst_number || company.gst_no || company.gstin || '-'}</TableCell>
+                      <TableCell>{company.contact || company.phone || company.mobile || company.phone_off || '-'}</TableCell>
+                      <TableCell>{company.email || company.email_id || '-'}</TableCell>
                       <TableCell>
                         <Box sx={{display:'flex',justifyContent:'center',gap:1}}>
                           <IconButton size="small" onClick={()=>handleSelectCompany(company)} sx={{color:themeColors.primary,'&:hover':{backgroundColor:themeColors.lightBlue}}} title="Open"><LoginIcon fontSize="small"/></IconButton>

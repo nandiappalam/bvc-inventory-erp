@@ -1670,46 +1670,69 @@ async function discoverAndSyncAllPostgresTenants(client) {
       if (!match) continue;
       const compId = parseInt(match[1], 10);
 
-      // Check if this tenant schema has a "companies" table with custom company details
+      // Check if this tenant schema has a "companies" or related table with custom company details
       let tenantDetails = null;
       try {
-        const tblCheck = await client.query(`
-          SELECT table_name FROM information_schema.tables 
-          WHERE table_schema = $1 AND lower(table_name) = 'companies'
-        `, [schemaName]);
-        if (tblCheck.rows.length > 0) {
-          const detailRes = await client.query(`SELECT * FROM "${schemaName}"."companies" ORDER BY id ASC LIMIT 1`);
-          if (detailRes.rows.length > 0) {
-            tenantDetails = detailRes.rows[0];
+        const candidateTables = ['companies', 'company', 'company_master', 'company_details', 'comp_master', 'profile'];
+        for (const tbl of candidateTables) {
+          const tblCheck = await client.query(`
+            SELECT table_name FROM information_schema.tables 
+            WHERE table_schema = $1 AND lower(table_name) = $2
+          `, [schemaName, tbl]);
+          if (tblCheck.rows.length > 0) {
+            const detailRes = await client.query(`SELECT * FROM "${schemaName}"."${tblCheck.rows[0].table_name}" LIMIT 1`);
+            if (detailRes.rows.length > 0) {
+              tenantDetails = detailRes.rows[0];
+              break;
+            }
           }
         }
       } catch (_) {}
 
+      const compName = tenantDetails?.name || tenantDetails?.company_name || tenantDetails?.comp_name || tenantDetails?.print_name || null;
+      const compCode = tenantDetails?.code || tenantDetails?.company_code || tenantDetails?.comp_code || `COMP_${compId}`;
+      const compAddress = tenantDetails?.address || tenantDetails?.address1 || tenantDetails?.address_line1 || tenantDetails?.location || tenantDetails?.city || null;
+      const compGst = tenantDetails?.gst_number || tenantDetails?.gst_no || tenantDetails?.gstin || tenantDetails?.gst || null;
+      const compContact = tenantDetails?.contact || tenantDetails?.phone || tenantDetails?.phone_off || tenantDetails?.mobile || tenantDetails?.mobile1 || tenantDetails?.phone_number || null;
+      const compEmail = tenantDetails?.email || tenantDetails?.email_id || tenantDetails?.mail || null;
+      const compState = tenantDetails?.state || null;
+      const compStateCode = tenantDetails?.state_code || null;
+
       if (!registeredCompIds.has(compId)) {
         // Auto-register detected company into public.companies!
-        const compName = tenantDetails?.name || `Company ${compId}`;
-        const compCode = tenantDetails?.code || `COMP_${compId}`;
-        const compAddress = tenantDetails?.address || null;
-        const compGst = tenantDetails?.gst_number || null;
-        const compContact = tenantDetails?.contact || null;
-        const compEmail = tenantDetails?.email || null;
-
+        const finalName = compName || `Company ${compId}`;
         await client.query(`
-          INSERT INTO public.companies (id, code, name, address, gst_number, contact, email, database_name, database_schema, status)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, 'Active')
-          ON CONFLICT (id) DO UPDATE SET status = 'Active', database_schema = EXCLUDED.database_schema
-        `, [compId, compCode, compName, compAddress, compGst, compContact, compEmail, schemaName]);
-        console.log(`✅ [PostgreSQL] Auto-registered tenant schema "${schemaName}" as Company ID ${compId} ("${compName}")`);
+          INSERT INTO public.companies (id, code, name, address, gst_number, contact, email, state, state_code, database_name, database_schema, status)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, 'Active')
+          ON CONFLICT (id) DO UPDATE SET 
+            status = 'Active', 
+            database_schema = EXCLUDED.database_schema,
+            name = COALESCE(NULLIF(public.companies.name, ''), EXCLUDED.name),
+            address = COALESCE(NULLIF(public.companies.address, ''), EXCLUDED.address),
+            gst_number = COALESCE(NULLIF(public.companies.gst_number, ''), EXCLUDED.gst_number),
+            contact = COALESCE(NULLIF(public.companies.contact, ''), EXCLUDED.contact),
+            email = COALESCE(NULLIF(public.companies.email, ''), EXCLUDED.email)
+        `, [compId, compCode, finalName, compAddress, compGst, compContact, compEmail, compState || 'Tamil Nadu', compStateCode || '33', schemaName]);
+        console.log(`✅ [PostgreSQL] Auto-registered tenant schema "${schemaName}" as Company ID ${compId} ("${finalName}")`);
       } else {
-        // If already registered, but was named 'BVC Exports Pvt Ltd' by default and tenant schema has custom name:
-        const currentReg = registeredCompMap.get(compId);
-        if (tenantDetails?.name && tenantDetails.name !== 'BVC Exports Pvt Ltd' && currentReg?.name === 'BVC Exports Pvt Ltd') {
+        // If already registered, update any missing/empty fields from tenant details
+        if (tenantDetails) {
           await client.query(`
             UPDATE public.companies 
-            SET name = $1, address = COALESCE($2, address), gst_number = COALESCE($3, gst_number), contact = COALESCE($4, contact), email = COALESCE($5, email)
-            WHERE id = $6
-          `, [tenantDetails.name, tenantDetails.address, tenantDetails.gst_number, tenantDetails.contact, tenantDetails.email, compId]);
-          console.log(`✓ [PostgreSQL] Restored real company name "${tenantDetails.name}" for Company ${compId}`);
+            SET 
+              name = CASE 
+                WHEN (name = 'BVC Exports Pvt Ltd' OR name LIKE 'Company %') AND $1 IS NOT NULL AND $1 != '' THEN $1 
+                ELSE COALESCE(NULLIF(name, ''), $1) 
+              END,
+              address = COALESCE(NULLIF(address, ''), $2),
+              gst_number = COALESCE(NULLIF(gst_number, ''), $3),
+              contact = COALESCE(NULLIF(contact, ''), $4),
+              email = COALESCE(NULLIF(email, ''), $5),
+              state = COALESCE(NULLIF(state, ''), $6),
+              state_code = COALESCE(NULLIF(state_code, ''), $7)
+            WHERE id = $8
+          `, [compName, compAddress, compGst, compContact, compEmail, compState, compStateCode, compId]);
+          console.log(`✓ [PostgreSQL] Synchronized company details for Company ID ${compId} from schema "${schemaName}"`);
         }
       }
 
