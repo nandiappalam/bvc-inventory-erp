@@ -112,13 +112,21 @@ const TENANT_BUSINESS_TABLES = new Set([
   'work_order_items', 'work_order_outputs', 'work_order_wastages', 'weightmaster', 'lot_sequence'
 ]);
 
-// Dynamically add any additional tables declared in COMPANY_TABLES
+// Master tables MUST NEVER be included in TENANT_BUSINESS_TABLES
+const MASTER_TABLE_NAMES_SET = new Set([
+  'companies', 'database_registry', 'users', 'roles', 'permissions', 'user_permissions', 'login_history', '_master_migrations'
+]);
+
+// Dynamically add any additional tables declared in COMPANY_TABLES (strictly excluding master tables)
 if (Array.isArray(COMPANY_TABLES)) {
   COMPANY_TABLES.forEach(sql => {
     if (typeof sql === 'string') {
       const match = sql.match(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-zA-Z0-9_]+)/i);
       if (match && match[1]) {
-        TENANT_BUSINESS_TABLES.add(match[1].toLowerCase());
+        const tblName = match[1].toLowerCase();
+        if (!MASTER_TABLE_NAMES_SET.has(tblName)) {
+          TENANT_BUSINESS_TABLES.add(tblName);
+        }
       }
     }
   });
@@ -131,21 +139,32 @@ function isMasterTableQuery(sql) {
   if (!sql || typeof sql !== 'string') return false;
   const normalized = sql.toLowerCase();
 
-  // If any business table is referenced in the query, it is strictly a tenant query
-  for (const bTable of TENANT_BUSINESS_TABLES) {
-    const bRegex = new RegExp(`\\b${bTable}\\b`, 'i');
-    if (bRegex.test(normalized)) {
-      return false;
-    }
+  // If query explicitly references public schema, it is always a master query
+  if (/\bpublic\./i.test(normalized)) {
+    return true;
   }
 
-  // Otherwise check if it strictly targets a master table
+  // Check if query targets any master table (companies, users, database_registry, etc.)
+  let targetsMaster = false;
   for (const tableName of MASTER_TABLE_NAMES) {
     const mRegex = new RegExp(`\\b(from|into|update|join|table)\\s+(public\\.)?${tableName}\\b`, 'i');
     if (mRegex.test(normalized)) {
-      return true;
+      targetsMaster = true;
+      break;
     }
   }
+
+  if (targetsMaster) {
+    // If it targets a master table, verify it does not join with a tenant business table
+    for (const bTable of TENANT_BUSINESS_TABLES) {
+      const bRegex = new RegExp(`\\b${bTable}\\b`, 'i');
+      if (bRegex.test(normalized)) {
+        return false; // Joined with tenant operational table, so route to tenant schema
+      }
+    }
+    return true; // Pure master query targeting public schema!
+  }
+
   return false;
 }
 
@@ -1004,9 +1023,15 @@ async function executePgQuery(sql, params = [], companyId = 1, isMaster = false)
 // ============================================================================
 // SQLITE EXECUTION HELPERS
 // ============================================================================
+function cleanSqlForSqlite(sql) {
+  if (!sql || typeof sql !== 'string') return sql;
+  return sql.replace(/\bpublic\.([a-zA-Z0-9_]+)\b/gi, '$1');
+}
+
 function queryOnSqlite(dbInst, text, params = []) {
+  const cleanedText = cleanSqlForSqlite(text);
   return new Promise((resolve, reject) => {
-    dbInst.all(text, params, (err, rows) => {
+    dbInst.all(cleanedText, params, (err, rows) => {
       if (err) reject(err);
       else resolve({ rows: rows || [] });
     });
@@ -1014,8 +1039,9 @@ function queryOnSqlite(dbInst, text, params = []) {
 }
 
 function runOnSqlite(dbInst, text, params = []) {
+  const cleanedText = cleanSqlForSqlite(text);
   return new Promise((resolve, reject) => {
-    dbInst.run(text, params, function (err) {
+    dbInst.run(cleanedText, params, function (err) {
       if (err) reject(err);
       else {
         resolve({
@@ -1601,7 +1627,8 @@ async function ensurePostgresMasterSchema() {
     `);
 
     await resyncPostgresSequences(client);
-    await migrateNeonPublicDataToCompany1(client);
+    await migrateNeonPublicDataToTenants(client);
+    await discoverAndSyncAllPostgresTenants(client);
     await ensurePostgresDefaultCompany(client);
     await dropPostgresForeignKeyConstraints(client);
     console.log('✓ PostgreSQL public master schema, sequences, and multi-tenant constraints verified successfully');
@@ -1613,13 +1640,129 @@ async function ensurePostgresMasterSchema() {
 }
 
 /**
- * Safely preserves and migrates any existing user records in public schema into company_1.
+ * Dynamically discovers all existing PostgreSQL tenant schemas (company_1, company_2, company_5, etc.),
+ * pulls custom company metadata from them, and ensures they are properly registered in public.companies
+ * and public.database_registry. NEVER hardcodes or overwrites existing user company details.
+ */
+async function discoverAndSyncAllPostgresTenants(client) {
+  try {
+    console.log('🔍 [PostgreSQL] Scanning and synchronizing all tenant companies and schemas...');
+
+    // 1. Detect all tenant schemas matching company_%
+    const schemaRes = await client.query(`
+      SELECT schema_name 
+      FROM information_schema.schemata 
+      WHERE schema_name LIKE 'company_%' 
+      ORDER BY schema_name ASC
+    `);
+
+    const detectedSchemas = schemaRes.rows.map(r => r.schema_name);
+    console.log(`🔍 [PostgreSQL] Found ${detectedSchemas.length} tenant schema(s):`, detectedSchemas);
+
+    // 2. Fetch all existing companies registered in public.companies
+    const pubCompRes = await client.query(`SELECT * FROM public.companies ORDER BY id ASC`);
+    const registeredCompIds = new Set(pubCompRes.rows.map(r => parseInt(r.id, 10)));
+    const registeredCompMap = new Map(pubCompRes.rows.map(r => [parseInt(r.id, 10), r]));
+
+    // 3. For each detected schema, ensure registered in public.companies
+    for (const schemaName of detectedSchemas) {
+      const match = schemaName.match(/^company_(\d+)$/);
+      if (!match) continue;
+      const compId = parseInt(match[1], 10);
+
+      // Check if this tenant schema has a "companies" table with custom company details
+      let tenantDetails = null;
+      try {
+        const tblCheck = await client.query(`
+          SELECT table_name FROM information_schema.tables 
+          WHERE table_schema = $1 AND lower(table_name) = 'companies'
+        `, [schemaName]);
+        if (tblCheck.rows.length > 0) {
+          const detailRes = await client.query(`SELECT * FROM "${schemaName}"."companies" ORDER BY id ASC LIMIT 1`);
+          if (detailRes.rows.length > 0) {
+            tenantDetails = detailRes.rows[0];
+          }
+        }
+      } catch (_) {}
+
+      if (!registeredCompIds.has(compId)) {
+        // Auto-register detected company into public.companies!
+        const compName = tenantDetails?.name || `Company ${compId}`;
+        const compCode = tenantDetails?.code || `COMP_${compId}`;
+        const compAddress = tenantDetails?.address || null;
+        const compGst = tenantDetails?.gst_number || null;
+        const compContact = tenantDetails?.contact || null;
+        const compEmail = tenantDetails?.email || null;
+
+        await client.query(`
+          INSERT INTO public.companies (id, code, name, address, gst_number, contact, email, database_name, database_schema, status)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, 'Active')
+          ON CONFLICT (id) DO UPDATE SET status = 'Active', database_schema = EXCLUDED.database_schema
+        `, [compId, compCode, compName, compAddress, compGst, compContact, compEmail, schemaName]);
+        console.log(`✅ [PostgreSQL] Auto-registered tenant schema "${schemaName}" as Company ID ${compId} ("${compName}")`);
+      } else {
+        // If already registered, but was named 'BVC Exports Pvt Ltd' by default and tenant schema has custom name:
+        const currentReg = registeredCompMap.get(compId);
+        if (tenantDetails?.name && tenantDetails.name !== 'BVC Exports Pvt Ltd' && currentReg?.name === 'BVC Exports Pvt Ltd') {
+          await client.query(`
+            UPDATE public.companies 
+            SET name = $1, address = COALESCE($2, address), gst_number = COALESCE($3, gst_number), contact = COALESCE($4, contact), email = COALESCE($5, email)
+            WHERE id = $6
+          `, [tenantDetails.name, tenantDetails.address, tenantDetails.gst_number, tenantDetails.contact, tenantDetails.email, compId]);
+          console.log(`✓ [PostgreSQL] Restored real company name "${tenantDetails.name}" for Company ${compId}`);
+        }
+      }
+
+      // Ensure database_registry entry exists
+      await client.query(`
+        INSERT INTO public.database_registry (company_id, db_type, db_name, db_schema, status)
+        VALUES ($1, 'postgres', $2, $2, 'Active')
+        ON CONFLICT (company_id) DO UPDATE SET db_schema = EXCLUDED.db_schema, status = 'Active'
+      `, [compId, schemaName]);
+
+      // Ensure tenant schema has all standard ERP tables
+      for (const tableSql of COMPANY_TABLES) {
+        try {
+          const pgTableSql = translateSqlForPostgres(tableSql, compId);
+          await client.query(pgTableSql);
+        } catch (_) {}
+      }
+
+      await resyncPostgresSequences(client, schemaName);
+    }
+
+    // 4. For any companies registered in public.companies that don't have schema yet:
+    const updatedCompRes = await client.query(`SELECT id, code, name FROM public.companies WHERE status != 'Inactive' OR status IS NULL`);
+    for (const c of updatedCompRes.rows) {
+      const compId = parseInt(c.id, 10);
+      const sName = `company_${compId}`;
+      await client.query(`CREATE SCHEMA IF NOT EXISTS "${sName}";`);
+      await client.query(`
+        INSERT INTO public.database_registry (company_id, db_type, db_name, db_schema, status)
+        VALUES ($1, 'postgres', $2, $2, 'Active')
+        ON CONFLICT (company_id) DO UPDATE SET db_schema = EXCLUDED.db_schema, status = 'Active'
+      `, [compId, sName]);
+
+      for (const tableSql of COMPANY_TABLES) {
+        try {
+          const pgTableSql = translateSqlForPostgres(tableSql, compId);
+          await client.query(pgTableSql);
+        } catch (_) {}
+      }
+      await resyncPostgresSequences(client, sName);
+    }
+  } catch (err) {
+    console.error('⚠️ [PostgreSQL] Tenant discovery notice:', err.message);
+  }
+}
+
+/**
+ * Safely preserves and migrates any existing user records in public schema into their corresponding company schemas.
  * NEVER drops user tables or data.
  */
-async function migrateNeonPublicDataToCompany1(client) {
+async function migrateNeonPublicDataToTenants(client) {
   try {
-    console.log('🔍 [PostgreSQL] Checking and preserving existing business data for Company 1...');
-    await client.query('CREATE SCHEMA IF NOT EXISTS company_1;');
+    console.log('🔍 [PostgreSQL] Checking and preserving existing public business data across tenants...');
 
     const tableCheckRes = await client.query(`
       SELECT table_name 
@@ -1639,24 +1782,44 @@ async function migrateNeonPublicDataToCompany1(client) {
         const pubCount = parseInt(pubCountRes.rows[0]?.cnt || 0, 10);
 
         if (pubCount > 0) {
-          console.log(`📦 Preserving ${pubCount} records from public."${bTable}" into company_1...`);
-          // Ensure table exists in company_1
-          await client.query(`CREATE TABLE IF NOT EXISTS "company_1"."${bTable}" (LIKE "public"."${bTable}" INCLUDING ALL)`);
+          // Check if public table has company_id column
+          const colCheck = await client.query(`
+            SELECT column_name FROM information_schema.columns 
+            WHERE table_schema = 'public' AND lower(table_name) = lower($1) AND lower(column_name) = 'company_id'
+          `, [bTable]);
+          const hasCompanyId = colCheck.rows.length > 0;
 
-          const compCountRes = await client.query(`SELECT COUNT(*) AS cnt FROM "company_1"."${bTable}"`);
-          const compCount = parseInt(compCountRes.rows[0]?.cnt || 0, 10);
-
-          if (compCount === 0 || compCount < pubCount) {
-            await client.query(`
-              INSERT INTO "company_1"."${bTable}" 
-              SELECT * FROM "public"."${bTable}" 
-              ON CONFLICT DO NOTHING
+          if (hasCompanyId) {
+            const compIdsRes = await client.query(`
+              SELECT DISTINCT company_id FROM "public"."${bTable}" WHERE company_id IS NOT NULL
             `);
-            console.log(`✓ Copied ${pubCount} records from public."${bTable}" to company_1."${bTable}"`);
+            for (const row of compIdsRes.rows) {
+              const cId = parseInt(row.company_id, 10);
+              if (!cId || isNaN(cId)) continue;
+              const targetSchema = `company_${cId}`;
+              await client.query(`CREATE SCHEMA IF NOT EXISTS "${targetSchema}";`);
+              await client.query(`CREATE TABLE IF NOT EXISTS "${targetSchema}"."${bTable}" (LIKE "public"."${bTable}" INCLUDING ALL)`);
+
+              await client.query(`
+                INSERT INTO "${targetSchema}"."${bTable}" 
+                SELECT * FROM "public"."${bTable}" 
+                WHERE company_id = $1
+                ON CONFLICT DO NOTHING
+              `, [cId]);
+            }
           }
+
+          // Also ensure company_1 has any legacy non-company_id rows
+          await client.query(`CREATE SCHEMA IF NOT EXISTS "company_1";`);
+          await client.query(`CREATE TABLE IF NOT EXISTS "company_1"."${bTable}" (LIKE "public"."${bTable}" INCLUDING ALL)`);
+          await client.query(`
+            INSERT INTO "company_1"."${bTable}" 
+            SELECT * FROM "public"."${bTable}" 
+            ${hasCompanyId ? 'WHERE company_id = 1 OR company_id IS NULL' : ''}
+            ON CONFLICT DO NOTHING
+          `);
         }
       } catch (tableErr) {
-        // Individual table notice without breaking entire startup
         console.warn(`⚠️ Notice preserving public."${bTable}":`, tableErr.message);
       }
     }
@@ -1666,19 +1829,24 @@ async function migrateNeonPublicDataToCompany1(client) {
 }
 
 /**
- * Ensures at least one active Company (Company 1) and Administrator exist in PostgreSQL.
+ * Ensures at least one active Company exists in PostgreSQL if the database is brand new.
+ * NEVER overwrites existing company names or records.
  */
 async function ensurePostgresDefaultCompany(client) {
   try {
     const compRes = await client.query("SELECT id, name FROM public.companies WHERE status != 'Inactive' OR status IS NULL LIMIT 1");
-    if (!compRes.rows || compRes.rows.length === 0) {
-      console.log('🌱 [PostgreSQL] No active company found in master schema. Ensuring Company 1 exists...');
+    const schemasRes = await client.query("SELECT schema_name FROM information_schema.schemata WHERE schema_name LIKE 'company_%' LIMIT 1");
+    
+    // Only insert default if NO companies and NO company_% schemas exist anywhere in PostgreSQL!
+    if ((!compRes.rows || compRes.rows.length === 0) && (!schemasRes.rows || schemasRes.rows.length === 0)) {
+      console.log('🌱 [PostgreSQL] No company or tenant schemas found in database. Initializing default Company 1...');
       await client.query(`
         INSERT INTO public.companies (id, code, name, address, gst_number, contact, email, database_name, database_schema, status)
         VALUES (1, 'COMP_BVC', 'BVC Exports Pvt Ltd', '123 Main Industrial Area, City', '33AABCB1234A1Z5', '9876543210', 'info@bvcexports.com', 'company_1', 'company_1', 'Active')
-        ON CONFLICT (id) DO UPDATE SET status = 'Active', name = EXCLUDED.name
+        ON CONFLICT (id) DO NOTHING
       `);
       
+      await client.query(`CREATE SCHEMA IF NOT EXISTS company_1;`);
       await client.query(`
         INSERT INTO public.database_registry (company_id, db_type, db_name, db_schema, status)
         VALUES (1, 'postgres', 'company_1', 'company_1', 'Active')
@@ -1735,6 +1903,7 @@ class PgDbConnection {
   }
 
   async beginTransaction() {
+    this.inTransaction = true;
     const schemaName = this.isMaster ? 'public' : `company_${this.companyId}`;
     await this.client.query('BEGIN');
     if (!this.isMaster) {
@@ -1746,16 +1915,26 @@ class PgDbConnection {
   }
 
   async commit() {
+    this.inTransaction = false;
     await this.client.query('COMMIT');
   }
 
   async rollback() {
+    this.inTransaction = false;
     await this.client.query('ROLLBACK');
   }
 
   async query(text, params = []) {
     let transformed = translateSqlForPostgres(text, this.companyId);
     const schemaName = this.isMaster ? 'public' : `company_${this.companyId}`;
+    if (!this.inTransaction) {
+      if (!this.isMaster) {
+        await this.client.query(`CREATE SCHEMA IF NOT EXISTS "${schemaName}";`);
+        await this.client.query(`SET search_path TO "${schemaName}", public;`);
+      } else {
+        await this.client.query(`SET search_path TO public;`);
+      }
+    }
     let result;
     try {
       result = await this.client.query(transformed, params);
@@ -1863,6 +2042,15 @@ module.exports = {
   restoreDatabase,
   ensurePostgresMasterSchema,
   ensurePostgresCompanySequences,
+  syncPostgresTenantSchemas: async () => {
+    if (!isPostgres || !pgPool) return;
+    const client = await pgPool.connect();
+    try {
+      await discoverAndSyncAllPostgresTenants(client);
+    } finally {
+      client.release();
+    }
+  },
 
   // Primary Query function (routes automatically based on context & SQL)
   query: async (text, params = [], explicitCompanyId = null) => {

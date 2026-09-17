@@ -10,15 +10,15 @@ const bcrypt = require('bcryptjs');
 // Helper function to ensure default Company 1 exists
 async function ensureDefaultCompanyExists() {
   try {
-    const existing = await db.master.query("SELECT * FROM companies WHERE id = 1 OR code = 'COMP_BVC' OR status != 'Inactive'");
+    const existing = await db.master.query("SELECT * FROM companies WHERE status != 'Inactive' OR status IS NULL");
     if (existing.rows && existing.rows.length > 0) {
       return existing.rows;
     }
 
     console.log('🌱 [Companies] Auto-provisioning default Company 1...');
     await db.master.run(`
-      INSERT INTO companies (code, name, address, gst_number, contact, email, database_name, database_schema, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Active')
+      INSERT OR IGNORE INTO companies (id, code, name, address, gst_number, contact, email, database_name, database_schema, status)
+      VALUES (1, ?, ?, ?, ?, ?, ?, ?, 'Active')
     `, [
       'COMP_BVC',
       'BVC Exports Pvt Ltd',
@@ -58,10 +58,25 @@ async function ensureDefaultCompanyExists() {
 // GET all companies
 router.get(['/', '/list'], async (req, res) => {
   try {
-    let result = await db.master.query("SELECT * FROM companies WHERE status != 'Inactive' OR status IS NULL ORDER BY name ASC");
+    // In PostgreSQL mode, dynamically discover and sync all existing company schemas
+    if (db.isPostgres && typeof db.syncPostgresTenantSchemas === 'function') {
+      try {
+        await db.syncPostgresTenantSchemas();
+      } catch (syncErr) {
+        console.warn('Notice syncing tenant schemas in GET /companies:', syncErr.message);
+      }
+    }
+
+    let result = await db.master.query("SELECT * FROM companies WHERE status != 'Inactive' OR status IS NULL ORDER BY id ASC");
     let rows = result.rows || [];
 
-    // If companies list is empty, auto-ensure Company 1
+    // Fallback if status filter excluded records
+    if (rows.length === 0) {
+      result = await db.master.query("SELECT * FROM companies ORDER BY id ASC");
+      rows = result.rows || [];
+    }
+
+    // If companies list is still empty, auto-ensure default Company 1
     if (rows.length === 0) {
       rows = await ensureDefaultCompanyExists();
     }

@@ -237,6 +237,20 @@ export const AuthProvider = ({ children }) => {
       localStorage.setItem('erp_isAdmin', String(loginData.isAdmin || loginData.role === 'Admin' || loginData.role === 'admin'));
       localStorage.setItem('erp_login_history_id', String(loginData.login_history_id || ''));
 
+      // Clear all module-specific cached business state from previous sessions to guarantee tenant data isolation
+      try {
+        const cacheKeys = [
+          'items', 'customers', 'suppliers', 'purchases', 'sales', 'stock',
+          'vouchers', 'godowns', 'tax_rates', 'dashboard_stats', 'financial_reports',
+          'erp_items_cache', 'erp_purchases_cache', 'erp_sales_cache', 'erp_customers_cache',
+          'erp_suppliers_cache', 'erp_stock_cache', 'cached_dashboard_stats'
+        ];
+        cacheKeys.forEach(k => {
+          localStorage.removeItem(k);
+          sessionStorage.removeItem(k);
+        });
+      } catch (cacheErr) {}
+
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('erp_company_changed', { detail: companyData }));
       }

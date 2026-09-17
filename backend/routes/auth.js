@@ -84,28 +84,28 @@ const seedDefaultData = async () => {
     const adminPasswordHash = await bcrypt.hash('admin123', saltRounds)
     const staffPasswordHash = await bcrypt.hash('staff123', saltRounds)
     
-    const companies = await db.query('SELECT COUNT(*) as count FROM companies')
-    console.log('Companies count:', companies.rows[0].count)
+    const companies = await db.master.query("SELECT COUNT(*) as count FROM companies WHERE status != 'Inactive' OR status IS NULL")
+    console.log('Active companies count:', companies.rows[0]?.count)
     
-    if (companies.rows[0].count === 0) {
+    if (parseInt(companies.rows[0]?.count || 0, 10) === 0) {
       console.log('Seeding default company...')
-      const companyResult = await db.run('INSERT INTO companies (name, address, gst_number, contact, email) VALUES (?, ?, ?, ?, ?)', ['BVC Company', '123 Main Street, City', '27AABCV1234A1Z5', '9876543210', 'info@bvc.com'])
+      const companyResult = await db.master.run('INSERT INTO companies (name, address, gst_number, contact, email) VALUES (?, ?, ?, ?, ?)', ['BVC Company', '123 Main Street, City', '27AABCV1234A1Z5', '9876543210', 'info@bvc.com'])
       const companyId = companyResult.lastID || companyResult.lastInsertRowid || 1
       console.log('Default company created with ID:', companyId)
       
       console.log('Seeding default users...')
-      await db.run('INSERT INTO users (username, password_hash, role, status, company_id) VALUES (?, ?, ?, ?, ?)', ['admin', adminPasswordHash, 'Admin', 'Active', companyId])
-      await db.run('INSERT INTO users (username, password_hash, role, status, company_id) VALUES (?, ?, ?, ?, ?)', ['staff', staffPasswordHash, 'Staff', 'Active', companyId])
+      await db.master.run('INSERT INTO users (username, password_hash, role, status, company_id) VALUES (?, ?, ?, ?, ?)', ['admin', adminPasswordHash, 'Admin', 'Active', companyId])
+      await db.master.run('INSERT INTO users (username, password_hash, role, status, company_id) VALUES (?, ?, ?, ?, ?)', ['staff', staffPasswordHash, 'Staff', 'Active', companyId])
       console.log('Default users created!')
     } else {
       // Ensure admin user exists in users table for default login
-      const adminUsers = await db.query("SELECT id FROM users WHERE LOWER(TRIM(username)) = 'admin'")
+      const adminUsers = await db.master.query("SELECT id FROM users WHERE LOWER(TRIM(username)) = 'admin'")
       if (!adminUsers.rows || adminUsers.rows.length === 0) {
         console.log('Seeding default admin user for existing company...')
-        const allComps = await db.query('SELECT id FROM companies ORDER BY id ASC LIMIT 1')
+        const allComps = await db.master.query('SELECT id FROM companies ORDER BY id ASC LIMIT 1')
         const firstCompId = allComps.rows[0]?.id || 1
-        await db.run('INSERT INTO users (username, password_hash, role, status, company_id) VALUES (?, ?, ?, ?, ?)', ['admin', adminPasswordHash, 'Admin', 'Active', firstCompId])
-        await db.run('INSERT INTO users (username, password_hash, role, status, company_id) VALUES (?, ?, ?, ?, ?)', ['staff', staffPasswordHash, 'Staff', 'Active', firstCompId])
+        await db.master.run('INSERT INTO users (username, password_hash, role, status, company_id) VALUES (?, ?, ?, ?, ?)', ['admin', adminPasswordHash, 'Admin', 'Active', firstCompId])
+        await db.master.run('INSERT INTO users (username, password_hash, role, status, company_id) VALUES (?, ?, ?, ?, ?)', ['staff', staffPasswordHash, 'Staff', 'Active', firstCompId])
       }
     }
   } catch (error) {
