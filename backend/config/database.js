@@ -884,7 +884,7 @@ async function resyncPostgresSequences(clientOrPool, schemaName = null) {
       JOIN pg_attribute a ON (d.refobjid = a.attrelid AND d.refobjsubid = a.attnum)
       JOIN pg_namespace n ON n.oid = s.relnamespace
       WHERE s.relkind = 'S' AND c.relkind = 'r'
-        ${schemaName ? 'AND n.nspname = $1' : "AND n.nspname IN ('public', 'company_1')"}
+        ${schemaName ? 'AND n.nspname = $1' : "AND (n.nspname = 'public' OR n.nspname LIKE 'company_%')"}
     `;
     const params = schemaName ? [schemaName] : [];
     const res = await q.query(sql, params);
@@ -913,6 +913,9 @@ async function ensurePostgresCompanySequences(companyId = 1) {
     await client.query(`SET search_path TO ${schemaName}, public`);
     await resyncPostgresSequences(client, schemaName);
   } finally {
+    try {
+      await client.query('RESET search_path;');
+    } catch (_) {}
     client.release();
   }
 }
@@ -991,6 +994,9 @@ async function executePgQuery(sql, params = [], companyId = 1, isMaster = false)
     }
     throw err;
   } finally {
+    try {
+      await client.query('RESET search_path;');
+    } catch (_) {}
     client.release();
   }
 }
@@ -1730,13 +1736,13 @@ class PgDbConnection {
 
   async beginTransaction() {
     const schemaName = this.isMaster ? 'public' : `company_${this.companyId}`;
-    if (!this.isMaster) {
-      await this.client.query(`CREATE SCHEMA IF NOT EXISTS ${schemaName};`);
-      await this.client.query(`SET search_path TO ${schemaName}, public;`);
-    } else {
-      await this.client.query(`SET search_path TO public;`);
-    }
     await this.client.query('BEGIN');
+    if (!this.isMaster) {
+      await this.client.query(`CREATE SCHEMA IF NOT EXISTS "${schemaName}";`);
+      await this.client.query(`SET LOCAL search_path TO "${schemaName}", public;`);
+    } else {
+      await this.client.query(`SET LOCAL search_path TO public;`);
+    }
   }
 
   async commit() {
@@ -1800,7 +1806,9 @@ class PgDbConnection {
 
   release() {
     if (this.client) {
-      this.client.release();
+      this.client.query('RESET search_path;').catch(() => {}).finally(() => {
+        this.client.release();
+      });
     }
   }
 }

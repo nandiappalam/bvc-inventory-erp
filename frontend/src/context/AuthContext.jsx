@@ -286,10 +286,43 @@ export const AuthProvider = ({ children }) => {
 
   // Select or switch company
   const selectCompany = (companyData) => {
+    // Clear company-dependent cached state
+    try {
+      const keysToClear = [
+        'erp_items_cache',
+        'erp_suppliers_cache',
+        'erp_customers_cache',
+        'erp_godowns_cache',
+        'erp_stock_cache',
+        'erp_lots_cache',
+        'erp_purchases_cache',
+        'erp_sales_cache',
+        'erp_dashboard_cache',
+        'erp_reports_cache',
+        'erp_ledger_cache',
+        'erp_notifications_cache',
+      ];
+      keysToClear.forEach((k) => {
+        localStorage.removeItem(k);
+        sessionStorage.removeItem(k);
+      });
+      Object.keys(localStorage).forEach((key) => {
+        if (key.startsWith('company_cache_') || key.startsWith('erp_company_data_')) {
+          localStorage.removeItem(key);
+        }
+      });
+    } catch (_) {}
+
     setSelectedCompany(companyData);
     setCompany(companyData);
-    localStorage.setItem('erp_selected_company', JSON.stringify(companyData));
-    localStorage.setItem('erp_company', JSON.stringify(companyData));
+    if (companyData) {
+      localStorage.setItem('erp_selected_company', JSON.stringify(companyData));
+      localStorage.setItem('erp_company', JSON.stringify(companyData));
+    } else {
+      localStorage.removeItem('erp_selected_company');
+      localStorage.removeItem('erp_company');
+    }
+
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('erp_company_changed', { detail: companyData }));
     }

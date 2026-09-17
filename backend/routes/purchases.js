@@ -81,7 +81,7 @@ router.get('/purchase-list', async (req, res) => {
     LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(p.supplier AS TEXT) OR s.name = CAST(p.supplier AS TEXT) OR s.print_name = CAST(p.supplier AS TEXT))
     LEFT JOIN purchase_items pi ON CAST(pi.purchase_id AS TEXT) = CAST(p.id AS TEXT)
     LEFT JOIN item_master im ON (CAST(im.id AS TEXT) = CAST(pi.item_id AS TEXT) OR im.item_name = CAST(pi.item_name AS TEXT))
-    LEFT JOIN qc_inspections qi ON (qi.rm_lot_no = pi.lot_no OR CAST(qi.purchase_id AS TEXT) = CAST(p.id AS TEXT) OR qi.purchase_id = ('PUR-' || CAST(p.id AS TEXT)))
+    LEFT JOIN qc_inspections qi ON (qi.rm_lot_no = pi.lot_no OR CAST(qi.purchase_id AS TEXT) = CAST(p.id AS TEXT) OR CAST(qi.purchase_id AS TEXT) = ('PUR-' || CAST(p.id AS TEXT)))
     ORDER BY p.id DESC`;
  
     const result = await db.query(sql);

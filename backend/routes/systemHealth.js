@@ -4,6 +4,7 @@
 
 const express = require('express');
 const router = express.Router();
+const db = require('../config/database');
 const databaseHealth = require('../services/DatabaseHealthService');
 const errorLogger = require('../services/ErrorLoggerService');
 const { authMiddleware } = require('../middleware/authMiddleware');
@@ -55,6 +56,109 @@ router.get('/system/errors', authMiddleware, (req, res) => {
     count: recentErrors.length,
     errors: recentErrors,
   });
+});
+
+// Multi-Tenant Context Diagnostics Endpoint
+router.get('/system/tenant-context', async (req, res) => {
+  try {
+    const isPostgres = db.isPostgres;
+    const companyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    const schema = req.companySchema || `company_${companyId}`;
+    
+    let currentSchema = 'unknown';
+    let searchPath = 'unknown';
+    let companyName = 'Unknown Company';
+    let databaseName = isPostgres ? (process.env.DATABASE_URL ? 'Neon PostgreSQL' : 'PostgreSQL') : `company_${companyId}.db`;
+    let tableCount = 0;
+    let itemCount = 0;
+    let purchaseCount = 0;
+    let salesCount = 0;
+    let registeredCompanies = [];
+
+    // 1. Fetch registered companies from master database
+    try {
+      const compRes = await db.master.query('SELECT id, code, name, database_name, database_schema, status FROM companies ORDER BY id ASC');
+      registeredCompanies = compRes.rows || [];
+      const match = registeredCompanies.find(c => String(c.id) === String(companyId));
+      if (match) {
+        companyName = match.name;
+        if (match.database_name) databaseName = match.database_name;
+      }
+    } catch (e) {
+      console.warn('Notice querying companies in tenant-context:', e.message);
+    }
+
+    // 2. Query PostgreSQL schema & search_path diagnostics
+    if (isPostgres) {
+      try {
+        const csRes = await db.query("SELECT current_schema() AS current_schema, current_setting('search_path') AS search_path");
+        if (csRes.rows && csRes.rows[0]) {
+          currentSchema = csRes.rows[0].current_schema;
+          searchPath = csRes.rows[0].search_path;
+        }
+        
+        const tblRes = await db.query(
+          "SELECT COUNT(*) AS count FROM information_schema.tables WHERE table_schema = ?",
+          [schema]
+        );
+        tableCount = parseInt(tblRes.rows[0]?.count, 10) || 0;
+      } catch (e) {
+        console.warn('Notice querying pg diagnostics in tenant-context:', e.message);
+      }
+    } else {
+      currentSchema = `company_${companyId}.db`;
+      searchPath = 'local_sqlite';
+      try {
+        const tblRes = await db.query("SELECT COUNT(*) AS count FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
+        tableCount = parseInt(tblRes.rows[0]?.count, 10) || 0;
+      } catch (_) {}
+    }
+
+    // 3. Query active tenant record counts
+    try {
+      const iRes = await db.query('SELECT COUNT(*) AS cnt FROM item_master');
+      itemCount = parseInt(iRes.rows[0]?.cnt, 10) || 0;
+    } catch (_) {}
+
+    try {
+      const pRes = await db.query('SELECT COUNT(*) AS cnt FROM purchases');
+      purchaseCount = parseInt(pRes.rows[0]?.cnt, 10) || 0;
+    } catch (_) {}
+
+    try {
+      const sRes = await db.query('SELECT COUNT(*) AS cnt FROM sales');
+      salesCount = parseInt(sRes.rows[0]?.cnt, 10) || 0;
+    } catch (_) {}
+
+    res.json({
+      mode: process.env.RENDER ? 'RENDER' : (isPostgres ? 'POSTGRES_REMOTE' : 'LOCAL_SQLITE'),
+      database: isPostgres ? 'postgresql' : 'sqlite',
+      companyId: companyId,
+      companyName: companyName,
+      schema: schema,
+      databaseName: databaseName,
+      server: process.env.RENDER ? 'Render' : 'Local/Container',
+      sqliteEnabled: !isPostgres,
+      current_schema: currentSchema,
+      search_path: searchPath,
+      tenant_tables_count: tableCount,
+      active_records_summary: {
+        items: itemCount,
+        purchases: purchaseCount,
+        sales: salesCount,
+      },
+      registered_companies: registeredCompanies.map(c => ({
+        id: c.id,
+        code: c.code,
+        name: c.name,
+        schema: c.database_schema || `company_${c.id}`,
+        status: c.status
+      }))
+    });
+  } catch (err) {
+    console.error('Error serving tenant context diagnostics:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 module.exports = router;

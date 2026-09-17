@@ -504,7 +504,7 @@ router.get(['/inspection/:id', '/purchase-lab-testing/:id'], asyncHandler(async 
          OR qi.qc_no = ? 
          OR qi.rm_lot_no = ? 
          OR CAST(qi.purchase_id AS TEXT) = ? 
-         OR qi.purchase_id = ('PUR-' || ?)
+         OR CAST(qi.purchase_id AS TEXT) = ('PUR-' || ?)
          OR CAST(qi.id AS TEXT) = ?
          OR qi.qc_no = ('QC-' || ?)
          OR qi.rm_lot_no = ('LOT-' || ?)

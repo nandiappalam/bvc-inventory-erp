@@ -9,41 +9,45 @@ function companyContextMiddleware(req, res, next) {
   let user = null;
 
   try {
-    // 1. Try resolving from Authorization header (JWT)
+    // 1. Try resolving from custom header (X-Company-Id or X-Tenant-Id)
+    const headerCompany = req.headers['x-company-id'] || req.headers['x-tenant-id'];
+    if (headerCompany) {
+      const parsed = parseInt(headerCompany, 10);
+      if (!isNaN(parsed) && parsed > 0) {
+        companyId = parsed;
+      }
+    }
+
+    // 2. Try resolving from Authorization header (JWT)
     const authHeader = req.headers['authorization'];
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.substring(7);
       try {
         const decoded = jwt.verify(token, JWT_SECRET);
-        if (decoded && decoded.companyId) {
-          companyId = parseInt(decoded.companyId, 10) || 1;
+        if (decoded) {
           user = decoded;
           req.user = decoded;
+          // If header wasn't explicitly supplied, use token's companyId
+          if (!headerCompany && decoded.companyId) {
+            companyId = parseInt(decoded.companyId, 10) || companyId;
+          }
         }
       } catch (err) {
         // Token invalid or expired - fallback smoothly without error
       }
     }
 
-    // 2. Try resolving from custom header
-    if (req.headers['x-company-id']) {
-      const parsed = parseInt(req.headers['x-company-id'], 10);
-      if (!isNaN(parsed) && parsed > 0) {
-        companyId = parsed;
-      }
-    }
-
     // 3. Try resolving from query parameters
-    if (req.query && req.query.company_id) {
-      const parsed = parseInt(req.query.company_id, 10);
+    if (!headerCompany && req.query && (req.query.company_id || req.query.companyId)) {
+      const parsed = parseInt(req.query.company_id || req.query.companyId, 10);
       if (!isNaN(parsed) && parsed > 0) {
         companyId = parsed;
       }
     }
 
     // 4. Try resolving from body (for POST/PUT requests)
-    if (req.body && req.body.company_id) {
-      const parsed = parseInt(req.body.company_id, 10);
+    if (!headerCompany && req.body && (req.body.company_id || req.body.companyId)) {
+      const parsed = parseInt(req.body.company_id || req.body.companyId, 10);
       if (!isNaN(parsed) && parsed > 0) {
         companyId = parsed;
       }
@@ -64,17 +68,51 @@ function companyContextMiddleware(req, res, next) {
     };
   }
 
+  const companySchema = `company_${companyId}`;
   req.companyId = companyId;
+  req.companySchema = companySchema;
   req.companyDb = db.forCompany(companyId);
+
+  // Structured tenant logging for all API calls
+  if (req.originalUrl && req.originalUrl.startsWith('/api/') && !req.originalUrl.includes('/health') && !req.originalUrl.includes('/system/health')) {
+    console.log(`[COMPANY ${companyId}][${companySchema}] ${req.method} ${req.originalUrl}`);
+  }
 
   // Run downstream handlers inside AsyncLocalStorage context
   if (db.asyncLocalStorage) {
-    db.asyncLocalStorage.run({ companyId, userId: req.user.id, user: req.user }, () => {
+    db.asyncLocalStorage.run({ companyId, companySchema, userId: req.user.id, user: req.user }, () => {
       next();
     });
   } else {
     next();
   }
+}
+
+// Mandatory Tenant Middleware for protected company-level operations
+function tenantMiddleware(req, res, next) {
+  const companyId = req.companyId;
+  if (!companyId || isNaN(companyId) || companyId <= 0) {
+    return res.status(400).json({
+      success: false,
+      message: 'Active Company Context is required. Please select a valid company.',
+      code: 'MISSING_TENANT_CONTEXT'
+    });
+  }
+
+  // Check user company access permissions
+  if (req.user && req.user.role !== 'Admin' && req.user.role !== 'admin' && req.user.role !== 'SuperAdmin') {
+    const userCompanyId = req.user.companyId || req.user.company_id;
+    if (userCompanyId && parseInt(userCompanyId, 10) !== parseInt(companyId, 10)) {
+      console.warn(`[SECURITY] User ${req.user.username} (Company ${userCompanyId}) denied access to Tenant Company ${companyId}`);
+      return res.status(403).json({
+        success: false,
+        message: `Access denied. You do not have permission to access Company ${companyId}.`,
+        code: 'TENANT_FORBIDDEN'
+      });
+    }
+  }
+
+  next();
 }
 
 // Non-blocking authentication verification (Guarantees zero 401/403 blockages)
@@ -105,6 +143,7 @@ function generateToken(payload) {
 
 module.exports = {
   companyContextMiddleware,
+  tenantMiddleware,
   authenticateToken,
   authMiddleware: authenticateToken,
   generateToken,
