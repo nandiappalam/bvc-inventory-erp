@@ -72,6 +72,8 @@ const UserCreate = () => {
     role: 'Admin',
     status: 'Active',
     company_id: selectedCompany?.id ? String(selectedCompany.id) : '',
+    password_expiry_days: '90',
+    password_last_changed: null,
     permissions: {}
   });
 
@@ -155,9 +157,11 @@ const UserCreate = () => {
           username: data.username,
           password: '',
           confirmPassword: '',
-          role: data.role,
-          status: data.status,
+          role: data.role || 'Staff',
+          status: data.status || 'Active',
           company_id: String(data.company_id || selectedCompany?.id || ''),
+          password_expiry_days: String(data.password_expiry_days !== undefined ? data.password_expiry_days : 90),
+          password_last_changed: data.password_last_changed || null,
           permissions: structuredPerms
         });
       } else {
@@ -202,7 +206,7 @@ const UserCreate = () => {
     if (!formData.username.trim()) { setError('Username is required'); return; }
     if (!isEditing && !formData.password) { setError('Password is required'); return; }
     if (formData.password && formData.password.length < 3) { setError('Password must be at least 3 characters'); return; }
-    if (formData.password !== formData.confirmPassword) { setError('Passwords do not match'); return; }
+    if (formData.password && formData.password !== formData.confirmPassword) { setError('Passwords do not match'); return; }
 
     try {
       setSaving(true);
@@ -231,6 +235,7 @@ const UserCreate = () => {
         role: formData.role,
         status: formData.status,
         company_id: parseInt(companyIdValue, 10),
+        password_expiry_days: parseInt(formData.password_expiry_days || 90, 10),
         permissions: permissionsArray
       };
       if (formData.password) payload.password = formData.password;
@@ -244,7 +249,7 @@ const UserCreate = () => {
       });
 
       if (response && (response.id || response.message?.includes('success') || response.success !== false)) {
-        const msg = isEditing ? 'User updated successfully!' : `User "${formData.username.trim()}" created successfully!`;
+        const msg = isEditing ? 'User credentials and settings updated successfully!' : `User "${formData.username.trim()}" created successfully!`;
         setSuccess(msg);
         alert(msg);
         if (isFirstUser || !user) {
@@ -379,7 +384,7 @@ const UserCreate = () => {
           <Grid item xs={12} md={4}>
             <Card sx={{ height: '100%' }}>
               <CardContent>
-                <Typography variant="h6" sx={{ mb: 2, color: themeColors.primary }}>🧾 User Details</Typography>
+                <Typography variant="h6" sx={{ mb: 2, color: themeColors.primary }}>🧾 User Details & Security</Typography>
                 <TextField fullWidth label="Username" name="username" value={formData.username} onChange={handleChange} margin="normal" required disabled={isEditing} />
                 <FormControl fullWidth margin="normal">
                   <InputLabel>Company</InputLabel>
@@ -396,8 +401,55 @@ const UserCreate = () => {
                     ))}
                   </Select>
                 </FormControl>
-                <TextField fullWidth label="Password" name="password" type="password" value={formData.password} onChange={handleChange} margin="normal" required={!isEditing} helperText={isEditing ? 'Leave blank to keep current password' : ''} />
-                <TextField fullWidth label="Confirm Password" name="confirmPassword" type="password" value={formData.confirmPassword} onChange={handleChange} margin="normal" required={!isEditing && !!formData.password} />
+                
+                <TextField 
+                  fullWidth 
+                  label={isEditing ? "New Password (optional)" : "Password"} 
+                  name="password" 
+                  type="password" 
+                  value={formData.password} 
+                  onChange={handleChange} 
+                  margin="normal" 
+                  required={!isEditing} 
+                  helperText={isEditing ? 'Leave blank to retain current password' : ''} 
+                />
+                
+                {(formData.password || !isEditing) && (
+                  <TextField 
+                    fullWidth 
+                    label="Confirm Password" 
+                    name="confirmPassword" 
+                    type="password" 
+                    value={formData.confirmPassword} 
+                    onChange={handleChange} 
+                    margin="normal" 
+                    required={!isEditing || !!formData.password} 
+                  />
+                )}
+
+                <FormControl fullWidth margin="normal">
+                  <InputLabel>Password Expiry / Change Period</InputLabel>
+                  <Select 
+                    name="password_expiry_days" 
+                    value={String(formData.password_expiry_days || '90')} 
+                    onChange={handleChange} 
+                    label="Password Expiry / Change Period"
+                  >
+                    <MenuItem value="30">30 Days (1 Month)</MenuItem>
+                    <MenuItem value="60">60 Days (2 Months)</MenuItem>
+                    <MenuItem value="90">90 Days (Quarterly - Recommended)</MenuItem>
+                    <MenuItem value="180">180 Days (6 Months)</MenuItem>
+                    <MenuItem value="365">365 Days (1 Year)</MenuItem>
+                    <MenuItem value="0">Never / No Expiry</MenuItem>
+                  </Select>
+                </FormControl>
+
+                {isEditing && formData.password_last_changed && (
+                  <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', mt: 0.5, mb: 1 }}>
+                    Last changed: {new Date(formData.password_last_changed).toLocaleDateString()}
+                  </Typography>
+                )}
+
                 <FormControl fullWidth margin="normal">
                   <InputLabel>Role</InputLabel>
                   <Select name="role" value={formData.role} onChange={handleChange} label="Role">
@@ -413,7 +465,7 @@ const UserCreate = () => {
                     <MenuItem value="Inactive">Inactive</MenuItem>
                   </Select>
                 </FormControl>
-                {formData.role === 'Admin' && <Alert severity="info" sx={{ mt: 2 }}>Admin users have full access.</Alert>}
+                {formData.role === 'Admin' && <Alert severity="info" sx={{ mt: 2 }}>Admin users have full access to all modules and company settings.</Alert>}
               </CardContent>
             </Card>
           </Grid>

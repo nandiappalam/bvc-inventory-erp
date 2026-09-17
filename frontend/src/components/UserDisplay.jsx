@@ -159,6 +159,7 @@ const UserDisplay = () => {
                   <TableCell sx={{ fontWeight: 'bold' }}>Company</TableCell>
                   <TableCell sx={{ fontWeight: 'bold' }}>Role</TableCell>
                   <TableCell sx={{ fontWeight: 'bold' }}>Status</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold' }}>Password Validity</TableCell>
                   <TableCell sx={{ fontWeight: 'bold' }}>Created At</TableCell>
                   {canManageUsers && <TableCell sx={{ fontWeight: 'bold' }} align="center">Actions</TableCell>}
                 </TableRow>
@@ -166,7 +167,7 @@ const UserDisplay = () => {
               <TableBody>
                 {users.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={canManageUsers ? 6 : 5} align="center" sx={{ py: 4 }}>
+                    <TableCell colSpan={canManageUsers ? 7 : 6} align="center" sx={{ py: 4 }}>
                       <Typography variant="body1" color="textSecondary">
                         No users found. {canManageUsers && 'Create a user to get started.'}
                       </Typography>
@@ -175,7 +176,7 @@ const UserDisplay = () => {
                 ) : (
                   users.map((user, index) => (
                     <TableRow key={user.id || `user-${index}`} hover>
-                      <TableCell>{user.username || user.user_name || '-'}</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>{user.username || user.user_name || '-'}</TableCell>
                       <TableCell>{user.company_name || selectedCompany?.name || '-'}</TableCell>
                       <TableCell>
                         <Chip
@@ -192,12 +193,20 @@ const UserDisplay = () => {
                         />
                       </TableCell>
                       <TableCell>
+                        <Chip
+                          label={user.password_expiry_days ? `${user.password_expiry_days} Days` : '90 Days'}
+                          variant="outlined"
+                          size="small"
+                        />
+                      </TableCell>
+                      <TableCell>
                         {user.created_at ? new Date(user.created_at).toLocaleDateString() : '-'}
                       </TableCell>
                       {canManageUsers && (
                         <TableCell align="center">
                           {canEditUsers && (
                             <IconButton
+                              title="Update User Details & Password Settings"
                               onClick={() => handleEdit(user.id)}
                               sx={{ color: themeColors.primary, mr: 1 }}
                             >
@@ -206,6 +215,7 @@ const UserDisplay = () => {
                           )}
                           {canDeleteUsers && (
                             <IconButton
+                              title="Delete User"
                               onClick={() => setDeleteConfirmUser(user)}
                               disabled={deleting}
                               sx={{ color: '#f44336' }}
