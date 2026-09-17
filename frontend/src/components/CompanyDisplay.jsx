@@ -94,6 +94,7 @@ const CompanyDisplay = () => {
       onEdit={handleUpdate}
       onDelete={handleDelete}
       onPrint={handlePrint}
+      onRefresh={loadCompanies}
       onCreate={() => navigate('/company-create')}
       showActions={true}
     />
