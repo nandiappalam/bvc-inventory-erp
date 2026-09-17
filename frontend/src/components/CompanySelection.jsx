@@ -45,23 +45,45 @@ const CompanySelection = () => {
   const [companyToDelete, setCompanyToDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
+  const [initializing, setInitializing] = useState(false);
+
   useEffect(() => { fetchCompanies(); }, []);
 
   const fetchCompanies = async () => {
     try {
       setLoading(true);
+      setError('');
       const result = await api('companies');
-      setCompanies(Array.isArray(result) ? result : []);
-      if (!result || result.length === 0) {
-        console.log('No companies found, redirecting to create company...');
-        navigate('/company-create');
+      if (result && result.success === false) {
+        setError(result.message || 'Error connecting to database');
+        setCompanies([]);
         return;
       }
+      const list = Array.isArray(result) ? result : [];
+      setCompanies(list);
     } catch (error) { 
       console.error('Error fetching companies:', error);
-      setError('Error connecting to server');
+      setError(error.message || 'Error connecting to server');
     } finally { 
       setLoading(false); 
+    }
+  };
+
+  const handleInitDefault = async () => {
+    try {
+      setInitializing(true);
+      setError('');
+      const res = await api('companies/init-default', { method: 'POST' });
+      if (res && res.success === false) {
+        setError(res.message || 'Failed to initialize default company');
+      } else {
+        setSuccessMsg('Default company initialized successfully!');
+        await fetchCompanies();
+      }
+    } catch (err) {
+      setError(err.message || 'Failed to initialize default company');
+    } finally {
+      setInitializing(false);
     }
   };
 
@@ -129,9 +151,55 @@ const CompanySelection = () => {
             </Box>
             <Button variant="contained" startIcon={<AddIcon/>} onClick={()=>navigate('/company-create')} sx={{backgroundColor:themeColors.primary,'&:hover':{backgroundColor:themeColors.secondary}}}>Add Company</Button>
           </Box>
-          {error && <Alert severity="error" sx={{mb:2}} onClose={()=>setError('')}>{error}</Alert>}
+          {error && (
+            <Alert 
+              severity="error" 
+              sx={{mb:2}} 
+              action={
+                <Button color="inherit" size="small" onClick={fetchCompanies}>
+                  Retry
+                </Button>
+              }
+              onClose={()=>setError('')}
+            >
+              {error}
+            </Alert>
+          )}
           {successMsg && <Alert severity="success" sx={{mb:2}} onClose={()=>setSuccessMsg('')}>{successMsg}</Alert>}
-          {companies.length===0 ? (<Box sx={{textAlign:'center',py:4}}><Typography variant="body1" color="textSecondary" sx={{mb:2}}>No companies found. Please create a company first.</Typography><Button variant="contained" onClick={()=>navigate('/company-create')} sx={{backgroundColor:themeColors.primary,'&:hover':{backgroundColor:themeColors.secondary}}}>Create Company</Button></Box>) : (
+          {companies.length===0 ? (
+            <Box sx={{textAlign:'center',py:4,px:2,backgroundColor:'#f8fafc',borderRadius:2,border:'1px dashed #cbd5e1'}}>
+              <Typography variant="h6" color="textPrimary" sx={{mb:1,fontWeight:600}}>
+                No Companies Configured
+              </Typography>
+              <Typography variant="body2" color="textSecondary" sx={{mb:3,maxWidth:500,mx:'auto'}}>
+                No active companies were detected in the database. You can initialize the standard default company (Company 1) or create a custom company profile.
+              </Typography>
+              <Box sx={{display:'flex',justifyContent:'center',gap:2,flexWrap:'wrap'}}>
+                <Button 
+                  variant="contained" 
+                  onClick={handleInitDefault} 
+                  disabled={initializing}
+                  sx={{backgroundColor:themeColors.primary,'&:hover':{backgroundColor:themeColors.secondary}}}
+                >
+                  {initializing ? 'Initializing...' : 'Initialize Default Company'}
+                </Button>
+                <Button 
+                  variant="outlined" 
+                  onClick={()=>navigate('/company-create')}
+                  sx={{color:themeColors.primary,borderColor:themeColors.primary}}
+                >
+                  Create New Company
+                </Button>
+                <Button 
+                  variant="text" 
+                  onClick={fetchCompanies}
+                  sx={{color:themeColors.secondary}}
+                >
+                  Refresh
+                </Button>
+              </Box>
+            </Box>
+          ) : (
             <TableContainer component={Paper} sx={{boxShadow:'none',border:`1px solid ${themeColors.lightBlue}`}}>
               <Table>
                 <TableHead sx={{backgroundColor:themeColors.lightBlue}}>

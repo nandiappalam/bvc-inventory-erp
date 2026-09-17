@@ -5,7 +5,7 @@ import path from 'path'
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
-  base: './',
+  base: process.env.TAURI_PLATFORM ? './' : '/',
   resolve: {
     alias: {
       '@templates': path.resolve(__dirname, '../../templates'),

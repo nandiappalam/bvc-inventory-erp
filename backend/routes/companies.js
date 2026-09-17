@@ -7,14 +7,86 @@ const bcrypt = require('bcryptjs');
 // API ROUTES FOR COMPANIES (Master Database)
 // ============================================================================
 
+// Helper function to ensure default Company 1 exists
+async function ensureDefaultCompanyExists() {
+  try {
+    const existing = await db.master.query("SELECT * FROM companies WHERE id = 1 OR code = 'COMP_BVC' OR status != 'Inactive'");
+    if (existing.rows && existing.rows.length > 0) {
+      return existing.rows;
+    }
+
+    console.log('🌱 [Companies] Auto-provisioning default Company 1...');
+    await db.master.run(`
+      INSERT INTO companies (code, name, address, gst_number, contact, email, database_name, database_schema, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Active')
+    `, [
+      'COMP_BVC',
+      'BVC Exports Pvt Ltd',
+      '123 Main Industrial Area, City',
+      '33AABCB1234A1Z5',
+      '9876543210',
+      'info@bvcexports.com',
+      db.isPostgres ? 'company_1' : 'company_1.db',
+      db.isPostgres ? 'company_1' : null
+    ]);
+
+    // Ensure database registry record exists
+    await db.master.run(`
+      INSERT OR REPLACE INTO database_registry (company_id, db_type, db_name, db_schema, status)
+      VALUES (1, ?, ?, ?, 'Active')
+    `, [db.isPostgres ? 'postgres' : 'sqlite', db.isPostgres ? 'company_1' : 'company_1.db', db.isPostgres ? 'company_1' : null]);
+
+    // Ensure default admin user exists
+    const adminExists = await db.master.query("SELECT id FROM users WHERE username = 'admin' LIMIT 1");
+    if (!adminExists.rows || adminExists.rows.length === 0) {
+      const hash = await bcrypt.hash('admin123', 10);
+      await db.master.run(`
+        INSERT OR IGNORE INTO users (username, password_hash, role, company_id, status)
+        VALUES ('admin', ?, 'Admin', 1, 'Active')
+      `, [hash]);
+    }
+
+    const seeded = await db.master.query("SELECT * FROM companies WHERE status != 'Inactive' OR status IS NULL ORDER BY id ASC");
+    return seeded.rows || [];
+  } catch (err) {
+    console.warn('⚠️ Notice during ensureDefaultCompanyExists:', err.message);
+    const fallback = await db.master.query("SELECT * FROM companies ORDER BY id ASC");
+    return fallback.rows || [];
+  }
+}
+
 // GET all companies
 router.get(['/', '/list'], async (req, res) => {
   try {
-    const result = await db.master.query("SELECT * FROM companies WHERE status != 'Inactive' OR status IS NULL ORDER BY name ASC");
-    res.json(result.rows || []);
+    let result = await db.master.query("SELECT * FROM companies WHERE status != 'Inactive' OR status IS NULL ORDER BY name ASC");
+    let rows = result.rows || [];
+
+    // If companies list is empty, auto-ensure Company 1
+    if (rows.length === 0) {
+      rows = await ensureDefaultCompanyExists();
+    }
+
+    res.json(rows);
   } catch (error) {
     console.error('Error fetching companies:', error);
+    try {
+      // Attempt recovery
+      const recovered = await ensureDefaultCompanyExists();
+      if (recovered.length > 0) {
+        return res.json(recovered);
+      }
+    } catch (e) {}
     res.status(500).json({ message: 'Error fetching companies', error: error.message });
+  }
+});
+
+// POST initialize default company (recovery route)
+router.post('/init-default', async (req, res) => {
+  try {
+    const companies = await ensureDefaultCompanyExists();
+    res.json({ success: true, message: 'Default company verified', companies });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 

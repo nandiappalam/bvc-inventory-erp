@@ -21,41 +21,46 @@ async function runAllPendingMigrations() {
 
     if (!companies.rows || companies.rows.length === 0) {
       console.log('🌱 [MIGRATIONS] Seeding initial Company 1 in Master DB...');
-      const compRes = await master.run(
-        `INSERT INTO companies (code, name, address, gst_number, contact, email, database_name, status) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          'COMP_BVC',
-          'BVC Exports Pvt Ltd',
-          '123 Main Industrial Area, City',
-          '33AABCB1234A1Z5',
-          '9876543210',
-          'info@bvcexports.com',
-          'company_1.db',
-          'Active'
-        ]
-      );
-      defaultCompanyId = compRes.lastInsertRowid || 1;
+      try {
+        const compRes = await master.run(
+          `INSERT INTO companies (code, name, address, gst_number, contact, email, database_name, status) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            'COMP_BVC',
+            'BVC Exports Pvt Ltd',
+            '123 Main Industrial Area, City',
+            '33AABCB1234A1Z5',
+            '9876543210',
+            'info@bvcexports.com',
+            db.isPostgres ? 'company_1' : 'company_1.db',
+            'Active'
+          ]
+        );
+        defaultCompanyId = compRes.lastInsertRowid || 1;
 
-      // Seed default admin and staff users in Master DB
-      const adminPass = await bcrypt.hash('admin123', 10);
-      const staffPass = await bcrypt.hash('staff123', 10);
+        // Seed default admin and staff users in Master DB
+        const adminPass = await bcrypt.hash('admin123', 10);
+        const staffPass = await bcrypt.hash('staff123', 10);
 
-      await master.run(
-        `INSERT OR IGNORE INTO users (username, password_hash, role, company_id, status) VALUES (?, ?, ?, ?, ?)`,
-        ['admin', adminPass, 'Admin', defaultCompanyId, 'Active']
-      );
-      await master.run(
-        `INSERT OR IGNORE INTO users (username, password_hash, role, company_id, status) VALUES (?, ?, ?, ?, ?)`,
-        ['staff', staffPass, 'Staff', defaultCompanyId, 'Active']
-      );
+        await master.run(
+          `INSERT OR IGNORE INTO users (username, password_hash, role, company_id, status) VALUES (?, ?, ?, ?, ?)`,
+          ['admin', adminPass, 'Admin', defaultCompanyId, 'Active']
+        );
+        await master.run(
+          `INSERT OR IGNORE INTO users (username, password_hash, role, company_id, status) VALUES (?, ?, ?, ?, ?)`,
+          ['staff', staffPass, 'Staff', defaultCompanyId, 'Active']
+        );
 
-      // Register Company 1 database
-      await master.run(
-        `INSERT OR REPLACE INTO database_registry (company_id, db_type, db_name, status) VALUES (?, ?, ?, ?)`,
-        [defaultCompanyId, db.isPostgres ? 'postgres' : 'sqlite', db.isPostgres ? 'company_1' : 'company_1.db', 'Active']
-      );
-      console.log(`✅ [MIGRATIONS] Initial Company ${defaultCompanyId} and users seeded`);
+        // Register Company 1 database
+        await master.run(
+          `INSERT OR REPLACE INTO database_registry (company_id, db_type, db_name, status) VALUES (?, ?, ?, ?)`,
+          [defaultCompanyId, db.isPostgres ? 'postgres' : 'sqlite', db.isPostgres ? 'company_1' : 'company_1.db', 'Active']
+        );
+        console.log(`✅ [MIGRATIONS] Initial Company ${defaultCompanyId} and users seeded`);
+      } catch (seedErr) {
+        console.warn('⚠️ [MIGRATIONS] Notice during initial company seeding:', seedErr.message);
+        defaultCompanyId = 1;
+      }
     } else {
       defaultCompanyId = companies.rows[0].id;
     }

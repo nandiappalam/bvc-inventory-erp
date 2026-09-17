@@ -11,7 +11,16 @@ const { orderTablesByDependencies } = require('../utils/schemaOrderer');
 const asyncLocalStorage = new AsyncLocalStorage();
 
 // Check if PostgreSQL (Neon / Supabase / RDS / Render Postgres) is configured
-const isPostgres = process.env.DB_ENGINE === 'postgres' || (!!process.env.DATABASE_URL && process.env.DB_ENGINE !== 'sqlite');
+const rawConnectionString = (
+  process.env.DATABASE_URL || 
+  process.env.POSTGRES_URL || 
+  process.env.NEON_DATABASE_URL || 
+  process.env.DATABASE_URI || 
+  process.env.PGURI || 
+  ''
+).trim();
+
+const isPostgres = process.env.DB_ENGINE === 'postgres' || (!!rawConnectionString && process.env.DB_ENGINE !== 'sqlite');
 
 // ============================================================================
 // MODE 1 vs MODE 2 ARCHITECTURAL ISOLATION
@@ -34,24 +43,29 @@ if (isPostgres) {
   console.log('🔹 Cloud-Desktop Sync: STRICTLY NON-SYNCED & NON-LINKED');
   console.log('================================================================');
 
-  const connectionString = process.env.DATABASE_URL;
-  const isSslNeeded = process.env.NODE_ENV === 'production' || 
-                      connectionString.includes('neon.tech') || 
-                      connectionString.includes('supabase.co') || 
-                      connectionString.includes('sslmode=require') ||
-                      !connectionString.includes('localhost');
+  const connectionString = rawConnectionString;
+  if (!connectionString) {
+    console.error('⚠️ [PostgreSQL Pool] DB_ENGINE is postgres, but no DATABASE_URL or POSTGRES_URL was found!');
+  } else {
+    const isSslNeeded = process.env.NODE_ENV === 'production' || 
+                        connectionString.includes('neon.tech') || 
+                        connectionString.includes('supabase.co') || 
+                        connectionString.includes('sslmode=require') ||
+                        !connectionString.includes('localhost');
 
-  pgPool = new Pool({
-    connectionString,
-    ssl: isSslNeeded ? { rejectUnauthorized: false } : false,
-    max: 20,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 10000,
-  });
+    pgPool = new Pool({
+      connectionString,
+      ssl: isSslNeeded ? { rejectUnauthorized: false } : false,
+      max: 20,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
+      keepAlive: true,
+    });
 
-  pgPool.on('error', (err) => {
-    console.error('⚠️ [PostgreSQL Pool] Error on idle client:', err.message);
-  });
+    pgPool.on('error', (err) => {
+      console.error('⚠️ [PostgreSQL Pool] Error on idle client:', err.message);
+    });
+  }
 } else {
   // MODE 1: Tauri / Desktop Local - SQLite ONLY
   console.log('================================================================');
@@ -1581,7 +1595,8 @@ async function ensurePostgresMasterSchema() {
     `);
 
     await resyncPostgresSequences(client);
-    await cleanPostgresPublicBusinessTables(client);
+    await migrateNeonPublicDataToCompany1(client);
+    await ensurePostgresDefaultCompany(client);
     await dropPostgresForeignKeyConstraints(client);
     console.log('✓ PostgreSQL public master schema, sequences, and multi-tenant constraints verified successfully');
   } catch (err) {
@@ -1591,14 +1606,86 @@ async function ensurePostgresMasterSchema() {
   }
 }
 
-async function cleanPostgresPublicBusinessTables(client) {
+/**
+ * Safely preserves and migrates any existing user records in public schema into company_1.
+ * NEVER drops user tables or data.
+ */
+async function migrateNeonPublicDataToCompany1(client) {
   try {
+    console.log('🔍 [PostgreSQL] Checking and preserving existing business data for Company 1...');
+    await client.query('CREATE SCHEMA IF NOT EXISTS company_1;');
+
+    const tableCheckRes = await client.query(`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public' 
+        AND table_type = 'BASE TABLE'
+    `);
+    const publicTableNames = new Set(tableCheckRes.rows.map(r => r.table_name.toLowerCase()));
+
     for (const bTable of TENANT_BUSINESS_TABLES) {
-      await client.query(`DROP TABLE IF EXISTS "public"."${bTable}" CASCADE`);
+      if (!publicTableNames.has(bTable.toLowerCase())) {
+        continue;
+      }
+
+      try {
+        const pubCountRes = await client.query(`SELECT COUNT(*) AS cnt FROM "public"."${bTable}"`);
+        const pubCount = parseInt(pubCountRes.rows[0]?.cnt || 0, 10);
+
+        if (pubCount > 0) {
+          console.log(`📦 Preserving ${pubCount} records from public."${bTable}" into company_1...`);
+          // Ensure table exists in company_1
+          await client.query(`CREATE TABLE IF NOT EXISTS "company_1"."${bTable}" (LIKE "public"."${bTable}" INCLUDING ALL)`);
+
+          const compCountRes = await client.query(`SELECT COUNT(*) AS cnt FROM "company_1"."${bTable}"`);
+          const compCount = parseInt(compCountRes.rows[0]?.cnt || 0, 10);
+
+          if (compCount === 0 || compCount < pubCount) {
+            await client.query(`
+              INSERT INTO "company_1"."${bTable}" 
+              SELECT * FROM "public"."${bTable}" 
+              ON CONFLICT DO NOTHING
+            `);
+            console.log(`✓ Copied ${pubCount} records from public."${bTable}" to company_1."${bTable}"`);
+          }
+        }
+      } catch (tableErr) {
+        // Individual table notice without breaking entire startup
+        console.warn(`⚠️ Notice preserving public."${bTable}":`, tableErr.message);
+      }
     }
-    console.log('✓ Cleaned up any orphan tenant business tables from PostgreSQL public schema');
   } catch (err) {
-    console.warn('⚠️ [PostgreSQL] Public business tables cleanup notice:', err.message);
+    console.warn('⚠️ [PostgreSQL] Data preservation notice:', err.message);
+  }
+}
+
+/**
+ * Ensures at least one active Company (Company 1) and Administrator exist in PostgreSQL.
+ */
+async function ensurePostgresDefaultCompany(client) {
+  try {
+    const compRes = await client.query("SELECT id, name FROM public.companies WHERE status != 'Inactive' OR status IS NULL LIMIT 1");
+    if (!compRes.rows || compRes.rows.length === 0) {
+      console.log('🌱 [PostgreSQL] No active company found in master schema. Ensuring Company 1 exists...');
+      await client.query(`
+        INSERT INTO public.companies (id, code, name, address, gst_number, contact, email, database_name, database_schema, status)
+        VALUES (1, 'COMP_BVC', 'BVC Exports Pvt Ltd', '123 Main Industrial Area, City', '33AABCB1234A1Z5', '9876543210', 'info@bvcexports.com', 'company_1', 'company_1', 'Active')
+        ON CONFLICT (id) DO UPDATE SET status = 'Active', name = EXCLUDED.name
+      `);
+      
+      await client.query(`
+        INSERT INTO public.database_registry (company_id, db_type, db_name, db_schema, status)
+        VALUES (1, 'postgres', 'company_1', 'company_1', 'Active')
+        ON CONFLICT (company_id) DO NOTHING
+      `);
+      console.log('✓ Default Company 1 established in PostgreSQL master schema');
+    }
+
+    // Ensure sequences are updated so serial IDs don't collide
+    await resyncPostgresSequences(client, 'public');
+    await resyncPostgresSequences(client, 'company_1');
+  } catch (compErr) {
+    console.warn('⚠️ [PostgreSQL] Notice ensuring default company:', compErr.message);
   }
 }
 
