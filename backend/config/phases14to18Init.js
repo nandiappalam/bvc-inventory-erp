@@ -171,84 +171,14 @@ async function initPhases14To18Tables() {
       )
     `);
 
-    // SEED INITIAL DATA FOR PHASES 14-18 IF EMPTY
-    const scheduleCount = await db.query('SELECT COUNT(*) as cnt FROM compliance_schedules');
-    if (parseInt(scheduleCount.rows[0]?.cnt || 0, 10) === 0) {
-      // 1. Seed Compliance Schedules
-      await db.run(`
-        INSERT INTO compliance_schedules (schedule_code, task_name, task_type, module, frequency, responsible_dept, assigned_to, priority)
-        VALUES 
-          ('SCH-001', 'Machine & Mill Deep Cleaning', 'CLEANING', 'Production', 'Daily', 'Production', 'Production Operator A', 'High'),
-          ('SCH-002', 'Godown & Warehouse Sanitization', 'CLEANING', 'Warehouse', 'Daily', 'Warehouse', 'Warehouse Supervisor', 'Medium'),
-          ('SCH-003', 'Pest Control Chemical Spray & Audit', 'PEST_CONTROL', 'Admin', 'Monthly', 'Admin', 'Pest Control Lead', 'High'),
-          ('SCH-004', 'Moisture & Weighbridge Calibration', 'CALIBRATION', 'QC', 'Quarterly', 'QC', 'QC Technician 1', 'Critical'),
-          ('SCH-005', 'Water Tank & Food Safety Inspection', 'INSPECTION', 'QC', 'Monthly', 'QC', 'Food Safety Inspector', 'High'),
-          ('SCH-006', 'Fire Safety & Cold Storage Temp Check', 'SAFETY', 'Maintenance', 'Weekly', 'Maintenance', 'Safety Officer', 'Medium')
-      `);
+    // Remove legacy example/dummy data
+    try {
+      await db.run("DELETE FROM customer_complaints WHERE complaint_no IN ('CMP-2026-001', 'CMP-2026-002', 'CMP-2026-003')");
+      await db.run("DELETE FROM recalls WHERE recall_no = 'RCL-2026-001'");
+      await db.run("DELETE FROM compliance_tasks WHERE task_code IN ('TSK-1001', 'TSK-1002', 'TSK-1003', 'TSK-1004', 'TSK-1005', 'TSK-1006')");
+    } catch (e) {}
 
-      // 2. Seed Compliance Tasks
-      const today = new Date().toISOString().split('T')[0];
-      const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
-      const next3Days = new Date(Date.now() + 3 * 86400000).toISOString().split('T')[0];
-      const past3Days = new Date(Date.now() - 3 * 86400000).toISOString().split('T')[0];
-
-      await db.run(`
-        INSERT INTO compliance_tasks (task_code, task_name, task_type, module, frequency, scheduled_date, due_date, assigned_to, priority, status, completed_at, completed_by, approved_at, approved_by, remarks)
-        VALUES 
-          ('TSK-1001', 'Machine & Mill Deep Cleaning', 'CLEANING', 'Production', 'Daily', ?, ?, 'Production Operator A', 'High', 'Approved', ?, 'Production Lead', ?, 'Super Lead', 'Cleaned main grinding rollers and sieve filters.'),
-          ('TSK-1002', 'Godown & Warehouse Sanitization', 'CLEANING', 'Warehouse', 'Daily', ?, ?, 'Warehouse Supervisor', 'Medium', 'Completed', ?, 'Warehouse Supervisor', NULL, NULL, 'Completed floor sweep and pallet spacing.'),
-          ('TSK-1003', 'Pest Control Chemical Spray & Audit', 'PEST_CONTROL', 'Admin', 'Monthly', ?, ?, 'Pest Control Lead', 'High', 'Pending Approval', NULL, NULL, NULL, NULL, 'Spraying completed for Zone A & Zone B.'),
-          ('TSK-1004', 'Moisture & Weighbridge Calibration', 'CALIBRATION', 'QC', 'Quarterly', ?, ?, 'QC Technician 1', 'Critical', 'Overdue', NULL, NULL, NULL, NULL, 'Awaiting external lab calibration standards.'),
-          ('TSK-1005', 'Water Tank & Food Safety Inspection', 'INSPECTION', 'QC', 'Monthly', ?, ?, 'Food Safety Inspector', 'High', 'In Progress', NULL, NULL, NULL, NULL, 'Water sample submitted for lab analysis.'),
-          ('TSK-1006', 'Fire Safety & Cold Storage Temp Check', 'SAFETY', 'Maintenance', 'Weekly', ?, ?, 'Safety Officer', 'Medium', 'Scheduled', NULL, NULL, NULL, NULL, 'Scheduled for routine check.')
-      `, [yesterday, yesterday, yesterday, yesterday, today, today, today, today, past3Days, past3Days, today, today, next3Days, next3Days]);
-
-      // 3. Seed Customer Complaints
-      await db.run(`
-        INSERT INTO customer_complaints (complaint_no, complaint_date, customer_name, invoice_no, sales_order_no, product_name, lot_no, qty_affected, complaint_type, description, severity, status, received_by)
-        VALUES 
-          ('CMP-2026-001', ?, 'Apex Agro Industries', 'INV-1042', 'SO-801', 'Urad Dal Premium 30kg', 'LOT000245', 150, 'Moisture', 'Elevated moisture level detected during customer QA test (14.2% vs standard 12.0%).', 'High', 'CAPA Assigned', 'Customer Support'),
-          ('CMP-2026-002', ?, 'Standard Food Distributors', 'INV-1038', 'SO-794', 'Moong Flour Fine 25kg', 'LOT000210', 50, 'Packaging', 'Bags delivered with torn outer seams leading to minor leakage.', 'Medium', 'Under Investigation', 'Logistics Officer'),
-          ('CMP-2026-003', ?, 'Royal Supermarkets Ltd', 'INV-1015', 'SO-760', 'Chana Dal Super 50kg', 'LOT000185', 200, 'Foreign Material', 'Minor dust residue reported in bulk sack lot.', 'Low', 'Resolved', 'Quality Auditor')
-      `, [past3Days, yesterday, '2026-09-01']);
-
-      // 4. Seed Complaint Investigations
-      const cmp1 = await db.query("SELECT id FROM customer_complaints WHERE complaint_no = 'CMP-2026-001'");
-      if (cmp1.rows[0]?.id) {
-        await db.run(`
-          INSERT INTO complaint_investigations (complaint_id, lot_no, qc_findings, production_findings, supplier_findings, root_cause, immediate_correction, corrective_action, preventive_action, responsible_person, target_date, capa_status)
-          VALUES 
-            (?, 'LOT000245', 'Lab test confirmed moisture content of 14.1% on retention sample.', 'Milling dryer temperature dropped from 65C to 52C during batch run.', 'Raw grain supplier purchase lot LOT-RAW-992 had normal initial moisture of 11.8%.', 'Dryer heating coil malfunction during final milling stage.', 'Quarantined remaining 800 KG stock of LOT000245 in Chamber 2.', 'Re-dry affected lot under controlled 65C air recirculation and re-test.', 'Install automated digital temperature logger with real-time audio alert on milling dryer.', 'Production Supervisor', ?, 'Action Assigned')
-        `, [cmp1.rows[0].id, next3Days]);
-      }
-
-      // 5. Seed Recall Record
-      await db.run(`
-        INSERT INTO recalls (recall_no, recall_date, product_name, lot_no, reason, severity, status, created_by)
-        VALUES 
-          ('RCL-2026-001', ?, 'Urad Dal Premium 30kg', 'LOT000245', 'Elevated moisture exceeding safety spec causing potential storage spoilage.', 'HIGH', 'CUSTOMER_NOTIFIED', 'Quality Manager')
-      `, [yesterday]);
-
-      const rcl1 = await db.query("SELECT id FROM recalls WHERE recall_no = 'RCL-2026-001'");
-      if (rcl1.rows[0]?.id) {
-        const recallId = rcl1.rows[0].id;
-        await db.run(`
-          INSERT INTO recall_lots (recall_id, lot_no, produced_qty_kg, current_stock_kg, sold_qty_kg, returned_qty_kg, quarantined_qty_kg, disposed_qty_kg)
-          VALUES 
-            (?, 'LOT000245', 5000, 800, 4000, 200, 800, 0)
-        `, [recallId]);
-
-        await db.run(`
-          INSERT INTO recall_customers (recall_id, customer_name, invoice_no, lot_no, supplied_qty_kg, contact_info, recall_status, recovered_qty_kg, credit_note_no)
-          VALUES 
-            (?, 'Apex Agro Industries', 'INV-1042', 'LOT000245', 1500, '+91 9876543210', 'RECOVERED', 1500, 'CN-2026-881'),
-            (?, 'Standard Food Distributors', 'INV-1043', 'LOT000245', 1500, '+91 9876543211', 'PARTIAL_RECOVERED', 1000, 'CN-2026-882'),
-            (?, 'Royal Supermarkets Ltd', 'INV-1044', 'LOT000245', 1000, '+91 9876543212', 'NOTIFIED', 0, NULL)
-        `, [recallId, recallId, recallId]);
-      }
-    }
-
-    console.log('✅ Phases 14–18 Database Schemas Verified & Seeded Successfully');
+    console.log('✅ Phases 14–18 Database Schemas Verified (clean without sample data)');
   } catch (err) {
     console.error('Error initializing Phases 14-18 tables:', err);
   }

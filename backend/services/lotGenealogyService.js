@@ -63,7 +63,7 @@ async function searchLots(query = '', filters = {}) {
       pi.lot_no as lotNo, 
       pi.item_name as itemName, 
       COALESCE(sm.name, p.supplier) as supplierName, 
-      SUBSTR(COALESCE(p.date, p.inv_date, ''), 1, 10) as purchaseDate, 
+      SUBSTR(COALESCE(CAST(p.date AS TEXT), CAST(p.inv_date AS TEXT), ''), 1, 10) as purchaseDate, 
       COALESCE(NULLIF(p.voucher_no, ''), NULLIF(p.inv_no, ''), NULLIF(p.po_no, ''), 'PUR-' || CAST(p.s_no AS TEXT)) as voucherNo
     FROM purchase_items pi
     JOIN purchases p ON pi.purchase_id = p.id
@@ -92,7 +92,7 @@ async function searchLots(query = '', filters = {}) {
       goi.lot_no as lotNo, 
       goi.item_name as itemName, 
       g.work_order_no as workOrderNo, 
-      SUBSTR(g.date, 1, 10) as millingDate,
+      SUBSTR(CAST(g.date AS TEXT), 1, 10) as millingDate,
       COALESCE(fmm.flourmill, g.flour_mill, 'BVC MILL') as flourMill
     FROM grain_output_items goi
     JOIN grains g ON goi.grain_id = g.id
@@ -116,7 +116,7 @@ async function searchLots(query = '', filters = {}) {
 
   // 4. Search work orders outputs
   const woLots = await db.query(`
-    SELECT DISTINCT fg_lot_no as lotNo, output_item as itemName, wo.work_order_no as workOrderNo, SUBSTR(wo.date, 1, 10) as date
+    SELECT DISTINCT fg_lot_no as lotNo, output_item as itemName, wo.work_order_no as workOrderNo, SUBSTR(CAST(wo.date AS TEXT), 1, 10) as date
     FROM work_order_outputs woo
     LEFT JOIN work_orders wo ON woo.work_order_id = wo.id
     WHERE fg_lot_no IS NOT NULL AND fg_lot_no != '' ${q ? 'AND (LOWER(fg_lot_no) LIKE ? OR LOWER(output_item) LIKE ?)' : ''}
@@ -164,7 +164,7 @@ async function getLotDetails(lotNo) {
       COALESCE(NULLIF(p.voucher_no, ''), NULLIF(p.inv_no, ''), NULLIF(p.po_no, ''), 'PUR-' || p.s_no, 'PUR-' || p.id) as voucherNo,
       p.inv_no as invNo,
       p.po_no as poNo,
-      SUBSTR(COALESCE(p.date, p.inv_date, ''), 1, 10) as purchaseDate,
+      SUBSTR(COALESCE(CAST(p.date AS TEXT), CAST(p.inv_date AS TEXT), ''), 1, 10) as purchaseDate,
       COALESCE(sm.name, NULLIF(p.supplier, '')) as supplierName,
       sm.phone_res as supplierPhone,
       COALESCE(NULLIF(p.vehicle_no, ''), NULLIF(p.lorry_no, ''), 'N/A') as vehicleNo,
@@ -196,7 +196,7 @@ async function getLotDetails(lotNo) {
     SELECT 
       g.id as grain_id,
       g.s_no as grain_s_no,
-      SUBSTR(g.date, 1, 10) as milling_date,
+      SUBSTR(CAST(g.date AS TEXT), 1, 10) as milling_date,
       g.work_order_no,
       COALESCE(fmm.flourmill, g.flour_mill, 'BVC MILL') as flour_mill_name,
       gii.lot_no as input_lot_no,
@@ -248,7 +248,7 @@ async function getLotDetails(lotNo) {
 
   // 5. Also check work orders (if any)
   const woInputRes = await db.query(`
-    SELECT woi.*, wo.work_order_no, SUBSTR(wo.date, 1, 10) as work_order_date, wo.work_unit, wo.product as target_product
+    SELECT woi.*, wo.work_order_no, SUBSTR(CAST(wo.date AS TEXT), 1, 10) as work_order_date, wo.work_unit, wo.product as target_product
     FROM work_order_items woi
     JOIN work_orders wo ON woi.work_order_id = wo.id
     WHERE LOWER(woi.lot_no) = LOWER(?)
@@ -266,7 +266,7 @@ async function getLotDetails(lotNo) {
   }
 
   const woOutputRes = await db.query(`
-    SELECT woo.*, wo.work_order_no, SUBSTR(wo.date, 1, 10) as work_order_date, wo.work_unit, wo.product as finished_product
+    SELECT woo.*, wo.work_order_no, SUBSTR(CAST(wo.date AS TEXT), 1, 10) as work_order_date, wo.work_unit, wo.product as finished_product
     FROM work_order_outputs woo
     JOIN work_orders wo ON woo.work_order_id = wo.id
     WHERE LOWER(woo.fg_lot_no) = LOWER(?)
@@ -305,7 +305,7 @@ async function getLotDetails(lotNo) {
         COALESCE(NULLIF(p.voucher_no, ''), NULLIF(p.inv_no, ''), NULLIF(p.po_no, ''), 'PUR-' || p.s_no, 'PUR-' || p.id) as voucherNo,
         p.inv_no as invNo,
         p.po_no as poNo,
-        SUBSTR(COALESCE(p.date, p.inv_date, ''), 1, 10) as purchaseDate,
+        SUBSTR(COALESCE(CAST(p.date AS TEXT), CAST(p.inv_date AS TEXT), ''), 1, 10) as purchaseDate,
         COALESCE(sm.name, NULLIF(p.supplier, '')) as supplierName,
         sm.phone_res as supplierPhone,
         COALESCE(NULLIF(p.vehicle_no, ''), NULLIF(p.lorry_no, ''), 'N/A') as vehicleNo,
@@ -365,7 +365,7 @@ async function getLotDetails(lotNo) {
 
   // 8. Jobwork Movements (Flour Out)
   const jobworkOutRes = await db.query(`
-    SELECT foi.*, SUBSTR(fo.date, 1, 10) as dispatch_date, COALESCE(pcm.name, fo.papad_company) as contractor_name, fo.s_no as dispatch_no
+    SELECT foi.*, SUBSTR(CAST(fo.date AS TEXT), 1, 10) as dispatch_date, COALESCE(pcm.name, fo.papad_company) as contractor_name, fo.s_no as dispatch_no
     FROM flour_out_items foi
     JOIN flour_out fo ON foi.flour_out_id = fo.id
     LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(fo.papad_company AS TEXT) OR pcm.name = fo.papad_company)
@@ -374,7 +374,7 @@ async function getLotDetails(lotNo) {
 
   // 9. Sales Dispatches
   const salesRes = await db.query(`
-    SELECT si.*, s.s_no as bill_no, SUBSTR(s.date, 1, 10) as invoice_date, s.customer as customer_name, s.pur_trans as transport, s.lorry_no as vehicle_no
+    SELECT si.*, s.s_no as bill_no, SUBSTR(CAST(s.date AS TEXT), 1, 10) as invoice_date, s.customer as customer_name, s.pur_trans as transport, s.lorry_no as vehicle_no
     FROM sales_items si
     JOIN sales s ON si.sales_id = s.id
     WHERE LOWER(si.lot_no) = LOWER(?)
@@ -485,7 +485,7 @@ async function buildForwardTrace(lotNo) {
 
         // Check if output lot went to jobwork or sales
         const childSales = await db.query(`
-          SELECT si.*, s.s_no as bill_no, s.customer as customer_name, SUBSTR(s.date, 1, 10) as invoice_date
+          SELECT si.*, s.s_no as bill_no, s.customer as customer_name, SUBSTR(CAST(s.date AS TEXT), 1, 10) as invoice_date
           FROM sales_items si
           JOIN sales s ON si.sales_id = s.id
           WHERE LOWER(si.lot_no) = LOWER(?)

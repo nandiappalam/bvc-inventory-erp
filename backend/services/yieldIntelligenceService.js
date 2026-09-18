@@ -70,7 +70,7 @@ async function getBatchYieldList(filters = {}) {
     SELECT 
       g.id,
       COALESCE(NULLIF(g.work_order_no, ''), 'MILL-' || CAST(g.s_no AS TEXT)) as batchNo,
-      SUBSTR(COALESCE(g.date, g.created_at, ''), 1, 10) as batchDate,
+      SUBSTR(COALESCE(CAST(g.date AS TEXT), CAST(g.created_at AS TEXT), ''), 1, 10) as batchDate,
       COALESCE(fmm.flourmill, g.flour_mill, 'BVC MILL') as machineLine,
       COALESCE(goi.item_name, 'Urad Flour') as productName,
       gii.lot_no as rawLotNo,
@@ -120,7 +120,7 @@ async function getBatchYieldList(filters = {}) {
     SELECT 
       wo.id,
       wo.work_order_no as batchNo,
-      SUBSTR(wo.date, 1, 10) as batchDate,
+      SUBSTR(CAST(wo.date AS TEXT), 1, 10) as batchDate,
       wo.work_unit as machineLine,
       wo.product as productName,
       wo.status,

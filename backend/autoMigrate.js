@@ -1871,74 +1871,16 @@ module.exports = async function autoMigrate() {
         VALUES ('MIX-01', 'Industrial Double-Cone Flour Blender', 'Mixing', 500, 20, 30, 15, 'READY', NULL, NULL, NULL, 0, NULL, NULL, 'Praveen K', 97.4)
       `);
 
+      // Keep production units clean
       await db.run(`
-        INSERT INTO production_units (unit_code, unit_name, process_stage, capacity_kg_per_hr, setup_time_mins, cleaning_time_mins, qc_time_mins, status, current_job_id, current_job_code, current_product, current_input_qty, started_at, expected_finish_at, operator, efficiency_pct)
-        VALUES ('PCK-01', 'Automated Form-Fill-Seal Packaging Line', 'Packing', 300, 15, 15, 10, 'READY', NULL, NULL, NULL, 0, NULL, NULL, 'Anand R', 95.8)
-      `);
-    }
-
-    // Seed default Production Queue if empty
-    const queueCheck = await db.query('SELECT COUNT(*) as cnt FROM production_queue');
-    if ((queueCheck.rows?.[0]?.cnt || 0) === 0) {
-      console.log('Seeding initial Factory Production Queue & Priority Orders...');
+        DELETE FROM production_queue WHERE source_ref_no IN ('PO-2026-0045', 'PO-2026-0048', 'PO-2026-0051', 'QT-2026-0089', 'PO-2026-0055');
+      `).catch(() => {});
       await db.run(`
-        INSERT INTO production_queue (queue_no, order_type, source_ref_no, customer_name, product_name, ordered_qty, required_qty, due_date, priority, priority_score, priority_reason, material_status, assigned_unit_code, current_stage, status, estimated_duration_mins, started_at)
-        VALUES (1, 'SALES_PO', 'PO-2026-0045', 'ABC Foods', 'Urad Flour', 1000, 700, '2026-09-20', 'URGENT', 96, 'Due in 3 days; 100% material in stock; Grinding Unit ready', 'AVAILABLE', 'CLN-01', 'Cleaning', 'RUNNING', 213, datetime('now', '-45 minutes'))
-      `);
-
+        DELETE FROM demand_forecast_records WHERE customer_name IN ('ABC Foods', 'XYZ Foods', 'PQR Foods', 'Lakshmi Traders & Agencies');
+      `).catch(() => {});
       await db.run(`
-        INSERT INTO production_queue (queue_no, order_type, source_ref_no, customer_name, product_name, ordered_qty, required_qty, due_date, priority, priority_score, priority_reason, material_status, assigned_unit_code, current_stage, status, estimated_duration_mins)
-        VALUES (2, 'SALES_PO', 'PO-2026-0048', 'XYZ Foods', 'Rice Flour', 500, 500, '2026-09-19', 'HIGH', 88, 'Due tomorrow; Raw rice available in Godown A', 'AVAILABLE', 'GRD-01', 'Grinding', 'QUEUED', 145)
-      `);
-
-      await db.run(`
-        INSERT INTO production_queue (queue_no, order_type, source_ref_no, customer_name, product_name, ordered_qty, required_qty, due_date, priority, priority_score, priority_reason, material_status, assigned_unit_code, current_stage, status, estimated_duration_mins)
-        VALUES (3, 'SALES_PO', 'PO-2026-0051', 'Chennai Super Foods', 'Special Papad 100g', 800, 450, '2026-09-24', 'NORMAL', 72, 'Standard delivery window; Partial stock available (350 KG ATP)', 'AVAILABLE', 'MIX-01', 'Mixing', 'QUEUED', 170)
-      `);
-
-      await db.run(`
-        INSERT INTO production_queue (queue_no, order_type, source_ref_no, customer_name, product_name, ordered_qty, required_qty, due_date, priority, priority_score, priority_reason, material_status, assigned_unit_code, current_stage, status, estimated_duration_mins)
-        VALUES (4, 'QUOTATION_DEMAND', 'QT-2026-0089', 'Madurai Grain Corp', 'Urad Flour Fine', 800, 800, '2026-09-25', 'PLANNED', 65, 'Potential quotation demand signal awaiting PO confirmation', 'AVAILABLE', 'GRD-01', 'Planning', 'QUEUED', 190)
-      `);
-
-      await db.run(`
-        INSERT INTO production_queue (queue_no, order_type, source_ref_no, customer_name, product_name, ordered_qty, required_qty, due_date, priority, priority_score, priority_reason, material_status, assigned_unit_code, current_stage, status, estimated_duration_mins)
-        VALUES (5, 'SALES_PO', 'PO-2026-0055', 'Southern Spice Distributors', 'Roasted Gram Flour', 600, 600, '2026-09-28', 'WAITING_MATERIAL', 45, 'Raw gram lot pending QC laboratory clearance', 'SHORTAGE', 'GRD-01', 'Waiting Material', 'QUEUED', 160)
-      `);
-    }
-
-    // Seed default Demand Forecast & MTS records
-    const forecastCheck = await db.query('SELECT COUNT(*) as cnt FROM demand_forecast_records');
-    if ((forecastCheck.rows?.[0]?.cnt || 0) === 0) {
-      console.log('Seeding initial Customer Demand Forecast & Make-to-Stock records...');
-      await db.run(`
-        INSERT INTO demand_forecast_records (customer_name, product_name, historical_avg_qty, last_month_qty, quotation_pipeline_qty, confirmed_po_qty, current_stock_atp, forecast_demand_qty, recommended_production_qty, confidence_score, recommendation_status)
-        VALUES ('ABC Foods', 'Urad Flour', 1200, 1400, 800, 1000, 300, 1200, 500, 92, 'RECOMMENDED')
-      `);
-
-      await db.run(`
-        INSERT INTO demand_forecast_records (customer_name, product_name, historical_avg_qty, last_month_qty, quotation_pipeline_qty, confirmed_po_qty, current_stock_atp, forecast_demand_qty, recommended_production_qty, confidence_score, recommendation_status)
-        VALUES ('XYZ Foods', 'Rice Flour', 650, 700, 300, 500, 150, 650, 350, 88, 'RECOMMENDED')
-      `);
-
-      await db.run(`
-        INSERT INTO demand_forecast_records (customer_name, product_name, historical_avg_qty, last_month_qty, quotation_pipeline_qty, confirmed_po_qty, current_stock_atp, forecast_demand_qty, recommended_production_qty, confidence_score, recommendation_status, approved_by, approved_at)
-        VALUES ('PQR Foods', 'Special Papad 100g', 900, 850, 500, 800, 200, 900, 400, 85, 'APPROVED', 'Plant Manager - Shanmugam', datetime('now', '-2 hours'))
-      `);
-
-      await db.run(`
-        INSERT INTO demand_forecast_records (customer_name, product_name, historical_avg_qty, last_month_qty, quotation_pipeline_qty, confirmed_po_qty, current_stock_atp, forecast_demand_qty, recommended_production_qty, confidence_score, recommendation_status)
-        VALUES ('Lakshmi Traders & Agencies', 'Moong Flour', 450, 400, 200, 300, 100, 450, 250, 82, 'RECOMMENDED')
-      `);
-    }
-
-    // Seed default Cleaning / Changeover record
-    const cleaningCheck = await db.query('SELECT COUNT(*) as cnt FROM cleaning_changeover_orders');
-    if ((cleaningCheck.rows?.[0]?.cnt || 0) === 0) {
-      await db.run(`
-        INSERT INTO cleaning_changeover_orders (cleaning_code, unit_code, previous_product, next_product, allergen_risk, cleaning_type, duration_mins, status, operator_name, verified_by, qc_status, remarks, completed_at)
-        VALUES ('CLN-2026-0012', 'GRD-01', 'Urad Flour', 'Rice Flour', 'Low', 'Dry Air Purge & High-Pressure Sanitation', 25, 'VERIFIED', 'Suresh Kumar', 'Karthik Raja (QA In-charge)', 'PASSED', 'Residue swab test passed, zero cross-contamination detected', datetime('now', '-3 hours'))
-      `);
+        DELETE FROM cleaning_changeover_orders WHERE cleaning_code = 'CLN-2026-0012';
+      `).catch(() => {});
     }
   } catch (schemaErr) {
     console.log('Notice creating manufacturing & traceability tables in autoMigrate:', schemaErr.message);

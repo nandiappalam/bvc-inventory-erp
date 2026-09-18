@@ -5,14 +5,13 @@ const db = require('../config/database');
 // GET Executive BI Center KPI Metrics & Comprehensive Analytics
 router.get('/dashboard', async (req, res) => {
   try {
-    // 1. Core Financial Metrics from Purchases, Sales, Stock & Vouchers
-    let totalSales = 2450000;
-    let totalPurchases = 1650000;
-    let stockValue = 890000;
-    let totalStockKg = 45000;
-    let quarantineStockKg = 800;
-    let inputKg = 58000;
-    let outputKg = 43600;
+    let totalSales = 0;
+    let totalPurchases = 0;
+    let stockValue = 0;
+    let totalStockKg = 0;
+    let quarantineStockKg = 0;
+    let inputKg = 0;
+    let outputKg = 0;
 
     try {
       const salesAgg = await db.query(`
@@ -21,8 +20,8 @@ router.get('/dashboard', async (req, res) => {
           COALESCE(COUNT(*), 0) as sales_count
         FROM sales
       `);
-      if (salesAgg.rows && salesAgg.rows[0] && parseFloat(salesAgg.rows[0].total_sales) > 0) {
-        totalSales = parseFloat(salesAgg.rows[0].total_sales);
+      if (salesAgg.rows && salesAgg.rows[0]) {
+        totalSales = parseFloat(salesAgg.rows[0].total_sales || 0);
       }
     } catch (e) {
       console.warn('Could not query sales metrics for BI:', e.message);
@@ -35,8 +34,8 @@ router.get('/dashboard', async (req, res) => {
           COALESCE(COUNT(*), 0) as purchase_count
         FROM purchases
       `);
-      if (purAgg.rows && purAgg.rows[0] && parseFloat(purAgg.rows[0].total_purchases) > 0) {
-        totalPurchases = parseFloat(purAgg.rows[0].total_purchases);
+      if (purAgg.rows && purAgg.rows[0]) {
+        totalPurchases = parseFloat(purAgg.rows[0].total_purchases || 0);
       }
     } catch (e) {
       console.warn('Could not query purchase metrics for BI:', e.message);
@@ -45,18 +44,15 @@ router.get('/dashboard', async (req, res) => {
     try {
       const stockAgg = await db.query(`
         SELECT 
-          COALESCE(SUM(remaining_quantity * 45), 0) as stock_value,
+          COALESCE(SUM(remaining_quantity * COALESCE(rate, 45)), 0) as stock_value,
           COALESCE(SUM(remaining_quantity), 0) as total_stock_kg,
-          COALESCE(SUM(CASE WHEN qc_status = 'QUARANTINE' THEN remaining_quantity ELSE 0 END), 0) as quarantine_stock_kg
+          COALESCE(SUM(CASE WHEN qc_status = 'QUARANTINE' OR qc_status = 'HOLD' THEN remaining_quantity ELSE 0 END), 0) as quarantine_stock_kg
         FROM stock_lots
       `);
       if (stockAgg.rows && stockAgg.rows[0]) {
-        const sv = parseFloat(stockAgg.rows[0].stock_value || 0);
-        const tsk = parseFloat(stockAgg.rows[0].total_stock_kg || 0);
-        const qsk = parseFloat(stockAgg.rows[0].quarantine_stock_kg || 0);
-        if (sv > 0) stockValue = sv;
-        if (tsk > 0) totalStockKg = tsk;
-        if (qsk > 0) quarantineStockKg = qsk;
+        stockValue = parseFloat(stockAgg.rows[0].stock_value || 0);
+        totalStockKg = parseFloat(stockAgg.rows[0].total_stock_kg || 0);
+        quarantineStockKg = parseFloat(stockAgg.rows[0].quarantine_stock_kg || 0);
       }
     } catch (e) {
       console.warn('Could not query stock_lots metrics for BI:', e.message);
@@ -65,23 +61,27 @@ router.get('/dashboard', async (req, res) => {
     try {
       const prodAgg = await db.query(`
         SELECT 
-          COALESCE((SELECT SUM(total_wt) FROM grain_input_items), 0) as input_kg,
-          COALESCE((SELECT SUM(total_wt) FROM grain_output_items), 0) as output_kg
+          COALESCE((SELECT SUM(COALESCE(total_wt, qty * 50)) FROM grain_input_items), 0) as input_kg,
+          COALESCE((SELECT SUM(COALESCE(total_wt, qty * 50)) FROM grain_output_items), 0) as output_kg
       `);
       if (prodAgg.rows && prodAgg.rows[0]) {
-        const inp = parseFloat(prodAgg.rows[0].input_kg || 0);
-        const out = parseFloat(prodAgg.rows[0].output_kg || 0);
-        if (inp > 0) inputKg = inp;
-        if (out > 0) outputKg = out;
+        inputKg = parseFloat(prodAgg.rows[0].input_kg || 0);
+        outputKg = parseFloat(prodAgg.rows[0].output_kg || 0);
       }
     } catch (e) {
       console.warn('Could not query production metrics for BI:', e.message);
     }
 
-    const avgYield = inputKg > 0 ? ((outputKg / inputKg) * 100).toFixed(1) : 75.0;
+    let qcIssuesCount = 0;
+    try {
+      const qcRes = await db.query(`SELECT COUNT(*) as cnt FROM qc_inspections WHERE overall_result = 'REJECTED' OR overall_result = 'HOLD'`);
+      qcIssuesCount = parseInt(qcRes.rows?.[0]?.cnt || 0, 10);
+    } catch (e) {}
+
+    const avgYield = inputKg > 0 ? ((outputKg / inputKg) * 100).toFixed(1) : 0;
     const processingCost = totalPurchases * 0.08;
-    const grossMargin = totalSales - (totalPurchases + processingCost);
-    const marginPct = totalSales > 0 ? ((grossMargin / totalSales) * 100).toFixed(1) : 28.5;
+    const grossMargin = totalSales > 0 ? (totalSales - (totalPurchases + processingCost)) : 0;
+    const marginPct = totalSales > 0 ? ((grossMargin / totalSales) * 100).toFixed(1) : 0;
 
     const kpis = {
       revenue: totalSales,
@@ -91,13 +91,13 @@ router.get('/dashboard', async (req, res) => {
       stockValue,
       totalStockKg,
       quarantineStockKg,
-      receivables: 420000,
-      payables: 310000,
+      receivables: 0,
+      payables: 0,
       productionInputKg: inputKg,
       productionOutputKg: outputKg,
       yieldPct: parseFloat(avgYield),
-      qcIssuesCount: 4,
-      inventoryTurnover: 4.8
+      qcIssuesCount,
+      inventoryTurnover: stockValue > 0 ? Number((totalPurchases / stockValue).toFixed(1)) : 0
     };
 
     res.json({ success: true, kpis });
@@ -110,23 +110,11 @@ router.get('/dashboard', async (req, res) => {
 // GET Purchase Analytics & Supplier Performance
 router.get('/purchase-analytics', async (req, res) => {
   try {
-    // 1. Fetch supplier master lookup map
-    const defaultSupplierNames = {
-      '1': 'Sri Venkateshwara Agro Mills',
-      '2': 'Apex Agro Commodities',
-      '3': 'National Grain Merchants',
-      '4': 'Sunshine Milling Traders',
-      '5': 'Kaveri Agro Industries'
-    };
-
-    let suppMap = { ...defaultSupplierNames };
+    let suppMap = {};
     try {
       const suppMasterRes = await db.query('SELECT id, name, print_name FROM supplier_master');
       (suppMasterRes.rows || []).forEach(s => {
         let display = (s.name || s.print_name || '').trim();
-        if (!display || /^\d+$/.test(display)) {
-          display = defaultSupplierNames[String(s.id)] || `Supplier #${s.id}`;
-        }
         if (s.id) suppMap[String(s.id)] = display;
         if (s.name) suppMap[String(s.name).toLowerCase().trim()] = display;
         if (s.print_name) suppMap[String(s.print_name).toLowerCase().trim()] = display;
@@ -136,7 +124,6 @@ router.get('/purchase-analytics', async (req, res) => {
     }
 
     let suppliers = [];
-
     try {
       const purchasesRes = await db.query(`
         SELECT 
@@ -157,9 +144,8 @@ router.get('/purchase-analytics', async (req, res) => {
         purchasesRes.rows.forEach(p => {
           let rawSupp = String(p.s_name || p.supplier || '').trim();
           let suppName = suppMap[rawSupp] || suppMap[rawSupp.toLowerCase()] || rawSupp;
-          if (!suppName || /^\d+$/.test(suppName) || suppName === 'undefined' || suppName === 'null') {
-            const matchedId = String(rawSupp).match(/\d+/) ? String(rawSupp).match(/\d+/)[0] : '1';
-            suppName = defaultSupplierNames[matchedId] || `Supplier #${matchedId}`;
+          if (!suppName || suppName === 'undefined' || suppName === 'null') {
+            suppName = `Supplier #${p.supplier || '1'}`;
           }
 
           if (!supplierAgg[suppName]) {
@@ -167,9 +153,9 @@ router.get('/purchase-analytics', async (req, res) => {
               supplier: suppName,
               spend: 0,
               orders: 0,
-              qualityScore: 95.0 + ((suppName.charCodeAt(0) % 5) * 0.8),
-              deliveryPerformance: '98%',
-              returnPct: '0.5%'
+              qualityScore: 95.0,
+              deliveryPerformance: '100%',
+              returnPct: '0%'
             };
           }
           supplierAgg[suppName].spend += parseFloat(p.amount || 0);
@@ -182,15 +168,7 @@ router.get('/purchase-analytics', async (req, res) => {
       console.warn('Could not query purchases for supplier breakdown:', e.message);
     }
 
-    if (suppliers.length === 0) {
-      suppliers = [
-        { supplier: 'Sri Venkateshwara Agro Mills', spend: 850000, orders: 12, qualityScore: 96.2, deliveryPerformance: '98%', returnPct: '0.5%' },
-        { supplier: 'Apex Agro Commodities', spend: 520000, orders: 8, qualityScore: 98.4, deliveryPerformance: '100%', returnPct: '0.2%' },
-        { supplier: 'National Grain Merchants', spend: 280000, orders: 4, qualityScore: 91.0, deliveryPerformance: '92%', returnPct: '1.8%' }
-      ];
-    } else {
-      suppliers.sort((a, b) => b.spend - a.spend);
-    }
+    suppliers.sort((a, b) => b.spend - a.spend);
 
     let itemTrends = [];
     try {
@@ -227,7 +205,7 @@ router.get('/production-analytics', async (req, res) => {
       const batchesRes = await db.query(`
         SELECT 
           g.id, 
-          g.date, 
+          SUBSTR(COALESCE(CAST(g.date AS TEXT), CAST(g.created_at AS TEXT), ''), 1, 10) as date, 
           COALESCE((SELECT SUM(gi.total_wt) FROM grain_input_items gi WHERE gi.grain_id = g.id), 0) as input_kg,
           COALESCE((SELECT SUM(go.total_wt) FROM grain_output_items go WHERE go.grain_id = g.id), 0) as output_kg,
           g.remarks
@@ -240,13 +218,32 @@ router.get('/production-analytics', async (req, res) => {
       console.warn('Could not query batches for production-analytics:', e.message);
     }
 
-    const monthlyTrends = [
-      { month: 'May 2026', inputKg: 42000, outputKg: 31000, yieldPct: 73.8, wastagePct: 2.2, costPerKg: 32.5 },
-      { month: 'Jun 2026', inputKg: 48000, outputKg: 35800, yieldPct: 74.6, wastagePct: 1.9, costPerKg: 31.8 },
-      { month: 'Jul 2026', inputKg: 51000, outputKg: 37200, yieldPct: 72.9, wastagePct: 2.5, costPerKg: 33.1 },
-      { month: 'Aug 2026', inputKg: 55000, outputKg: 41250, yieldPct: 75.0, wastagePct: 1.8, costPerKg: 31.2 },
-      { month: 'Sep 2026', inputKg: 58000, outputKg: 43600, yieldPct: 75.2, wastagePct: 1.7, costPerKg: 30.9 }
-    ];
+    let monthlyTrends = [];
+    try {
+      const monthlyRes = await db.query(`
+        SELECT 
+          SUBSTR(COALESCE(CAST(g.date AS TEXT), CAST(g.created_at AS TEXT), ''), 1, 7) as month,
+          SUM(COALESCE((SELECT SUM(gi.total_wt) FROM grain_input_items gi WHERE gi.grain_id = g.id), 0)) as inputKg,
+          SUM(COALESCE((SELECT SUM(go.total_wt) FROM grain_output_items go WHERE go.grain_id = g.id), 0)) as outputKg
+        FROM grains g
+        GROUP BY SUBSTR(COALESCE(CAST(g.date AS TEXT), CAST(g.created_at AS TEXT), ''), 1, 7)
+        ORDER BY month DESC
+        LIMIT 6
+      `);
+      monthlyTrends = (monthlyRes.rows || []).map(r => {
+        const inp = parseFloat(r.inputKg || 0);
+        const out = parseFloat(r.outputKg || 0);
+        const yld = inp > 0 ? Number(((out / inp) * 100).toFixed(1)) : 0;
+        return {
+          month: r.month || 'Current',
+          inputKg: inp,
+          outputKg: out,
+          yieldPct: yld,
+          wastagePct: inp > out ? Number((((inp - out) / inp) * 100).toFixed(1)) : 0,
+          costPerKg: 0
+        };
+      });
+    } catch (e) {}
 
     res.json({
       success: true,
@@ -261,12 +258,26 @@ router.get('/production-analytics', async (req, res) => {
 // GET Margin & Cost Intelligence
 router.get('/margin-intelligence', async (req, res) => {
   try {
-    const products = [
-      { product: 'Urad Dal Premium 30kg', purchaseCost: 82.0, processingCost: 4.5, jobworkCost: 2.0, packingCost: 1.5, freightCost: 2.0, totalCost: 92.0, sellingPrice: 125.0, margin: 33.0, marginPct: 26.4 },
-      { product: 'Moong Flour Fine 25kg', purchaseCost: 74.0, processingCost: 5.0, jobworkCost: 1.8, packingCost: 1.2, freightCost: 1.8, totalCost: 83.8, sellingPrice: 112.0, margin: 28.2, marginPct: 25.2 },
-      { product: 'Chana Dal Super 50kg', purchaseCost: 58.0, processingCost: 3.8, jobworkCost: 1.5, packingCost: 1.0, freightCost: 1.5, totalCost: 65.8, sellingPrice: 90.0, margin: 24.2, marginPct: 26.9 },
-      { product: 'Papad Special Grade A', purchaseCost: 110.0, processingCost: 12.0, jobworkCost: 8.0, packingCost: 4.0, freightCost: 3.0, totalCost: 137.0, sellingPrice: 195.0, margin: 58.0, marginPct: 29.7 }
-    ];
+    let products = [];
+    try {
+      const itemsRes = await db.query(`
+        SELECT DISTINCT item_name FROM items WHERE status = 'Active' OR status = '1'
+        UNION
+        SELECT DISTINCT item_name FROM purchase_items
+      `);
+      products = (itemsRes.rows || []).map(row => ({
+        product: row.item_name,
+        purchaseCost: 0,
+        processingCost: 0,
+        jobworkCost: 0,
+        packingCost: 0,
+        freightCost: 0,
+        totalCost: 0,
+        sellingPrice: 0,
+        margin: 0,
+        marginPct: 0
+      }));
+    } catch (e) {}
 
     res.json({ success: true, products });
   } catch (err) {
