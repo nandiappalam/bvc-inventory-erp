@@ -1,7 +1,7 @@
-const express = require('express')
-const router = express.Router()
-const db = require('../config/database')
-const bcrypt = require('bcryptjs')
+const express = require('express');
+const router = express.Router();
+const db = require('../config/database');
+const bcrypt = require('bcryptjs');
 
 // Helper for database operations on the master database
 const masterDb = {
@@ -20,11 +20,11 @@ const masterDb = {
 };
 
 // ============================================================================
-// AUTH TABLES MANAGEMENT - Ensure tables exist with password expiry columns
+// AUTH TABLES MANAGEMENT - Ensure tables & columns exist on SQLite & PostgreSQL
 // ============================================================================
 const createAuthTables = async () => {
   try {
-    console.log('Ensuring auth tables on master database...');
+    console.log('Ensuring auth tables and columns on database...');
     
     // Create companies table
     await masterDb.run(`
@@ -43,7 +43,7 @@ const createAuthTables = async () => {
       )
     `);
 
-    // Create users table with password expiry settings
+    // Create users table with all security and expiry columns
     await masterDb.run(`
       CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT, 
@@ -60,24 +60,35 @@ const createAuthTables = async () => {
       )
     `);
 
-    // Ensure password_expiry_days column exists in existing users table
+    // Ensure password_expiry_days & password_last_changed exist in existing users table
     try {
       if (db.isPostgres) {
-        const poolClient = await db.master.getConnection();
-        await poolClient.query(`
-          ALTER TABLE public.users ADD COLUMN IF NOT EXISTS password_expiry_days INTEGER DEFAULT 90;
-          ALTER TABLE public.users ADD COLUMN IF NOT EXISTS password_last_changed TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
-        `);
-        poolClient.release();
+        if (db.master && typeof db.master.getConnection === 'function') {
+          const poolClient = await db.master.getConnection();
+          try {
+            await poolClient.query(`
+              ALTER TABLE public.users ADD COLUMN IF NOT EXISTS password_expiry_days INTEGER DEFAULT 90;
+              ALTER TABLE public.users ADD COLUMN IF NOT EXISTS password_last_changed TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+            `);
+          } catch (_) {}
+          poolClient.release();
+        }
+        await masterDb.run(`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_expiry_days INTEGER DEFAULT 90`).catch(() => {});
+        await masterDb.run(`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_last_changed TIMESTAMP DEFAULT CURRENT_TIMESTAMP`).catch(() => {});
       } else {
         const pragmaInfo = await masterDb.query("PRAGMA table_info(users)");
-        const hasExpiry = pragmaInfo.rows && pragmaInfo.rows.some(c => c.name === 'password_expiry_days');
-        if (!hasExpiry) {
-          await masterDb.run("ALTER TABLE users ADD COLUMN password_expiry_days INTEGER DEFAULT 90");
-          await masterDb.run("ALTER TABLE users ADD COLUMN password_last_changed DATETIME DEFAULT CURRENT_TIMESTAMP");
+        const colNames = (pragmaInfo.rows || []).map(c => c.name);
+        if (!colNames.includes('password_expiry_days')) {
+          await masterDb.run("ALTER TABLE users ADD COLUMN password_expiry_days INTEGER DEFAULT 90").catch(() => {});
+        }
+        if (!colNames.includes('password_last_changed')) {
+          await masterDb.run("ALTER TABLE users ADD COLUMN password_last_changed TEXT").catch(() => {});
+          await masterDb.run("UPDATE users SET password_last_changed = datetime('now') WHERE password_last_changed IS NULL").catch(() => {});
         }
       }
-    } catch (_) {}
+    } catch (colErr) {
+      console.warn('Notice ensuring user table columns:', colErr.message);
+    }
 
     // Create user_permissions table
     await masterDb.run(`
@@ -108,7 +119,7 @@ const createAuthTables = async () => {
       )
     `);
 
-    console.log('✅ Auth tables initialized successfully');
+    console.log('✅ Auth tables and columns initialized successfully');
   } catch (error) {
     console.error('Auth tables init error:', error.message);
   }
@@ -117,13 +128,14 @@ const createAuthTables = async () => {
 createAuthTables();
 
 // ============================================================================
-// SEED DEFAULT DATA
+// SEED DEFAULT DATA & CREDENTIALS
 // ============================================================================
 const seedDefaultData = async () => {
   try {
+    await createAuthTables();
+
     const saltRounds = 10;
     const adminPasswordHash = await bcrypt.hash('admin123', saltRounds);
-    const staffPasswordHash = await bcrypt.hash('staff123', saltRounds);
 
     // Ensure default Company 1 exists
     const companies = await masterDb.query("SELECT * FROM companies ORDER BY id ASC");
@@ -153,7 +165,7 @@ const seedDefaultData = async () => {
         await masterDb.run(
           'INSERT INTO users (username, password_hash, role, status, company_id, password_expiry_days) VALUES (?, ?, ?, ?, ?, ?)',
           ['admin', adminPasswordHash, 'Admin', 'Active', compId, 90]
-        );
+        ).catch(() => {});
       }
     }
   } catch (error) {
@@ -161,7 +173,7 @@ const seedDefaultData = async () => {
   }
 };
 
-setTimeout(seedDefaultData, 1500);
+setTimeout(seedDefaultData, 1000);
 
 // ============================================================================
 // API ROUTES
@@ -212,11 +224,11 @@ router.post('/login', async (req, res) => {
     // 1. Check company-specific user matching username in master database
     if (companyIdNum) {
       const companyUsers = await masterDb.query(
-        'SELECT id, username, password_hash, role, status, company_id, password_expiry_days, password_last_changed FROM users WHERE LOWER(TRIM(username)) = LOWER(TRIM(?)) AND (company_id = ? OR company_id IS NULL)',
+        'SELECT * FROM users WHERE LOWER(TRIM(username)) = LOWER(TRIM(?)) AND (company_id = ? OR company_id IS NULL)',
         [trimmedUsername, companyIdNum]
       );
 
-      for (const candidate of companyUsers.rows) {
+      for (const candidate of (companyUsers.rows || [])) {
         let matches = false;
         if (candidate.password_hash && candidate.password_hash.startsWith('$2')) {
           matches = await bcrypt.compare(password, candidate.password_hash);
@@ -227,9 +239,8 @@ router.post('/login', async (req, res) => {
         // Special fallback for default admin/admin123
         if (!matches && isDefaultAdminCred && candidate.username.toLowerCase() === 'admin') {
           matches = true;
-          // Auto-rehash password
           const newHash = await bcrypt.hash('admin123', 10);
-          await masterDb.run('UPDATE users SET password_hash = ? WHERE id = ?', [newHash, candidate.id]);
+          await masterDb.run('UPDATE users SET password_hash = ? WHERE id = ?', [newHash, candidate.id]).catch(() => {});
         }
 
         if (matches) {
@@ -242,11 +253,11 @@ router.post('/login', async (req, res) => {
     // 2. Fallback: Search all users globally matching username
     if (!userCandidate) {
       const globalUsers = await masterDb.query(
-        'SELECT id, username, password_hash, role, status, company_id, password_expiry_days, password_last_changed FROM users WHERE LOWER(TRIM(username)) = LOWER(TRIM(?))',
+        'SELECT * FROM users WHERE LOWER(TRIM(username)) = LOWER(TRIM(?))',
         [trimmedUsername]
       );
 
-      for (const candidate of globalUsers.rows) {
+      for (const candidate of (globalUsers.rows || [])) {
         let matches = false;
         if (candidate.password_hash && candidate.password_hash.startsWith('$2')) {
           matches = await bcrypt.compare(password, candidate.password_hash);
@@ -257,7 +268,7 @@ router.post('/login', async (req, res) => {
         if (!matches && isDefaultAdminCred && candidate.username.toLowerCase() === 'admin') {
           matches = true;
           const newHash = await bcrypt.hash('admin123', 10);
-          await masterDb.run('UPDATE users SET password_hash = ? WHERE id = ?', [newHash, candidate.id]);
+          await masterDb.run('UPDATE users SET password_hash = ? WHERE id = ?', [newHash, candidate.id]).catch(() => {});
         }
 
         if (matches) {
@@ -298,7 +309,7 @@ router.post('/login', async (req, res) => {
 
     const activeCompanyId = companyIdNum || userCandidate.company_id || 1;
     const companyResult = await masterDb.query('SELECT * FROM companies WHERE id = ?', [activeCompanyId]);
-    const company = companyResult.rows[0] || { id: activeCompanyId, name: `Company ${activeCompanyId}` };
+    const company = (companyResult.rows && companyResult.rows[0]) ? companyResult.rows[0] : { id: activeCompanyId, name: `Company ${activeCompanyId}` };
 
     const permissionsResult = await masterDb.query(
       `SELECT module_name, page_name, can_view, can_create, can_edit, can_delete, can_print FROM user_permissions WHERE user_id = ?`,
@@ -336,7 +347,7 @@ router.post('/login', async (req, res) => {
         company_id: activeCompanyId,
         company_name: company.name,
         password_expiry_days: userCandidate.password_expiry_days || 90,
-        password_last_changed: userCandidate.password_last_changed || null
+        password_last_changed: userCandidate.password_last_changed || userCandidate.updated_at || userCandidate.created_at || null
       },
       company: company,
       permissions: permissions,
@@ -390,10 +401,19 @@ router.post('/users', async (req, res) => {
     const saltRounds = 10;
     const passwordHash = await bcrypt.hash(password, saltRounds);
 
-    const userResult = await masterDb.run(
-      'INSERT INTO users (username, password_hash, role, status, company_id, password_expiry_days, password_last_changed) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)',
-      [username, passwordHash, role || 'Staff', status || 'Active', companyIdNum, expiryDays]
-    );
+    let userResult;
+    try {
+      userResult = await masterDb.run(
+        'INSERT INTO users (username, password_hash, role, status, company_id, password_expiry_days, password_last_changed) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)',
+        [username, passwordHash, role || 'Staff', status || 'Active', companyIdNum, expiryDays]
+      );
+    } catch (_) {
+      // Fallback if password_last_changed is not yet in column list
+      userResult = await masterDb.run(
+        'INSERT INTO users (username, password_hash, role, status, company_id, password_expiry_days) VALUES (?, ?, ?, ?, ?, ?)',
+        [username, passwordHash, role || 'Staff', status || 'Active', companyIdNum, expiryDays]
+      );
+    }
 
     const userId = userResult.lastID || userResult.lastInsertRowid;
 
@@ -423,8 +443,7 @@ router.post('/users', async (req, res) => {
 router.get('/users/:companyId', async (req, res) => {
   try {
     const result = await masterDb.query(`
-      SELECT u.id, u.username, u.role, u.status, u.company_id, u.password_expiry_days, u.password_last_changed, u.created_at, u.updated_at,
-             c.name as company_name
+      SELECT u.*, c.name as company_name
       FROM users u
       LEFT JOIN companies c ON u.company_id = c.id
       WHERE u.company_id = ? OR u.company_id IS NULL
@@ -441,8 +460,7 @@ router.get('/users/:companyId', async (req, res) => {
 router.get('/users', async (req, res) => {
   try {
     const result = await masterDb.query(`
-      SELECT u.id, u.username, u.role, u.status, u.company_id, u.password_expiry_days, u.password_last_changed, u.created_at, u.updated_at,
-             c.name as company_name
+      SELECT u.*, c.name as company_name
       FROM users u
       LEFT JOIN companies c ON u.company_id = c.id
       ORDER BY u.id ASC
@@ -458,12 +476,12 @@ router.get('/users', async (req, res) => {
 router.get('/users/:companyId/:userId', async (req, res) => {
   try {
     let userResult = await masterDb.query(
-      'SELECT id, username, role, status, company_id, password_expiry_days, password_last_changed, created_at, updated_at FROM users WHERE id = ? AND (company_id = ? OR company_id IS NULL)',
+      'SELECT * FROM users WHERE id = ? AND (company_id = ? OR company_id IS NULL)',
       [req.params.userId, req.params.companyId]
     );
     if (!userResult.rows || userResult.rows.length === 0) {
       userResult = await masterDb.query(
-        'SELECT id, username, role, status, company_id, password_expiry_days, password_last_changed, created_at, updated_at FROM users WHERE id = ?',
+        'SELECT * FROM users WHERE id = ?',
         [req.params.userId]
       );
     }
@@ -494,16 +512,30 @@ router.put('/users/:userId', async (req, res) => {
       // Hash new password and update password_last_changed timestamp
       const saltRounds = 10;
       const passwordHash = await bcrypt.hash(password, saltRounds);
-      if (companyIdNum) {
-        await masterDb.run(
-          'UPDATE users SET username = ?, password_hash = ?, role = ?, status = ?, company_id = ?, password_expiry_days = ?, password_last_changed = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-          [username, passwordHash, role, status, companyIdNum, expiryDays, userId]
-        );
-      } else {
-        await masterDb.run(
-          'UPDATE users SET username = ?, password_hash = ?, role = ?, status = ?, password_expiry_days = ?, password_last_changed = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-          [username, passwordHash, role, status, expiryDays, userId]
-        );
+      try {
+        if (companyIdNum) {
+          await masterDb.run(
+            'UPDATE users SET username = ?, password_hash = ?, role = ?, status = ?, company_id = ?, password_expiry_days = ?, password_last_changed = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+            [username, passwordHash, role, status, companyIdNum, expiryDays, userId]
+          );
+        } else {
+          await masterDb.run(
+            'UPDATE users SET username = ?, password_hash = ?, role = ?, status = ?, password_expiry_days = ?, password_last_changed = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+            [username, passwordHash, role, status, expiryDays, userId]
+          );
+        }
+      } catch (_) {
+        if (companyIdNum) {
+          await masterDb.run(
+            'UPDATE users SET username = ?, password_hash = ?, role = ?, status = ?, company_id = ?, password_expiry_days = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+            [username, passwordHash, role, status, companyIdNum, expiryDays, userId]
+          );
+        } else {
+          await masterDb.run(
+            'UPDATE users SET username = ?, password_hash = ?, role = ?, status = ?, password_expiry_days = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+            [username, passwordHash, role, status, expiryDays, userId]
+          );
+        }
       }
     } else {
       // Update details without overwriting existing password

@@ -798,7 +798,12 @@ function openMasterDatabase() {
       { table: 'companies', col: 'email', type: 'TEXT' },
       { table: 'companies', col: 'database_name', type: 'TEXT' },
       { table: 'companies', col: 'database_schema', type: 'TEXT' },
-      { table: 'companies', col: 'status', type: "TEXT DEFAULT 'Active'" }
+      { table: 'companies', col: 'status', type: "TEXT DEFAULT 'Active'" },
+      { table: 'users', col: 'status', type: "TEXT DEFAULT 'Active'" },
+      { table: 'users', col: 'email', type: 'TEXT' },
+      { table: 'users', col: 'phone', type: 'TEXT' },
+      { table: 'users', col: 'password_expiry_days', type: 'INTEGER DEFAULT 90' },
+      { table: 'users', col: 'password_last_changed', type: 'TEXT' }
     ];
     for (const mCol of masterColsToAdd) {
       masterDb.run(`ALTER TABLE ${mCol.table} ADD COLUMN ${mCol.col} ${mCol.type}`, () => {});
@@ -1622,6 +1627,8 @@ async function ensurePostgresMasterSchema() {
         ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'Active',
         ADD COLUMN IF NOT EXISTS email TEXT,
         ADD COLUMN IF NOT EXISTS phone TEXT,
+        ADD COLUMN IF NOT EXISTS password_expiry_days INTEGER DEFAULT 90,
+        ADD COLUMN IF NOT EXISTS password_last_changed TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     `);

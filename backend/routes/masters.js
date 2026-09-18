@@ -6,25 +6,41 @@ const recycleBinService = require('../services/RecycleBinService')
 // Helper function to check if table exists
 async function tableExists(tableName) {
   try {
+    const isPg = typeof db.isPostgres === 'function' ? db.isPostgres() : db.isPostgres;
+    if (isPg) {
+      const result = await db.query(
+        "SELECT table_name as name FROM information_schema.tables WHERE lower(table_name) = lower(?)",
+        [tableName]
+      );
+      return (result.rows && result.rows.length > 0);
+    }
     const result = await db.query(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
+      "SELECT name FROM sqlite_master WHERE type='table' AND lower(name) = lower(?)",
       [tableName]
-    )
-    return result.rows.length > 0
+    );
+    return (result.rows && result.rows.length > 0);
   } catch (error) {
-    console.error(`Error checking if table '${tableName}' exists:`, error.message)
-    return false
+    console.error(`Error checking if table '${tableName}' exists:`, error.message);
+    return true;
   }
 }
 
 // Helper function to check if column exists in a table
 async function columnExists(tableName, columnName) {
   try {
-    const result = await db.query(`PRAGMA table_info(${tableName})`)
-    return result.rows.some(col => col.name === columnName)
+    const isPg = typeof db.isPostgres === 'function' ? db.isPostgres() : db.isPostgres;
+    if (isPg) {
+      const result = await db.query(
+        "SELECT column_name as name FROM information_schema.columns WHERE lower(table_name) = lower(?) AND lower(column_name) = lower(?)",
+        [tableName, columnName]
+      );
+      return (result.rows && result.rows.length > 0);
+    }
+    const result = await db.query(`PRAGMA table_info(${tableName})`);
+    return (result.rows || []).some(col => String(col.name).toLowerCase() === String(columnName).toLowerCase());
   } catch (error) {
-    console.error(`Error checking column '${columnName}' in '${tableName}':`, error.message)
-    return false
+    console.error(`Error checking column '${columnName}' in '${tableName}':`, error.message);
+    return true;
   }
 }
 

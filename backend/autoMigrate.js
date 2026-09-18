@@ -1380,6 +1380,10 @@ module.exports = async function autoMigrate() {
   await safeAddColumn('sales_return_items', 'sgst_amount', 'REAL DEFAULT 0');
   await safeAddColumn('sales_return_items', 'igst_amount', 'REAL DEFAULT 0');
 
+  // Ensure users table columns exist across all database setups
+  await safeAddColumn('users', 'password_expiry_days', 'INTEGER DEFAULT 90');
+  await safeAddColumn('users', 'password_last_changed', 'TEXT');
+
   // Seed default Tax Ledgers if needed
   try {
     const taxLedgers = [
