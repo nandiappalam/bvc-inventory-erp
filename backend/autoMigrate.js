@@ -511,27 +511,14 @@ module.exports = async function autoMigrate() {
   await safeAddColumn('item_master', 'type', "TEXT DEFAULT 'Urad'");
   await safeAddColumn('item_master', 'lab_parameters', 'TEXT');
 
-  // Ensure Masala item group and items exist
+  // Clean up unrequested seed/sample Masala items & groups so only user-created data is displayed
   try {
-    await db.run(`INSERT OR IGNORE INTO item_groups (group_code, group_name, print_name, tax, status) VALUES ('MSL', 'Masala', 'MASALA', 5, 'Active')`);
-    const sampleMasalas = [
-      { code: 'MSL001', name: 'Papad Masala', print_name: 'PAPAD MASALA', group: 'Masala', tax: 5, hsn: '210390' },
-      { code: 'MSL002', name: 'Red Chilli Powder', print_name: 'RED CHILLI POWDER', group: 'Masala', tax: 5, hsn: '090422' },
-      { code: 'MSL003', name: 'Black Pepper Powder', print_name: 'BLACK PEPPER POWDER', group: 'Masala', tax: 5, hsn: '090412' },
-      { code: 'MSL004', name: 'Hing (Asafoetida)', print_name: 'HING (ASAFOETIDA)', group: 'Masala', tax: 5, hsn: '130190' },
-      { code: 'MSL005', name: 'Jeera Powder', print_name: 'JEERA POWDER', group: 'Masala', tax: 5, hsn: '090932' }
-    ];
-    for (const m of sampleMasalas) {
-      const check = await db.query('SELECT id FROM item_master WHERE LOWER(item_name) = LOWER(?)', [m.name]);
-      if (!check.rows || check.rows.length === 0) {
-        await db.run(
-          'INSERT INTO item_master (item_code, item_name, print_name, item_group, tax, hsn_code, status, type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-          [m.code, m.name, m.print_name, m.group, m.tax, m.hsn, 'Active', 'Masala']
-        );
-      }
-    }
+    await db.run(`DELETE FROM item_master WHERE item_code IN ('MSL001', 'MSL002', 'MSL003', 'MSL004', 'MSL005') OR (item_group = 'Masala' AND item_code LIKE 'MSL%')`);
+    await db.run(`DELETE FROM item_groups WHERE group_code = 'MSL' AND (group_name = 'Masala' OR print_name = 'MASALA')`);
+    await db.run(`DELETE FROM item_master WHERE item_code IN ('URD001', 'MOO001', 'MAS001', 'TOO001', 'CHB001') AND item_name IN ('Urad Dal', 'Moong Dal', 'Masur Dal', 'Toor Dal', 'Chana Dal')`);
+    await db.run(`DELETE FROM item_groups WHERE group_code IN ('PLS', 'GRM', 'SPT') AND group_name IN ('Pulses', 'Grains', 'Spices')`);
   } catch (err) {
-    console.log('Notice in seeding Masala items:', err.message);
+    console.log('Notice in cleaning sample items & groups in autoMigrate:', err.message);
   }
 
   // Ensure purchase entry compatibility with ERP fields
