@@ -81,9 +81,11 @@ export async function api(endpoint, options = {}) {
         body: formattedBody,
       });
 
-      // If backend is still initializing (503 from proxy), retry if attempts remain
-      if (res.status === 503 && attempt < maxRetries) {
-        await new Promise((r) => setTimeout(r, 400 * attempt));
+      // Retry on transient server errors common with Render spin-up or gateway proxies
+      const isTransientError = res.status === 502 || res.status === 503 || res.status === 504 || res.status === 429 || ((!options.method || options.method === 'GET') && res.status === 500);
+      if (isTransientError && attempt < maxRetries) {
+        console.warn(`⏳ [API Retry] Transient status ${res.status} for ${endpoint}, retrying attempt ${attempt + 1}/${maxRetries}...`);
+        await new Promise((r) => setTimeout(r, 500 * attempt));
         continue;
       }
 

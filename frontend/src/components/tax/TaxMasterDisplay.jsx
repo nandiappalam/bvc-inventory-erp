@@ -20,7 +20,17 @@ const TaxMasterDisplay = () => {
       setLoading(true);
       const res = await getTaxes({ status: '' });
       if (res?.success && res.data) {
-        setTaxes(res.data);
+        // Client-side deduplication safeguard
+        const seen = new Set();
+        const unique = [];
+        for (const item of res.data) {
+          const key = String(item.tax_name || item.id || '').trim().toLowerCase();
+          if (!seen.has(key)) {
+            seen.add(key);
+            unique.push(item);
+          }
+        }
+        setTaxes(unique);
       }
     } catch (err) {
       console.error('Error loading tax configurations:', err);

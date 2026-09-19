@@ -1094,11 +1094,12 @@ async function createCompanyDatabase(companyId, companyCode) {
       }
 
       // 3. Seed Default Tax Rates
+      await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_tax_master_tax_name ON tax_master(tax_name)`);
       for (const tax of DEFAULT_TAX_RATES) {
         await client.query(
           `INSERT INTO tax_master (tax_name, hsn_code, gst_rate, cgst_rate, sgst_rate, igst_rate, status) 
            VALUES ($1, $2, $3, $4, $5, $6, $7) 
-           ON CONFLICT DO NOTHING`,
+           ON CONFLICT (tax_name) DO NOTHING`,
           [
             tax.tax_name, 
             tax.hsn_code || '0000', 
@@ -1162,21 +1163,26 @@ async function createCompanyDatabase(companyId, companyCode) {
             });
           }
 
+          await new Promise((res) => compDb.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_tax_master_tax_name ON tax_master(tax_name)`, () => res()));
+
           for (const tax of DEFAULT_TAX_RATES) {
             await new Promise((res) => {
-              compDb.run(
-                `INSERT OR IGNORE INTO tax_master (tax_name, hsn_code, gst_rate, cgst_rate, sgst_rate, igst_rate, status) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-                [
-                  tax.tax_name, 
-                  tax.hsn_code || '0000', 
-                  tax.gst_rate !== undefined ? tax.gst_rate : (tax.tax_percent || 0), 
-                  tax.cgst_rate !== undefined ? tax.cgst_rate : (tax.cgst || 0), 
-                  tax.sgst_rate !== undefined ? tax.sgst_rate : (tax.sgst || 0), 
-                  tax.igst_rate !== undefined ? tax.igst_rate : (tax.igst || 0), 
-                  'Active'
-                ],
-                () => res()
-              );
+              compDb.get(`SELECT id FROM tax_master WHERE tax_name = ?`, [tax.tax_name], (err, row) => {
+                if (row) return res();
+                compDb.run(
+                  `INSERT INTO tax_master (tax_name, hsn_code, gst_rate, cgst_rate, sgst_rate, igst_rate, status) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                  [
+                    tax.tax_name, 
+                    tax.hsn_code || '0000', 
+                    tax.gst_rate !== undefined ? tax.gst_rate : (tax.tax_percent || 0), 
+                    tax.cgst_rate !== undefined ? tax.cgst_rate : (tax.cgst || 0), 
+                    tax.sgst_rate !== undefined ? tax.sgst_rate : (tax.sgst || 0), 
+                    tax.igst_rate !== undefined ? tax.igst_rate : (tax.igst || 0), 
+                    'Active'
+                  ],
+                  () => res()
+                );
+              });
             });
           }
 

@@ -131,7 +131,7 @@ const EntryDisplay = ({
 
   const resolvedLink = getResolvedAddNewLink();
 
-  const fetchData = async () => {
+  const fetchData = async (isRetry = false) => {
     if (!apiEndpoint && !tableName) return;
     setLoading(true);
     setMessage("");
@@ -141,22 +141,46 @@ const EntryDisplay = ({
       if (tableName && !['purchases', 'sales'].includes(tableName)) {
         result = await api(`/masters/${tableName}`);
       } else if (apiEndpoint) {
-        const response = await api(apiEndpoint);
-        result = response;
+        result = await api(apiEndpoint);
       } else {
         setData([]);
         return;
       }
       
-      // Debug: log raw response shape for this page
-      console.log('EntryDisplay apiEndpoint:', apiEndpoint, 'result:', result);
+      // If server returned an unsuccessful payload
+      if (!result || result.success === false) {
+        if (!isRetry) {
+          // Auto retry once after 800ms to smoothly bridge transient server cold-starts
+          console.warn(`⏳ [EntryDisplay] Retrying fetch for ${apiEndpoint || tableName}...`);
+          setTimeout(() => fetchData(true), 800);
+          return;
+        }
+        setMessage(result?.message || "Failed to load records from server. Click Refresh to try again.");
+        setMessageType("error");
+        return;
+      }
 
-      const rawData = safeArray(result.data || result);
+      let rawData = [];
+      if (Array.isArray(result)) {
+        rawData = result;
+      } else if (Array.isArray(result.data)) {
+        rawData = result.data;
+      } else if (result.data && Array.isArray(result.data.rows)) {
+        rawData = result.data.rows;
+      } else if (result.rows && Array.isArray(result.rows)) {
+        rawData = result.rows;
+      } else {
+        rawData = safeArray(result.data || result);
+      }
+
       setData(rawData);
-
     } catch (error) {
       console.error("Error fetching data:", error);
-      setMessage("Error loading data");
+      if (!isRetry) {
+        setTimeout(() => fetchData(true), 800);
+        return;
+      }
+      setMessage("Error loading data from server. Click Refresh to try again.");
       setMessageType("error");
       setData([]);
     } finally {
@@ -365,7 +389,23 @@ const EntryDisplay = ({
               </tr>
             ) : filteredData.length === 0 ? (
               <tr>
-                <td colSpan={columns.length + 1} style={styles.noData}>No records found</td>
+                <td colSpan={columns.length + 1} style={styles.noData}>
+                  {message ? (
+                    <div>
+                      <span style={{ color: '#ef4444', fontWeight: 'bold' }}>{message}</span>
+                      <div style={{ marginTop: '8px' }}>
+                        <button 
+                          onClick={() => fetchData(true)} 
+                          style={{ padding: '4px 12px', fontSize: '12px', cursor: 'pointer', backgroundColor: '#1f4fb2', color: '#fff', border: 'none', borderRadius: '4px' }}
+                        >
+                          ↻ Retry Loading
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    'No records found'
+                  )}
+                </td>
               </tr>
             ) : (
               filteredData.map((row, idx) => (

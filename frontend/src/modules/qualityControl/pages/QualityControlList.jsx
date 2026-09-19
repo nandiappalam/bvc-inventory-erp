@@ -36,6 +36,7 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import StoreIcon from '@mui/icons-material/Store';
+import RefreshIcon from '@mui/icons-material/Refresh';
 
 import ERPPageLayout from '../../../components/erp/ERPPageLayout';
 import ERPBreadcrumb from '../../../components/erp/ERPBreadcrumb';
@@ -82,8 +83,12 @@ export default function QualityControlList() {
   const [searchParams] = useSearchParams();
   const urlTab = searchParams.get('tab');
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState(urlTab === 'completed' || urlTab === '1' ? 1 : urlTab === 'unloading' || urlTab === '2' ? 2 : 0);
+  const [activeTab, setActiveTab] = useState(
+    urlTab === 'pending' || urlTab === '0' ? 0 :
+    urlTab === 'unloading' || urlTab === '2' ? 2 : 1
+  );
 
   useEffect(() => {
     if (urlTab === 'completed' || urlTab === '1') {
@@ -138,81 +143,93 @@ export default function QualityControlList() {
     return rawName || (resolvedId ? `Godown ${resolvedId}` : 'Main Godown');
   };
 
-  const loadData = () => {
-    setLoading(true);
+  const loadData = async (isManual = false) => {
+    if (isManual) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
     setError('');
 
-    Promise.allSettled([
-      api('/qc/pending'),
-      api('/quality/registers'),
-      api('/masters/all/godowns'),
-      api('/vehicle-movements')
-    ])
-      .then(([pendingSettled, registersSettled, godownsSettled, vehiclesSettled]) => {
-        const pendingRes = pendingSettled.status === 'fulfilled' ? pendingSettled.value : null;
-        const registersRes = registersSettled.status === 'fulfilled' ? registersSettled.value : null;
-        const godownsRes = godownsSettled.status === 'fulfilled' ? godownsSettled.value : null;
-        const vehiclesRes = vehiclesSettled.status === 'fulfilled' ? vehiclesSettled.value : null;
+    try {
+      const [pendingSettled, registersSettled, godownsSettled, vehiclesSettled] = await Promise.allSettled([
+        api('/qc/pending').catch(() => api('/quality/pending')),
+        api('/quality/registers').catch(() => api('/qc/registers')),
+        api('/masters/all/godowns'),
+        api('/vehicle-movements')
+      ]);
 
-        if (pendingRes?.success) {
-          setPendingLots(pendingRes.data || []);
-        }
-        if (registersRes?.success) {
-          const qcData = registersRes.data?.qc || [];
-          setCompletedTests(qcData);
+      const pendingRes = pendingSettled.status === 'fulfilled' ? pendingSettled.value : null;
+      let registersRes = registersSettled.status === 'fulfilled' ? registersSettled.value : null;
+      const godownsRes = godownsSettled.status === 'fulfilled' ? godownsSettled.value : null;
+      const vehiclesRes = vehiclesSettled.status === 'fulfilled' ? vehiclesSettled.value : null;
 
-          // If no specific tab was specified in URL, and pending is empty while completed has items, switch to completed tab
-          if (!urlTab && (pendingRes?.data || []).length === 0 && qcData.length > 0) {
-            setActiveTab(1);
+      if (pendingRes?.success && Array.isArray(pendingRes.data)) {
+        setPendingLots(pendingRes.data);
+      }
+
+      // Retry registers if needed
+      if (!registersRes?.success || !registersRes?.data?.qc) {
+        try {
+          const fallbackReg = await api('/qc/registers');
+          if (fallbackReg?.success && fallbackReg?.data?.qc) {
+            registersRes = fallbackReg;
           }
+        } catch (e) {}
+      }
 
-          const initialMap = {};
-          qcData.forEach(t => {
-            if (t.allocations && t.allocations.length > 0) {
-              initialMap[t.rm_lot_no] = t.allocations.map(a => ({
-                godownId: a.godown_id || '',
-                qty: a.quantity !== undefined ? a.quantity : ''
-              }));
-            } else {
-              initialMap[t.rm_lot_no] = [{
-                godownId: t.godown_id || '',
-                qty: t.quantity !== undefined ? t.quantity : ''
-              }];
-            }
-          });
-          setAllocationsMap(initialMap);
-        }
+      if (registersRes?.success && registersRes.data?.qc) {
+        const qcData = registersRes.data.qc || [];
+        setCompletedTests(qcData);
 
-        const godownItems = (godownsRes && Array.isArray(godownsRes))
-          ? godownsRes
-          : (godownsRes?.data && Array.isArray(godownsRes.data))
+        const initialMap = {};
+        qcData.forEach(t => {
+          if (t.allocations && t.allocations.length > 0) {
+            initialMap[t.rm_lot_no] = t.allocations.map(a => ({
+              godownId: a.godown_id || '',
+              qty: a.quantity !== undefined ? a.quantity : ''
+            }));
+          } else {
+            initialMap[t.rm_lot_no] = [{
+              godownId: t.godown_id || '',
+              qty: t.quantity !== undefined ? t.quantity : ''
+            }];
+          }
+        });
+        setAllocationsMap(initialMap);
+      }
+
+      const godownItems = (godownsRes && Array.isArray(godownsRes))
+        ? godownsRes
+        : (godownsRes?.data && Array.isArray(godownsRes.data))
+          ? godownsRes.data
+          : (godownsRes?.success && Array.isArray(godownsRes.data))
             ? godownsRes.data
-            : (godownsRes?.success && Array.isArray(godownsRes.data))
-              ? godownsRes.data
-              : [];
+            : [];
 
-        if (godownItems.length > 0) {
-          setGodowns(godownItems);
-        } else {
-          api('/masters/godowns').then(res => {
-            const list = Array.isArray(res) ? res : (res?.data || []);
-            if (list.length > 0) setGodowns(list);
-          }).catch(() => {});
-        }
-        if (Array.isArray(vehiclesRes)) {
-          // Filter vehicles with IN status
-          const inMovements = vehiclesRes.filter(v => (v.status || '').toUpperCase() === 'IN' || (v.gate_in_time && !v.gate_out_time));
-          setVehicleMovementsIn(inMovements);
-        } else if (vehiclesRes?.data) {
-          const inMovements = (vehiclesRes.data || []).filter(v => (v.status || '').toUpperCase() === 'IN' || (v.gate_in_time && !v.gate_out_time));
-          setVehicleMovementsIn(inMovements);
-        }
-      })
-      .catch((err) => {
-        console.error('Failed to load QC dashboard data:', err);
-        setError('Error loading quality control list records.');
-      })
-      .finally(() => setLoading(false));
+      if (godownItems.length > 0) {
+        setGodowns(godownItems);
+      } else {
+        api('/masters/godowns').then(res => {
+          const list = Array.isArray(res) ? res : (res?.data || []);
+          if (list.length > 0) setGodowns(list);
+        }).catch(() => {});
+      }
+
+      if (Array.isArray(vehiclesRes)) {
+        const inMovements = vehiclesRes.filter(v => (v.status || '').toUpperCase() === 'IN' || (v.gate_in_time && !v.gate_out_time));
+        setVehicleMovementsIn(inMovements);
+      } else if (vehiclesRes?.data) {
+        const inMovements = (vehiclesRes.data || []).filter(v => (v.status || '').toUpperCase() === 'IN' || (v.gate_in_time && !v.gate_out_time));
+        setVehicleMovementsIn(inMovements);
+      }
+    } catch (err) {
+      console.error('Failed to load QC dashboard data:', err);
+      setError('Error loading quality control list records.');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   };
 
   const handleAddGodownRow = (lotNo) => {
@@ -365,14 +382,25 @@ export default function QualityControlList() {
         <ERPHeader 
           title="Quality Control (QC) Registers" 
           action={
-            <Button 
-              variant="contained" 
-              color="primary" 
-              startIcon={<AddCircleOutlineIcon />}
-              onClick={() => navigate('/entry/quality-control-create')}
-            >
-              New QA Entry
-            </Button>
+            <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center' }}>
+              <Button 
+                variant="outlined" 
+                color="inherit" 
+                startIcon={<RefreshIcon />}
+                onClick={() => loadData(true)}
+                disabled={loading || refreshing}
+              >
+                {refreshing ? 'Refreshing...' : 'Refresh'}
+              </Button>
+              <Button 
+                variant="contained" 
+                color="primary" 
+                startIcon={<AddCircleOutlineIcon />}
+                onClick={() => navigate('/entry/quality-control-create')}
+              >
+                New QA Entry
+              </Button>
+            </Box>
           }
         />
       }
@@ -453,7 +481,17 @@ export default function QualityControlList() {
         {/* KPI Dashboard cards */}
         <Grid container spacing={2}>
           <Grid item xs={12} sm={6} md={3}>
-            <Card sx={{ borderLeft: '4px solid #ed6c02', boxShadow: '0 2px 4px rgba(0,0,0,0.04)' }}>
+            <Card 
+              onClick={() => setActiveTab(0)}
+              sx={{ 
+                borderLeft: '4px solid #ed6c02', 
+                boxShadow: activeTab === 0 ? '0 4px 12px rgba(237,108,2,0.2)' : '0 2px 4px rgba(0,0,0,0.04)',
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+                backgroundColor: activeTab === 0 ? '#fffaf5' : '#ffffff',
+                '&:hover': { transform: 'translateY(-2px)' }
+              }}
+            >
               <CardContent sx={{ p: 2 }}>
                 <Typography variant="subtitle2" color="text.secondary" sx={{ fontWeight: 800, textTransform: 'uppercase', fontSize: 11 }}>
                   Pending QC Queue
@@ -465,7 +503,17 @@ export default function QualityControlList() {
             </Card>
           </Grid>
           <Grid item xs={12} sm={6} md={3}>
-            <Card sx={{ borderLeft: '4px solid #1976d2', boxShadow: '0 2px 4px rgba(0,0,0,0.04)' }}>
+            <Card 
+              onClick={() => setActiveTab(1)}
+              sx={{ 
+                borderLeft: '4px solid #1976d2', 
+                boxShadow: activeTab === 1 ? '0 4px 12px rgba(25,118,210,0.2)' : '0 2px 4px rgba(0,0,0,0.04)',
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+                backgroundColor: activeTab === 1 ? '#f5f9ff' : '#ffffff',
+                '&:hover': { transform: 'translateY(-2px)' }
+              }}
+            >
               <CardContent sx={{ p: 2 }}>
                 <Typography variant="subtitle2" color="text.secondary" sx={{ fontWeight: 800, textTransform: 'uppercase', fontSize: 11 }}>
                   Completed Tests
@@ -477,7 +525,17 @@ export default function QualityControlList() {
             </Card>
           </Grid>
           <Grid item xs={12} sm={6} md={3}>
-            <Card sx={{ borderLeft: '4px solid #2e7d32', boxShadow: '0 2px 4px rgba(0,0,0,0.04)' }}>
+            <Card 
+              onClick={() => setActiveTab(2)}
+              sx={{ 
+                borderLeft: '4px solid #2e7d32', 
+                boxShadow: activeTab === 2 ? '0 4px 12px rgba(46,125,50,0.2)' : '0 2px 4px rgba(0,0,0,0.04)',
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+                backgroundColor: activeTab === 2 ? '#f6fbf6' : '#ffffff',
+                '&:hover': { transform: 'translateY(-2px)' }
+              }}
+            >
               <CardContent sx={{ p: 2 }}>
                 <Typography variant="subtitle2" color="text.secondary" sx={{ fontWeight: 800, textTransform: 'uppercase', fontSize: 11 }}>
                   Approved Lots
@@ -489,12 +547,12 @@ export default function QualityControlList() {
             </Card>
           </Grid>
           <Grid item xs={12} sm={6} md={3}>
-            <Card sx={{ borderLeft: '4px solid #2e7d32', boxShadow: '0 2px 4px rgba(0,0,0,0.04)' }}>
+            <Card sx={{ borderLeft: '4px solid #0284c7', boxShadow: '0 2px 4px rgba(0,0,0,0.04)' }}>
               <CardContent sx={{ p: 2 }}>
                 <Typography variant="subtitle2" color="text.secondary" sx={{ fontWeight: 800, textTransform: 'uppercase', fontSize: 11 }}>
                   Acceptance Rate
                 </Typography>
-                <Typography variant="h4" sx={{ fontWeight: 900, mt: 0.5, color: '#2e7d32' }}>
+                <Typography variant="h4" sx={{ fontWeight: 900, mt: 0.5, color: '#0284c7' }}>
                   {stats.passRate}
                 </Typography>
               </CardContent>

@@ -37,7 +37,35 @@ const getOptionLabel = (opt) => {
   );
 };
 
-const MASTER_FIELD_TYPES = {};
+const MASTER_FIELD_TYPES = {
+  supplier: 'suppliers',
+  supplier_id: 'suppliers',
+  supplierId: 'suppliers',
+  supplierName: 'suppliers',
+  customer: 'customers',
+  customer_id: 'customers',
+  customerId: 'customers',
+  customerName: 'customers',
+  item: 'items',
+  item_id: 'items',
+  godown: 'godowns',
+  godown_id: 'godowns',
+  godownId: 'godowns',
+  transport: 'transports',
+  transport_id: 'transports',
+  transportId: 'transports',
+  sender: 'senders',
+  sender_id: 'senders',
+  senderId: 'senders',
+  consignee: 'consignees',
+  consignee_id: 'consignees',
+  consigneeId: 'consignees',
+  papad_company: 'papad_companies',
+  papadCompany: 'papad_companies',
+  papadComp: 'papad_companies',
+  flour_mill: 'flour_mills',
+  flourMill: 'flour_mills'
+};
 const DEBUG = false;
 
 const validateEntryConfig = (fields, columns) => true;
@@ -300,25 +328,36 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
     );
   }
 
+  const fetchMasterData = async (force = false) => {
+    if (!field.masterType) return;
+    setLoading(true);
+    try {
+      const rawResult = await getMasters(field.masterType, { forceRefresh: force });
+      if (!rawResult) return;
+      const resultData = safeArray(rawResult.data || rawResult);
+      if (resultData.length > 0) {
+        setMasterOptions(resultData);
+      }
+    } catch (err) {
+      console.error(`Error fetching ${field.masterType}:`, err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    if (field.masterType) {
-      const fetchMasterData = async () => {
-        setLoading(true);
-        try {
-          const rawResult = await getMasters(field.masterType);
-          if (!rawResult) return;
-          const resultData = safeArray(rawResult.data || rawResult);
-          setMasterOptions(resultData);
-        } catch (err) {
-          console.error(`Error fetching ${field.masterType}:`, err);
-          setMasterOptions([]);
-        } finally {
-          setLoading(false);
-        }
-      };
+    if (field.options && field.options.length > 0) {
+      setMasterOptions(field.options);
+    } else if (field.masterType) {
       fetchMasterData();
     }
-  }, [field.masterType]);
+  }, [field.masterType, field.options]);
+
+  const handleDropdownFocus = () => {
+    if (field.masterType && masterOptions.length === 0 && !loading) {
+      fetchMasterData(true);
+    }
+  };
 
   const handleMasterSelect = async (id, field) => {
     if (!id || !field?.masterType) return;
@@ -419,6 +458,7 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
           name={field.name}
           value={selectValue}
           onChange={handleChange}
+          onFocus={handleDropdownFocus}
           style={styles.input}
           disabled={loading}
         >

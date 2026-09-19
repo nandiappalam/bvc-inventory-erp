@@ -85,12 +85,21 @@ async function runAllPendingMigrations() {
           );
         }
 
-        // Ensure default taxes exist
+        // Ensure unique index and no duplicates on tax_master
+        try {
+          await compDb.run(`DELETE FROM tax_master WHERE id NOT IN (SELECT MIN(id) FROM tax_master GROUP BY tax_name)`);
+          await compDb.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_tax_master_tax_name ON tax_master(tax_name)`);
+        } catch (e) {}
+
+        // Ensure default taxes exist idempotently
         for (const tax of DEFAULT_TAX_RATES) {
-          await compDb.run(
-            `INSERT OR IGNORE INTO tax_master (tax_name, hsn_code, gst_rate, cgst_rate, sgst_rate, igst_rate, status) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [tax.tax_name, '0000', tax.tax_percent || 0, tax.cgst || 0, tax.sgst || 0, tax.igst || 0, 'Active']
-          );
+          const exists = await compDb.get(`SELECT id FROM tax_master WHERE tax_name = ?`, [tax.tax_name]);
+          if (!exists) {
+            await compDb.run(
+              `INSERT INTO tax_master (tax_name, hsn_code, gst_rate, cgst_rate, sgst_rate, igst_rate, status) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+              [tax.tax_name, '0000', tax.tax_percent || 0, tax.cgst || 0, tax.sgst || 0, tax.igst || 0, 'Active']
+            );
+          }
         }
 
         // Run auto-migrations in company context

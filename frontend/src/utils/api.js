@@ -76,9 +76,11 @@ export async function api(endpoint, options = {}) {
         body: options.body ? JSON.stringify(options.body) : undefined
       });
 
-      // If backend is still initializing (503 from proxy), retry if attempts remain
-      if (res.status === 503 && attempt < maxRetries) {
-        await new Promise((r) => setTimeout(r, 400 * attempt));
+      // Retry on transient server errors common with Render spin-up or gateway proxies
+      const isTransientError = res.status === 502 || res.status === 503 || res.status === 504 || res.status === 429 || ((!options.method || options.method === 'GET') && res.status === 500);
+      if (isTransientError && attempt < maxRetries) {
+        console.warn(`⏳ [utils/API Retry] Transient status ${res.status} for ${endpoint}, retrying attempt ${attempt + 1}/${maxRetries}...`);
+        await new Promise((r) => setTimeout(r, 500 * attempt));
         continue;
       }
 
@@ -128,9 +130,11 @@ export async function api(endpoint, options = {}) {
   return { success: false, data: null, message: lastErr?.message || 'Network request failed' };
 }
 
-// Generic getMasters
-export async function getMasters(type) {
-  return api(`/masters/${type}`);
+import { getMasters as fetchMastersWithCache } from '../services/masterservice.js';
+
+// Generic getMasters with in-memory caching and request deduplication
+export async function getMasters(type, options) {
+  return fetchMastersWithCache(type, options);
 }
 
 // CRUD functions  

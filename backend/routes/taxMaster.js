@@ -11,7 +11,7 @@ const initTaxMasterTable = async () => {
     await db.run(`
       CREATE TABLE IF NOT EXISTS tax_master (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        tax_name TEXT NOT NULL,
+        tax_name TEXT NOT NULL UNIQUE,
         hsn_code TEXT NOT NULL,
         tax_type TEXT DEFAULT 'Taxable',
         description TEXT,
@@ -29,6 +29,25 @@ const initTaxMasterTable = async () => {
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
+
+    // 1. Clean up any historical duplicate rows by keeping only the first ID for each tax_name
+    try {
+      await db.run(`
+        DELETE FROM tax_master 
+        WHERE id NOT IN (
+          SELECT MIN(id) FROM tax_master GROUP BY tax_name
+        )
+      `);
+    } catch (cleanErr) {
+      // Ignore if syntax differs on Postgres / SQLite
+    }
+
+    // 2. Ensure unique index on tax_name
+    try {
+      await db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_tax_master_tax_name ON tax_master(tax_name)`);
+    } catch (idxErr) {
+      // Index may already exist
+    }
 
     // Seed default Indian Food Factory GST configurations if empty
     const countRes = await db.query('SELECT COUNT(*) as cnt FROM tax_master');
@@ -281,10 +300,22 @@ router.get('/', async (req, res) => {
     query += ' ORDER BY tax_type ASC, gst_rate ASC, tax_name ASC';
 
     const result = await db.query(query, params);
+    
+    // Deduplicate records by tax_name to strictly guarantee no duplicate rows in UI
+    const seenNames = new Set();
+    const uniqueRecords = [];
+    for (const row of (result.rows || [])) {
+      const key = String(row.tax_name || '').trim().toLowerCase();
+      if (!seenNames.has(key)) {
+        seenNames.add(key);
+        uniqueRecords.push(row);
+      }
+    }
+
     res.json({
       success: true,
-      count: result.rows.length,
-      data: result.rows
+      count: uniqueRecords.length,
+      data: uniqueRecords
     });
   } catch (error) {
     console.error('Error fetching tax configurations:', error);

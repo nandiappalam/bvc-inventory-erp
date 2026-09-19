@@ -17,111 +17,121 @@ const ensureQcCleanConstraints = async () => {
 };
 ensureQcCleanConstraints();
 
-// Dynamic tenant table guard
+// Dynamic tenant table guard - runs once on startup or when needed, never blocking every request
+let qcTablesPromise = null;
 const ensureQcTables = async () => {
-  try {
-    await db.run(`
-      CREATE TABLE IF NOT EXISTS qc_inspections (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        qc_no TEXT UNIQUE,
-        purchase_id INTEGER,
-        purchase_item_id INTEGER,
-        rm_lot_no TEXT NOT NULL,
-        inspection_date TEXT,
-        inspector TEXT,
-        overall_result TEXT,
-        remarks TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-  } catch (e) {}
+  if (qcTablesPromise) return qcTablesPromise;
+  qcTablesPromise = (async () => {
+    try {
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS qc_inspections (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          qc_no TEXT UNIQUE,
+          purchase_id INTEGER,
+          purchase_item_id INTEGER,
+          rm_lot_no TEXT NOT NULL,
+          inspection_date TEXT,
+          inspector TEXT,
+          overall_result TEXT,
+          remarks TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+    } catch (e) {}
 
-  try {
-    await db.run(`
-      CREATE TABLE IF NOT EXISTS qc_inspection_params (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        qc_id INTEGER NOT NULL,
-        param_key TEXT NOT NULL,
-        param_value TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-  } catch (e) {}
+    try {
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS qc_inspection_params (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          qc_id INTEGER NOT NULL,
+          param_key TEXT NOT NULL,
+          param_value TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+    } catch (e) {}
 
-  try {
-    await db.run(`
-      CREATE TABLE IF NOT EXISTS incoming_quality_reports (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        iqr_no TEXT UNIQUE,
-        qc_id INTEGER NOT NULL,
-        rm_lot_no TEXT NOT NULL,
-        report_file TEXT,
-        uploaded_date TEXT,
-        uploaded_by TEXT,
-        version INTEGER DEFAULT 1,
-        remarks TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-  } catch (e) {}
+    try {
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS incoming_quality_reports (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          iqr_no TEXT UNIQUE,
+          qc_id INTEGER NOT NULL,
+          rm_lot_no TEXT NOT NULL,
+          report_file TEXT,
+          uploaded_date TEXT,
+          uploaded_by TEXT,
+          version INTEGER DEFAULT 1,
+          remarks TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+    } catch (e) {}
 
-  try {
-    await db.run(`
-      CREATE TABLE IF NOT EXISTS qc_approval_history (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        qc_id INTEGER NOT NULL,
-        approval_level TEXT NOT NULL,
-        approved_by TEXT,
-        approved_date TEXT,
-        remarks TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-  } catch (e) {}
+    try {
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS qc_approval_history (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          qc_id INTEGER NOT NULL,
+          approval_level TEXT NOT NULL,
+          approved_by TEXT,
+          approved_date TEXT,
+          remarks TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+    } catch (e) {}
 
-  try {
-    await db.run("ALTER TABLE stock_lots ADD COLUMN unloading_status TEXT DEFAULT 'PENDING_DECISION'");
-  } catch (e) {}
-  try {
-    await db.run("ALTER TABLE stock_lots ADD COLUMN godown_id INTEGER");
-  } catch (e) {}
-  try {
-    await db.run("ALTER TABLE stock_lots ADD COLUMN godown_name TEXT");
-  } catch (e) {}
-  try {
-    await db.run("ALTER TABLE stock_lots ADD COLUMN qc_status TEXT DEFAULT 'QC_PENDING'");
-  } catch (e) {}
-  try {
-    await db.run("ALTER TABLE stock_lots ADD COLUMN rate REAL DEFAULT 0");
-  } catch (e) {}
-  try {
-    await db.run("ALTER TABLE stock_lots ADD COLUMN purchase_id INTEGER");
-  } catch (e) {}
-  try {
-    await db.run("ALTER TABLE stock_lots ADD COLUMN usable_for_production INTEGER DEFAULT 0");
-  } catch (e) {}
-  try {
-    await db.run("ALTER TABLE stock_lots ADD COLUMN approval_status TEXT DEFAULT 'PENDING_APPROVAL'");
-  } catch (e) {}
-  try {
-    await db.run("ALTER TABLE stock_lots ADD COLUMN approval_date TEXT");
-  } catch (e) {}
-  try {
-    await db.run("ALTER TABLE purchase_returns ADD COLUMN return_inv_no TEXT");
-  } catch (e) {}
-  try {
-    await db.run("ALTER TABLE purchase_return_items ADD COLUMN lot_no TEXT");
-  } catch (e) {}
+    try {
+      await db.run("ALTER TABLE stock_lots ADD COLUMN unloading_status TEXT DEFAULT 'PENDING_DECISION'");
+    } catch (e) {}
+    try {
+      await db.run("ALTER TABLE stock_lots ADD COLUMN godown_id INTEGER");
+    } catch (e) {}
+    try {
+      await db.run("ALTER TABLE stock_lots ADD COLUMN godown_name TEXT");
+    } catch (e) {}
+    try {
+      await db.run("ALTER TABLE stock_lots ADD COLUMN qc_status TEXT DEFAULT 'QC_PENDING'");
+    } catch (e) {}
+    try {
+      await db.run("ALTER TABLE stock_lots ADD COLUMN rate REAL DEFAULT 0");
+    } catch (e) {}
+    try {
+      await db.run("ALTER TABLE stock_lots ADD COLUMN purchase_id INTEGER");
+    } catch (e) {}
+    try {
+      await db.run("ALTER TABLE stock_lots ADD COLUMN usable_for_production INTEGER DEFAULT 0");
+    } catch (e) {}
+    try {
+      await db.run("ALTER TABLE stock_lots ADD COLUMN approval_status TEXT DEFAULT 'PENDING_APPROVAL'");
+    } catch (e) {}
+    try {
+      await db.run("ALTER TABLE stock_lots ADD COLUMN approval_date TEXT");
+    } catch (e) {}
+    try {
+      await db.run("ALTER TABLE purchase_returns ADD COLUMN return_inv_no TEXT");
+    } catch (e) {}
+    try {
+      await db.run("ALTER TABLE purchase_return_items ADD COLUMN lot_no TEXT");
+    } catch (e) {}
+  })();
+  return qcTablesPromise;
 };
 
-// Ensure tables exist on every request
+// Initialize tables once on background startup
+ensureQcTables();
+
+// Lightweight middleware: ensures startup has completed without re-executing DDL on every single request
 router.use(async (req, res, next) => {
-  try {
-    await ensureQcTables();
-  } catch (e) {}
+  if (qcTablesPromise) {
+    try {
+      await qcTablesPromise;
+    } catch (e) {}
+  }
   next();
 });
 
@@ -157,7 +167,9 @@ router.get('/pending', asyncHandler(async (req, res) => {
   `;
 
   if (!showAll) {
-    queryStr += ` WHERE (sl.qc_status = 'QC_PENDING' OR sl.qc_status IS NULL OR sl.qc_status = '') AND sl.lot_no NOT IN (SELECT rm_lot_no FROM qc_inspections) `;
+    queryStr += ` WHERE (sl.qc_status = 'QC_PENDING' OR sl.qc_status IS NULL OR sl.qc_status = '') 
+                  AND (sl.lot_no IS NOT NULL AND sl.lot_no != '') 
+                  AND NOT EXISTS (SELECT 1 FROM qc_inspections qi WHERE qi.rm_lot_no = sl.lot_no) `;
   }
 
   queryStr += ` ORDER BY COALESCE(p.date, sl.created_at) DESC `;
@@ -167,7 +179,23 @@ router.get('/pending', asyncHandler(async (req, res) => {
     const pendingLots = await db.query(queryStr);
     rows = pendingLots.rows || [];
   } catch (err) {
-    console.error('Error fetching pending lots:', err.message);
+    console.error('Error fetching pending lots with joins, trying fallback:', err.message);
+    try {
+      const fbLots = await db.query(`
+        SELECT sl.id as stock_lot_id, sl.lot_no, sl.item_name, sl.quantity as received_qty,
+               sl.rate, sl.qc_status, COALESCE(sl.unloading_status, 'PENDING_DECISION') as unloading_status,
+               COALESCE(CAST(sl.purchase_id AS TEXT), '') as purchase_id,
+               50 as unit_weight, (sl.quantity * 50) as total_weight
+        FROM stock_lots sl
+        WHERE (sl.qc_status = 'QC_PENDING' OR sl.qc_status IS NULL OR sl.qc_status = '')
+          AND sl.lot_no IS NOT NULL AND sl.lot_no != ''
+          AND NOT EXISTS (SELECT 1 FROM qc_inspections qi WHERE qi.rm_lot_no = sl.lot_no)
+        ORDER BY sl.id DESC
+      `);
+      rows = fbLots.rows || [];
+    } catch (fbErr) {
+      console.error('Pending fallback failed:', fbErr.message);
+    }
   }
   res.json({ success: true, data: rows });
 }));
@@ -227,8 +255,8 @@ router.get(['/history', '/purchase-lab-testing'], asyncHandler(async (req, res) 
   res.json({ success: true, data: normalizedRows });
 }));
 
-// GET /api/quality/registers
-router.get('/registers', asyncHandler(async (req, res) => {
+// GET /api/quality/registers or /api/qc/registers
+router.get(['/registers', '/all-registers', '/register-list'], asyncHandler(async (req, res) => {
   // Load godown master map to guarantee accurate godown name resolution
   const godownDict = {
     '1': 'Main Godown',
@@ -284,82 +312,115 @@ router.get('/registers', asyncHandler(async (req, res) => {
       )
       ORDER BY qi.inspection_date DESC, qi.id DESC
     `);
-    qcRows = qcList.rows || [];
+    
+    // Deduplicate by inspection ID
+    const seen = new Set();
+    for (const r of (qcList.rows || [])) {
+      if (!seen.has(r.id)) {
+        seen.add(r.id);
+        qcRows.push(r);
+      }
+    }
   } catch (err) {
-    console.error('Error fetching qcList in /quality/registers:', err.message);
+    console.error('Error fetching joined qcList in /quality/registers, attempting resilient fallback:', err.message);
+    try {
+      const fallbackList = await db.query(`
+        SELECT qi.id, qi.qc_no, qi.purchase_id, qi.rm_lot_no, qi.inspection_date, qi.overall_result,
+               COALESCE(qi.inspector, 'QC Officer') as inspector, qi.remarks
+        FROM qc_inspections qi
+        ORDER BY qi.inspection_date DESC, qi.id DESC
+      `);
+      qcRows = fallbackList.rows || [];
+    } catch (fbErr) {
+      console.error('Fallback qc_inspections query failed:', fbErr.message);
+    }
   }
 
-  for (let row of qcRows) {
-    try {
-      const isReturned = await db.query(`
-        SELECT pr.id, pr.return_inv_no 
-        FROM purchase_return_items pri
-        INNER JOIN purchase_returns pr ON CAST(pri.purchase_return_id AS TEXT) = CAST(pr.id AS TEXT)
-        WHERE pri.lot_no = ?
-      `, [row.rm_lot_no]);
-      
-      if (isReturned.rows && isReturned.rows.length > 0) {
-        row.unloading_status = 'RETURNED';
-        row.return_registered = true;
-        row.return_inv_no = isReturned.rows[0].return_inv_no;
-      }
-    } catch (e) {}
+  // Batch process returns and allocations for all lots
+  if (qcRows.length > 0) {
+    const lotNos = Array.from(new Set(qcRows.map(r => r.rm_lot_no).filter(Boolean)));
 
-    const rowGId = String(row.godown_id || '').trim();
-    if (!row.godown_name || !isNaN(row.godown_name) || String(row.godown_name).startsWith('Godown ID:') || String(row.godown_name).startsWith('Godown:')) {
-      row.godown_name = godownDict[rowGId] || godownDict[String(row.godown_name).replace(/[^0-9]/g, '')] || row.godown_name || (rowGId ? `Godown ${rowGId}` : 'Main Godown');
+    // Batch check purchase returns
+    const returnMap = new Map();
+    if (lotNos.length > 0) {
+      try {
+        const placeholders = lotNos.map(() => '?').join(',');
+        const retRes = await db.query(`
+          SELECT pri.lot_no, pr.id, pr.return_inv_no 
+          FROM purchase_return_items pri
+          INNER JOIN purchase_returns pr ON CAST(pri.purchase_return_id AS TEXT) = CAST(pr.id AS TEXT)
+          WHERE pri.lot_no IN (${placeholders})
+        `, lotNos);
+        (retRes.rows || []).forEach(r => {
+          if (r.lot_no) returnMap.set(r.lot_no, r.return_inv_no || true);
+        });
+      } catch (e) {}
     }
 
-    let allocationList = [];
-    try {
-      const allocs = await db.query(`
-        SELECT sl.id, sl.godown_id, sl.godown_name, sl.quantity, sl.remaining_quantity, sl.unloading_status,
-               COALESCE(g.godown_name, g.print_name, sl.godown_name, '') as godown_name
-        FROM stock_lots sl
-        LEFT JOIN godown_master g ON (
-          CAST(g.id AS TEXT) = CAST(sl.godown_id AS TEXT) 
-          OR g.godown_name = CAST(sl.godown_id AS TEXT)
-        )
-        WHERE sl.lot_no = ?
-      `, [row.rm_lot_no]);
+    // Batch check stock allocations
+    const allocMap = new Map();
+    if (lotNos.length > 0) {
+      try {
+        const placeholders = lotNos.map(() => '?').join(',');
+        const allocRes = await db.query(`
+          SELECT sl.id, sl.lot_no, sl.godown_id, sl.godown_name, sl.quantity, sl.remaining_quantity, sl.unloading_status,
+                 COALESCE(g.godown_name, g.print_name, sl.godown_name, '') as resolved_godown_name
+          FROM stock_lots sl
+          LEFT JOIN godown_master g ON (
+            CAST(g.id AS TEXT) = CAST(sl.godown_id AS TEXT) 
+            OR g.godown_name = CAST(sl.godown_id AS TEXT)
+          )
+          WHERE sl.lot_no IN (${placeholders})
+        `, lotNos);
+        (allocRes.rows || []).forEach(alloc => {
+          const list = allocMap.get(alloc.lot_no) || [];
+          const aGId = String(alloc.godown_id || '').trim();
+          let resolvedGName = alloc.resolved_godown_name || alloc.godown_name;
+          if (!resolvedGName || !isNaN(resolvedGName) || String(resolvedGName).startsWith('Godown ID:') || String(resolvedGName).startsWith('Godown:')) {
+            resolvedGName = godownDict[aGId] || godownDict[String(resolvedGName).replace(/[^0-9]/g, '')] || resolvedGName || (aGId ? `Godown ${aGId}` : 'Main Godown');
+          }
+          list.push({
+            ...alloc,
+            godown_name: resolvedGName
+          });
+          allocMap.set(alloc.lot_no, list);
+        });
+      } catch (e) {}
+    }
 
-      allocationList = (allocs.rows || []).map(alloc => {
-        const aGId = String(alloc.godown_id || '').trim();
-        let resolvedGName = alloc.godown_name;
-        if (!resolvedGName || !isNaN(resolvedGName) || String(resolvedGName).startsWith('Godown ID:') || String(resolvedGName).startsWith('Godown:')) {
-          resolvedGName = godownDict[aGId] || godownDict[String(resolvedGName).replace(/[^0-9]/g, '')] || resolvedGName || (aGId ? `Godown ${aGId}` : 'Main Godown');
-        }
-        if (alloc.id && resolvedGName) {
-          db.run("UPDATE stock_lots SET godown_name = ? WHERE id = ?", [resolvedGName, alloc.id]).catch(() => {});
-        }
-        return {
-          ...alloc,
-          godown_name: resolvedGName
-        };
-      });
-    } catch (e) {}
-
-    if (allocationList.length > 0) {
-      row.allocations = allocationList;
-      const isUnloaded = allocationList.some(a => a.unloading_status === 'UNLOADED');
-      if (isUnloaded) {
-        row.unloading_status = 'UNLOADED';
-      }
-      const isRet = allocationList.some(a => a.unloading_status === 'RETURNED');
-      if (isRet) {
+    for (let row of qcRows) {
+      if (returnMap.has(row.rm_lot_no)) {
         row.unloading_status = 'RETURNED';
+        row.return_registered = true;
+        row.return_inv_no = returnMap.get(row.rm_lot_no);
       }
-      const totalAllocQty = allocationList.reduce((sum, a) => sum + (parseFloat(a.quantity) || 0), 0);
-      if (totalAllocQty > 0) {
-        row.quantity = totalAllocQty;
+
+      const rowGId = String(row.godown_id || '').trim();
+      if (!row.godown_name || !isNaN(row.godown_name) || String(row.godown_name).startsWith('Godown ID:') || String(row.godown_name).startsWith('Godown:')) {
+        row.godown_name = godownDict[rowGId] || godownDict[String(row.godown_name).replace(/[^0-9]/g, '')] || row.godown_name || (rowGId ? `Godown ${rowGId}` : 'Main Godown');
       }
-    } else {
-      row.allocations = [{
-        godown_id: row.godown_id,
-        godown_name: row.godown_name || godownDict[rowGId] || 'Main Godown',
-        quantity: row.quantity,
-        unloading_status: row.unloading_status
-      }];
+
+      const allocationList = allocMap.get(row.rm_lot_no) || [];
+      if (allocationList.length > 0) {
+        row.allocations = allocationList;
+        if (allocationList.some(a => a.unloading_status === 'UNLOADED')) {
+          row.unloading_status = 'UNLOADED';
+        }
+        if (allocationList.some(a => a.unloading_status === 'RETURNED')) {
+          row.unloading_status = 'RETURNED';
+        }
+        const totalAllocQty = allocationList.reduce((sum, a) => sum + (parseFloat(a.quantity) || 0), 0);
+        if (totalAllocQty > 0) {
+          row.quantity = totalAllocQty;
+        }
+      } else {
+        row.allocations = [{
+          godown_id: row.godown_id,
+          godown_name: row.godown_name || godownDict[rowGId] || 'Main Godown',
+          quantity: row.quantity,
+          unloading_status: row.unloading_status
+        }];
+      }
     }
   }
 
@@ -416,21 +477,6 @@ router.get('/registers', asyncHandler(async (req, res) => {
     }
   }
 
-  // Check returns for IQR list as well
-  for (let r of iqrRows) {
-    try {
-      const isReturned = await db.query(`
-        SELECT pr.id, pr.return_inv_no 
-        FROM purchase_return_items pri
-        INNER JOIN purchase_returns pr ON CAST(pri.purchase_return_id AS TEXT) = CAST(pr.id AS TEXT)
-        WHERE pri.lot_no = ?
-      `, [r.rm_lot_no]);
-      if (isReturned.rows && isReturned.rows.length > 0) {
-        r.unloading_status = 'RETURNED';
-      }
-    } catch (e) {}
-  }
-
   res.json({ 
     success: true, 
     data: {
@@ -440,8 +486,8 @@ router.get('/registers', asyncHandler(async (req, res) => {
   });
 }));
 
-// GET /api/qc/inspection/:id or /api/quality/purchase-lab-testing/:id
-router.get(['/inspection/:id', '/purchase-lab-testing/:id'], asyncHandler(async (req, res) => {
+// GET /api/qc/inspection/:id or /api/quality/purchase-lab-testing/:id or /coa/:id or /iqr/:id
+router.get(['/inspection/:id', '/purchase-lab-testing/:id', '/coa/:id', '/iqr/:id', '/report/:id'], asyncHandler(async (req, res) => {
   const { id } = req.params;
   const idStr = String(id).trim();
   const idClean = idStr.replace(/^PUR-?/i, '').replace(/^QC-?/i, '').replace(/^LOT-?/i, '').replace(/^INV-?/i, '').trim();
