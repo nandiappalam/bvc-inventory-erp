@@ -81,16 +81,14 @@ export default function CertificateAnalysisDisplay() {
   }
 
   const rawQcResults = data.qcResults || [];
-  const qcResults = React.useMemo(() => {
-    const seen = new Set();
-    return rawQcResults.filter((r) => {
-      const key = (r.parameterKey || r.parameterName || r.parameter || r.id || '').toString().toLowerCase().trim();
-      if (!key) return true;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-  }, [rawQcResults]);
+  const seenParamKeys = new Set();
+  const qcResults = rawQcResults.filter((r) => {
+    const key = (r.parameterKey || r.parameterName || r.parameter || r.id || '').toString().toLowerCase().trim();
+    if (!key) return true;
+    if (seenParamKeys.has(key)) return false;
+    seenParamKeys.add(key);
+    return true;
+  });
   const overallResult = data.overallResult || 'ACCEPTED';
 
   return (
