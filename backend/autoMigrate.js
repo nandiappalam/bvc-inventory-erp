@@ -885,6 +885,22 @@ module.exports = async function autoMigrate() {
 
   // Weight status
   await safeAddColumn('weightmaster', 'status', "TEXT DEFAULT 'Active'");
+  try {
+    const wmCount = await db.query('SELECT COUNT(*) as cnt FROM weightmaster');
+    if (wmCount.rows && wmCount.rows[0]?.cnt === 0) {
+      const defaultWeights = [
+        { name: '25 KG', printname: '25 KG', weight: 25, status: 'Active' },
+        { name: '30 KG', printname: '30 KG', weight: 30, status: 'Active' },
+        { name: '50 KG', printname: '50 KG', weight: 50, status: 'Active' },
+        { name: '60 KG', printname: '60 KG', weight: 60, status: 'Active' },
+        { name: '75 KG', printname: '75 KG', weight: 75, status: 'Active' },
+        { name: '100 KG', printname: '100 KG', weight: 100, status: 'Active' }
+      ];
+      for (const w of defaultWeights) {
+        await db.run('INSERT INTO weightmaster (name, printname, weight, status) VALUES (?, ?, ?, ?)', [w.name, w.printname, w.weight, w.status]);
+      }
+    }
+  } catch (e) {}
 
   // Ledger group status
   await safeAddColumn('ledgergroupmaster', 'status', "TEXT DEFAULT 'Active'");

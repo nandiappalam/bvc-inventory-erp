@@ -761,17 +761,24 @@ router.get(['/inspection/:id', '/purchase-lab-testing/:id'], asyncHandler(async 
       WHERE CAST(qc_id AS TEXT) = ? OR CAST(qc_id AS TEXT) = ?
     `, [String(rowData.id), idStr]);
 
-    qcResults = paramsResult.rows.map(row => {
+    const seenParamKeys = new Set();
+    qcResults = [];
+    for (const row of paramsResult.rows) {
+      let parsed = null;
       try {
-        return JSON.parse(row.param_value);
+        parsed = JSON.parse(row.param_value);
       } catch (e) {
-        return {
+        parsed = {
           parameterKey: row.param_key,
           actualResult: row.param_value,
           status: 'PASS'
         };
       }
-    });
+      const pKey = (parsed.parameterKey || parsed.parameterName || parsed.parameter || row.param_key || '').toString().toLowerCase().trim();
+      if (pKey && seenParamKeys.has(pKey)) continue;
+      if (pKey) seenParamKeys.add(pKey);
+      qcResults.push(parsed);
+    }
   } catch (e) {}
 
   if (qcResults.length === 0) {
@@ -941,12 +948,21 @@ router.post(['/submit', '/purchase-lab-testing'], asyncHandler(async (req, res) 
            WHERE id = ?`,
           [resolvedPurchaseId, lotNo, new Date().toISOString().split('T')[0], analyst, overallResult, remarks, savedQcId]
         );
-
-        // Clear existing params to rewrite them
-        await connection.run(`DELETE FROM qc_inspection_params WHERE qc_id = ?`, [savedQcId]);
       } else {
-        // Did not exist with this id, reset to create new
         savedQcId = null;
+      }
+    }
+
+    if (!savedQcId && lotNo) {
+      const existingByLot = await connection.query('SELECT id FROM qc_inspections WHERE rm_lot_no = ? ORDER BY id DESC LIMIT 1', [lotNo]);
+      if (existingByLot.rows && existingByLot.rows.length > 0) {
+        savedQcId = existingByLot.rows[0].id;
+        await connection.run(
+          `UPDATE qc_inspections 
+           SET purchase_id = ?, rm_lot_no = ?, inspection_date = ?, inspector = ?, overall_result = ?, remarks = ?, updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?`,
+          [resolvedPurchaseId, lotNo, new Date().toISOString().split('T')[0], analyst, overallResult, remarks, savedQcId]
+        );
       }
     }
 
@@ -971,9 +987,18 @@ router.post(['/submit', '/purchase-lab-testing'], asyncHandler(async (req, res) 
       throw new Error('Failed to create or resolve a valid QC inspection record');
     }
 
-    // 2. Insert params
-    for (const resItem of qcResults) {
-      const key = resItem.parameterKey || resItem.id || resItem.parameter;
+    // Clear existing params before writing new ones to prevent duplicate rows
+    await connection.run(`DELETE FROM qc_inspection_params WHERE CAST(qc_id AS TEXT) = ?`, [String(savedQcId)]);
+
+    // 2. Insert params with deduplication
+    const seenParamKeys = new Set();
+    for (const resItem of (qcResults || [])) {
+      const key = resItem.parameterKey || resItem.id || resItem.parameter || resItem.parameterName;
+      if (!key) continue;
+      const normalizedKey = String(key).toLowerCase().trim();
+      if (seenParamKeys.has(normalizedKey)) continue;
+      seenParamKeys.add(normalizedKey);
+
       // Serialize full param result details into param_value to avoid data duplication
       const serializedValue = JSON.stringify({
         parameterKey: key,

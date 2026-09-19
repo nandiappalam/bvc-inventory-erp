@@ -26,7 +26,7 @@ import {
   Chip,
   Divider
 } from '@mui/material';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import SearchIcon from '@mui/icons-material/Search';
 import VehiclePrint from '../../vehicle/VehiclePrint';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
@@ -79,9 +79,21 @@ const STATIC_GODOWN_MAP = {
 
 export default function QualityControlList() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const urlTab = searchParams.get('tab');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState(0);
+  const [activeTab, setActiveTab] = useState(urlTab === 'completed' || urlTab === '1' ? 1 : urlTab === 'unloading' || urlTab === '2' ? 2 : 0);
+
+  useEffect(() => {
+    if (urlTab === 'completed' || urlTab === '1') {
+      setActiveTab(1);
+    } else if (urlTab === 'unloading' || urlTab === '2') {
+      setActiveTab(2);
+    } else if (urlTab === 'pending' || urlTab === '0') {
+      setActiveTab(0);
+    }
+  }, [urlTab]);
 
   // States
   const [pendingLots, setPendingLots] = useState([]);
@@ -148,6 +160,11 @@ export default function QualityControlList() {
         if (registersRes?.success) {
           const qcData = registersRes.data?.qc || [];
           setCompletedTests(qcData);
+
+          // If no specific tab was specified in URL, and pending is empty while completed has items, switch to completed tab
+          if (!urlTab && (pendingRes?.data || []).length === 0 && qcData.length > 0) {
+            setActiveTab(1);
+          }
 
           const initialMap = {};
           qcData.forEach(t => {

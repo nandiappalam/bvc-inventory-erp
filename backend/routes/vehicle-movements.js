@@ -30,7 +30,10 @@ router.get('/reference-options/:type', async (req, res) => {
     if (type === 'PURCHASE') {
       // Return purchases with invoice/party details
       const result = await db.query(`
-        SELECT p.id, p.inv_no as reference_id, s.name as party_name,
+        SELECT p.id, p.inv_no as reference_id, COALESCE(s.print_name, s.name, p.supplier) as party_name,
+               COALESCE(p.vehicle_no, p.lorry_no, '') as vehicle_no,
+               COALESCE(p.driver_name, p.driver, '') as driver_name,
+               COALESCE(p.transporter, p.transport, '') as transporter,
                pi.item_name, pi.qty, pi.per_unit_weight as weight, pi.lot_no
         FROM purchases p
         LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(p.supplier AS TEXT) OR s.name = p.supplier OR s.print_name = p.supplier)
@@ -40,7 +43,10 @@ router.get('/reference-options/:type', async (req, res) => {
     } else if (type === 'SALES') {
       // Return sales with bill/party details
       const result = await db.query(`
-        SELECT s.id, s.s_no as reference_id, c.name as party_name,
+        SELECT s.id, s.s_no as reference_id, COALESCE(c.print_name, c.name, s.customer) as party_name,
+               COALESCE(s.lorry_no, '') as vehicle_no,
+               COALESCE(s.driver, '') as driver_name,
+               COALESCE(s.pur_trans, '') as transporter,
                si.item_name, si.qty, si.weight, si.lot_no
         FROM sales s
         LEFT JOIN customer_master c ON (CAST(c.id AS TEXT) = CAST(s.customer AS TEXT) OR c.name = s.customer OR c.print_name = s.customer)
@@ -68,7 +74,10 @@ async function autoTrackMovementStatus(db, movement) {
     item_name: movement.item_name || '',
     qty: movement.qty || 0,
     weight: movement.weight || 0,
-    lot_no: movement.lot_no || ''
+    lot_no: movement.lot_no || '',
+    vehicle_no: movement.vehicle_no || '',
+    driver_name: movement.driver_name || '',
+    transporter: movement.transporter || movement.transporter_id || ''
   };
 
   const gross = parseFloat(movement.gross_weight) || 0;
@@ -81,6 +90,9 @@ async function autoTrackMovementStatus(db, movement) {
     if (lotToMatch) {
       pRes = await db.query(`
         SELECT p.id as purchase_id, p.inv_no, COALESCE(s.print_name, s.name, p.supplier) as party_name,
+               COALESCE(p.vehicle_no, p.lorry_no, '') as vehicle_no,
+               COALESCE(p.driver_name, p.driver, '') as driver_name,
+               COALESCE(p.transporter, p.transport, '') as transporter,
                pi.item_name, pi.qty, pi.per_unit_weight as weight, pi.lot_no
         FROM purchases p
         LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(p.supplier AS TEXT) OR s.name = p.supplier OR s.print_name = p.supplier)
@@ -93,6 +105,9 @@ async function autoTrackMovementStatus(db, movement) {
     if (!pRes || pRes.rows.length === 0) {
       pRes = await db.query(`
         SELECT p.id as purchase_id, p.inv_no, COALESCE(s.print_name, s.name, p.supplier) as party_name,
+               COALESCE(p.vehicle_no, p.lorry_no, '') as vehicle_no,
+               COALESCE(p.driver_name, p.driver, '') as driver_name,
+               COALESCE(p.transporter, p.transport, '') as transporter,
                pi.item_name, pi.qty, pi.per_unit_weight as weight, pi.lot_no
         FROM purchases p
         LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(p.supplier AS TEXT) OR s.name = p.supplier OR s.print_name = p.supplier)
@@ -107,6 +122,9 @@ async function autoTrackMovementStatus(db, movement) {
       details.item_name = row.item_name || details.item_name;
       details.qty = row.qty || details.qty;
       details.weight = row.weight || details.weight;
+      details.vehicle_no = row.vehicle_no || details.vehicle_no;
+      details.driver_name = row.driver_name || details.driver_name;
+      details.transporter = row.transporter || details.transporter;
       if (!details.lot_no) {
         details.lot_no = row.lot_no || '';
       }

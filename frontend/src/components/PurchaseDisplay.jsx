@@ -150,7 +150,7 @@ const PurchaseDisplay = () => {
             style={{ backgroundColor: '#ed6c02', color: '#ffffff', border: 'none', padding: '5px 11px', borderRadius: '4px', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }} 
             onClick={() => navigate(`/quality/iqr-display/${row.qc_id}`)}
           >
-            IC Report
+            IQ Report
           </button>
         </>
       ) : (

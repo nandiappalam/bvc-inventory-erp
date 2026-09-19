@@ -123,11 +123,14 @@ const VehicleCreate = () => {
             setFormData(prev => ({
               ...prev,
               reference_id: selectedOpt.reference_id || selectedOpt.id,
-              party_name: selectedOpt.party_name || '',
-              item_name: selectedOpt.item_name || '',
-              qty: selectedOpt.qty !== undefined && selectedOpt.qty !== null ? selectedOpt.qty : '',
-              weight: selectedOpt.weight !== undefined && selectedOpt.weight !== null ? selectedOpt.weight : '',
-              lot_no: prev.lot_no || selectedOpt.lot_no || ''
+              party_name: selectedOpt.party_name || prev.party_name || '',
+              item_name: selectedOpt.item_name || prev.item_name || '',
+              qty: selectedOpt.qty !== undefined && selectedOpt.qty !== null ? selectedOpt.qty : prev.qty,
+              weight: selectedOpt.weight !== undefined && selectedOpt.weight !== null ? selectedOpt.weight : prev.weight,
+              lot_no: prev.lot_no || selectedOpt.lot_no || '',
+              vehicle_no: selectedOpt.vehicle_no || prev.vehicle_no || '',
+              driver_name: selectedOpt.driver_name || prev.driver_name || '',
+              transporter_id: selectedOpt.transporter || selectedOpt.transporter_id || prev.transporter_id || ''
             }));
           }
         }
@@ -229,7 +232,10 @@ const VehicleCreate = () => {
         item_name: selectedOpt.item_name || '',
         qty: selectedOpt.qty !== undefined && selectedOpt.qty !== null ? selectedOpt.qty : '',
         weight: selectedOpt.weight !== undefined && selectedOpt.weight !== null ? selectedOpt.weight : '',
-        lot_no: selectedOpt.lot_no || ''
+        lot_no: selectedOpt.lot_no || '',
+        vehicle_no: selectedOpt.vehicle_no || prev.vehicle_no || '',
+        driver_name: selectedOpt.driver_name || prev.driver_name || '',
+        transporter_id: selectedOpt.transporter || selectedOpt.transporter_id || prev.transporter_id || ''
       }));
     } else {
       setFormData(prev => ({

@@ -654,9 +654,9 @@ export default function QualityControlCreate() {
               }
             });
 
-          // Navigate to display or view report
+          // Navigate to completed QC list
           setTimeout(() => {
-            navigate(`/entry/quality-control-display`);
+            navigate(`/entry/quality-control-display?tab=completed`);
           }, 1500);
         } else {
           setToast({ open: true, message: res?.message || 'Failed to save QA record.', severity: 'error' });
