@@ -114,7 +114,24 @@ const PurchaseCreation = () => {
     } catch (e) {}
 
     let suppAddress = order.address || order.supplierAddress || '';
-    const suppId = draft.formData.supplier_id || order.supplier_id || order.supplierId || '';
+    let suppId = draft.formData.supplier_id || order.supplier_id || order.supplierId || '';
+    const suppNameCandidate = order.supplier_name || order.supplierName || order.supplier || '';
+    if (!suppId && suppNameCandidate) {
+      try {
+        const suppListRes = await getMasters('suppliers');
+        const suppList = Array.isArray(suppListRes) ? suppListRes : (suppListRes?.data || []);
+        const matched = suppList.find(s => 
+          String(s.id) === String(suppNameCandidate) ||
+          String(s.name || s.supplier_name).trim().toLowerCase() === String(suppNameCandidate).trim().toLowerCase()
+        );
+        if (matched) {
+          suppId = String(matched.id);
+        } else if (/^\d+$/.test(String(suppNameCandidate))) {
+          suppId = String(suppNameCandidate);
+        }
+      } catch (e) {}
+    }
+
     if ((!suppAddress || suppAddress.length < 5) && suppId) {
       try {
         const suppRes = await api(`/masters/record/suppliers/${suppId}`);
@@ -139,11 +156,17 @@ const PurchaseCreation = () => {
       } catch (e) {}
     }
 
+    const godownVal = draft.formData.godown || order.godown || order.godown_name || '';
+    const godownIdVal = draft.formData.godown_id || order.godown_id || order.godownId || '';
+
     setFormData((prev) => ({
       ...prev,
       ...draft.formData,
       s_no: nextSNo || prev.s_no,
       supplier_id: suppId || prev.supplier_id,
+      supplier: suppId || prev.supplier_id,
+      godown: godownVal || prev.godown,
+      godown_id: godownIdVal || prev.godown_id,
       address: suppAddress || draft.formData.address || prev.address || '',
       supplier_details: suppAddress || draft.formData.supplier_details || prev.supplier_details || '',
       transporter: order.transporter || order.transport || order.ship_via || draft.formData.transporter || prev.transporter || '',

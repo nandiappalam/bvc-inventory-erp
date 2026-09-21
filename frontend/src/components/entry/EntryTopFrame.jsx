@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../services/api.js';
-import { getMasters, safeArray } from '../../services/masterservice.js';
+import { getMasters, safeArray, normalizeMasterKey } from '../../services/masterservice.js';
 
 const masterTableMap = {
   suppliers: 'supplier_master',
@@ -14,57 +14,137 @@ const masterTableMap = {
   consignee: 'consignee_group_master',
   transports: 'transport_master',
   transport: 'transport_master',
+  weights: 'weightmaster',
+  weight: 'weightmaster',
+  flour_mills: 'flour_mill_master',
+  flour_mill: 'flour_mill_master',
   papad_companies: 'papad_company_master',
   papad_company: 'papad_company_master',
+  deductions: 'deduction_purchase',
+  deduction_purchase: 'deduction_purchase',
+  deduction_sales: 'deduction_sales',
+  areas: 'area_master',
+  cities: 'city_master',
+  item_groups: 'item_groups'
+};
+
+const getOptionValue = (opt) => {
+  if (opt === null || opt === undefined) return '';
+  if (typeof opt === 'string' || typeof opt === 'number') return String(opt);
+  if (opt.id !== undefined && opt.id !== null) return String(opt.id);
+  if (opt.value !== undefined && opt.value !== null) return String(opt.value);
+  return String(opt.name || opt.code || '');
 };
 
 const getOptionLabel = (opt) => {
   if (!opt) return '';
+  if (typeof opt === 'string' || typeof opt === 'number') return String(opt);
+  if (opt.label !== undefined && opt.label !== null && opt.label !== '') return String(opt.label);
   return (
     opt.name ||
+    opt.supplier_name ||
+    opt.customer_name ||
     opt.sender_name ||
     opt.consignee_name ||
     opt.transport_name ||
+    opt.transporter ||
     opt.godown_name ||
     opt.flourmill ||
+    opt.flour_mill_name ||
+    opt.mill_name ||
     opt.papad_company ||
     opt.company_name ||
     opt.ledger_name ||
     opt.item_name ||
+    opt.group_name ||
+    opt.ded_name ||
+    opt.deduction_name ||
     opt.print_name ||
-    opt.label ||
-    String(opt.id || '')
+    opt.printname ||
+    opt.weight_name ||
+    (opt.id !== undefined ? String(opt.id) : '') ||
+    (opt.value !== undefined ? String(opt.value) : '')
   );
 };
 
 const MASTER_FIELD_TYPES = {
   supplier: 'suppliers',
+  suppliers: 'suppliers',
   supplier_id: 'suppliers',
   supplierId: 'suppliers',
   supplierName: 'suppliers',
+  supplier_name: 'suppliers',
   customer: 'customers',
+  customers: 'customers',
   customer_id: 'customers',
   customerId: 'customers',
   customerName: 'customers',
+  customer_name: 'customers',
+  exporter: 'customers',
+  buyer_other: 'customers',
   item: 'items',
+  items: 'items',
   item_id: 'items',
+  itemId: 'items',
+  itemName: 'items',
+  item_name: 'items',
   godown: 'godowns',
+  godowns: 'godowns',
   godown_id: 'godowns',
   godownId: 'godowns',
+  godown_from: 'godowns',
+  godown_to: 'godowns',
+  godown_from_id: 'godowns',
+  godown_to_id: 'godowns',
+  from_godown_id: 'godowns',
+  to_godown_id: 'godowns',
   transport: 'transports',
+  transports: 'transports',
   transport_id: 'transports',
   transportId: 'transports',
+  transporter: 'transports',
+  transporters: 'transports',
+  transporter_id: 'transports',
+  pur_trans: 'transports',
+  pur_transport: 'transports',
+  ship_via: 'transports',
+  weight: 'weights',
+  weights: 'weights',
+  weight_id: 'weights',
+  weightId: 'weights',
+  wt: 'weights',
   sender: 'senders',
+  senders: 'senders',
   sender_id: 'senders',
   senderId: 'senders',
+  sender_name: 'senders',
   consignee: 'consignees',
+  consignees: 'consignees',
   consignee_id: 'consignees',
   consigneeId: 'consignees',
+  consigned_to: 'consignees',
+  consignee_name: 'consignees',
   papad_company: 'papad_companies',
+  papad_companies: 'papad_companies',
   papadCompany: 'papad_companies',
   papadComp: 'papad_companies',
+  papad_comp: 'papad_companies',
+  papad_company_id: 'papad_companies',
   flour_mill: 'flour_mills',
-  flourMill: 'flour_mills'
+  flour_mills: 'flour_mills',
+  flourMill: 'flour_mills',
+  flourmill: 'flour_mills',
+  flour_mill_id: 'flour_mills',
+  area: 'areas',
+  areas: 'areas',
+  area_id: 'areas',
+  city: 'cities',
+  cities: 'cities',
+  city_id: 'cities',
+  deduction: 'deductions',
+  deductions: 'deductions',
+  deduction_purchase: 'deductions',
+  deduction_sales: 'deduction_sales'
 };
 const DEBUG = false;
 
@@ -193,12 +273,15 @@ export const EntryTopFrame = ({ fields = [], data = {}, onChange = () => {}, col
 
   const normalizedFields = normalizeFields(fields);
   const processedFields = normalizedFields.map(field => {
-    const isMaster = field.masterType || Object.keys(MASTER_FIELD_TYPES).includes(field.name);
-    if (isMaster && field.type !== 'master') {
+    const normName = String(field.name || '').toLowerCase();
+    const masterKey = field.masterType || MASTER_FIELD_TYPES[field.name] || MASTER_FIELD_TYPES[normName];
+    const isMaster = !!masterKey || field.type === 'master' || field.type === 'masterSelect';
+    if (isMaster) {
+      const resolvedMasterType = normalizeMasterKey(field.masterType || masterKey || field.name);
       return {
         ...field,
         type: 'master',
-        masterType: field.masterType || field.name + 's'
+        masterType: resolvedMasterType || (field.name.endsWith('s') ? field.name : field.name + 's')
       };
     }
     return field;
@@ -306,8 +389,18 @@ export const EntryTopFrame = ({ fields = [], data = {}, onChange = () => {}, col
   );
 };
 
-const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], generateSno, api }) => { 
-  const [masterOptions, setMasterOptions] = useState([]);
+const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], generateSno, api: apiProp }) => { 
+  const normKey = normalizeMasterKey(field.masterType || field.name);
+  const masterKeyFromTypes = MASTER_FIELD_TYPES[field.name] || MASTER_FIELD_TYPES[String(field.name || '').toLowerCase()];
+  const isMasterField = field.type === 'master' || field.type === 'masterSelect' || !!field.masterType || !!masterKeyFromTypes;
+  const isSelectField = field.type === 'select' || isMasterField || (Array.isArray(field.options) && field.options.length > 0);
+
+  const [masterOptions, setMasterOptions] = useState(() => {
+    if (Array.isArray(field.options) && field.options.length > 1) {
+      return field.options;
+    }
+    return [];
+  });
   const [loading, setLoading] = useState(false);
 
   const isTextarea = field.type === 'textarea' || field.name === 'address' || field.name === 'remarks';
@@ -329,49 +422,53 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
   }
 
   const fetchMasterData = async (force = false) => {
-    if (!field.masterType) return;
+    const key = normKey || normalizeMasterKey(masterKeyFromTypes) || normalizeMasterKey(field.name);
+    if (!key) return;
     setLoading(true);
     try {
-      const rawResult = await getMasters(field.masterType, { forceRefresh: force });
+      const rawResult = await getMasters(key, { forceRefresh: force });
       if (!rawResult) return;
       const resultData = safeArray(rawResult.data || rawResult);
-      if (resultData.length > 0) {
+      if (resultData && resultData.length > 0) {
+        setMasterOptions(resultData);
+      } else if (!field.options || field.options.length <= 1) {
         setMasterOptions(resultData);
       }
     } catch (err) {
-      console.error(`Error fetching ${field.masterType}:`, err);
+      console.error(`Error fetching master ${key}:`, err);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    if (field.options && field.options.length > 0) {
-      setMasterOptions(field.options);
-    } else if (field.masterType) {
+    if (isMasterField || MASTER_FIELD_TYPES[field.name] || MASTER_FIELD_TYPES[String(field.name || '').toLowerCase()]) {
       fetchMasterData();
+    } else if (field.options && field.options.length > 0) {
+      setMasterOptions(field.options);
     }
-  }, [field.masterType, field.options]);
+  }, [field.masterType, field.name, isMasterField]);
 
   const handleDropdownFocus = () => {
-    if (field.masterType && masterOptions.length === 0 && !loading) {
+    if ((isMasterField || MASTER_FIELD_TYPES[field.name]) && masterOptions.length === 0 && !loading) {
       fetchMasterData(true);
     }
   };
 
-  const handleMasterSelect = async (id, field) => {
-    if (!id || !field?.masterType) return;
+  const handleMasterSelect = async (selectedVal, field) => {
+    const key = normalizeMasterKey(field?.masterType || field?.name);
+    if (!selectedVal || !key) return;
 
     try {
-      const tableName = masterTableMap[field.masterType] || field.masterType;
-      const record = await api(`/masters/record/${tableName}/${id}`);
+      const tableName = masterTableMap[key] || masterTableMap[field.masterType] || key;
+      const apiClient = apiProp || api;
+      const record = await apiClient(`/masters/record/${tableName}/${encodeURIComponent(selectedVal)}`);
 
       if (record) {
         // Only autofill 'address' for customers, suppliers, and papad companies.
-        // Senders and Consignees must NOT overwrite the customer's address.
-        const isCustomer = field.masterType === 'customers' || field.name === 'customer_id' || field.name === 'customer' || field.name === 'customerId' || field.name === 'customerName';
-        const isSupplier = field.masterType === 'suppliers' || field.name === 'supplier_id' || field.name === 'supplier' || field.name === 'supplierId' || field.name === 'supplierName';
-        const isPapadComp = field.masterType === 'papad_companies' || field.name === 'papad_company' || field.name === 'papadCompany' || field.name === 'papadComp';
+        const isCustomer = key === 'customers' || field.name === 'customer_id' || field.name === 'customer' || field.name === 'customerId' || field.name === 'customerName';
+        const isSupplier = key === 'suppliers' || field.name === 'supplier_id' || field.name === 'supplier' || field.name === 'supplierId' || field.name === 'supplierName';
+        const isPapadComp = key === 'papad_companies' || field.name === 'papad_company' || field.name === 'papadCompany' || field.name === 'papadComp';
 
         if (isCustomer || isSupplier) {
           const partyName = record.name || record.supplier_name || record.customer_name || '';
@@ -426,27 +523,32 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
   const handleChange = async (e) => {
     const value = e.target.value;
     onChange(field.name, value);
+    const key = normalizeMasterKey(field.masterType || field.name);
     const isAutofillMaster = 
-      field.masterType === 'customers' || field.name === 'customer_id' || field.name === 'customer' || field.name === 'customerId' || field.name === 'customerName' ||
-      field.masterType === 'suppliers' || field.name === 'supplier_id' || field.name === 'supplier' || field.name === 'supplierId' || field.name === 'supplierName' ||
-      field.masterType === 'papad_companies' || field.name === 'papad_company' || field.name === 'papadCompany' || field.name === 'papadComp';
+      key === 'customers' || field.name === 'customer_id' || field.name === 'customer' || field.name === 'customerId' || field.name === 'customerName' ||
+      key === 'suppliers' || field.name === 'supplier_id' || field.name === 'supplier' || field.name === 'supplierId' || field.name === 'supplierName' ||
+      key === 'papad_companies' || field.name === 'papad_company' || field.name === 'papadCompany' || field.name === 'papadComp';
 
     if (value && isAutofillMaster) {
       await handleMasterSelect(value, field);
     }
   };
 
-  if (field.masterType) {
-    let selectValue = (data[field.name] !== undefined && data[field.name] !== null) ? String(data[field.name]) : '';
-    if (selectValue && masterOptions.length > 0) {
-      const isValidId = masterOptions.some(opt => String(opt.id) === selectValue);
-      if (!isValidId) {
-        const found = masterOptions.find(opt => 
-          getOptionLabel(opt).toLowerCase() === selectValue.toLowerCase()
-        );
-        if (found) {
-          selectValue = String(found.id);
-        }
+  const effectiveOptions = masterOptions || [];
+
+  if (isSelectField || field.masterType || effectiveOptions.length > 0) {
+    let rawVal = (data[field.name] !== undefined && data[field.name] !== null) ? String(data[field.name]) : '';
+    let selectValue = rawVal;
+    
+    if (rawVal && effectiveOptions.length > 0) {
+      const match = effectiveOptions.find(opt => {
+        const optVal = getOptionValue(opt);
+        const optLabel = getOptionLabel(opt);
+        return String(optVal).toLowerCase() === rawVal.toLowerCase() ||
+               String(optLabel).toLowerCase() === rawVal.toLowerCase();
+      });
+      if (match) {
+        selectValue = getOptionValue(match);
       }
     }
 
@@ -459,15 +561,24 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
           value={selectValue}
           onChange={handleChange}
           onFocus={handleDropdownFocus}
-          style={styles.input}
-          disabled={loading}
+          style={{
+            ...styles.input,
+            cursor: (field.disabled || field.readOnly) ? 'not-allowed' : 'pointer',
+            backgroundColor: (field.disabled || field.readOnly) ? '#f4f6fa' : '#ffffff'
+          }}
+          disabled={field.disabled || field.readOnly}
+          className="form-control form-select"
         >
           <option value="">Select...</option>
-          {masterOptions.map((opt, idx) => (
-            <option key={`${opt.id || 'opt'}-${idx}`} value={opt.id}>
-              {getOptionLabel(opt)}
-            </option>
-          ))}
+          {effectiveOptions.map((opt, idx) => {
+            const optVal = getOptionValue(opt);
+            const optLabel = getOptionLabel(opt);
+            return (
+              <option key={`${optVal || 'opt'}-${idx}`} value={optVal}>
+                {optLabel}
+              </option>
+            );
+          })}
         </select>
       </div>
     );
@@ -493,29 +604,14 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
     <div className="entry-top-field-group" style={styles.fieldGroup}>
       <label style={styles.label}>{field.label}</label>
       <span style={styles.colon}>:</span>
-      {field.type === 'select' ? (
-        <select
-          name={field.name}
-          value={data[field.name] || ''}
-          onChange={(e) => onChange(field.name, e.target.value)}
-          style={styles.input}
-        >
-          {field.options?.map((opt, idx) => (
-            <option key={`${opt.value || 'val'}-${idx}`} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-      ) : (
-        <input
-          type={field.type || 'text'}
-          name={field.name}
-          value={data[field.name] || ''}
-          onChange={(e) => onChange(field.name, e.target.value)}
-          readOnly={field.readOnly}
-          style={field.readOnly ? { ...styles.input, backgroundColor: '#f4f6fa', color: '#1f3f67' } : styles.input}
-        />
-      )}
+      <input
+        type={field.type || 'text'}
+        name={field.name}
+        value={data[field.name] || ''}
+        onChange={(e) => onChange(field.name, e.target.value)}
+        readOnly={field.readOnly}
+        style={field.readOnly ? { ...styles.input, backgroundColor: '#f4f6fa', color: '#1f3f67' } : styles.input}
+      />
     </div>
   );
 };
@@ -586,6 +682,7 @@ const styles = {
     color: '#1a1a1a',
     outline: 'none',
   },
-};
+}; 
+
 
 export default EntryTopFrame;

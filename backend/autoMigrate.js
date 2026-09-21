@@ -885,22 +885,6 @@ module.exports = async function autoMigrate() {
 
   // Weight status
   await safeAddColumn('weightmaster', 'status', "TEXT DEFAULT 'Active'");
-  try {
-    const wmCount = await db.query('SELECT COUNT(*) as cnt FROM weightmaster');
-    if (wmCount.rows && wmCount.rows[0]?.cnt === 0) {
-      const defaultWeights = [
-        { name: '25 KG', printname: '25 KG', weight: 25, status: 'Active' },
-        { name: '30 KG', printname: '30 KG', weight: 30, status: 'Active' },
-        { name: '50 KG', printname: '50 KG', weight: 50, status: 'Active' },
-        { name: '60 KG', printname: '60 KG', weight: 60, status: 'Active' },
-        { name: '75 KG', printname: '75 KG', weight: 75, status: 'Active' },
-        { name: '100 KG', printname: '100 KG', weight: 100, status: 'Active' }
-      ];
-      for (const w of defaultWeights) {
-        await db.run('INSERT INTO weightmaster (name, printname, weight, status) VALUES (?, ?, ?, ?)', [w.name, w.printname, w.weight, w.status]);
-      }
-    }
-  } catch (e) {}
 
   // Ledger group status
   await safeAddColumn('ledgergroupmaster', 'status', "TEXT DEFAULT 'Active'");
@@ -1228,27 +1212,7 @@ module.exports = async function autoMigrate() {
   await safeAddColumn('sales', 'deductions_json', 'TEXT');
   await safeAddColumn('sales', 'deduction_amount', 'REAL DEFAULT 0');
 
-  // Seed default godowns if godown_master is empty
-  try {
-    const godownsCount = await db.query('SELECT COUNT(*) as cnt FROM godown_master');
-    if (!godownsCount.rows[0]?.cnt) {
-      const defaultGodowns = [
-        { name: 'Main Godown', print: 'MAIN GODOWN', area: 'Main Factory' },
-        { name: 'Godown 1', print: 'GODOWN 1', area: 'Unit 1' },
-        { name: 'Raw Material Godown', print: 'RM GODOWN', area: 'Storage' },
-        { name: 'Finished Goods Godown', print: 'FG GODOWN', area: 'Warehouse' }
-      ];
-      for (const g of defaultGodowns) {
-        await db.run(
-          'INSERT INTO godown_master (godown_name, print_name, area, status) VALUES (?, ?, ?, ?)',
-          [g.name, g.print, g.area, 'Active']
-        );
-      }
-      console.log('✓ Seeded default godowns in godown_master');
-    }
-  } catch (err) {
-    console.log('Error seeding default godowns:', err.message);
-  }
+
 
   // Ensure packing_items table has new fields for Box, Packet, Total Packet, Employee
   await safeAddColumn('packing_items', 'employee_name', 'TEXT');

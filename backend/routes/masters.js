@@ -12,32 +12,52 @@ async function tableExists(tableName) {
         "SELECT table_name as name FROM information_schema.tables WHERE lower(table_name) = lower(?)",
         [tableName]
       );
-      return (result.rows && result.rows.length > 0);
+      return (result && result.rows && result.rows.length > 0);
     }
     const result = await db.query(
       "SELECT name FROM sqlite_master WHERE type='table' AND lower(name) = lower(?)",
       [tableName]
     );
-    return (result.rows && result.rows.length > 0);
+    return (result && result.rows && result.rows.length > 0);
   } catch (error) {
     console.error(`Error checking if table '${tableName}' exists:`, error.message);
     return true;
   }
 }
 
-// Helper function to check if column exists in a table
-async function columnExists(tableName, columnName) {
+// Helper function to safely get column names for a table (works on both Postgres and SQLite)
+async function getTableColumns(tableName) {
   try {
     const isPg = typeof db.isPostgres === 'function' ? db.isPostgres() : db.isPostgres;
     if (isPg) {
-      const result = await db.query(
-        "SELECT column_name as name FROM information_schema.columns WHERE lower(table_name) = lower(?) AND lower(column_name) = lower(?)",
-        [tableName, columnName]
+      const res = await db.query(
+        "SELECT column_name as name FROM information_schema.columns WHERE lower(table_name) = lower(?)",
+        [tableName]
       );
-      return (result.rows && result.rows.length > 0);
+      const rows = res?.rows || (Array.isArray(res) ? res : []);
+      return new Set(rows.map(col => col.name));
+    } else {
+      const res = await db.query(`PRAGMA table_info(${tableName})`);
+      const rows = res?.rows || (Array.isArray(res) ? res : []);
+      return new Set(rows.map(col => col.name));
     }
-    const result = await db.query(`PRAGMA table_info(${tableName})`);
-    return (result.rows || []).some(col => String(col.name).toLowerCase() === String(columnName).toLowerCase());
+  } catch (err) {
+    console.error(`Error inspecting columns for table '${tableName}':`, err.message);
+    return new Set();
+  }
+}
+
+// Helper function to check if column exists in a table
+async function columnExists(tableName, columnName) {
+  try {
+    const cols = await getTableColumns(tableName);
+    if (cols.size === 0) return true;
+    for (const c of cols) {
+      if (String(c).toLowerCase() === String(columnName).toLowerCase()) {
+        return true;
+      }
+    }
+    return false;
   } catch (error) {
     console.error(`Error checking column '${columnName}' in '${tableName}':`, error.message);
     return true;
@@ -46,19 +66,27 @@ async function columnExists(tableName, columnName) {
 
 // Helper function to resolve alias to table name and configuration
 const resolveTableConfig = (tableParam) => {
-  const normalizedParam = (tableParam || '').replace(/-/g, '_');
+  if (!tableParam) return { tableName: null, tableConfig: null };
+  const normalizedParam = String(tableParam).replace(/-/g, '_');
   const actualTable = masterTypeAliases[tableParam] 
     ? masterTypeAliases[tableParam].table 
-    : (masterTypeAliases[normalizedParam] ? masterTypeAliases[normalizedParam].table : normalizedParam);
+    : (masterTypeAliases[normalizedParam] 
+      ? masterTypeAliases[normalizedParam].table 
+      : (masterTables[tableParam] 
+        ? masterTables[tableParam].table 
+        : (masterTables[normalizedParam] 
+          ? masterTables[normalizedParam].table 
+          : normalizedParam)));
+
+  const config = masterTypeAliases[tableParam] || masterTypeAliases[normalizedParam] || masterTables[actualTable] || masterTables[normalizedParam] || { table: actualTable, displayField: 'name', hasStatus: false };
   return {
     tableName: actualTable,
-    tableConfig: masterTables[actualTable] || masterTables[normalizedParam] || null
+    tableConfig: config
   };
 };
 
 const normalizeMasterData = async (tableName, rawData) => {
-  const tableColumnsResult = await db.query(`PRAGMA table_info(${tableName})`);
-  const actualColumns = new Set(tableColumnsResult.rows.map(col => col.name));
+  const actualColumns = await getTableColumns(tableName);
 
   const fieldSynonyms = {
     deduction_name: 'ded_name',
@@ -81,35 +109,47 @@ const normalizeMasterData = async (tableName, rawData) => {
     printname: 'print_name',
     godown_name: 'name',
     name: 'godown_name',
+    transport_name: 'name',
+    supplier_name: 'name',
+    customer_name: 'name',
+    item_name: 'name',
+    group_name: 'name',
+    flour_mill: 'flourmill',
+    flourmill_name: 'flourmill',
+    papad_company_name: 'name',
   };
 
   const filteredData = {};
-  
-  // First, copy exact columns
-  for (const col of actualColumns) {
-    if (rawData[col] !== undefined) {
-      filteredData[col] = rawData[col];
+
+  if (actualColumns.size === 0) {
+    for (const [k, v] of Object.entries(rawData || {})) {
+      if (k !== 'id' && k !== 'created_at' && k !== 'updated_at') {
+        filteredData[k] = v;
+      }
     }
-  }
-
-  // Next, try mapping synonyms for columns that are still undefined
-  for (const [syn, col] of Object.entries(fieldSynonyms)) {
-    if (actualColumns.has(col) && filteredData[col] === undefined && rawData[syn] !== undefined) {
-      filteredData[col] = rawData[syn];
+  } else {
+    for (const col of actualColumns) {
+      if (rawData[col] !== undefined) {
+        filteredData[col] = rawData[col];
+      }
     }
-  }
 
-  // Handle auto-generation of ded_code if table requires it
-  if (actualColumns.has('ded_code') && (!filteredData.ded_code || String(filteredData.ded_code).trim() === '')) {
-    const nameToUse = filteredData.ded_name || rawData.ded_name || rawData.deduction_name || 'DED';
-    const cleanName = nameToUse.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 6);
-    const randomSuffix = Math.floor(100 + Math.random() * 900);
-    filteredData.ded_code = `${cleanName}${randomSuffix}`;
-  }
+    for (const [syn, col] of Object.entries(fieldSynonyms)) {
+      if (actualColumns.has(col) && filteredData[col] === undefined && rawData[syn] !== undefined) {
+        filteredData[col] = rawData[syn];
+      }
+    }
 
-  // Handle active status by default if table has status column and it's not set
-  if (actualColumns.has('status') && filteredData.status === undefined) {
-    filteredData.status = 'Active';
+    if (actualColumns.has('ded_code') && (!filteredData.ded_code || String(filteredData.ded_code).trim() === '')) {
+      const nameToUse = filteredData.ded_name || rawData.ded_name || rawData.deduction_name || 'DED';
+      const cleanName = nameToUse.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 6);
+      const randomSuffix = Math.floor(100 + Math.random() * 900);
+      filteredData.ded_code = `${cleanName}${randomSuffix}`;
+    }
+
+    if (actualColumns.has('status') && filteredData.status === undefined) {
+      filteredData.status = 'Active';
+    }
   }
 
   // ========================================================================
@@ -393,6 +433,11 @@ const getTableConfig = (type) => {
   return masterTypeAliases[type] || masterTables[type] || null
 }
 
+// Root GET route to safely handle /api/masters
+router.get('/', (req, res) => {
+  res.json({ success: true, data: [] });
+});
+
 // ============================================================================
 // GENERIC API: Get Active records only, ordered by name ASC
 // Returns: [{ id: 1, name: "ABC" }]
@@ -407,15 +452,16 @@ router.get('/:type', async (req, res, next) => {
     const type = validateMasterType(req.params.type)
     
     if (!type) {
-      return res.status(400).json({ 
-        success: false,
+      return res.json({ 
+        success: true,
+        data: [],
         message: 'Invalid master type.' 
       })
     }
 
     const config = getTableConfig(type)
     if (!config) {
-      return res.status(400).json({ message: 'Master configuration not found' })
+      return res.json({ success: true, data: [], message: 'Master configuration not found' })
     }
 
     const tableName = config.table || type
@@ -695,41 +741,50 @@ router.get('/:type', async (req, res, next) => {
     }
 
     const result = await db.query(query, params)
-    
-    // Auto-seed weightmaster if empty
-    if (table === 'weightmaster' && (!result.rows || result.rows.length === 0)) {
-      const defaultWeights = [
-        { name: '25 KG', printname: '25 KG', weight: 25, status: 'Active' },
-        { name: '30 KG', printname: '30 KG', weight: 30, status: 'Active' },
-        { name: '50 KG', printname: '50 KG', weight: 50, status: 'Active' },
-        { name: '60 KG', printname: '60 KG', weight: 60, status: 'Active' },
-        { name: '75 KG', printname: '75 KG', weight: 75, status: 'Active' },
-        { name: '100 KG', printname: '100 KG', weight: 100, status: 'Active' }
-      ];
-      for (const dw of defaultWeights) {
-        try {
-          await db.run('INSERT INTO weightmaster (name, printname, weight, status) VALUES (?, ?, ?, ?)', [dw.name, dw.printname, dw.weight, dw.status]);
-        } catch (e) {}
-      }
-      const refetched = await db.query(query, params);
-      if (refetched.rows && refetched.rows.length > 0) {
-        result.rows = refetched.rows;
-      }
-    }
 
-    // Return simplified format [{ id, name }]
-    const simplified = result.rows.map(row => ({
-      ...row,
-      id: row.id || row[displayField] || row.name || row.item_code || row.godown_name,
-      godown_name: row.godown_name || row.name || row[displayField] || '',
-      name: row[displayField] || row.name || row.item_name || row.godown_name || row.ded_name || row.flourmill || '',
-      weight: row.weight !== undefined ? row.weight : (parseFloat(String(row.name).replace(/[^\d.]/g, '')) || 0)
-    }))
+    // Helper to enrich and normalize master row for all frontend consumption patterns
+    const normalizeRecord = (row) => {
+      const copy = { ...row };
+      const resolvedName = copy.name || copy[displayField] || copy.supplier_name || copy.customer_name || copy.item_name || copy.godown_name || copy.transport_name || copy.flourmill || copy.flour_mill_name || copy.papad_company || copy.ded_name || copy.print_name || copy.printname || '';
+      
+      copy.id = copy.id || copy[displayField] || resolvedName || copy.item_code || copy.godown_name;
+      copy.name = resolvedName;
+      copy.supplier_name = copy.supplier_name || resolvedName;
+      copy.customer_name = copy.customer_name || resolvedName;
+      copy.item_name = copy.item_name || resolvedName;
+      copy.godown_name = copy.godown_name || resolvedName;
+      copy.transport_name = copy.transport_name || resolvedName;
+      copy.transporter = copy.transporter || copy.transport_name || resolvedName;
+      copy.flourmill = copy.flourmill || copy.flour_mill_name || copy.mill_name || resolvedName;
+      copy.flour_mill_name = copy.flour_mill_name || copy.mill_name || copy.flourmill || resolvedName;
+      copy.mill_name = copy.mill_name || copy.flour_mill_name || copy.flourmill || resolvedName;
+      copy.papad_company = copy.papad_company || copy.company_name || resolvedName;
+      copy.sender_name = copy.sender_name || resolvedName;
+      copy.consignee_name = copy.consignee_name || resolvedName;
+      copy.ded_name = copy.ded_name || copy.deduction_name || resolvedName;
+      copy.deduction_name = copy.deduction_name || copy.ded_name || resolvedName;
+      copy.print_name = copy.print_name || copy.printname || resolvedName;
+      copy.printname = copy.printname || copy.print_name || resolvedName;
+      copy.weight_name = copy.weight_name || resolvedName;
+      copy.weight = copy.weight !== undefined && copy.weight !== null ? copy.weight : (parseFloat(String(resolvedName).replace(/[^\d.]/g, '')) || 0);
+      copy.address = copy.address || copy.address1 || '';
+      copy.address1 = copy.address1 || copy.address || '';
+      copy.phone = copy.phone || copy.phone_off || copy.phone_res || copy.mobile || copy.mobile1 || '';
+      copy.mobile = copy.mobile || copy.mobile1 || copy.phone || '';
+      copy.gst_number = copy.gst_number || copy.gst_no || copy.tin_no || '';
+      copy.gst_no = copy.gst_no || copy.gst_number || copy.tin_no || '';
+      copy.area = copy.area || copy.location || '';
+      copy.location = copy.location || copy.area || '';
+      return copy;
+    };
+
+    const rowsList = Array.isArray(result?.rows) ? result.rows : (Array.isArray(result) ? result : []);
+    const simplified = rowsList.map(normalizeRecord);
 
     res.json({ success: true, data: simplified })
   } catch (error) {
-    console.error('Error fetching master records:', error)
-    res.json({ success: false, data: [], error: error.message })
+    console.error(`Error fetching master records for ${req.params?.type}:`, error.message)
+    res.json({ success: true, data: [], error: error.message })
   }
 })
 
@@ -742,34 +797,53 @@ router.get('/all/:table', async (req, res) => {
     const { tableName, tableConfig } = resolveTableConfig(tableNameParam)
 
     if (!tableName) {
-      return res.status(400).json({ message: 'Invalid master table' })
+      return res.json({ success: true, data: [] })
+    }
+
+    const exists = await tableExists(tableName)
+    if (!exists) {
+      return res.json({ success: true, data: [] })
     }
 
     const result = await db.query(`SELECT * FROM ${tableName}`)
     const rows = (result.rows || []).map(row => {
       const copy = { ...row };
-      if (tableName === 'godown_master' || tableNameParam === 'godown' || tableNameParam === 'godowns') {
-        if (copy.name && !copy.godown_name) copy.godown_name = copy.name;
-        if (copy.godown_name && !copy.name) copy.name = copy.godown_name;
-        if (copy.printname && !copy.print_name) copy.print_name = copy.printname;
-        if (copy.print_name && !copy.printname) copy.printname = copy.print_name;
-        if (copy.address && !copy.address1) copy.address1 = copy.address;
-        if (copy.address1 && !copy.address) copy.address = copy.address1;
-        if (copy.phone && !copy.phone_off) copy.phone_off = copy.phone;
-        if (copy.phone_off && !copy.phone) copy.phone = copy.phone_off;
-        if (copy.mobile && !copy.mobile1) copy.mobile1 = copy.mobile;
-        if (copy.mobile1 && !copy.mobile) copy.mobile = copy.mobile1;
-        if (copy.gst_no && !copy.gst_number) copy.gst_number = copy.gst_no;
-        if (copy.gst_number && !copy.gst_no) copy.gst_no = copy.gst_number;
-        if (copy.location && !copy.area) copy.area = copy.location;
-        if (copy.area && !copy.location) copy.location = copy.area;
-      }
+      const resolvedName = copy.name || copy.supplier_name || copy.customer_name || copy.item_name || copy.godown_name || copy.transport_name || copy.flourmill || copy.flour_mill_name || copy.papad_company || copy.ded_name || copy.print_name || copy.printname || '';
+      
+      copy.id = copy.id || resolvedName || copy.item_code || copy.godown_name;
+      copy.name = copy.name || resolvedName;
+      copy.supplier_name = copy.supplier_name || resolvedName;
+      copy.customer_name = copy.customer_name || resolvedName;
+      copy.item_name = copy.item_name || resolvedName;
+      copy.godown_name = copy.godown_name || resolvedName;
+      copy.transport_name = copy.transport_name || resolvedName;
+      copy.transporter = copy.transporter || copy.transport_name || resolvedName;
+      copy.flourmill = copy.flourmill || copy.flour_mill_name || copy.mill_name || resolvedName;
+      copy.flour_mill_name = copy.flour_mill_name || copy.mill_name || copy.flourmill || resolvedName;
+      copy.mill_name = copy.mill_name || copy.flour_mill_name || copy.flourmill || resolvedName;
+      copy.papad_company = copy.papad_company || copy.company_name || resolvedName;
+      copy.sender_name = copy.sender_name || resolvedName;
+      copy.consignee_name = copy.consignee_name || resolvedName;
+      copy.ded_name = copy.ded_name || copy.deduction_name || resolvedName;
+      copy.deduction_name = copy.deduction_name || copy.ded_name || resolvedName;
+      copy.print_name = copy.print_name || copy.printname || resolvedName;
+      copy.printname = copy.printname || copy.print_name || resolvedName;
+      copy.weight_name = copy.weight_name || resolvedName;
+      copy.weight = copy.weight !== undefined && copy.weight !== null ? copy.weight : (parseFloat(String(resolvedName).replace(/[^\d.]/g, '')) || 0);
+      copy.address = copy.address || copy.address1 || '';
+      copy.address1 = copy.address1 || copy.address || '';
+      copy.phone = copy.phone || copy.phone_off || copy.phone_res || copy.mobile || copy.mobile1 || '';
+      copy.mobile = copy.mobile || copy.mobile1 || copy.phone || '';
+      copy.gst_number = copy.gst_number || copy.gst_no || copy.tin_no || '';
+      copy.gst_no = copy.gst_no || copy.gst_number || copy.tin_no || '';
+      copy.area = copy.area || copy.location || '';
+      copy.location = copy.location || copy.area || '';
       return copy;
     });
     res.json({ success: true, data: rows })
   } catch (error) {
-    console.error('Error fetching master records:', error)
-    res.status(500).json({ message: 'Error fetching records', error: error.message })
+    console.error(`Error fetching master all records for ${req.params?.table}:`, error.message)
+    res.json({ success: true, data: [], error: error.message })
   }
 })
 
@@ -1089,8 +1163,7 @@ router.delete('/:table/:id', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid master table' });
     }
 
-    const tableColumnsResult = await db.query(`PRAGMA table_info(${tableName})`);
-    const actualColumns = new Set(tableColumnsResult.rows.map(col => col.name));
+    const actualColumns = await getTableColumns(tableName);
     
     const rawId = String(req.params.id).trim();
     const isNumericId = /^\d+$/.test(rawId);
@@ -1191,8 +1264,7 @@ router.delete('/record/:table/:id', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid master table' });
     }
 
-    const tableColumnsResult = await db.query(`PRAGMA table_info(${tableName})`);
-    const actualColumns = new Set(tableColumnsResult.rows.map(col => col.name));
+    const actualColumns = await getTableColumns(tableName);
     
     const rawId = String(req.params.id).trim();
     const isNumericId = /^\d+$/.test(rawId);

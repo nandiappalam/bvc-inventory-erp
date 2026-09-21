@@ -94,6 +94,16 @@ const PurchaseOrderCreate = () => {
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState('success');
 
+  const setError = (msg) => {
+    setMessage(msg);
+    setMessageType('error');
+  };
+
+  const setSuccess = (msg) => {
+    setMessage(msg);
+    setMessageType('success');
+  };
+
   useEffect(() => {
     const fetchDeductions = async () => {
       try {

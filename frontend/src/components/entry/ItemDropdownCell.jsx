@@ -154,7 +154,9 @@ const ItemDropdownCell = ({
         }
       } catch (err) {
         console.error('Failed to fetch items master:', err);
-        if (isMounted) setItems([]);
+        if (isMounted) {
+          setItems([]);
+        }
       } finally {
         if (isMounted) setLoading(false);
       }

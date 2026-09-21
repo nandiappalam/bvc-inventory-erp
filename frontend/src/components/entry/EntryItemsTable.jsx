@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { validateEntryConfig } from '../../utils/validateEntryPage';
 
 import { api, getMasters } from '../../services/api.js';
-import { safeArray } from './safeArray.js';
+import { safeArray, normalizeMasterKey } from '../../services/masterservice.js';
 import { DEBUG } from '../../config/debug';
 import ItemDropdownCell from './ItemDropdownCell.jsx';
 import ExistingLotDropdownCell from './ExistingLotDropdownCell.jsx';
@@ -29,12 +29,13 @@ const MasterSelectCell = ({
   taxRate,
   data,
 }) => {
+  const normKey = normalizeMasterKey(masterType || cellKey);
   const [options, setOptions] = useState([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!masterType) {
-      setOptions([]);
+    const key = normalizeMasterKey(masterType || cellKey);
+    if (!key) {
       return;
     }
 
@@ -42,11 +43,10 @@ const MasterSelectCell = ({
       setLoading(true);
 
       try {
-        const table = masterType.replace('_master', '');
+        const table = key.replace('_master', '');
         const result = await getMasters(table);
 
         const data = safeArray(result?.data || result);
-
         setOptions(data);
       } catch (err) {
         console.error(err);
@@ -57,20 +57,9 @@ const MasterSelectCell = ({
     };
 
     fetchOptions();
-  }, [masterType]);
+  }, [masterType, cellKey]);
 
-  const DEFAULT_WEIGHT_OPTIONS = [
-    { id: 1, name: '25 KG', print_name: '25 KG', weight: 25 },
-    { id: 2, name: '30 KG', print_name: '30 KG', weight: 30 },
-    { id: 3, name: '50 KG', print_name: '50 KG', weight: 50 },
-    { id: 4, name: '60 KG', print_name: '60 KG', weight: 60 },
-    { id: 5, name: '75 KG', print_name: '75 KG', weight: 75 },
-    { id: 6, name: '100 KG', print_name: '100 KG', weight: 100 }
-  ];
-
-  const safeOptions = Array.isArray(options) && options.length > 0
-    ? options
-    : (masterType === 'weights' || cellKey === 'weight') ? DEFAULT_WEIGHT_OPTIONS : [];
+  const safeOptions = Array.isArray(options) ? options : [];
 
   const handleChange = async (e) => {
     const selectedId = e.target.value;
@@ -380,23 +369,23 @@ const MasterSelectCell = ({
     <select
       value={selectValue}
       onChange={handleChange}
-      disabled={loading}
+      disabled={row?.readOnly || false}
       style={styles.cellInput}
       className="table-input"
     >
       <option value="">
-        {loading ? 'Loading...' : '-- Select --'}
+        -- Select --
       </option>
 
-      {safeOptions.map((opt, idx) => (
-        <option key={`${opt.id || 'opt'}-${idx}`} value={String(opt.id)}>
-          {opt.item_name ||
-            opt.name ||
-            opt.printname ||
-            opt.print_name ||
-            String(opt.id)}
-        </option>
-      ))}
+      {safeOptions.map((opt, idx) => {
+        const optVal = opt.id !== undefined && opt.id !== null ? String(opt.id) : (opt.value !== undefined ? String(opt.value) : String(opt.name || opt));
+        const optLabel = opt.item_name || opt.name || opt.printname || opt.print_name || opt.weight_name || opt.label || String(optVal);
+        return (
+          <option key={`${optVal || 'opt'}-${idx}`} value={optVal}>
+            {optLabel}
+          </option>
+        );
+      })}
     </select>
   );
 };

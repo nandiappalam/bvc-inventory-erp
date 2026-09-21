@@ -192,7 +192,7 @@ const WeightConversionCreate = () => {
         if (Array.isArray(weightsRes)) {
           setAvailableWeights(weightsRes.map(r => r.name));
         } else {
-          setAvailableWeights(['1 KG', '500 GM', '1 GM', '25 KG', '50 KG']);
+          setAvailableWeights([]);
         }
       } catch (err) {
         console.error('Failed to initialize data:', err);

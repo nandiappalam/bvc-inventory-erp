@@ -664,8 +664,8 @@ router.get('/:id', async (req, res) => {
         sm.gst_number as supplier_gst
       FROM purchase_requests pr
       LEFT JOIN supplier_master sm ON CAST(pr.supplier_id AS TEXT) = CAST(sm.id AS TEXT)
-      WHERE pr.pr_no = ? OR LOWER(pr.pr_no) = LOWER(?) ${isNum ? 'OR pr.id = ? OR pr.s_no = ?' : ''}
-    `, isNum ? [idStr, idStr, numVal, numVal] : [idStr, idStr]);
+      WHERE pr.pr_no = ? OR LOWER(pr.pr_no) = LOWER(?) ${isNum ? 'OR pr.id = ?' : ''}
+    `, isNum ? [idStr, idStr, numVal] : [idStr, idStr]);
 
     if (!prRes.rows || prRes.rows.length === 0) {
       return res.status(404).json({ error: 'Purchase Request not found' });
