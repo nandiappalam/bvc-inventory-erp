@@ -244,7 +244,7 @@ router.get('/approved-list', async (req, res) => {
         COALESCE(pri_agg.total_amount, 0) as total_amount,
         pri_agg.item_names
       FROM purchase_requests pr
-      LEFT JOIN supplier_master sm ON pr.supplier_id = sm.id
+      LEFT JOIN supplier_master sm ON CAST(pr.supplier_id AS TEXT) = CAST(sm.id AS TEXT)
       LEFT JOIN (
         SELECT purchase_request_id, COUNT(*) as total_items, SUM(requested_qty) as total_qty, SUM(estimated_amount) as total_amount, ${itemNamesAggregate} as item_names
         FROM purchase_request_items GROUP BY purchase_request_id
@@ -651,7 +651,10 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const isNum = !isNaN(Number(id));
+    const idStr = String(id || '').trim();
+    const isNum = !isNaN(Number(idStr)) && idStr !== '';
+    const numVal = isNum ? Number(idStr) : null;
+
     const prRes = await db.query(`
       SELECT 
         pr.*,
@@ -660,9 +663,9 @@ router.get('/:id', async (req, res) => {
         COALESCE(sm.mobile1, sm.phone_off) as supplier_phone,
         sm.gst_number as supplier_gst
       FROM purchase_requests pr
-      LEFT JOIN supplier_master sm ON pr.supplier_id = sm.id
-      WHERE pr.pr_no = ? ${isNum ? 'OR pr.id = ?' : ''}
-    `, isNum ? [id, Number(id)] : [id]);
+      LEFT JOIN supplier_master sm ON CAST(pr.supplier_id AS TEXT) = CAST(sm.id AS TEXT)
+      WHERE pr.pr_no = ? OR LOWER(pr.pr_no) = LOWER(?) ${isNum ? 'OR pr.id = ? OR pr.s_no = ?' : ''}
+    `, isNum ? [idStr, idStr, numVal, numVal] : [idStr, idStr]);
 
     if (!prRes.rows || prRes.rows.length === 0) {
       return res.status(404).json({ error: 'Purchase Request not found' });

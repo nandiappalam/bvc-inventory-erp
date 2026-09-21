@@ -696,12 +696,34 @@ router.get('/:type', async (req, res, next) => {
 
     const result = await db.query(query, params)
     
+    // Auto-seed weightmaster if empty
+    if (table === 'weightmaster' && (!result.rows || result.rows.length === 0)) {
+      const defaultWeights = [
+        { name: '25 KG', printname: '25 KG', weight: 25, status: 'Active' },
+        { name: '30 KG', printname: '30 KG', weight: 30, status: 'Active' },
+        { name: '50 KG', printname: '50 KG', weight: 50, status: 'Active' },
+        { name: '60 KG', printname: '60 KG', weight: 60, status: 'Active' },
+        { name: '75 KG', printname: '75 KG', weight: 75, status: 'Active' },
+        { name: '100 KG', printname: '100 KG', weight: 100, status: 'Active' }
+      ];
+      for (const dw of defaultWeights) {
+        try {
+          await db.run('INSERT INTO weightmaster (name, printname, weight, status) VALUES (?, ?, ?, ?)', [dw.name, dw.printname, dw.weight, dw.status]);
+        } catch (e) {}
+      }
+      const refetched = await db.query(query, params);
+      if (refetched.rows && refetched.rows.length > 0) {
+        result.rows = refetched.rows;
+      }
+    }
+
     // Return simplified format [{ id, name }]
     const simplified = result.rows.map(row => ({
       ...row,
       id: row.id || row[displayField] || row.name || row.item_code || row.godown_name,
       godown_name: row.godown_name || row.name || row[displayField] || '',
-      name: row[displayField] || row.name || row.item_name || row.godown_name || row.ded_name || row.flourmill || ''
+      name: row[displayField] || row.name || row.item_name || row.godown_name || row.ded_name || row.flourmill || '',
+      weight: row.weight !== undefined ? row.weight : (parseFloat(String(row.name).replace(/[^\d.]/g, '')) || 0)
     }))
 
     res.json({ success: true, data: simplified })

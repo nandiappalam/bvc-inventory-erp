@@ -407,6 +407,25 @@ router.post('/', async (req, res) => {
       }
     }
 
+    let resolvedGodownId = null;
+    let resolvedGodownName = formData.godown || '';
+    const rawGodown = formData.godown_id || formData.godownId || formData.godown || null;
+    if (rawGodown && /^\d+$/.test(String(rawGodown))) {
+      resolvedGodownId = parseInt(rawGodown, 10);
+    }
+    try {
+      if (resolvedGodownId) {
+        const gRes = await db.query('SELECT godown_name FROM godown_master WHERE id = ?', [resolvedGodownId]);
+        if (gRes.rows && gRes.rows[0]) resolvedGodownName = gRes.rows[0].godown_name;
+      } else if (resolvedGodownName) {
+        const gRes = await db.query('SELECT id, godown_name FROM godown_master WHERE LOWER(godown_name) = LOWER(?)', [resolvedGodownName]);
+        if (gRes.rows && gRes.rows[0]) {
+          resolvedGodownId = gRes.rows[0].id;
+          resolvedGodownName = gRes.rows[0].godown_name;
+        }
+      }
+    } catch (e) {}
+
     const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
 
     for (const item of items) {
@@ -469,14 +488,39 @@ router.post('/', async (req, res) => {
       }
 
       await db.run(`
-        INSERT INTO stock_lots (item_id, item_name, lot_no, purchase_id, quantity, remaining_quantity, rate)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `, [itemId, normalizedItem.item_name, lotNo, purchaseId, qty, qty, rate])
+        INSERT INTO stock_lots (item_id, item_name, lot_no, purchase_id, quantity, remaining_quantity, rate, qc_status, unloading_status, godown_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'QC_PENDING', 'PENDING_DECISION', ?)
+      `, [itemId, normalizedItem.item_name, lotNo, purchaseId, qty, qty, rate, resolvedGodownId])
 
       await db.run(`
-        INSERT INTO stock (item_name, lot_no, qty, weight, rate, amount, date, type, reference_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'Purchase', ?)
-      `, [normalizedItem.item_name, lotNo, qty, totalWt, rate, amount, formData.date, purchaseId])
+        INSERT INTO stock (item_id, item_name, lot_no, qty, weight, rate, amount, date, type, reference_id, godown, godown_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Purchase', ?, ?, ?)
+      `, [itemId, normalizedItem.item_name, lotNo, qty, totalWt, rate, amount, formData.date, purchaseId, resolvedGodownName || 'Main Godown', resolvedGodownId || 1])
+    }
+
+    if (vehicle_no) {
+      try {
+        await db.run(`
+          INSERT INTO vehicle_movements (
+            reference_type, reference_id, movement_type, operation_type, vehicle_no, driver_name,
+            gate_in_time, status, item_name, qty, weight, party_name, lot_no, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 'IN', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        `, [
+          'Purchase',
+          purchaseId,
+          'INWARD',
+          'Purchase Inward',
+          vehicle_no,
+          driver_name || '',
+          items[0]?.item_name || '',
+          parseFloat(totals.totalQty) || 0,
+          parseFloat(totals.totalWeight) || 0,
+          formData.supplier || '',
+          items[0]?.lot_no || ''
+        ]);
+      } catch (vmErr) {
+        console.error('Error inserting vehicle movement for purchase:', vmErr);
+      }
     }
 
     for (const ded of deductions) {
@@ -661,9 +705,9 @@ router.put('/:id', async (req, res) => {
       }
 
       await db.run(`
-        INSERT INTO stock_lots (item_id, item_name, lot_no, purchase_id, quantity, remaining_quantity, rate)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `, [itemId, normalizedItem.item_name, lotNo, purchaseId, qty, qty, rate])
+        INSERT INTO stock_lots (item_id, item_name, lot_no, purchase_id, quantity, remaining_quantity, rate, qc_status, unloading_status, godown_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'QC_PENDING', 'PENDING_DECISION', ?)
+      `, [itemId, normalizedItem.item_name, lotNo, purchaseId, qty, qty, rate, resolvedGodownId])
 
       // Re-apply preserved status if this lot number already existed
       const key = lotNo.toUpperCase();
@@ -678,7 +722,7 @@ router.put('/:id', async (req, res) => {
           `, [
             p.qc_status || 'QC_PENDING',
             p.unloading_status || 'PENDING_DECISION',
-            p.godown_id || null,
+            p.godown_id || resolvedGodownId,
             p.usable_for_production || 0,
             p.approval_status || 'PENDING_APPROVAL',
             p.approval_date || null,
@@ -691,9 +735,9 @@ router.put('/:id', async (req, res) => {
       }
 
       await db.run(`
-        INSERT INTO stock (item_name, lot_no, qty, weight, rate, amount, date, type, reference_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'Purchase', ?)
-      `, [normalizedItem.item_name, lotNo, qty, totalWt, rate, amount, formData.date, purchaseId])
+        INSERT INTO stock (item_id, item_name, lot_no, qty, weight, rate, amount, date, type, reference_id, godown, godown_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Purchase', ?, ?, ?)
+      `, [itemId, normalizedItem.item_name, lotNo, qty, totalWt, rate, amount, formData.date, purchaseId, resolvedGodownName || 'Main Godown', resolvedGodownId || 1])
     }
 
     for (const ded of deductions) {

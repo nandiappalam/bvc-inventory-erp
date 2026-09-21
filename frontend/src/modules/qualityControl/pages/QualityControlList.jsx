@@ -86,8 +86,8 @@ export default function QualityControlList() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState(
-    urlTab === 'pending' || urlTab === '0' ? 0 :
-    urlTab === 'unloading' || urlTab === '2' ? 2 : 1
+    urlTab === 'completed' || urlTab === '1' ? 1 :
+    urlTab === 'unloading' || urlTab === '2' ? 2 : 0
   );
 
   useEffect(() => {
@@ -164,9 +164,15 @@ export default function QualityControlList() {
       const godownsRes = godownsSettled.status === 'fulfilled' ? godownsSettled.value : null;
       const vehiclesRes = vehiclesSettled.status === 'fulfilled' ? vehiclesSettled.value : null;
 
+      let pendingData = [];
       if (pendingRes?.success && Array.isArray(pendingRes.data)) {
-        setPendingLots(pendingRes.data);
+        pendingData = pendingRes.data;
+      } else if (Array.isArray(pendingRes?.data)) {
+        pendingData = pendingRes.data;
+      } else if (Array.isArray(pendingRes)) {
+        pendingData = pendingRes;
       }
+      setPendingLots(pendingData);
 
       // Retry registers if needed
       if (!registersRes?.success || !registersRes?.data?.qc) {
@@ -178,26 +184,39 @@ export default function QualityControlList() {
         } catch (e) {}
       }
 
+      let qcData = [];
       if (registersRes?.success && registersRes.data?.qc) {
-        const qcData = registersRes.data.qc || [];
-        setCompletedTests(qcData);
-
-        const initialMap = {};
-        qcData.forEach(t => {
-          if (t.allocations && t.allocations.length > 0) {
-            initialMap[t.rm_lot_no] = t.allocations.map(a => ({
-              godownId: a.godown_id || '',
-              qty: a.quantity !== undefined ? a.quantity : ''
-            }));
-          } else {
-            initialMap[t.rm_lot_no] = [{
-              godownId: t.godown_id || '',
-              qty: t.quantity !== undefined ? t.quantity : ''
-            }];
-          }
-        });
-        setAllocationsMap(initialMap);
+        qcData = registersRes.data.qc || [];
+      } else if (registersRes?.data && Array.isArray(registersRes.data)) {
+        qcData = registersRes.data;
+      } else if (Array.isArray(registersRes)) {
+        qcData = registersRes;
       }
+      setCompletedTests(qcData);
+
+      if (!urlTab) {
+        if (pendingData.length > 0) {
+          setActiveTab(0);
+        } else if (qcData.length > 0) {
+          setActiveTab(1);
+        }
+      }
+
+      const initialMap = {};
+      qcData.forEach(t => {
+        if (t.allocations && t.allocations.length > 0) {
+          initialMap[t.rm_lot_no] = t.allocations.map(a => ({
+            godownId: a.godown_id || '',
+            qty: a.quantity !== undefined ? a.quantity : ''
+          }));
+        } else {
+          initialMap[t.rm_lot_no] = [{
+            godownId: t.godown_id || '',
+            qty: t.quantity !== undefined ? t.quantity : ''
+          }];
+        }
+      });
+      setAllocationsMap(initialMap);
 
       const godownItems = (godownsRes && Array.isArray(godownsRes))
         ? godownsRes

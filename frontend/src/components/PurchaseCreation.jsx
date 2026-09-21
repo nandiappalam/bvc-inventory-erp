@@ -373,16 +373,24 @@ const PurchaseCreation = () => {
         } catch (e) {
           console.log('purchaseOrderService get fallback');
         }
-        if (!order) {
+        if (!order || (!order.id && !order.s_no && !order.inv_no)) {
           const res = await api(`/purchase-orders/${sourceOrderId}`).catch(() => null);
-          order = res?.data || res;
+          if (res?.data && (res.data.id || res.data.s_no || res.data.inv_no)) {
+            order = res.data;
+          } else if (res && (res.id || res.s_no || res.inv_no)) {
+            order = res;
+          }
         }
 
-        if (order) {
+        if (order && (order.id || order.s_no || order.inv_no)) {
           await applyPurchaseOrder(order);
+          setSuccess(`Inward loaded from Purchase Order ${order.inv_no || order.invNo || ('#' + sourceOrderId)}`);
+        } else {
+          setError(`Could not fetch Purchase Order #${sourceOrderId}`);
         }
       } catch (err) {
         console.error('Error preloading PO:', err);
+        setError(`Error loading Purchase Order: ${err.message}`);
       }
     };
 

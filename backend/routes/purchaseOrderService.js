@@ -112,7 +112,8 @@ exports.createPurchaseOrder = async (formData, items = [], deductions = []) => {
             }
         } catch (e) {}
         
-        let supplier_id = formData.supplier_id || formData.supplierId || null;
+        let rawSupplierId = formData.supplier_id || formData.supplierId || null;
+        let supplier_id = rawSupplierId && /^\d+$/.test(String(rawSupplierId)) ? parseInt(rawSupplierId, 10) : null;
         let supplier_name = formData.supplier_name || formData.supplierName || '';
 
         if (!supplier_id && supplier_name) {
@@ -142,6 +143,9 @@ exports.createPurchaseOrder = async (formData, items = [], deductions = []) => {
             } catch (e) {}
         }
 
+        let rawGodownId = formData.godown_id || formData.godownId || null;
+        let godown_id = rawGodownId && /^\d+$/.test(String(rawGodownId)) ? parseInt(rawGodownId, 10) : null;
+
         const purchaseOrderResult = await client.run(
             `INSERT INTO purchase_orders (
                 s_no, supplier_id, supplier_name, date, inv_no, inv_date, po_date, godown_id, pay_type, tax_type, tax_rate, type, 
@@ -156,7 +160,7 @@ exports.createPurchaseOrder = async (formData, items = [], deductions = []) => {
                 inv_no,
                 formData.inv_date || formData.invDate || null,
                 formData.po_date || formData.poDate || formData.date,
-                formData.godown_id || formData.godownId || null,
+                godown_id,
                 formData.pay_type || formData.payType || 'Cash',
                 formData.tax_type || formData.taxType || 'Exclusive',
                 parseFloat(formData.tax_rate || formData.taxRate || 0),
@@ -194,7 +198,8 @@ exports.createPurchaseOrder = async (formData, items = [], deductions = []) => {
         }
 
         for (const item of items) {
-            let item_id = item.item_id || item.itemId || null;
+            let rawItemId = item.item_id || item.itemId || null;
+            let item_id = rawItemId && /^\d+$/.test(String(rawItemId)) ? parseInt(rawItemId, 10) : null;
             let item_name = item.item_name || item.itemName || '';
 
             if (!item_id && item_name) {
@@ -205,6 +210,9 @@ exports.createPurchaseOrder = async (formData, items = [], deductions = []) => {
                     }
                 } catch (e) {}
             }
+
+            let rawWeightId = item.weight_id || item.weightId || null;
+            let weight_id = rawWeightId && /^\d+$/.test(String(rawWeightId)) ? parseInt(rawWeightId, 10) : null;
 
             await client.run(
                 `INSERT INTO purchase_order_items (
@@ -218,7 +226,7 @@ exports.createPurchaseOrder = async (formData, items = [], deductions = []) => {
                     parseFloat(item.rate || item.purc_rate) || 0, 
                     parseFloat(item.amount) || 0,
                     item.uom || '',
-                    item.weight_id || item.weightId || null,
+                    weight_id,
                     parseFloat(item.weight) || 0,
                     parseFloat(item.tot_wt || item.totWt) || 0,
                     parseFloat(item.discount_percent || item.discountPercent) || 0,
@@ -339,16 +347,20 @@ exports.getAllPurchaseOrders = async () => {
 exports.getPurchaseOrderById = async (id) => {
     try {
         await ensurePurchaseOrderSchema();
+        const idStr = String(id || '').trim();
+        const idNum = /^\d+$/.test(idStr) ? parseInt(idStr, 10) : null;
+
         const purchaseOrderResult = await db.query(`
             SELECT po.*, COALESCE(s.name, po.supplier_name) as supplier_name, g.godown_name
             FROM purchase_orders po
             LEFT JOIN supplier_master s ON CAST(po.supplier_id AS TEXT) = CAST(s.id AS TEXT)
             LEFT JOIN godown_master g ON CAST(po.godown_id AS TEXT) = CAST(g.id AS TEXT)
-            WHERE po.id = ?
-        `, [id]);
+            WHERE ${idNum !== null ? 'po.id = ? OR po.s_no = ? OR ' : ''}po.inv_no = ? OR LOWER(po.inv_no) = LOWER(?)
+        `, idNum !== null ? [idNum, idNum, idStr, idStr] : [idStr, idStr]);
         if (!purchaseOrderResult.rows || purchaseOrderResult.rows.length === 0) return null;
 
         const purchaseOrder = purchaseOrderResult.rows[0];
+        const actualPoId = purchaseOrder.id;
         let items = [];
         try {
             const itemsResult = await db.query(`
@@ -356,7 +368,7 @@ exports.getPurchaseOrderById = async (id) => {
                 FROM purchase_order_items poi
                 LEFT JOIN item_master i ON CAST(poi.item_id AS TEXT) = CAST(i.id AS TEXT)
                 WHERE poi.purchase_order_id = ?
-            `, [id]);
+            `, [actualPoId]);
             items = itemsResult.rows || [];
         } catch (e) {}
 
@@ -364,7 +376,7 @@ exports.getPurchaseOrderById = async (id) => {
         try {
             const dedResult = await db.query(`
                 SELECT * FROM purchase_order_deductions WHERE purchase_order_id = ?
-            `, [id]);
+            `, [actualPoId]);
             deductions = dedResult.rows || [];
         } catch (e) {}
 
@@ -388,7 +400,8 @@ exports.updatePurchaseOrder = async (id, formData, items = [], deductions = []) 
         const s_no = formData.s_no || formData.sNo;
         const inv_no = formData.inv_no || formData.invNo || `PO-${s_no}`;
 
-        let supplier_id = formData.supplier_id || formData.supplierId || null;
+        let rawSupplierId = formData.supplier_id || formData.supplierId || null;
+        let supplier_id = rawSupplierId && /^\d+$/.test(String(rawSupplierId)) ? parseInt(rawSupplierId, 10) : null;
         let supplier_name = formData.supplier_name || formData.supplierName || '';
 
         if (!supplier_id && supplier_name) {
@@ -418,6 +431,9 @@ exports.updatePurchaseOrder = async (id, formData, items = [], deductions = []) 
             } catch (e) {}
         }
 
+        let rawGodownId = formData.godown_id || formData.godownId || null;
+        let godown_id = rawGodownId && /^\d+$/.test(String(rawGodownId)) ? parseInt(rawGodownId, 10) : null;
+
         const updateResult = await client.run(
             `UPDATE purchase_orders SET
                 s_no = ?, supplier_id = ?, supplier_name = ?, date = ?, inv_no = ?, inv_date = ?, po_date = ?, godown_id = ?, pay_type = ?,
@@ -433,7 +449,7 @@ exports.updatePurchaseOrder = async (id, formData, items = [], deductions = []) 
                 inv_no, 
                 formData.inv_date || formData.invDate || null,
                 formData.po_date || formData.poDate || formData.date,
-                formData.godown_id || formData.godownId || null, 
+                godown_id, 
                 formData.pay_type || formData.payType || 'Cash', 
                 formData.tax_type || formData.taxType || 'Exclusive', 
                 parseFloat(formData.tax_rate || formData.taxRate || 0), 
@@ -464,7 +480,8 @@ exports.updatePurchaseOrder = async (id, formData, items = [], deductions = []) 
         await client.run('DELETE FROM purchase_order_items WHERE purchase_order_id = ?', [id]);
 
         for (const item of items) {
-            let item_id = item.item_id || item.itemId || null;
+            let rawItemId = item.item_id || item.itemId || null;
+            let item_id = rawItemId && /^\d+$/.test(String(rawItemId)) ? parseInt(rawItemId, 10) : null;
             let item_name = item.item_name || item.itemName || '';
 
             if (!item_id && item_name) {
@@ -475,6 +492,9 @@ exports.updatePurchaseOrder = async (id, formData, items = [], deductions = []) 
                     }
                 } catch (e) {}
             }
+
+            let rawWeightId = item.weight_id || item.weightId || null;
+            let weight_id = rawWeightId && /^\d+$/.test(String(rawWeightId)) ? parseInt(rawWeightId, 10) : null;
 
             await client.run(
                 `INSERT INTO purchase_order_items (
@@ -488,7 +508,7 @@ exports.updatePurchaseOrder = async (id, formData, items = [], deductions = []) 
                     parseFloat(item.rate || item.purc_rate) || 0, 
                     parseFloat(item.amount) || 0,
                     item.uom || '',
-                    item.weight_id || item.weightId || null,
+                    weight_id,
                     parseFloat(item.weight) || 0,
                     parseFloat(item.tot_wt || item.totWt) || 0,
                     parseFloat(item.discount_percent || item.discountPercent) || 0,

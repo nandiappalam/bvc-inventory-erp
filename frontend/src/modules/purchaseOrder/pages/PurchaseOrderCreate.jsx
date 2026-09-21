@@ -357,12 +357,30 @@ const PurchaseOrderCreate = () => {
 
           if (linkedPrId) {
             try {
-              const prRes = await api(`/purchase-requests/${linkedPrId}`).catch(() => null) || await fetch(`/api/purchase-requests/${linkedPrId}`).then(r => r.json()).catch(() => null);
-              if (prRes && (prRes.id || prRes.pr_no)) {
-                applyPurchaseRequest(prRes);
+              let prData = null;
+              const prRes = await api(`/purchase-requests/${linkedPrId}`).catch(() => null);
+              if (prRes?.data && (prRes.data.id || prRes.data.pr_no)) {
+                prData = prRes.data;
+              } else if (prRes && (prRes.id || prRes.pr_no)) {
+                prData = prRes;
+              }
+              if (!prData) {
+                const fetchRes = await fetch(`/api/purchase-requests/${linkedPrId}`).then(r => r.json()).catch(() => null);
+                if (fetchRes?.data && (fetchRes.data.id || fetchRes.data.pr_no)) {
+                  prData = fetchRes.data;
+                } else if (fetchRes && (fetchRes.id || fetchRes.pr_no)) {
+                  prData = fetchRes;
+                }
+              }
+              if (prData && (prData.id || prData.pr_no)) {
+                applyPurchaseRequest(prData);
+                setSuccess(`Preloaded from Purchase Request ${prData.pr_no || ('#' + linkedPrId)}`);
+              } else {
+                setError(`Could not fetch Purchase Request #${linkedPrId}`);
               }
             } catch (err) {
               console.error('Error preloading PR into PO:', err);
+              setError(`Error loading Purchase Request: ${err.message}`);
             }
           } else {
             const savedDraft = loadModuleDraft('po_create');
