@@ -301,55 +301,86 @@ const PurchaseOrderCreate = () => {
         if (editingId) {
           const existing = await purchaseOrderService.get(editingId);
           if (existing) {
+            const fmtDate = (d) => d ? String(d).split('T')[0].split(' ')[0] : '';
+            const poDateVal = fmtDate(existing.poDate || existing.po_date || existing.date);
+            const dateVal = fmtDate(existing.date);
+            const invDateVal = fmtDate(existing.invDate || existing.inv_date);
+
+            const suppId = String(existing.supplierId || existing.supplier_id || existing.supplier || '');
+            const suppName = existing.supplierName || existing.supplier_name || existing.supplier || '';
+            const invNoVal = existing.invNo || existing.inv_no || existing.orderNo || '';
+            const sNoVal = String(existing.sNo || existing.s_no || '');
+
             setFormData({
-              sNo: existing.sNo || existing.s_no || '',
-              date: existing.date || '',
-              payType: existing.payType || existing.paymentTerms || 'Cash',
+              sNo: sNoVal,
+              s_no: sNoVal,
+              date: dateVal,
+              payType: existing.payType || existing.pay_type || existing.paymentTerms || 'Cash',
               type: existing.type || 'Urad',
-              invNo: existing.invNo || existing.orderNo || '',
-              invDate: existing.invDate || '',
-              taxType: existing.taxType || 'Exclusive',
-              poDate: existing.poDate || existing.date || '',
+              invNo: invNoVal,
+              inv_no: invNoVal,
+              invDate: invDateVal,
+              inv_date: invDateVal,
+              taxType: existing.taxType || existing.tax_type || 'Exclusive',
+              poDate: poDateVal || dateVal,
               terms: existing.terms || '',
               fob: existing.fob || '',
-              shipVia: existing.shipVia || '',
+              shipVia: existing.shipVia || existing.ship_via || '',
               sign: existing.sign || '',
-              supplierId: existing.supplierId || '',
-              supplierName: existing.supplierName || '',
+              supplierId: suppId,
+              supplier_id: suppId,
+              supplierName: suppName,
+              supplier_name: suppName,
               address: existing.address || '',
               sender: existing.sender || '',
-              remarks: existing.internalRemarks || existing.remarks || '',
-              purchase_request_id: existing.purchase_request_id || '',
+              remarks: existing.remarks || existing.internalRemarks || '',
+              purchase_request_id: existing.purchase_request_id || existing.pr_id || '',
               pr_no: existing.pr_no || '',
-              taxPercent: String(existing.taxPercent || '18'),
+              taxPercent: String(existing.taxPercent !== undefined ? existing.taxPercent : (existing.tax_percent !== undefined ? existing.tax_percent : '18')),
               amount: String(existing.amount || '0.00'),
-              billAmt: String(existing.billAmt || '0.00'),
-              taxAmt: String(existing.taxAmt || '0.00'),
-              totAmt: String(existing.totAmt || '0.00')
+              billAmt: String(existing.billAmt || existing.bill_amt || '0.00'),
+              taxAmt: String(existing.taxAmt || existing.tax_amt || '0.00'),
+              totAmt: String(existing.totAmt || existing.total_amt || '0.00')
             });
 
             if (existing.items && existing.items.length > 0) {
-              setItems(existing.items.map((it, idx) => ({
-                id: idx + 1,
-                item_name: it.itemName || it.item_name || '',
-                weight: it.weight || '',
-                qty: it.qty || '',
-                tot_wt: it.tot_wt || it.totWt || '',
-                purc_rate: it.purc_rate || it.rate || '',
-                disc_percent: it.disc_percent || it.discountPercent || '',
-                tax_percent: it.tax_percent || it.taxPercent || '',
-                ed_percent: it.ed_percent || '',
-                amount: it.amount || '0.00'
-              })));
+              setItems(existing.items.map((it, idx) => {
+                const name = it.itemName || it.item_name || '';
+                const itemId = String(it.item_id || it.itemId || '');
+                const qtyVal = String(it.qty !== undefined ? it.qty : '');
+                const wtVal = String(it.weight !== undefined ? it.weight : '');
+                const totWtVal = String(it.tot_wt !== undefined ? it.tot_wt : (it.totWt !== undefined ? it.totWt : ''));
+                const rateVal = String(it.purc_rate !== undefined ? it.purc_rate : (it.rate !== undefined ? it.rate : ''));
+                const discVal = String(it.disc_percent !== undefined ? it.disc_percent : (it.discountPercent !== undefined ? it.discountPercent : ''));
+                const taxVal = String(it.tax_percent !== undefined ? it.tax_percent : (it.taxPercent !== undefined ? it.taxPercent : '5'));
+
+                return {
+                  id: idx + 1,
+                  item_id: itemId || name,
+                  item_name: name,
+                  item_label: name,
+                  weight: wtVal,
+                  weight_id: it.weight_id ? String(it.weight_id) : wtVal,
+                  qty: qtyVal,
+                  tot_wt: totWtVal,
+                  purc_rate: rateVal,
+                  rate: rateVal,
+                  disc_percent: discVal,
+                  tax_percent: taxVal,
+                  ed_percent: String(it.ed_percent || ''),
+                  amount: String(it.amount || '0.00')
+                };
+              }));
             }
 
             if (existing.deductions && existing.deductions.length > 0) {
               setSelectedDeductions(existing.deductions.map(d => ({
                 id: d.id,
                 deduction: d.deduction || d.deduction_name || '',
+                deduction_name: d.deduction_name || d.deduction || '',
                 type: (d.type || 'less').toLowerCase(),
-                percent: d.percent || d.value || '',
-                amount: d.amount || '',
+                percent: d.percent !== undefined ? String(d.percent) : (d.value !== undefined ? String(d.value) : ''),
+                amount: String(d.amount || ''),
                 remarks: d.remarks || ''
               })));
             }

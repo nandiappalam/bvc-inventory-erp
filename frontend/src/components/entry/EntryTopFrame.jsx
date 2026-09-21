@@ -538,6 +538,26 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
 
   if (isSelectField || field.masterType || effectiveOptions.length > 0) {
     let rawVal = (data[field.name] !== undefined && data[field.name] !== null) ? String(data[field.name]) : '';
+    if (!rawVal) {
+      if (field.name.includes('_')) {
+        const camel = field.name.replace(/_([a-z])/g, (_, g) => g.toUpperCase());
+        if (data[camel] !== undefined && data[camel] !== null) rawVal = String(data[camel]);
+      } else {
+        const snake = field.name.replace(/([A-Z])/g, '_$1').toLowerCase();
+        if (data[snake] !== undefined && data[snake] !== null) rawVal = String(data[snake]);
+      }
+    }
+    if (!rawVal) {
+      if (['supplier_id', 'supplierId', 'supplier'].includes(field.name)) {
+        rawVal = String(data.supplier_id || data.supplierId || data.supplier || data.supplierName || data.supplier_name || '');
+      } else if (['customer_id', 'customerId', 'customer'].includes(field.name)) {
+        rawVal = String(data.customer_id || data.customerId || data.customer || data.customerName || data.customer_name || '');
+      } else if (['godown_id', 'godownId', 'godown'].includes(field.name)) {
+        rawVal = String(data.godown_id || data.godownId || data.godown || data.godownName || data.godown_name || '');
+      } else if (['transport_id', 'transportId', 'transporter', 'transport'].includes(field.name)) {
+        rawVal = String(data.transporter || data.transport || data.transport_id || data.transportId || '');
+      }
+    }
     let selectValue = rawVal;
     
     if (rawVal && effectiveOptions.length > 0) {
@@ -600,6 +620,19 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
     );
   }
 
+  let rawInputValue = data[field.name] !== undefined && data[field.name] !== null ? data[field.name] : '';
+  if (!rawInputValue && field.name.includes('_')) {
+    const camel = field.name.replace(/_([a-z])/g, (_, g) => g.toUpperCase());
+    if (data[camel] !== undefined && data[camel] !== null) rawInputValue = data[camel];
+  } else if (!rawInputValue) {
+    const snake = field.name.replace(/([A-Z])/g, '_$1').toLowerCase();
+    if (data[snake] !== undefined && data[snake] !== null) rawInputValue = data[snake];
+  }
+
+  if (field.type === 'date' && rawInputValue) {
+    rawInputValue = String(rawInputValue).split('T')[0].split(' ')[0];
+  }
+
   return (
     <div className="entry-top-field-group" style={styles.fieldGroup}>
       <label style={styles.label}>{field.label}</label>
@@ -607,7 +640,7 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
       <input
         type={field.type || 'text'}
         name={field.name}
-        value={data[field.name] || ''}
+        value={rawInputValue || ''}
         onChange={(e) => onChange(field.name, e.target.value)}
         readOnly={field.readOnly}
         style={field.readOnly ? { ...styles.input, backgroundColor: '#f4f6fa', color: '#1f3f67' } : styles.input}

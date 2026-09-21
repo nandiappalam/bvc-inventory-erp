@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { useLocation, useParams, useNavigate } from 'react-router-dom';
+import { useLocation, useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, getMasters } from '../utils/api';
 import purchaseOrderService from '../modules/purchaseOrder/services/purchaseOrderService';
 import { buildReceiptDraftFromPurchaseOrder } from '../modules/purchaseOrder/utils/poToReceipt.mjs';
@@ -18,9 +18,11 @@ import './SalesCreate.css';
  * - This page ONLY aggregates totals and builds backend payload
  */
 const PurchaseCreation = () => {
-  const { id } = useParams();
+  const { id: paramId } = useParams();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const location = useLocation();
+  const id = paramId || searchParams.get('id') || location.state?.editId || location.state?.id;
   const [formData, setFormData] = useState({
     s_no: '',
     supplier_id: '',
@@ -292,85 +294,111 @@ const PurchaseCreation = () => {
         }
 
         const result = await api(`/purchases/${id}`);
-        if (result) {
+        const data = result?.data || result;
+        if (data && (data.id || data.s_no)) {
+          const formatDate = (d) => d ? String(d).split('T')[0].split(' ')[0] : '';
+          const suppId = String(data.supplier || data.supplier_id || data.supplierId || '');
+          const suppName = data.supplier_name || data.supplierName || '';
+
           setFormData({
-            s_no: String(result.s_no),
-            supplier_id: result.supplier,
-            supplier_details: result.address || '',
-            address: result.address || '',
-            transporter: result.transporter || result.transport || '',
-            transport: result.transporter || result.transport || '',
-            vehicle_no: result.vehicle_no || result.lorry_no || '',
-            lorry_no: result.vehicle_no || result.lorry_no || '',
-            driver_name: result.driver_name || result.driver || '',
-            driver: result.driver_name || result.driver || '',
-            date: result.date,
-
-            inv_no: result.inv_no,
-            inv_date: result.inv_date || '',
-            godown_id: result.godown,
-            pay_type: result.pay_type,
-            tax_type: result.tax_type || 'Exclusive',
-            tax_rate: result.tax_percent || 5,
-            gst_no: result.gst_no || '',
-            email: result.email || '',
-            type: result.type || 'Urad',
-            remarks: result.remarks || '',
-            source_order_no: result.source_order_no || '',
-            source_order_id: result.source_order_id || ''
+            s_no: String(data.s_no || data.sNo || ''),
+            supplier_id: suppId,
+            supplierId: suppId,
+            supplier_name: suppName,
+            supplierName: suppName,
+            supplier_details: data.address || data.supplier_details || '',
+            address: data.address || data.supplier_details || '',
+            transporter: data.transporter || data.transport || '',
+            transport: data.transporter || data.transport || '',
+            vehicle_no: data.vehicle_no || data.lorry_no || '',
+            lorry_no: data.vehicle_no || data.lorry_no || '',
+            driver_name: data.driver_name || data.driver || '',
+            driver: data.driver_name || data.driver || '',
+            date: formatDate(data.date),
+            inv_no: data.inv_no || data.invNo || '',
+            invNo: data.inv_no || data.invNo || '',
+            inv_date: formatDate(data.inv_date || data.invDate),
+            invDate: formatDate(data.inv_date || data.invDate),
+            godown_id: String(data.godown || data.godown_id || data.godownId || ''),
+            godownId: String(data.godown || data.godown_id || data.godownId || ''),
+            pay_type: data.pay_type || data.payType || 'Cash',
+            tax_type: data.tax_type || data.taxType || 'Exclusive',
+            tax_rate: data.tax_percent !== undefined ? data.tax_percent : (data.tax_rate || 5),
+            gst_no: data.gst_no || '',
+            email: data.email || '',
+            type: data.type || 'Urad',
+            remarks: data.remarks || '',
+            source_order_no: data.source_order_no || data.po_no || '',
+            source_order_id: data.source_order_id || data.purchase_order_id || '',
+            purchase_order_id: data.purchase_order_id || data.source_order_id || '',
+            po_no: data.po_no || data.source_order_no || ''
           });
-          setTableData((result.items || []).map(it => {
-            const qty = Number(it.qty || 0);
-            const rate = Number(it.rate || 0);
-            const disc_percent = Number(it.disc_percent ?? 0);
-            const tax_percent = Number(it.tax_percent ?? 5);
 
-            const per_unit_wt = Number(it.per_unit_weight ?? it.weight ?? 0);
-            const total_weight = Number(it.total_weight ?? it.total_wt ?? (qty * per_unit_wt));
+          if (Array.isArray(data.items) && data.items.length > 0) {
+            setTableData(data.items.map(it => {
+              const qty = Number(it.qty || 0);
+              const rate = Number(it.rate || it.purc_rate || 0);
+              const disc_percent = Number(it.disc_percent ?? it.discount_percent ?? 0);
+              const tax_percent = Number(it.tax_percent ?? 5);
 
-            const base_amount = qty * rate;
-            const disc_amount = base_amount * (disc_percent / 100);
-            const taxable_amount = base_amount - disc_amount;
-            const tax_amount = (taxable_amount * tax_percent) / 100;
-            const amount = base_amount + tax_amount;
+              const per_unit_wt = Number(it.per_unit_weight ?? it.weight ?? 0);
+              const total_weight = Number(it.total_weight ?? it.total_wt ?? (qty * per_unit_wt));
 
-            // Find matching weight_id from weights list
-            const matchedWeight = weightsList.find(w => Number(w.weight) === per_unit_wt);
-            const weight_id = matchedWeight ? matchedWeight.id : '';
+              const base_amount = qty * rate;
+              const disc_amount = base_amount * (disc_percent / 100);
+              const taxable_amount = base_amount - disc_amount;
+              const tax_amount = (taxable_amount * tax_percent) / 100;
+              const amount = base_amount - disc_amount + tax_amount;
 
-            return {
-              ...it,
-              item_id: it.item_id || it.item_name,
-              qty,
-              weight: per_unit_wt,
-              weight_id: weight_id,
-              per_unit_wt,
-              total_wt: total_weight,
-              total_weight,
-              rate,
-              disc: disc_percent,
-              disc_percent,
-              tax_rate: tax_percent,
-              tax_percent,
-              base_amount,
-              disc_amount,
-              tax_amount,
-              amount,
-              lot_status: 'reserved'
-            };
-          }));
-          setSelectedDeductions((result.deductions || []).map(d => ({
-            id: d.deduction_id || d.deduction_purchase_id,
-            name: d.deduction_name,
-            amount: d.amount,
-            type: d.type || 'LESS',
-            calculation_type: d.calculation_type || d.calc_type,
-            percentage: d.percentage || d.value || 0,
-            remarks: d.remarks || ''
-          })));
+              const matchedWeight = weightsList.find(w => Number(w.weight) === per_unit_wt);
+              const weight_id = matchedWeight ? matchedWeight.id : (it.weight_id || '');
+
+              return {
+                ...it,
+                item_id: it.item_id || it.itemId || it.item_name || '',
+                item_name: it.item_name || it.itemName || '',
+                item_label: it.item_name || it.itemName || '',
+                qty,
+                weight: per_unit_wt,
+                weight_id: weight_id,
+                per_unit_wt,
+                total_wt: total_weight,
+                total_weight,
+                rate,
+                purc_rate: rate,
+                disc: disc_percent,
+                disc_percent,
+                tax_rate: tax_percent,
+                tax_percent,
+                base_amount,
+                disc_amount,
+                tax_amount,
+                amount: amount.toFixed(2),
+                lot_no: it.lot_no || '',
+                lot_status: 'reserved'
+              };
+            }));
+          }
+
+          if (Array.isArray(data.deductions) && data.deductions.length > 0) {
+            setSelectedDeductions(data.deductions.map(d => ({
+              id: d.id || d.deduction_id || d.deduction_purchase_id || '',
+              deduction_id: d.deduction_id || d.id || '',
+              name: d.deduction_name || d.name || d.deduction || '',
+              deduction: d.deduction_name || d.name || d.deduction || '',
+              amount: parseFloat(d.amount) || 0,
+              type: (d.type || 'LESS').toUpperCase(),
+              percentage: parseFloat(d.percent || d.percentage || d.value || 0),
+              percent: parseFloat(d.percent || d.percentage || d.value || 0),
+              remarks: d.remarks || ''
+            })));
+          }
         }
-      } catch (err) { console.error('Fetch error:', err); }
-      finally { setLoading(false); }
+      } catch (err) {
+        console.error('Failed to load purchase details for edit:', err);
+      } finally {
+        setLoading(false);
+      }
     };
 
     const preloadFromPurchaseOrder = async () => {

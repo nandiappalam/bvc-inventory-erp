@@ -194,35 +194,38 @@ const PurchaseRequestCreate = () => {
 
   const loadPurchaseRequest = async (id) => {
     try {
-      const data = await api(`/purchase-requests/${id}`);
+      const rawRes = await api(`/purchase-requests/${id}`);
+      const data = rawRes?.data || rawRes;
       if (!data || data.error) throw new Error(data?.message || 'Purchase Request not found');
 
-      setPrNo(data.pr_no);
-      setRequestDate(data.request_date || new Date().toISOString().split('T')[0]);
-      setRequiredDate(data.required_date || '');
+      const fmtDate = (d) => d ? String(d).split('T')[0].split(' ')[0] : '';
+
+      setPrNo(data.pr_no || '');
+      setRequestDate(fmtDate(data.request_date) || new Date().toISOString().split('T')[0]);
+      setRequiredDate(fmtDate(data.required_date) || '');
       setDepartment(data.department || 'Raw Materials');
       setRequestedBy(data.requested_by || user?.username || 'Admin');
       setPriority(data.priority || 'Medium');
-      setSupplierId(data.supplier_id || '');
-      setGodownId(data.godown_id || '');
+      setSupplierId(data.supplier_id ? String(data.supplier_id) : (data.supplier ? String(data.supplier) : ''));
+      setGodownId(data.godown_id ? String(data.godown_id) : (data.godown ? String(data.godown) : ''));
       setStatus(data.status || 'Draft');
       setRemarks(data.remarks || '');
 
       if (Array.isArray(data.items) && data.items.length > 0) {
         setItems(data.items.map(it => ({
-          item_id: it.item_id || '',
+          item_id: it.item_id ? String(it.item_id) : '',
           item_code: it.item_code || '',
           item_name: it.item_name || '',
-          weight: it.weight || '',
+          weight: it.weight !== undefined ? String(it.weight) : '',
           description: it.description || '',
-          requested_qty: it.requested_qty || '',
-          approved_qty: it.approved_qty || it.requested_qty || '',
+          requested_qty: it.requested_qty !== undefined ? String(it.requested_qty) : '',
+          approved_qty: it.approved_qty !== undefined ? String(it.approved_qty) : String(it.requested_qty || ''),
           unit: it.unit || 'kg',
           current_stock: it.current_stock || 0,
           current_stock_rm: it.current_stock_rm !== undefined ? it.current_stock_rm : (it.current_stock || 0),
           current_stock_fg: it.current_stock_fg || 0,
-          estimated_rate: it.estimated_rate || '',
-          estimated_amount: it.estimated_amount || 0,
+          estimated_rate: it.estimated_rate !== undefined ? String(it.estimated_rate) : '',
+          estimated_amount: it.estimated_amount !== undefined ? Number(it.estimated_amount) : 0,
           remarks: it.remarks || ''
         })));
       }
