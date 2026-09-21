@@ -239,6 +239,31 @@ router.get('/godown-stock', async (req, res) => {
     const godownsRes = await db.query('SELECT * FROM godown_master ORDER BY id ASC');
     godowns = godownsRes.rows || [];
 
+    // Query distinct godowns from stock ledger and stock_lots to catch all active locations
+    try {
+      const distinctStockG = await db.query('SELECT DISTINCT godown_id, godown FROM stock WHERE godown IS NOT NULL AND TRIM(godown) != ""');
+      (distinctStockG.rows || []).forEach(sg => {
+        const sgName = sg.godown || 'Main Godown';
+        const sgId = sg.godown_id || (sgName.toLowerCase().includes('raw') ? 3 : sgName.toLowerCase().includes('finished') ? 4 : 100);
+        const exists = godowns.some(g => String(g.id) === String(sgId) || norm(g.godown_name) === norm(sgName));
+        if (!exists) {
+          godowns.push({ id: sgId, godown_name: sgName, area: 'Factory Storage' });
+        }
+      });
+    } catch(e) {}
+
+    try {
+      const distinctLotG = await db.query('SELECT DISTINCT godown_id, godown_name FROM stock_lots WHERE godown_name IS NOT NULL AND TRIM(godown_name) != ""');
+      (distinctLotG.rows || []).forEach(lg => {
+        const lgName = lg.godown_name;
+        const lgId = lg.godown_id || 101;
+        const exists = godowns.some(g => String(g.id) === String(lgId) || norm(g.godown_name) === norm(lgName));
+        if (!exists) {
+          godowns.push({ id: lgId, godown_name: lgName, area: 'Storage Bay' });
+        }
+      });
+    } catch(e) {}
+
     if (godowns.length === 0) {
       godowns = [
         { id: 1, godown_name: 'Main Godown', area: 'Factory Premises' },
@@ -250,7 +275,7 @@ router.get('/godown-stock', async (req, res) => {
 
     // Filter by godown if provided
     if (gId && gId !== 'all') {
-      godowns = godowns.filter(g => String(g.id) === String(gId) || g.godown_name.toLowerCase() === String(gId).toLowerCase());
+      godowns = godowns.filter(g => String(g.id) === String(gId) || norm(g.godown_name) === norm(gId));
     }
 
     // Normalize helper for godown matching
@@ -377,11 +402,14 @@ router.get('/godown-stock', async (req, res) => {
       const itemMap = new Map();
 
       // 1. Process stock ledger entries for this godown (the absolute source of truth)
-      const stockForG = stockTxnRows.filter(s =>
-        String(s.godown_id) === String(targetGId) ||
-        norm(s.godown_name) === normGName ||
-        (normGName.includes('main') && (!s.godown_name || norm(s.godown_name) === 'maingodown'))
-      );
+      const stockForG = stockTxnRows.filter(s => {
+        const sNorm = norm(s.godown_name);
+        if (s.godown_id && String(s.godown_id) === String(targetGId)) return true;
+        if (sNorm && sNorm === normGName) return true;
+        if (sNorm && normGName && (sNorm.includes(normGName) || normGName.includes(sNorm))) return true;
+        if (normGName.includes('main') && (!s.godown_name || sNorm === 'maingodown')) return true;
+        return false;
+      });
 
       stockForG.forEach((s, idx) => {
         const key = `${(s.item_name || '').toLowerCase()}:::${(s.lot_no || '').toLowerCase()}`;
@@ -419,11 +447,14 @@ router.get('/godown-stock', async (req, res) => {
       });
 
       // 2. Process stock_lots for this godown (to catch any lot records not captured by the ledger)
-      const lotsForG = lotRows.filter(l =>
-        String(l.godown_id) === String(targetGId) ||
-        norm(l.godown_name) === normGName ||
-        (normGName.includes('main') && (!l.godown_name || norm(l.godown_name) === 'maingodown'))
-      );
+      const lotsForG = lotRows.filter(l => {
+        const lNorm = norm(l.godown_name);
+        if (l.godown_id && String(l.godown_id) === String(targetGId)) return true;
+        if (lNorm && lNorm === normGName) return true;
+        if (lNorm && normGName && (lNorm.includes(normGName) || normGName.includes(lNorm))) return true;
+        if (normGName.includes('main') && (!l.godown_name || lNorm === 'maingodown')) return true;
+        return false;
+      });
 
       lotsForG.forEach((l, idx) => {
         const key = `${(l.item_name || '').toLowerCase()}:::${(l.lot_no || '').toLowerCase()}`;
@@ -4067,22 +4098,26 @@ const categoryReportHandler = async (req, res) => {
       if (item_group) { where += ' AND (LOWER(im.item_group) LIKE LOWER(?) OR LOWER(im.type) LIKE LOWER(?))'; params.push(`%${item_group}%`, `%${item_group}%`); }
       if (search) { where += ' AND (LOWER(s.item_name) LIKE LOWER(?) OR LOWER(s.lot_no) LIKE LOWER(?) OR LOWER(im.item_group) LIKE LOWER(?) OR LOWER(g.godown_name) LIKE LOWER(?) OR LOWER(s.godown) LIKE LOWER(?) OR LOWER(s.remarks) LIKE LOWER(?))'; params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`); }
 
-      if (sub_type === 'urad') {
-        where += ` AND (LOWER(s.item_name) LIKE '%urad%' OR LOWER(im.item_group) LIKE '%urad%' OR LOWER(im.type) LIKE '%urad%')`;
-      } else if (sub_type === 'flour') {
-        where += ` AND (LOWER(s.item_name) LIKE '%flour%' OR LOWER(s.item_name) LIKE '%atta%' OR LOWER(s.item_name) LIKE '%bgf%' OR LOWER(s.item_name) LIKE '%brf%' OR LOWER(im.item_group) LIKE '%flour%' OR LOWER(im.type) LIKE '%flour%')`;
-      } else if (sub_type === 'flour-out') {
-        where += ` AND (LOWER(s.item_name) LIKE '%flour%' OR LOWER(s.item_name) LIKE '%bgf%' OR LOWER(s.item_name) LIKE '%brf%' OR LOWER(im.item_group) LIKE '%flour%' OR LOWER(im.type) LIKE '%flour%')`;
-      } else if (sub_type === 'papad') {
-        where += ` AND (LOWER(s.item_name) LIKE '%papad%' OR LOWER(im.item_group) LIKE '%papad%' OR LOWER(im.type) LIKE '%papad%')`;
-      } else if (sub_type === 'masala') {
-        where += ` AND (LOWER(s.item_name) LIKE '%masala%' OR LOWER(s.item_name) LIKE '%spice%' OR LOWER(im.item_group) LIKE '%masala%' OR LOWER(im.item_group) LIKE '%spices%' OR LOWER(im.type) LIKE '%masala%' OR LOWER(im.type) LIKE '%spice%')`;
-      } else if (sub_type === 'pack') {
-        where += ` AND (LOWER(s.item_name) LIKE '%pack%' OR LOWER(im.item_group) LIKE '%pack%' OR LOWER(im.item_group) LIKE '%packing%')`;
-      } else if (sub_type === 'wastage' || sub_type === 'rejection') {
-        where += ` AND (LOWER(s.item_name) LIKE '%wastage%' OR LOWER(s.item_name) LIKE '%rejection%' OR LOWER(im.item_group) LIKE '%wastage%' OR LOWER(im.item_group) LIKE '%rejection%')`;
-      } else if (sub_type === 'others') {
-        where += ` AND NOT (LOWER(s.item_name) LIKE '%urad%' OR LOWER(s.item_name) LIKE '%flour%' OR LOWER(s.item_name) LIKE '%papad%' OR LOWER(s.item_name) LIKE '%masala%' OR LOWER(s.item_name) LIKE '%pack%' OR LOWER(s.item_name) LIKE '%wastage%' OR LOWER(s.item_name) LIKE '%rejection%' OR LOWER(im.item_group) LIKE '%urad%' OR LOWER(im.item_group) LIKE '%flour%' OR LOWER(im.item_group) LIKE '%papad%' OR LOWER(im.item_group) LIKE '%masala%' OR LOWER(im.item_group) LIKE '%packing%' OR LOWER(im.item_group) LIKE '%wastage%' OR LOWER(im.item_group) LIKE '%rejection%')`;
+      if (sub_type && sub_type !== 'group-wise' && sub_type !== 'godown-wise') {
+        const cleanSub = sub_type.replace(/-stock$/, '').replace(/-/g, ' ').toLowerCase();
+        if (cleanSub === 'urad') {
+          where += ` AND (LOWER(s.item_name) LIKE '%urad%' OR LOWER(im.item_group) LIKE '%urad%' OR LOWER(im.type) LIKE '%urad%')`;
+        } else if (cleanSub === 'flour') {
+          where += ` AND (LOWER(s.item_name) LIKE '%flour%' OR LOWER(s.item_name) LIKE '%atta%' OR LOWER(s.item_name) LIKE '%bgf%' OR LOWER(s.item_name) LIKE '%brf%' OR LOWER(im.item_group) LIKE '%flour%' OR LOWER(im.type) LIKE '%flour%')`;
+        } else if (cleanSub === 'papad') {
+          where += ` AND (LOWER(s.item_name) LIKE '%papad%' OR LOWER(im.item_group) LIKE '%papad%' OR LOWER(im.type) LIKE '%papad%')`;
+        } else if (cleanSub === 'masala' || cleanSub === 'spices') {
+          where += ` AND (LOWER(s.item_name) LIKE '%masala%' OR LOWER(s.item_name) LIKE '%spice%' OR LOWER(im.item_group) LIKE '%masala%' OR LOWER(im.item_group) LIKE '%spices%' OR LOWER(im.type) LIKE '%masala%' OR LOWER(im.type) LIKE '%spice%')`;
+        } else if (cleanSub === 'pack' || cleanSub === 'packaging') {
+          where += ` AND (LOWER(s.item_name) LIKE '%pack%' OR LOWER(im.item_group) LIKE '%pack%' OR LOWER(im.item_group) LIKE '%packing%')`;
+        } else if (cleanSub === 'wastage' || cleanSub === 'rejection') {
+          where += ` AND (LOWER(s.item_name) LIKE '%wastage%' OR LOWER(s.item_name) LIKE '%rejection%' OR LOWER(im.item_group) LIKE '%wastage%' OR LOWER(im.item_group) LIKE '%rejection%')`;
+        } else if (cleanSub === 'others') {
+          where += ` AND NOT (LOWER(s.item_name) LIKE '%urad%' OR LOWER(s.item_name) LIKE '%flour%' OR LOWER(s.item_name) LIKE '%papad%' OR LOWER(s.item_name) LIKE '%masala%' OR LOWER(s.item_name) LIKE '%pack%' OR LOWER(s.item_name) LIKE '%wastage%' OR LOWER(s.item_name) LIKE '%rejection%' OR LOWER(im.item_group) LIKE '%urad%' OR LOWER(im.item_group) LIKE '%flour%' OR LOWER(im.item_group) LIKE '%papad%' OR LOWER(im.item_group) LIKE '%masala%' OR LOWER(im.item_group) LIKE '%packing%' OR LOWER(im.item_group) LIKE '%wastage%' OR LOWER(im.item_group) LIKE '%rejection%')`;
+        } else {
+          where += ` AND (LOWER(im.item_group) LIKE ? OR LOWER(im.type) LIKE ? OR LOWER(s.item_name) LIKE ?)`;
+          params.push(`%${cleanSub}%`, `%${cleanSub}%`, `%${cleanSub}%`);
+        }
       }
 
       let sql = '';

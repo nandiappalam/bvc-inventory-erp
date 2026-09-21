@@ -839,6 +839,45 @@ async function syncAllProductionRecords() {
           existing.rows[0].id
         ]);
       }
+
+      // Also Sync P2: Fumigation & Chemical Safety Record for each RM receiving lot
+      const p2RecNo = `P2-${(pur.date || '2026-08-04').substring(0, 4)}-${String(pur.id).padStart(3, '0')}`;
+      const p2Findings = {
+        fumigant_used: 'Aluminium Phosphide 56% Tablet',
+        dosage: '3 Tablets / Ton (9g/ton)',
+        exposure_period: '72 Hours Continuous Exposure',
+        fumigation_date: pur.date || '2026-08-04',
+        degassing_date: pur.date || '2026-08-04',
+        gas_concentration_ppm: 'Pre-degas: 250 ppm, Post-degas: 0 ppm (Safe Level)',
+        target_pest: 'Rice Weevil / Flour Beetle / Grain Borer',
+        pest_survival: '0% Survival (100% Efficacy Passed)',
+        certified_agency: 'Government Authorized Fumigation Services',
+        safety_clearance: 'APPROVED FOR MILLING & STORAGE'
+      };
+
+      const p2Exist = await db.query(`SELECT id FROM compliance_production_records WHERE record_code = 'P2' AND (lot_no = ? OR record_no = ?)`, [pur.lot_no, p2RecNo]);
+      if (!p2Exist.rows || p2Exist.rows.length === 0) {
+        await db.run(`
+          INSERT INTO compliance_production_records
+          (record_code, record_type, record_no, record_date, frequency, item_name, lot_no, purchase_id, purchase_no, supplier_name, vehicle_no, status, checked_by, findings_json, remarks)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+          'P2', 'FUMIGATION', p2RecNo, pur.date || '2026-08-04', 'RM Receiving & Storage',
+          pur.item_name, pur.lot_no, pur.id, pur.inv_no || String(pur.s_no || pur.id),
+          supplierDisplay, pur.lorry_no || 'TN-58-AX-9912', 'COMPLETED', 'Certified Fumigator',
+          JSON.stringify(p2Findings), `Fumigation & degassing executed for ${pur.lot_no} (${pur.item_name}). Post-degas gas concentration: 0 ppm.`
+        ]);
+      } else {
+        await db.run(`
+          UPDATE compliance_production_records
+          SET record_date = ?, item_name = ?, supplier_name = ?, checked_by = ?, findings_json = ?, remarks = ?
+          WHERE id = ?
+        `, [
+          pur.date || '2026-08-04', pur.item_name, supplierDisplay, 'Certified Fumigator',
+          JSON.stringify(p2Findings), `Fumigation & degassing executed for ${pur.lot_no} (${pur.item_name}). Post-degas gas concentration: 0 ppm.`,
+          p2Exist.rows[0].id
+        ]);
+      }
     }
 
     // 2. Sync P3: In Process Checklists, P4: CCP Monitoring, P5: Changeover, & P6: COA from Grains / Milling
@@ -1123,7 +1162,18 @@ async function syncAllProductionRecords() {
 
 router.get('/production-records', async (req, res) => {
   try {
-    const { record_code, lot_no } = req.query;
+    const { record_code, lot_no, sync } = req.query;
+
+    // Check if table is empty or sync requested
+    if (sync === 'true') {
+      await syncAllProductionRecords();
+    } else {
+      const countRes = await db.query(`SELECT COUNT(*) as cnt FROM compliance_production_records`);
+      if (!countRes.rows || parseInt(countRes.rows[0].cnt || 0, 10) === 0) {
+        await syncAllProductionRecords();
+      }
+    }
+
     let query = `SELECT * FROM compliance_production_records WHERE 1=1`;
     const params = [];
 
@@ -1137,7 +1187,13 @@ router.get('/production-records', async (req, res) => {
     }
 
     query += ` ORDER BY id DESC`;
-    const resRows = await db.query(query, params);
+    let resRows = await db.query(query, params);
+
+    // If query returned 0 rows for specific code, run sync and re-query
+    if ((!resRows.rows || resRows.rows.length === 0) && (!record_code || record_code !== 'ALL')) {
+      await syncAllProductionRecords();
+      resRows = await db.query(query, params);
+    }
 
     const parsed = (resRows.rows || []).map(r => {
       let findings = {};

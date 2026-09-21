@@ -199,6 +199,30 @@ export function printHtml(html, title = "Print Document", options = {}) {
     document.title = title;
   }
 
+  let bodyContent = safeContent;
+  let customStyleMarkup = '';
+
+  // Handle full HTML documents passed as string
+  if (typeof safeContent === 'string' && (safeContent.includes('<html') || safeContent.includes('<!DOCTYPE'))) {
+    const styleMatches = safeContent.match(/<style[\s\S]*?<\/style>/gi);
+    if (styleMatches) {
+      customStyleMarkup = styleMatches.join('\n');
+    }
+    const bodyMatch = safeContent.match(/<body[\s\S]*?>([\s\S]*?)<\/body>/i);
+    if (bodyMatch && bodyMatch[1]) {
+      bodyContent = bodyMatch[1];
+    }
+  }
+
+  // Inject dynamic styles into head temporarily
+  let styleTag = null;
+  if (customStyleMarkup) {
+    styleTag = document.createElement('style');
+    styleTag.id = 'bvc-portal-print-style';
+    styleTag.innerHTML = customStyleMarkup.replace(/<\/?style[^>]*>/gi, '');
+    document.head.appendChild(styleTag);
+  }
+
   // Retrieve or create print portal on document.body
   let portal = document.getElementById("bvc-print-portal");
   if (!portal) {
@@ -209,7 +233,7 @@ export function printHtml(html, title = "Print Document", options = {}) {
   }
 
   // Inject content into the portal
-  portal.innerHTML = safeContent;
+  portal.innerHTML = bodyContent;
 
   // Add the portal printing class to body so @media print reveals ONLY the portal
   document.body.classList.add("bvc-printing-portal");
@@ -220,6 +244,9 @@ export function printHtml(html, title = "Print Document", options = {}) {
     if (isCleanedUp) return;
     isCleanedUp = true;
     document.body.classList.remove("bvc-printing-portal");
+    if (styleTag && styleTag.parentNode) {
+      styleTag.parentNode.removeChild(styleTag);
+    }
     setTimeout(() => {
       if (portal && !document.body.classList.contains("bvc-printing-portal")) {
         portal.innerHTML = "";

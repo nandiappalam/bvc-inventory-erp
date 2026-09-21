@@ -1004,6 +1004,7 @@ const CategoryReportPage = () => {
   // Dropdown options
   const [godownsList, setGodownsList] = useState([]);
   const [itemsList, setItemsList] = useState([]);
+  const [itemGroupsList, setItemGroupsList] = useState([]);
 
   // Report Data
   const [rows, setRows] = useState([]);
@@ -1028,9 +1029,10 @@ const CategoryReportPage = () => {
 
   const fetchFilterMasters = async () => {
     try {
-      const [gData, iData] = await Promise.all([
+      const [gData, iData, igData] = await Promise.all([
         api('/masters/all/godowns'),
-        api('/masters/item')
+        api('/masters/item'),
+        api('/masters/all/item_groups')
       ]);
       if (Array.isArray(gData)) {
         setGodownsList(gData);
@@ -1038,10 +1040,50 @@ const CategoryReportPage = () => {
       if (Array.isArray(iData)) {
         setItemsList(iData);
       }
+      if (Array.isArray(igData) && igData.length > 0) {
+        setItemGroupsList(igData);
+      }
     } catch (e) {
       console.log('Error fetching masters:', e);
     }
   };
+
+  const getSubReports = () => {
+    if (categoryKey !== 'stock') return config.subReports;
+
+    const baseList = [
+      { id: 'group-wise', label: 'Item Group Wise Stock Status' },
+      { id: 'godown-wise', label: 'Godown Wise Stock Status' }
+    ];
+
+    const groupMap = new Map();
+    const defaults = [
+      { id: 'urad', label: 'Urad Stock Status' },
+      { id: 'flour', label: 'Flour Stock Status' },
+      { id: 'rice', label: 'Rice Stock Status' },
+      { id: 'papad', label: 'Papad Stock Status' },
+      { id: 'masala', label: 'Masala Stock Status' },
+      { id: 'pack', label: 'Pack Stock Status' },
+      { id: 'wastage', label: 'Wastage / Rejection Stock Status' }
+    ];
+    defaults.forEach(d => groupMap.set(d.id, d));
+
+    if (Array.isArray(itemGroupsList)) {
+      itemGroupsList.forEach(ig => {
+        const name = ig.group_name || ig.name || ig.group_code;
+        if (name) {
+          const id = name.toLowerCase().trim().replace(/[^a-z0-9]/g, '-');
+          groupMap.set(id, { id, label: `${name} Stock Status` });
+        }
+      });
+    }
+
+    groupMap.set('others', { id: 'others', label: 'Stock Status (Others)' });
+
+    return [...baseList, ...Array.from(groupMap.values())];
+  };
+
+  const effectiveSubReports = getSubReports();
 
   const generateSampleRows = () => {
     if (categoryKey === 'stock') {
@@ -1321,7 +1363,7 @@ const CategoryReportPage = () => {
     }
   };
 
-  const activeSubLabel = config.subReports.find(s => s.id === currentSubReport)?.label || config.title;
+  const activeSubLabel = effectiveSubReports.find(s => s.id === currentSubReport)?.label || config.title;
 
   return (
     <Container maxWidth="xl" sx={{ mt: 2, mb: 4 }}>
@@ -1383,7 +1425,7 @@ const CategoryReportPage = () => {
           Select Report Division:
         </Typography>
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-          {config.subReports.map(sub => {
+          {effectiveSubReports.map(sub => {
             const isActive = currentSubReport === sub.id;
             return (
               <Chip
