@@ -2071,7 +2071,8 @@ router.get('/traceability/:lotNo', async (req, res) => {
 
     const lotList = Array.from(associatedLots);
     const lotListUpper = lotList.map(l => String(l).trim().toUpperCase());
-    const lotPlaceholdersUpper = lotListUpper.map(() => 'UPPER(?)').join(',');
+    const lotPlaceholders = lotList.length > 0 ? lotList.map(() => '?').join(',') : "''";
+    const lotPlaceholdersUpper = lotListUpper.length > 0 ? lotListUpper.map(() => 'UPPER(?)').join(',') : "''";
 
     // Ensure compliance records table is populated
     try {
@@ -2166,7 +2167,7 @@ router.get('/traceability/:lotNo', async (req, res) => {
 
     // If no COA found in records for associated lots, fetch actual QC inspection or generate COA records
     if (coaList.length === 0) {
-      const coaItemName = lotDetails?.item_name || (grindBatches.length > 0 && grindBatches[0].outputs && grindBatches[0].outputs[0] ? grindBatches[0].outputs[0].item_name : 'Broken Rice / Grain Flour');
+      const coaItemName = lot?.item_name || (grindBatches.length > 0 && grindBatches[0].outputs && grindBatches[0].outputs[0] ? grindBatches[0].outputs[0].item_name : 'Broken Rice / Grain Flour');
       const coaLotNo = canonicalLotNo;
 
       // Look for real QC Inspection in qc_inspections table

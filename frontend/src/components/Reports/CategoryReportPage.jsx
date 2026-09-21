@@ -1030,19 +1030,26 @@ const CategoryReportPage = () => {
   const fetchFilterMasters = async () => {
     try {
       const [gData, iData, igData] = await Promise.all([
-        api('/masters/all/godowns'),
-        api('/masters/item'),
-        api('/masters/all/item_groups')
+        api('/masters/all/godowns').catch(() => null),
+        api('/masters/item').catch(() => null),
+        api('/masters/all/item_groups').catch(() => null)
       ]);
-      if (Array.isArray(gData)) {
-        setGodownsList(gData);
-      }
-      if (Array.isArray(iData)) {
-        setItemsList(iData);
-      }
-      if (Array.isArray(igData) && igData.length > 0) {
-        setItemGroupsList(igData);
-      }
+
+      const parseArray = (res) => {
+        if (!res) return [];
+        if (Array.isArray(res)) return res;
+        if (Array.isArray(res.data)) return res.data;
+        if (Array.isArray(res.items)) return res.items;
+        return [];
+      };
+
+      const godowns = parseArray(gData);
+      const items = parseArray(iData);
+      const itemGroups = parseArray(igData);
+
+      if (godowns.length > 0) setGodownsList(godowns);
+      if (items.length > 0) setItemsList(items);
+      if (itemGroups.length > 0) setItemGroupsList(itemGroups);
     } catch (e) {
       console.log('Error fetching masters:', e);
     }
@@ -1057,28 +1064,31 @@ const CategoryReportPage = () => {
     ];
 
     const groupMap = new Map();
-    const defaults = [
-      { id: 'urad', label: 'Urad Stock Status' },
-      { id: 'flour', label: 'Flour Stock Status' },
-      { id: 'rice', label: 'Rice Stock Status' },
-      { id: 'papad', label: 'Papad Stock Status' },
-      { id: 'masala', label: 'Masala Stock Status' },
-      { id: 'pack', label: 'Pack Stock Status' },
-      { id: 'wastage', label: 'Wastage / Rejection Stock Status' }
-    ];
-    defaults.forEach(d => groupMap.set(d.id, d));
 
-    if (Array.isArray(itemGroupsList)) {
+    if (Array.isArray(itemGroupsList) && itemGroupsList.length > 0) {
       itemGroupsList.forEach(ig => {
-        const name = ig.group_name || ig.name || ig.group_code;
+        const name = (ig.group_name || ig.name || ig.group_code || '').trim();
         if (name) {
           const id = name.toLowerCase().trim().replace(/[^a-z0-9]/g, '-');
-          groupMap.set(id, { id, label: `${name} Stock Status` });
+          groupMap.set(id, { id, label: `${name} Stock Status`, groupName: name });
         }
       });
+    } else {
+      const defaults = [
+        { id: 'urad', label: 'Urad Stock Status', groupName: 'URAD' },
+        { id: 'flour', label: 'Flour Stock Status', groupName: 'Flour' },
+        { id: 'rice', label: 'Rice Stock Status', groupName: 'Rice' },
+        { id: 'papad', label: 'Papad Stock Status', groupName: 'Papad' },
+        { id: 'masala', label: 'Masala Stock Status', groupName: 'Masala' },
+        { id: 'pack', label: 'Pack Stock Status', groupName: 'Packing Material' }
+      ];
+      defaults.forEach(d => groupMap.set(d.id, d));
     }
 
-    groupMap.set('others', { id: 'others', label: 'Stock Status (Others)' });
+    if (!groupMap.has('wastage')) {
+      groupMap.set('wastage', { id: 'wastage', label: 'Wastage / Rejection Stock Status', groupName: 'Wastage' });
+    }
+    groupMap.set('others', { id: 'others', label: 'Stock Status (Others)', groupName: 'Others' });
 
     return [...baseList, ...Array.from(groupMap.values())];
   };

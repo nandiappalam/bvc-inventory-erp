@@ -61,13 +61,23 @@ const GodownStockReport = () => {
 
   // Fetch Godowns list
   useEffect(() => {
-    api('/godowns')
-      .then((list) => {
-        if (Array.isArray(list)) {
-          setGodowns(list);
+    api('/masters/all/godowns')
+      .then((res) => {
+        if (Array.isArray(res)) {
+          setGodowns(res);
+        } else if (Array.isArray(res?.data)) {
+          setGodowns(res.data);
         }
       })
-      .catch((err) => console.error('Error loading godowns:', err));
+      .catch(() => {
+        api('/godowns').then((res) => {
+          if (Array.isArray(res)) {
+            setGodowns(res);
+          } else if (Array.isArray(res?.data)) {
+            setGodowns(res.data);
+          }
+        }).catch(err => console.error('Error loading godowns:', err));
+      });
   }, []);
 
   // Fetch Lots for Selected Godown
@@ -155,8 +165,12 @@ const GodownStockReport = () => {
         const openQty = parseFloat(item.opening_qty || 0);
         const inQty = parseFloat(item.in_qty || 0);
         const outQty = parseFloat(item.out_qty || 0);
-        // Correct available qty calculation: Opening + In - Out
-        const availQty = openQty + inQty - outQty;
+        // Correct available qty calculation: Prefer backend calculated available_qty or current_qty
+        const availQty = item.available_qty !== undefined && item.available_qty !== null
+          ? parseFloat(item.available_qty)
+          : (item.current_qty !== undefined && item.current_qty !== null
+            ? parseFloat(item.current_qty)
+            : (openQty + inQty - outQty));
         const unitWt = parseFloat(item.weight || item.unit_weight || 50);
         const stockWt = availQty * unitWt;
         const rate = parseFloat(item.rate || item.purchase_rate || item.cost || 0);

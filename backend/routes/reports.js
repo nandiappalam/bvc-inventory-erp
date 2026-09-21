@@ -241,7 +241,7 @@ router.get('/godown-stock', async (req, res) => {
 
     // Query distinct godowns from stock ledger and stock_lots to catch all active locations
     try {
-      const distinctStockG = await db.query('SELECT DISTINCT godown_id, godown FROM stock WHERE godown IS NOT NULL AND TRIM(godown) != ""');
+      const distinctStockG = await db.query("SELECT DISTINCT godown_id, godown FROM stock WHERE godown IS NOT NULL AND TRIM(godown) != ''");
       (distinctStockG.rows || []).forEach(sg => {
         const sgName = sg.godown || 'Main Godown';
         const sgId = sg.godown_id || (sgName.toLowerCase().includes('raw') ? 3 : sgName.toLowerCase().includes('finished') ? 4 : 100);
@@ -253,7 +253,7 @@ router.get('/godown-stock', async (req, res) => {
     } catch(e) {}
 
     try {
-      const distinctLotG = await db.query('SELECT DISTINCT godown_id, godown_name FROM stock_lots WHERE godown_name IS NOT NULL AND TRIM(godown_name) != ""');
+      const distinctLotG = await db.query("SELECT DISTINCT godown_id, godown_name FROM stock_lots WHERE godown_name IS NOT NULL AND TRIM(godown_name) != ''");
       (distinctLotG.rows || []).forEach(lg => {
         const lgName = lg.godown_name;
         const lgId = lg.godown_id || 101;
@@ -4099,23 +4099,25 @@ const categoryReportHandler = async (req, res) => {
       if (search) { where += ' AND (LOWER(s.item_name) LIKE LOWER(?) OR LOWER(s.lot_no) LIKE LOWER(?) OR LOWER(im.item_group) LIKE LOWER(?) OR LOWER(g.godown_name) LIKE LOWER(?) OR LOWER(s.godown) LIKE LOWER(?) OR LOWER(s.remarks) LIKE LOWER(?))'; params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`); }
 
       if (sub_type && sub_type !== 'group-wise' && sub_type !== 'godown-wise') {
-        const cleanSub = sub_type.replace(/-stock$/, '').replace(/-/g, ' ').toLowerCase();
+        const cleanSub = sub_type.replace(/-stock$/, '').replace(/-/g, ' ').toLowerCase().trim();
         if (cleanSub === 'urad') {
-          where += ` AND (LOWER(s.item_name) LIKE '%urad%' OR LOWER(im.item_group) LIKE '%urad%' OR LOWER(im.type) LIKE '%urad%')`;
-        } else if (cleanSub === 'flour') {
-          where += ` AND (LOWER(s.item_name) LIKE '%flour%' OR LOWER(s.item_name) LIKE '%atta%' OR LOWER(s.item_name) LIKE '%bgf%' OR LOWER(s.item_name) LIKE '%brf%' OR LOWER(im.item_group) LIKE '%flour%' OR LOWER(im.type) LIKE '%flour%')`;
+          where += ` AND (LOWER(s.item_name) LIKE '%urad%' OR LOWER(COALESCE(im.item_group, '')) LIKE '%urad%' OR LOWER(COALESCE(im.type, '')) LIKE '%urad%')`;
+        } else if (cleanSub === 'flour' || cleanSub === 'flour out') {
+          where += ` AND (LOWER(s.item_name) LIKE '%flour%' OR LOWER(s.item_name) LIKE '%atta%' OR LOWER(s.item_name) LIKE '%bgf%' OR LOWER(s.item_name) LIKE '%brf%' OR LOWER(COALESCE(im.item_group, '')) LIKE '%flour%' OR LOWER(COALESCE(im.type, '')) LIKE '%flour%')`;
+        } else if (cleanSub === 'rice') {
+          where += ` AND (LOWER(s.item_name) LIKE '%rice%' OR LOWER(COALESCE(im.item_group, '')) LIKE '%rice%' OR LOWER(COALESCE(im.type, '')) LIKE '%rice%')`;
         } else if (cleanSub === 'papad') {
-          where += ` AND (LOWER(s.item_name) LIKE '%papad%' OR LOWER(im.item_group) LIKE '%papad%' OR LOWER(im.type) LIKE '%papad%')`;
+          where += ` AND (LOWER(s.item_name) LIKE '%papad%' OR LOWER(COALESCE(im.item_group, '')) LIKE '%papad%' OR LOWER(COALESCE(im.type, '')) LIKE '%papad%')`;
         } else if (cleanSub === 'masala' || cleanSub === 'spices') {
-          where += ` AND (LOWER(s.item_name) LIKE '%masala%' OR LOWER(s.item_name) LIKE '%spice%' OR LOWER(im.item_group) LIKE '%masala%' OR LOWER(im.item_group) LIKE '%spices%' OR LOWER(im.type) LIKE '%masala%' OR LOWER(im.type) LIKE '%spice%')`;
-        } else if (cleanSub === 'pack' || cleanSub === 'packaging') {
-          where += ` AND (LOWER(s.item_name) LIKE '%pack%' OR LOWER(im.item_group) LIKE '%pack%' OR LOWER(im.item_group) LIKE '%packing%')`;
+          where += ` AND (LOWER(s.item_name) LIKE '%masala%' OR LOWER(s.item_name) LIKE '%spice%' OR LOWER(COALESCE(im.item_group, '')) LIKE '%masala%' OR LOWER(COALESCE(im.item_group, '')) LIKE '%spices%' OR LOWER(COALESCE(im.type, '')) LIKE '%masala%' OR LOWER(COALESCE(im.type, '')) LIKE '%spice%')`;
+        } else if (cleanSub === 'pack' || cleanSub === 'packaging' || cleanSub.includes('packing')) {
+          where += ` AND (LOWER(s.item_name) LIKE '%pack%' OR LOWER(COALESCE(im.item_group, '')) LIKE '%pack%' OR LOWER(COALESCE(im.item_group, '')) LIKE '%packing%')`;
         } else if (cleanSub === 'wastage' || cleanSub === 'rejection') {
-          where += ` AND (LOWER(s.item_name) LIKE '%wastage%' OR LOWER(s.item_name) LIKE '%rejection%' OR LOWER(im.item_group) LIKE '%wastage%' OR LOWER(im.item_group) LIKE '%rejection%')`;
+          where += ` AND (LOWER(s.item_name) LIKE '%wastage%' OR LOWER(s.item_name) LIKE '%rejection%' OR LOWER(COALESCE(im.item_group, '')) LIKE '%wastage%' OR LOWER(COALESCE(im.item_group, '')) LIKE '%rejection%')`;
         } else if (cleanSub === 'others') {
-          where += ` AND NOT (LOWER(s.item_name) LIKE '%urad%' OR LOWER(s.item_name) LIKE '%flour%' OR LOWER(s.item_name) LIKE '%papad%' OR LOWER(s.item_name) LIKE '%masala%' OR LOWER(s.item_name) LIKE '%pack%' OR LOWER(s.item_name) LIKE '%wastage%' OR LOWER(s.item_name) LIKE '%rejection%' OR LOWER(im.item_group) LIKE '%urad%' OR LOWER(im.item_group) LIKE '%flour%' OR LOWER(im.item_group) LIKE '%papad%' OR LOWER(im.item_group) LIKE '%masala%' OR LOWER(im.item_group) LIKE '%packing%' OR LOWER(im.item_group) LIKE '%wastage%' OR LOWER(im.item_group) LIKE '%rejection%')`;
+          where += ` AND NOT (LOWER(s.item_name) LIKE '%urad%' OR LOWER(s.item_name) LIKE '%flour%' OR LOWER(s.item_name) LIKE '%rice%' OR LOWER(s.item_name) LIKE '%papad%' OR LOWER(s.item_name) LIKE '%masala%' OR LOWER(s.item_name) LIKE '%pack%' OR LOWER(s.item_name) LIKE '%wastage%' OR LOWER(s.item_name) LIKE '%rejection%' OR LOWER(COALESCE(im.item_group, '')) LIKE '%urad%' OR LOWER(COALESCE(im.item_group, '')) LIKE '%flour%' OR LOWER(COALESCE(im.item_group, '')) LIKE '%rice%' OR LOWER(COALESCE(im.item_group, '')) LIKE '%papad%' OR LOWER(COALESCE(im.item_group, '')) LIKE '%masala%' OR LOWER(COALESCE(im.item_group, '')) LIKE '%packing%' OR LOWER(COALESCE(im.item_group, '')) LIKE '%wastage%' OR LOWER(COALESCE(im.item_group, '')) LIKE '%rejection%')`;
         } else {
-          where += ` AND (LOWER(im.item_group) LIKE ? OR LOWER(im.type) LIKE ? OR LOWER(s.item_name) LIKE ?)`;
+          where += ` AND (LOWER(COALESCE(im.item_group, '')) LIKE ? OR LOWER(COALESCE(im.type, '')) LIKE ? OR LOWER(s.item_name) LIKE ?)`;
           params.push(`%${cleanSub}%`, `%${cleanSub}%`, `%${cleanSub}%`);
         }
       }
@@ -4125,18 +4127,18 @@ const categoryReportHandler = async (req, res) => {
         sql = `
           SELECT 
             MAX(s.id) as id,
-            COALESCE(g.godown_name, s.godown, 'Main Warehouse') as godown_name,
+            COALESCE(g.godown_name, s.godown, 'Main Godown') as godown_name,
             s.item_name,
-            MAX(TRIM(COALESCE(im.item_group, 'General'))) as item_group,
+            COALESCE(MAX(NULLIF(TRIM(im.item_group), '')), MAX(NULLIF(TRIM(im.type), '')), 'General') as item_group,
             COALESCE(s.lot_no, 'LOT-GEN') as lot_no,
             SUM(COALESCE(s.qty, 0)) as available_qty,
-            SUM(COALESCE(s.weight, 0)) as weight,
+            SUM(CASE WHEN COALESCE(s.weight, 0) > 0 THEN s.weight ELSE (COALESCE(s.qty, 0) * COALESCE(NULLIF(im.weight, 0), 50)) END) as weight,
             0 as reserved_qty
           FROM stock s
           LEFT JOIN item_master im ON (CAST(s.item_id AS TEXT) = CAST(im.id AS TEXT) OR LOWER(TRIM(s.item_name)) = LOWER(TRIM(im.item_name)) OR s.item_name = im.item_code)
           LEFT JOIN godown_master g ON (CAST(s.godown_id AS TEXT) = CAST(g.id AS TEXT) OR LOWER(TRIM(s.godown)) = LOWER(TRIM(g.godown_name)))
           ${where}
-          GROUP BY COALESCE(g.godown_name, s.godown, 'Main Warehouse'), s.item_name, COALESCE(s.lot_no, 'LOT-GEN')
+          GROUP BY COALESCE(g.godown_name, s.godown, 'Main Godown'), s.item_name, COALESCE(s.lot_no, 'LOT-GEN')
           ORDER BY godown_name ASC, s.item_name ASC
         `;
       } else {
@@ -4145,22 +4147,22 @@ const categoryReportHandler = async (req, res) => {
             MAX(s.id) as id,
             COALESCE(MAX(im.id), MAX(s.item_id)) as item_id,
             s.item_name,
-            MAX(TRIM(COALESCE(im.item_group, 'General'))) as item_group,
+            COALESCE(MAX(NULLIF(TRIM(im.item_group), '')), MAX(NULLIF(TRIM(im.type), '')), 'General') as item_group,
             MAX(COALESCE(im.type, '')) as item_type,
             COALESCE(s.lot_no, 'LOT-GEN') as lot_no,
-            COALESCE(g.godown_name, s.godown, 'Main Warehouse') as godown_name,
-            SUM(CASE WHEN s.type IN ('Opening Stock', 'Open Stock') THEN COALESCE(s.qty, 0) ELSE 0 END) as opening_qty,
-            SUM(CASE WHEN s.type NOT IN ('Opening Stock', 'Open Stock') AND s.qty > 0 THEN COALESCE(s.qty, 0) ELSE 0 END) as total_purchased,
+            COALESCE(g.godown_name, s.godown, 'Main Godown') as godown_name,
+            SUM(CASE WHEN s.type IN ('Opening Stock', 'Open Stock', 'Opening') THEN COALESCE(s.qty, 0) ELSE 0 END) as opening_qty,
+            SUM(CASE WHEN s.type NOT IN ('Opening Stock', 'Open Stock', 'Opening') AND s.qty > 0 THEN COALESCE(s.qty, 0) ELSE 0 END) as total_purchased,
             SUM(CASE WHEN s.qty < 0 AND LOWER(COALESCE(s.type, '')) NOT LIKE '%wastage%' THEN COALESCE(ABS(s.qty), 0) ELSE 0 END) as total_sold,
             SUM(CASE WHEN LOWER(COALESCE(s.type, '')) LIKE '%wastage%' OR LOWER(s.item_name) LIKE '%wastage%' THEN COALESCE(ABS(s.qty), 0) ELSE 0 END) as wastage_qty,
             SUM(COALESCE(s.qty, 0)) as available_qty,
-            SUM(COALESCE(s.weight, 0)) as weight,
+            SUM(CASE WHEN COALESCE(s.weight, 0) > 0 THEN s.weight ELSE (COALESCE(s.qty, 0) * COALESCE(NULLIF(im.weight, 0), 50)) END) as weight,
             0 as reserved_qty
           FROM stock s
           LEFT JOIN item_master im ON (CAST(s.item_id AS TEXT) = CAST(im.id AS TEXT) OR LOWER(TRIM(s.item_name)) = LOWER(TRIM(im.item_name)) OR s.item_name = im.item_code)
           LEFT JOIN godown_master g ON (CAST(s.godown_id AS TEXT) = CAST(g.id AS TEXT) OR LOWER(TRIM(s.godown)) = LOWER(TRIM(g.godown_name)))
           ${where}
-          GROUP BY s.item_name, COALESCE(s.lot_no, 'LOT-GEN'), COALESCE(g.godown_name, s.godown, 'Main Warehouse')
+          GROUP BY s.item_name, COALESCE(s.lot_no, 'LOT-GEN'), COALESCE(g.godown_name, s.godown, 'Main Godown')
           ORDER BY s.item_name ASC
         `;
       }
@@ -4169,34 +4171,8 @@ const categoryReportHandler = async (req, res) => {
 
       rows = await Promise.all(rawRows.map(async r => {
         let category = await determineLotCategory(db, r.item_name, r.item_group, r.lot_no);
-        let godownName = r.godown_name;
+        let godownName = r.godown_name || 'Main Godown';
         let itemGroup = r.item_group || 'General';
-
-        if (category === 'RM') {
-          if (itemGroup === 'Finished Goods' || itemGroup === 'General') {
-            itemGroup = 'Raw Material';
-          }
-          if (!godownName || godownName === 'Main Warehouse') {
-            godownName = 'Raw Material Godown';
-          }
-        } else if (category === 'FG') {
-          if (itemGroup === 'Raw Material' || itemGroup === 'General') {
-            itemGroup = 'Finished Goods';
-          }
-          if (!godownName || godownName === 'Main Warehouse') {
-            godownName = 'Finished Goods Godown';
-          }
-        } else if (category === 'PM') {
-          itemGroup = 'Packing Material';
-          if (!godownName || godownName === 'Main Warehouse') {
-            godownName = 'Packing Store';
-          }
-        } else if (category === 'Wastage') {
-          itemGroup = 'Wastage';
-          if (!godownName || godownName === 'Main Warehouse') {
-            godownName = 'Main Godown';
-          }
-        }
 
         return {
           ...r,
