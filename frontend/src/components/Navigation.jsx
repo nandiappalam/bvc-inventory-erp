@@ -459,37 +459,45 @@ const Navigation = () => {
   // Grouped Documents Modules
   const documentsGroups = [
     {
-      groupTitle: 'Dashboard',
+      groupTitle: 'Compliance Dashboard',
       items: [
-        { name: 'Document Dashboard', path: '/documents/dashboard', permission: 'Quality Control' }
+        { name: 'Document Compliance Dashboard', path: '/documents/dashboard', permission: 'Quality Control' }
       ]
     },
     {
-      groupTitle: 'Operational Records',
+      groupTitle: 'Process & Quality Records (P1–P8)',
       items: [
-        { name: 'Production Records (P1–P8)', path: '/documents/production', permission: 'Quality Control' },
-        { name: 'Cleaning Records (C1–C10)', path: '/documents/cleaning', permission: 'Quality Control' }
+        { name: '1. Inward Quality Report (IQR / P1)', path: '/documents/production?code=P1', permission: 'Quality Control' },
+        { name: '2. RM Storage Audit (P2)', path: '/documents/production?code=P2', permission: 'Quality Control' },
+        { name: '3. Milling Pre-Start Checklist (P3)', path: '/documents/production?code=P3', permission: 'Quality Control' },
+        { name: '4. CCP Monitoring Records (P4)', path: '/documents/production?code=P4', permission: 'Quality Control' },
+        { name: '5. Line Changeover & Cleanliness (P5)', path: '/documents/production?code=P5', permission: 'Quality Control' },
+        { name: '6. Certificate of Analysis (COA / P6)', path: '/documents/production?code=P6', permission: 'Quality Control' },
+        { name: '7. Terminal Inspection & Dispatch (P7)', path: '/documents/production?code=P7', permission: 'Quality Control' },
+        { name: '8. 360° Lot Traceability Engine (P8)', path: '/lot-genealogy', permission: 'Quality Control' }
       ]
     },
     {
-      groupTitle: 'Controlled Documents',
+      groupTitle: 'Sanitation & Hygiene Records (C1–C10)',
       items: [
-        { name: 'Controlled Documents (D1–D11)', path: '/documents/controlled', permission: 'Quality Control' }
+        { name: 'Cleaning & Sanitation Master (C1–C10)', path: '/documents/cleaning', permission: 'Quality Control' }
       ]
     },
     {
-      groupTitle: 'Document Administration',
+      groupTitle: 'Controlled Policies & Manuals (D1–D11)',
+      items: [
+        { name: 'Glass & Brittle Plastic Policy (D3)', path: '/documents/controlled?code=D3', permission: 'Quality Control' },
+        { name: 'Allergen Management Plan (D5)', path: '/documents/controlled?code=D5', permission: 'Quality Control' },
+        { name: 'Controlled Documents Register (D1–D11)', path: '/documents/controlled', permission: 'Quality Control' }
+      ]
+    },
+    {
+      groupTitle: 'Administration & Monitoring',
       items: [
         { name: 'Document Templates', path: '/documents/templates', permission: 'Quality Control' },
         { name: 'Document Schedule', path: '/documents/schedule', permission: 'Quality Control' },
-        { name: 'Document Register', path: '/documents/register', permission: 'Quality Control' }
-      ]
-    },
-    {
-      groupTitle: 'Document Monitoring',
-      items: [
-        { name: 'Pending Documents', path: '/documents/pending', permission: 'Quality Control' },
-        { name: 'Expiring Documents', path: '/documents/expiring', permission: 'Quality Control' }
+        { name: 'Document Register', path: '/documents/register', permission: 'Quality Control' },
+        { name: 'Pending & Expiring Records', path: '/documents/pending', permission: 'Quality Control' }
       ]
     }
   ];

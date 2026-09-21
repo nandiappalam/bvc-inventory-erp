@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { printHtml } from '../../utils/printHelper';
 import {
   Box,
   Typography,
@@ -57,12 +59,23 @@ const PROD_RECORDS = [
 ];
 
 export default function ProductionRecordsList({ onRefresh, onNavigateToTrace, onOpenTraceability }) {
+  const [searchParams] = useSearchParams();
+  const initialCode = searchParams.get('code') || searchParams.get('record_code') || 'ALL';
+  
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncSuccess, setSyncSuccess] = useState(null);
-  const [selectedCode, setSelectedCode] = useState('ALL');
+  const [selectedCode, setSelectedCode] = useState(initialCode);
   const [lotSearch, setLotSearch] = useState('');
+
+  // Sync selectedCode if URL search param changes
+  useEffect(() => {
+    const codeFromUrl = searchParams.get('code') || searchParams.get('record_code');
+    if (codeFromUrl && codeFromUrl !== selectedCode) {
+      setSelectedCode(codeFromUrl);
+    }
+  }, [searchParams]);
 
   // New Record Dialog
   const [openNewDialog, setOpenNewDialog] = useState(false);
@@ -85,6 +98,8 @@ export default function ProductionRecordsList({ onRefresh, onNavigateToTrace, on
   // View Record Dialog
   const [viewingRecord, setViewingRecord] = useState(null);
 
+  const initialSyncDoneRef = useRef(false);
+
   const fetchRecords = async () => {
     try {
       setLoading(true);
@@ -97,7 +112,25 @@ export default function ProductionRecordsList({ onRefresh, onNavigateToTrace, on
       const res = await fetch(url);
       const data = await res.json();
       if (data.success) {
-        setRecords(data.records || []);
+        const fetchedRecords = data.records || [];
+        
+        // Deduplicate records in state
+        const seenKeys = new Set();
+        const uniqueRecs = [];
+        for (const rec of fetchedRecords) {
+          const key = `${rec.record_code}-${rec.record_no || rec.id}`;
+          if (!seenKeys.has(key)) {
+            seenKeys.add(key);
+            uniqueRecs.push(rec);
+          }
+        }
+        setRecords(uniqueRecs);
+
+        // Run auto-sync ONLY ONCE on initial load if all production records are empty
+        if (uniqueRecs.length === 0 && !initialSyncDoneRef.current && !lotSearch && selectedCode === 'ALL') {
+          initialSyncDoneRef.current = true;
+          handleSyncRecords();
+        }
       }
     } catch (err) {
       console.error('Error fetching production records:', err);
@@ -187,7 +220,65 @@ export default function ProductionRecordsList({ onRefresh, onNavigateToTrace, on
   };
 
   const handlePrintModal = () => {
-    window.print();
+    if (!viewingRecord) return;
+    const rec = viewingRecord;
+    const code = rec.record_code;
+    const docTitle = PROD_RECORDS.find(p => p.code === code)?.label || rec.record_code;
+    const docRef = PROD_RECORDS.find(p => p.code === code)?.docRef || 'BVC/QA/01';
+
+    const printHtmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>${code} - ${rec.record_no}</title>
+        <style>
+          @page { size: A4; margin: 12mm; }
+          body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 15px; color: #0f172a; font-size: 11px; }
+          .header { text-align: center; border-bottom: 2px solid #1f4fb2; padding-bottom: 10px; margin-bottom: 15px; }
+          .company-name { font-size: 22px; font-weight: 900; color: #1f4fb2; letter-spacing: 0.5px; }
+          .subtitle { font-size: 10px; font-weight: 700; color: #475569; text-transform: uppercase; margin-top: 2px; }
+          .doc-title { font-size: 14px; font-weight: 800; color: #0f172a; margin-top: 6px; background: #eff6ff; display: inline-block; padding: 4px 16px; border-radius: 4px; border: 1px solid #bfdbfe; }
+          .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; background: #f8fafc; border: 1px solid #cbd5e1; padding: 10px; border-radius: 6px; margin-bottom: 15px; }
+          .meta label { font-size: 9px; font-weight: 700; color: #64748b; text-transform: uppercase; display: block; }
+          .meta val { font-size: 11px; font-weight: 800; color: #0f172a; }
+          table { width: 100%; border-collapse: collapse; margin-top: 10px; margin-bottom: 15px; }
+          th, td { border: 1px solid #cbd5e1; padding: 6px 8px; font-size: 10px; text-align: left; }
+          th { background: #1f4fb2; color: white; font-weight: 700; }
+          .badge { background: #dcfce7; color: #15803d; font-weight: 800; padding: 2px 6px; border-radius: 3px; font-size: 9px; display: inline-block; }
+          .signatures { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-top: 30px; padding-top: 15px; border-top: 1px dashed #cbd5e1; text-align: center; }
+          .sig-line { border-top: 1px solid #0f172a; margin-top: 25px; padding-top: 4px; font-weight: 700; font-size: 10px; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div class="company-name">BVC EXPORTS PVT. LTD.</div>
+          <div class="subtitle">Quality Assurance & Food Safety Compliance Division • FSSAI / HACCP / ISO 22000 Certified</div>
+          <div class="doc-title">${docTitle}</div>
+        </div>
+
+        <div class="grid-4">
+          <div class="meta"><label>Record No</label><val style="color:#1f4fb2; font-family:monospace;">${rec.record_no}</val></div>
+          <div class="meta"><label>Record Date</label><val>${rec.record_date}</val></div>
+          <div class="meta"><label>Item / Product</label><val>${rec.item_name}</val></div>
+          <div class="meta"><label>Lot Number</label><val style="font-family:monospace;">${rec.lot_no || 'N/A'}</val></div>
+          <div class="meta"><label>Doc Ref</label><val>${docRef}</val></div>
+          <div class="meta"><label>Frequency</label><val>${rec.frequency || 'Per Batch'}</val></div>
+          <div class="meta"><label>Checked By</label><val>${rec.checked_by || 'QA Officer'}</val></div>
+          <div class="meta"><label>Status</label><val><span class="badge">${rec.status}</span></val></div>
+        </div>
+
+        ${rec.remarks ? `<div style="margin-top:15px; padding:10px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:4px; font-style:italic;"><strong>Auditor Remarks:</strong> "${rec.remarks}"</div>` : ''}
+
+        <div class="signatures">
+          <div><div class="sig-line">Inspected By (${rec.checked_by || 'QA Officer'})</div></div>
+          <div><div class="sig-line">Verified By (Plant Manager)</div></div>
+          <div><div class="sig-line">Approved By (QA Head)</div></div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    printHtml(printHtmlContent, `Record_${rec.record_no}`);
   };
 
   // Helper to render official formatted inspection details based on record code
