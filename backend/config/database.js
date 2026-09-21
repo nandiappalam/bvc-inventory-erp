@@ -1,4 +1,11 @@
-const { Pool } = require('pg');
+const { Pool, types } = require('pg');
+
+// Ensure PostgreSQL DATE and TIMESTAMP columns return ISO strings, matching SQLite behavior
+if (types && typeof types.setTypeParser === 'function') {
+  types.setTypeParser(1082, (val) => val); // DATE (1082) -> 'YYYY-MM-DD'
+  types.setTypeParser(1114, (val) => val); // TIMESTAMP without timezone (1114) -> string
+  types.setTypeParser(1184, (val) => val); // TIMESTAMPTZ (1184) -> string
+}
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
@@ -1801,6 +1808,9 @@ async function discoverAndSyncAllPostgresTenants(client) {
       `, [compId, schemaName]);
 
       // Ensure tenant schema has all standard ERP tables
+      try {
+        await client.query(`SET search_path TO "${schemaName}", public;`);
+      } catch (_) {}
       for (const tableSql of COMPANY_TABLES) {
         try {
           const pgTableSql = translateSqlForPostgres(tableSql, compId);
@@ -1823,6 +1833,9 @@ async function discoverAndSyncAllPostgresTenants(client) {
         ON CONFLICT (company_id) DO UPDATE SET db_schema = EXCLUDED.db_schema, status = 'Active'
       `, [compId, sName]);
 
+      try {
+        await client.query(`SET search_path TO "${sName}", public;`);
+      } catch (_) {}
       for (const tableSql of COMPANY_TABLES) {
         try {
           const pgTableSql = translateSqlForPostgres(tableSql, compId);

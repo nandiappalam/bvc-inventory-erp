@@ -126,8 +126,8 @@ export default function ProductionRecordsList({ onRefresh, onNavigateToTrace, on
         }
         setRecords(uniqueRecs);
 
-        // Run auto-sync ONLY ONCE on initial load if all production records are empty
-        if (uniqueRecs.length === 0 && !initialSyncDoneRef.current && !lotSearch && selectedCode === 'ALL') {
+        // Run auto-sync ONLY ONCE on initial load if records are empty
+        if (uniqueRecs.length === 0 && !initialSyncDoneRef.current && !lotSearch) {
           initialSyncDoneRef.current = true;
           handleSyncRecords();
         }
@@ -150,7 +150,8 @@ export default function ProductionRecordsList({ onRefresh, onNavigateToTrace, on
       const res = await fetch('/api/compliance/production-records/sync', { method: 'POST' });
       const data = await res.json();
       if (data.success) {
-        setSyncSuccess(`Auto-synced ${data.synced} compliance production records from ERP purchases, milling batches & sales!`);
+        const count = data.synced !== undefined ? data.synced : (data.count || 0);
+        setSyncSuccess(`Synchronized ${count} compliance production records from ERP purchases, milling batches & sales!`);
         fetchRecords();
         if (onRefresh) onRefresh();
       }

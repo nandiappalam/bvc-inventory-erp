@@ -734,7 +734,33 @@ router.delete('/documents/:id', async (req, res) => {
 // 3. PRODUCTION RECORDS (P1 to P8) API WITH LIVE ERP AUTO-SYNC ENGINE
 // ============================================================================
 
+// Helper functions for safe date manipulation across both SQLite and PostgreSQL
+function formatDateSafe(d, fallback = '2026-08-04') {
+  if (!d) return fallback;
+  if (typeof d === 'string') {
+    return d.includes('T') ? d.split('T')[0] : d;
+  }
+  if (d instanceof Date && !isNaN(d.getTime())) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  return String(d).split('T')[0] || fallback;
+}
+
+function getYearFromDate(d) {
+  const s = formatDateSafe(d);
+  return s.substring(0, 4) || '2026';
+}
+
+function getCompactDate(d) {
+  const s = formatDateSafe(d);
+  return s.replace(/[^0-9]/g, '') || '20260804';
+}
+
 async function syncAllProductionRecords() {
+  let syncedCount = 0;
   try {
     // 1. Sync P1: Incoming Quality Reports (IQR) from Purchases & QC
     const purchases = await db.query(`
@@ -748,8 +774,12 @@ async function syncAllProductionRecords() {
     `);
 
     for (const pur of (purchases.rows || [])) {
-      if (!pur.lot_no) continue;
-      const recNo = `P1-${(pur.date || '2026-08-04').substring(0, 4)}-${String(pur.id).padStart(3, '0')}`;
+      const effectiveLotNo = (pur.lot_no && String(pur.lot_no).trim())
+        ? String(pur.lot_no).trim()
+        : `LOT-${String(pur.id).padStart(4, '0')}`;
+      const purDateStr = formatDateSafe(pur.date);
+      const purYearStr = getYearFromDate(pur.date);
+      const recNo = `P1-${purYearStr}-${String(pur.id).padStart(3, '0')}`;
       
       const supplierDisplay = pur.supplier_name || (pur.supplier && isNaN(pur.supplier) ? pur.supplier : 'Direct Procurement');
       const inwardBags = pur.item_qty || pur.pur_total_qty || 0;
@@ -761,9 +791,9 @@ async function syncAllProductionRecords() {
         SELECT qi.*, iqr.iqr_no, iqr.uploaded_date as iqr_date
         FROM qc_inspections qi
         LEFT JOIN incoming_quality_reports iqr ON (iqr.qc_id = qi.id OR iqr.rm_lot_no = qi.rm_lot_no)
-        WHERE qi.rm_lot_no = ? OR qi.purchase_id = ?
+        WHERE qi.rm_lot_no = ? OR CAST(qi.purchase_id AS TEXT) = CAST(? AS TEXT)
         ORDER BY qi.id DESC LIMIT 1
-      `, [pur.lot_no, pur.id]);
+      `, [effectiveLotNo, String(pur.id)]);
 
       const qc = qcRes.rows && qcRes.rows[0] ? qcRes.rows[0] : null;
       let qcParams = {};
@@ -787,7 +817,7 @@ async function syncAllProductionRecords() {
         });
       }
 
-      const iqrNo = qc?.iqr_no || (qc?.qc_no ? `IQR-${qc.qc_no}` : `IQR-${(pur.date || '2026-08-04').replace(/-/g, '')}-${pur.id}`);
+      const iqrNo = qc?.iqr_no || (qc?.qc_no ? `IQR-${qc.qc_no}` : `IQR-${getCompactDate(pur.date)}-${pur.id}`);
       const moistureVal = qcParams.moisture ? `${qcParams.moisture}%` : '10.8%';
       const fmVal = qcParams.foreign_matter ? `${qcParams.foreign_matter}%` : '0.4%';
       const brokenVal = qcParams.broken_grains || qcParams.broken_grain ? `${qcParams.broken_grains || qcParams.broken_grain}%` : '1.2%';
@@ -807,7 +837,7 @@ async function syncAllProductionRecords() {
         bag_weight_kg: perUnitWt,
         total_weight_kg: inwardKg,
         purchase_invoice: pur.inv_no || String(pur.s_no || pur.id),
-        invoice_date: pur.inv_date || pur.date,
+        invoice_date: formatDateSafe(pur.inv_date || pur.date),
         rate_per_unit: pur.rate,
         supplier_name: supplierDisplay,
         supplier_contact: pur.phone_off || pur.area || '',
@@ -815,7 +845,7 @@ async function syncAllProductionRecords() {
         parameters_list: qcParamsList.length > 0 ? qcParamsList : undefined
       };
 
-      const existing = await db.query(`SELECT id FROM compliance_production_records WHERE record_code = 'P1' AND (lot_no = ? OR record_no = ?)`, [pur.lot_no, recNo]);
+      const existing = await db.query(`SELECT id FROM compliance_production_records WHERE record_code = 'P1' AND (lot_no = ? OR record_no = ?)`, [effectiveLotNo, recNo]);
 
       if (!existing.rows || existing.rows.length === 0) {
         await db.run(`
@@ -823,31 +853,32 @@ async function syncAllProductionRecords() {
           (record_code, record_type, record_no, record_date, frequency, item_name, lot_no, purchase_id, purchase_no, supplier_name, vehicle_no, status, checked_by, findings_json, remarks)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
-          'P1', 'INCOMING_QUALITY', recNo, pur.date || '2026-08-04', 'RM Receiving',
-          pur.item_name, pur.lot_no, pur.id, pur.inv_no || String(pur.s_no || pur.id),
+          'P1', 'INCOMING_QUALITY', recNo, purDateStr, 'RM Receiving',
+          pur.item_name, effectiveLotNo, pur.id, pur.inv_no || String(pur.s_no || pur.id),
           supplierDisplay, pur.lorry_no || 'TN-58-AX-9912', 'COMPLETED', inspectorName,
           JSON.stringify(findings), `Inward RM inspection verified and ${overallDecision.toLowerCase()} (${inwardBags} Bags / ${inwardKg} Kg). Moisture & purity compliant.`
         ]);
+        syncedCount++;
       } else {
         await db.run(`
           UPDATE compliance_production_records
           SET record_date = ?, item_name = ?, supplier_name = ?, vehicle_no = ?, checked_by = ?, findings_json = ?, remarks = ?
           WHERE id = ?
         `, [
-          pur.date || '2026-08-04', pur.item_name, supplierDisplay, pur.lorry_no || 'TN-58-AX-9912', inspectorName,
+          purDateStr, pur.item_name, supplierDisplay, pur.lorry_no || 'TN-58-AX-9912', inspectorName,
           JSON.stringify(findings), `Inward RM inspection verified and ${overallDecision.toLowerCase()} (${inwardBags} Bags / ${inwardKg} Kg). Moisture & purity compliant.`,
           existing.rows[0].id
         ]);
       }
 
       // Also Sync P2: Fumigation & Chemical Safety Record for each RM receiving lot
-      const p2RecNo = `P2-${(pur.date || '2026-08-04').substring(0, 4)}-${String(pur.id).padStart(3, '0')}`;
+      const p2RecNo = `P2-${purYearStr}-${String(pur.id).padStart(3, '0')}`;
       const p2Findings = {
         fumigant_used: 'Aluminium Phosphide 56% Tablet',
         dosage: '3 Tablets / Ton (9g/ton)',
         exposure_period: '72 Hours Continuous Exposure',
-        fumigation_date: pur.date || '2026-08-04',
-        degassing_date: pur.date || '2026-08-04',
+        fumigation_date: purDateStr,
+        degassing_date: purDateStr,
         gas_concentration_ppm: 'Pre-degas: 250 ppm, Post-degas: 0 ppm (Safe Level)',
         target_pest: 'Rice Weevil / Flour Beetle / Grain Borer',
         pest_survival: '0% Survival (100% Efficacy Passed)',
@@ -855,26 +886,27 @@ async function syncAllProductionRecords() {
         safety_clearance: 'APPROVED FOR MILLING & STORAGE'
       };
 
-      const p2Exist = await db.query(`SELECT id FROM compliance_production_records WHERE record_code = 'P2' AND (lot_no = ? OR record_no = ?)`, [pur.lot_no, p2RecNo]);
+      const p2Exist = await db.query(`SELECT id FROM compliance_production_records WHERE record_code = 'P2' AND (lot_no = ? OR record_no = ?)`, [effectiveLotNo, p2RecNo]);
       if (!p2Exist.rows || p2Exist.rows.length === 0) {
         await db.run(`
           INSERT INTO compliance_production_records
           (record_code, record_type, record_no, record_date, frequency, item_name, lot_no, purchase_id, purchase_no, supplier_name, vehicle_no, status, checked_by, findings_json, remarks)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
-          'P2', 'FUMIGATION', p2RecNo, pur.date || '2026-08-04', 'RM Receiving & Storage',
-          pur.item_name, pur.lot_no, pur.id, pur.inv_no || String(pur.s_no || pur.id),
+          'P2', 'FUMIGATION', p2RecNo, purDateStr, 'RM Receiving & Storage',
+          pur.item_name, effectiveLotNo, pur.id, pur.inv_no || String(pur.s_no || pur.id),
           supplierDisplay, pur.lorry_no || 'TN-58-AX-9912', 'COMPLETED', 'Certified Fumigator',
-          JSON.stringify(p2Findings), `Fumigation & degassing executed for ${pur.lot_no} (${pur.item_name}). Post-degas gas concentration: 0 ppm.`
+          JSON.stringify(p2Findings), `Fumigation & degassing executed for ${effectiveLotNo} (${pur.item_name}). Post-degas gas concentration: 0 ppm.`
         ]);
+        syncedCount++;
       } else {
         await db.run(`
           UPDATE compliance_production_records
           SET record_date = ?, item_name = ?, supplier_name = ?, checked_by = ?, findings_json = ?, remarks = ?
           WHERE id = ?
         `, [
-          pur.date || '2026-08-04', pur.item_name, supplierDisplay, 'Certified Fumigator',
-          JSON.stringify(p2Findings), `Fumigation & degassing executed for ${pur.lot_no} (${pur.item_name}). Post-degas gas concentration: 0 ppm.`,
+          purDateStr, pur.item_name, supplierDisplay, 'Certified Fumigator',
+          JSON.stringify(p2Findings), `Fumigation & degassing executed for ${effectiveLotNo} (${pur.item_name}). Post-degas gas concentration: 0 ppm.`,
           p2Exist.rows[0].id
         ]);
       }
@@ -891,6 +923,8 @@ async function syncAllProductionRecords() {
     `);
 
     for (const g of (grainsRes.rows || [])) {
+      const gDateStr = formatDateSafe(g.date);
+      const gYearStr = getYearFromDate(g.date);
       const grindNo = `GRD-${String(g.s_no || g.id).padStart(4, '0')}`;
       const millDisplay = g.mill_name || (g.flour_mill === '1' ? 'Premium Flour Mill' : g.flour_mill === '11' ? 'KTH Mill' : `Milling Line ${g.flour_mill}`);
 
@@ -903,7 +937,7 @@ async function syncAllProductionRecords() {
       const yieldPct = inputKg > 0 ? ((totalOutputKg / inputKg) * 100).toFixed(1) + '%' : '99.5%';
 
       // P3: In Process Checklist
-      const p3RecNo = `P3-${(g.date || '2026-08-04').substring(0, 4)}-${String(g.id).padStart(3, '0')}`;
+      const p3RecNo = `P3-${gYearStr}-${String(g.id).padStart(3, '0')}`;
       const p3Findings = {
         grind_no: grindNo,
         flour_mill: millDisplay,
@@ -928,17 +962,18 @@ async function syncAllProductionRecords() {
           (record_code, record_type, record_no, record_date, frequency, item_name, lot_no, stage_name, status, checked_by, findings_json, remarks)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
-          'P3', 'IN_PROCESS', p3RecNo, g.date || '2026-08-04', 'Daily / Per Batch',
+          'P3', 'IN_PROCESS', p3RecNo, gDateStr, 'Daily / Per Batch',
           g.input_item, g.input_lot, 'Milling & Destoning', 'COMPLETED', 'Line Incharge',
           JSON.stringify(p3Findings), `In-process milling checklist verified for ${grindNo} at ${millDisplay}. Outputs: ${outputDesc}.`
         ]);
+        syncedCount++;
       } else {
         await db.run(`
           UPDATE compliance_production_records
           SET record_date = ?, item_name = ?, lot_no = ?, stage_name = ?, findings_json = ?, remarks = ?
           WHERE id = ?
         `, [
-          g.date || '2026-08-04', g.input_item, g.input_lot, 'Milling & Destoning',
+          gDateStr, g.input_item, g.input_lot, 'Milling & Destoning',
           JSON.stringify(p3Findings), `In-process milling checklist verified for ${grindNo} at ${millDisplay}. Outputs: ${outputDesc}.`,
           p3Exist.rows[0].id
         ]);
@@ -957,11 +992,11 @@ async function syncAllProductionRecords() {
       const ccpStatus = primaryCcp?.status ? primaryCcp.status.toUpperCase() : 'COMPLIANT';
       const ccpCheckedBy = primaryCcp?.checked_by || 'HACCP CCP Monitor';
 
-      const p4RecNo = `P4-${(g.date || '2026-08-04').substring(0, 4)}-${String(g.id).padStart(3, '0')}`;
+      const p4RecNo = `P4-${gYearStr}-${String(g.id).padStart(3, '0')}`;
       const p4Findings = {
         grind_no: grindNo,
         flour_mill: millDisplay,
-        milling_date: g.date || '2026-08-04',
+        milling_date: gDateStr,
         input_item: g.input_item,
         input_lot: g.input_lot,
         ccp1_name: ccpCategory,
@@ -981,24 +1016,25 @@ async function syncAllProductionRecords() {
           (record_code, record_type, record_no, record_date, frequency, item_name, lot_no, stage_name, status, checked_by, findings_json, remarks)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
-          'P4', 'CCP_MONITORING', p4RecNo, g.date || '2026-08-04', 'Daily / 2-Hourly',
+          'P4', 'CCP_MONITORING', p4RecNo, gDateStr, 'Daily / 2-Hourly',
           g.input_item, g.input_lot, 'Destoner, Magnet & Sifter', 'COMPLETED', ccpCheckedBy,
           JSON.stringify(p4Findings), `CCP & OPRP monitored and ${ccpStatus} during ${grindNo}.`
         ]);
+        syncedCount++;
       } else {
         await db.run(`
           UPDATE compliance_production_records
           SET record_date = ?, item_name = ?, lot_no = ?, stage_name = ?, checked_by = ?, findings_json = ?, remarks = ?
           WHERE id = ?
         `, [
-          g.date || '2026-08-04', g.input_item, g.input_lot, 'Destoner, Magnet & Sifter', ccpCheckedBy,
+          gDateStr, g.input_item, g.input_lot, 'Destoner, Magnet & Sifter', ccpCheckedBy,
           JSON.stringify(p4Findings), `CCP & OPRP monitored and ${ccpStatus} during ${grindNo}.`,
           p4Exist.rows[0].id
         ]);
       }
 
       // P5: Product Changeover Records
-      const p5RecNo = `P5-${(g.date || '2026-08-04').substring(0, 4)}-${String(g.id).padStart(3, '0')}`;
+      const p5RecNo = `P5-${gYearStr}-${String(g.id).padStart(3, '0')}`;
       const p5Findings = {
         grind_no: grindNo,
         line: millDisplay,
@@ -1015,10 +1051,11 @@ async function syncAllProductionRecords() {
           (record_code, record_type, record_no, record_date, frequency, item_name, lot_no, stage_name, status, checked_by, findings_json, remarks)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
-          'P5', 'CHANGEOVER', p5RecNo, g.date || '2026-08-04', 'Per Changeover',
+          'P5', 'CHANGEOVER', p5RecNo, gDateStr, 'Per Changeover',
           g.input_item, g.input_lot, 'Milling Floor Changeover', 'COMPLETED', 'Sanitation Lead',
           JSON.stringify(p5Findings), `Line clearance and dry purge executed prior to running ${grindNo}.`
         ]);
+        syncedCount++;
       }
 
       // P6: COA for each Output Finished Good Lot
@@ -1082,17 +1119,18 @@ async function syncAllProductionRecords() {
             (record_code, record_type, record_no, record_date, frequency, item_name, lot_no, stage_name, status, checked_by, approved_by, findings_json, remarks)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `, [
-            'P6', 'COA', coaNo, g.date || '2026-08-04', 'Loading / Release',
+            'P6', 'COA', coaNo, gDateStr, 'Loading / Release',
             out.item_name, out.lot_no, 'Finished Good QA Release', 'COMPLETED', outQc?.inspector || 'QA Chemist', 'Quality Head',
             JSON.stringify(p6Findings), `Certificate of Analysis issued for ${out.item_name} [${out.lot_no}]. Meets all FSSAI / export quality standards.`
           ]);
+          syncedCount++;
         } else {
           await db.run(`
             UPDATE compliance_production_records
             SET record_date = ?, item_name = ?, stage_name = ?, checked_by = ?, findings_json = ?, remarks = ?
             WHERE id = ?
           `, [
-            g.date || '2026-08-04', out.item_name, 'Finished Good QA Release', outQc?.inspector || 'QA Chemist',
+            gDateStr, out.item_name, 'Finished Good QA Release', outQc?.inspector || 'QA Chemist',
             JSON.stringify(p6Findings), `Certificate of Analysis issued for ${out.item_name} [${out.lot_no}]. Meets all FSSAI / export quality standards.`,
             p6Exist.rows[0].id
           ]);
@@ -1110,7 +1148,9 @@ async function syncAllProductionRecords() {
     `);
 
     for (const sal of (salesRes.rows || [])) {
-      const p7RecNo = `P7-${(sal.date || '2026-08-04').substring(0, 4)}-${String(sal.id).padStart(3, '0')}`;
+      const sDateStr = formatDateSafe(sal.date);
+      const sYearStr = getYearFromDate(sal.date);
+      const p7RecNo = `P7-${sYearStr}-${String(sal.id).padStart(3, '0')}`;
       const custDisplay = sal.customer_name || (sal.customer && isNaN(sal.customer) ? sal.customer : 'Royal Foods Exporters');
       const p7Findings = {
         sales_invoice: sal.s_no || sal.id,
@@ -1134,27 +1174,31 @@ async function syncAllProductionRecords() {
           (record_code, record_type, record_no, record_date, frequency, item_name, lot_no, sales_id, invoice_no, customer_name, vehicle_no, status, checked_by, findings_json, remarks)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
-          'P7', 'TERMINAL_INSPECTION', p7RecNo, sal.date || '2026-08-04', 'Loading',
+          'P7', 'TERMINAL_INSPECTION', p7RecNo, sDateStr, 'Loading',
           sal.item_name, sal.lot_no, sal.id, String(sal.s_no || sal.id),
           custDisplay, 'TN-58-AX-9912', 'COMPLETED', 'Dispatch Inspector',
           JSON.stringify(p7Findings), `Terminal pre-shipment audit passed for Inv #${sal.s_no || sal.id} to ${custDisplay}. Container sealed.`
         ]);
+        syncedCount++;
       } else {
         await db.run(`
           UPDATE compliance_production_records
           SET record_date = ?, item_name = ?, lot_no = ?, customer_name = ?, findings_json = ?, remarks = ?
           WHERE id = ?
         `, [
-          sal.date || '2026-08-04', sal.item_name, sal.lot_no, custDisplay,
+          sDateStr, sal.item_name, sal.lot_no, custDisplay,
           JSON.stringify(p7Findings), `Terminal pre-shipment audit passed for Inv #${sal.s_no || sal.id} to ${custDisplay}. Container sealed.`,
           p7Exist.rows[0].id
         ]);
       }
     }
 
-    // 4. Godown Fumigation Records are user-managed or created explicitly
+    const totalRes = await db.query(`SELECT COUNT(*) as count FROM compliance_production_records`);
+    const totalCount = parseInt(totalRes.rows?.[0]?.count ?? totalRes.rows?.[0]?.cnt ?? 0, 10);
+    return { success: true, count: totalCount, synced: syncedCount };
   } catch (err) {
     console.error('Error in syncAllProductionRecords:', err);
+    return { success: false, error: err.message, synced: 0, count: 0 };
   }
 }
 
@@ -1165,13 +1209,10 @@ router.get('/production-records', async (req, res) => {
     const { record_code, lot_no, sync } = req.query;
 
     // Check if table is empty or sync requested
-    if (sync === 'true') {
+    const countRes = await db.query(`SELECT COUNT(*) as cnt FROM compliance_production_records`);
+    const currentCnt = parseInt(countRes.rows?.[0]?.cnt ?? countRes.rows?.[0]?.count ?? 0, 10);
+    if (sync === 'true' || currentCnt === 0) {
       await syncAllProductionRecords();
-    } else {
-      const countRes = await db.query(`SELECT COUNT(*) as cnt FROM compliance_production_records`);
-      if (!countRes.rows || parseInt(countRes.rows[0].cnt || 0, 10) === 0) {
-        await syncAllProductionRecords();
-      }
     }
 
     let query = `SELECT * FROM compliance_production_records WHERE 1=1`;
@@ -1189,8 +1230,8 @@ router.get('/production-records', async (req, res) => {
     query += ` ORDER BY id DESC`;
     let resRows = await db.query(query, params);
 
-    // If query returned 0 rows for specific code, run sync and re-query
-    if ((!resRows.rows || resRows.rows.length === 0) && (!record_code || record_code !== 'ALL')) {
+    // If query returned 0 rows, attempt auto-sync from live ERP transactions and re-query
+    if (!resRows.rows || resRows.rows.length === 0) {
       await syncAllProductionRecords();
       resRows = await db.query(query, params);
     }
@@ -1225,9 +1266,15 @@ router.get('/production-records', async (req, res) => {
 
 router.post('/production-records/sync', async (req, res) => {
   try {
-    await syncAllProductionRecords();
-    res.json({ success: true, message: 'Production records synchronized with ERP transactions.' });
+    const result = await syncAllProductionRecords();
+    res.json({
+      success: true,
+      synced: result.synced,
+      count: result.count,
+      message: `Production records synchronized with ERP transactions (${result.synced} updated/added).`
+    });
   } catch (err) {
+    console.error('Error in /production-records/sync:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
