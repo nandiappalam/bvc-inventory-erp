@@ -169,21 +169,26 @@
 
 .wo-input {
   width: 100%;
-  padding: 8px 12px;
+  height: 42px;
+  padding: 8px 14px;
   border: 1px solid #94a3b8;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 14px;
+  color: #0f172a;
   outline: none;
-  background-color: #f8fafc;
+  background-color: #ffffff;
   box-sizing: border-box;
 }
 .wo-input:focus {
   border-color: #2563eb;
-  background-color: #ffffff;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
 }
 
-.wo-input.select {
+.wo-input.select, select.wo-input, select.wo-table-input {
   cursor: pointer;
+  appearance: auto;
+  color: #0f172a;
+  background-color: #ffffff;
 }
 
 /* Section Cards */
@@ -285,16 +290,19 @@
 
 .wo-table-input {
   width: 100%;
-  padding: 6px 8px;
+  height: 38px;
+  padding: 6px 10px;
   border: 1px solid #cbd5e1;
   border-radius: 4px;
   font-size: 13px;
+  color: #0f172a;
+  background-color: #ffffff;
   box-sizing: border-box;
 }
 .wo-table-input:focus {
   border-color: #2563eb;
   outline: none;
-  background-color: #ffffff;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
 }
 
 .wo-table-input.select {
