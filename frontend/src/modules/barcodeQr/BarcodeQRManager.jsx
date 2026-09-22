@@ -384,7 +384,7 @@ export default function BarcodeQRManager() {
                 >
                   <div ref={printLabelRef}>
                     <Typography variant="subtitle2" sx={{ fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                      BHAGWATI & CO. (BVC)
+                      BVC
                     </Typography>
                     <Typography variant="caption" color="text.secondary" display="block">
                       {genTitle || `${genType} IDENTIFIER`}
