@@ -6,14 +6,14 @@ import api from '../services/api.js';
 
 // Column definitions for Purchase Return Display
 const columns = [
-  { key: 'sno', title: 'S.No', render: (_val, row, idx) => idx !== undefined ? idx + 1 : (row.s_no || '') },
-  { key: 'date', title: 'Date' },
-  { key: 'return_inv_no', title: 'Return Inv No' },
+  { key: 'sno', title: 'S.No', render: (_val, row, idx) => idx !== undefined ? idx + 1 : (row?.s_no || '') },
+  { key: 'date', title: 'Date', render: (_val, row) => row?.date || '-' },
+  { key: 'return_inv_no', title: 'Return Inv No', render: (_val, row) => row?.return_inv_no || '-' },
   {
     key: 'source',
     title: 'Source / Method',
     render: (_val, row) => {
-      const isQc = row.source === 'QC_REJECTION' || row.source === 'IQR_REJECTION';
+      const isQc = row?.source === 'QC_REJECTION' || row?.source === 'IQR_REJECTION';
       return (
         <span style={{
           padding: '2px 8px',
@@ -31,38 +31,38 @@ const columns = [
   { 
     key: 'purchase_inv_no', 
     title: 'Orig. Inv #', 
-    render: (_val, row) => row.purchase_inv_no || (row.purchase_id ? `#${row.purchase_id}` : '-') 
+    render: (_val, row) => row?.purchase_inv_no || (row?.purchase_id ? `#${row.purchase_id}` : '-') 
   },
   { 
     key: 'supplier', 
     title: 'Supplier', 
-    render: (_val, row) => row.supplier_print_name || row.supplier_master_name || row.supplier || '-' 
+    render: (_val, row) => row?.supplier_print_name || row?.supplier_master_name || row?.supplier || '-' 
   },
   { 
     key: 'item_names', 
     title: 'Item Name', 
-    render: (_val, row) => row.item_names || row.item_name || '-' 
+    render: (_val, row) => row?.item_names || row?.item_name || '-' 
   },
   { 
     key: 'item_weights', 
     title: 'Weight', 
-    render: (_val, row) => row.item_weights || row.weight || '-' 
+    render: (_val, row) => row?.item_weights || row?.weight || '-' 
   },
-  { key: 'total_qty', title: 'Total Qty' },
-  { key: 'total_weight', title: 'Total Weight' },
-  { key: 'total_amount', title: 'Total Amount' },
+  { key: 'total_qty', title: 'Total Qty', render: (_val, row) => parseFloat(row?.total_qty || 0).toFixed(2) },
+  { key: 'total_weight', title: 'Total Weight', render: (_val, row) => parseFloat(row?.total_weight || 0).toFixed(2) },
+  { key: 'total_amount', title: 'Total Amount', render: (_val, row) => `₹${parseFloat(row?.total_amount || 0).toFixed(2)}` },
   { 
     key: 'deduction_amount', 
     title: 'Ded Amount', 
     render: (_val, row) => {
-      let da = parseFloat(row.deduction_amount);
-      if (isNaN(da) || da === undefined) {
-        da = (parseFloat(row.grand_total || 0) - parseFloat(row.total_amount || 0));
+      let da = parseFloat(row?.deduction_amount);
+      if (isNaN(da)) {
+        da = (parseFloat(row?.grand_total || 0) - parseFloat(row?.total_amount || 0));
       }
-      return da.toFixed(2);
+      return (isNaN(da) ? 0 : da).toFixed(2);
     } 
   },
-  { key: 'grand_total', title: 'Grand Total' },
+  { key: 'grand_total', title: 'Grand Total', render: (_val, row) => `₹${parseFloat(row?.grand_total || 0).toFixed(2)}` },
 ];
 
 // Handle print with full detailed voucher

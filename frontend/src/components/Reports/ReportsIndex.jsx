@@ -169,6 +169,66 @@ const REPORT_CATEGORIES = [
       { label: 'Papad In Pending Register', type: 'papad-in' },
       { label: 'Pending Purchase Requisitions', type: 'purchase-reqs' }
     ]
+  },
+  {
+    id: 'flour-out',
+    title: 'Flour Out Reports',
+    badge: 'Outward Flour Issues to Papad Manufacturers & Mills',
+    icon: <StockIcon sx={{ fontSize: 32, color: '#0d9488' }} />,
+    color: '#0d9488',
+    path: '/reports/category/flour-out',
+    subReports: [
+      { label: 'Flour Out Register (In Order)', type: 'register' },
+      { label: 'Flour Out Details - Date Wise', type: 'date-wise' },
+      { label: 'Flour Out Details - Month Wise', type: 'month-wise' },
+      { label: 'Flour Out Details - Papad Company Wise', type: 'company-wise' },
+      { label: 'Flour Out Details - Item Wise', type: 'item-wise' }
+    ]
+  },
+  {
+    id: 'flour-out-return',
+    title: 'Flour Out Return Reports',
+    badge: 'Flour Returns & Reversals from Papad Companies',
+    icon: <ReturnIcon sx={{ fontSize: 32, color: '#0891b2' }} />,
+    color: '#0891b2',
+    path: '/reports/category/flour-out-return',
+    subReports: [
+      { label: 'Flour Out Return Register (In Order)', type: 'register' },
+      { label: 'Flour Out Return Details - Date Wise', type: 'date-wise' },
+      { label: 'Flour Out Return Details - Month Wise', type: 'month-wise' },
+      { label: 'Flour Out Return Details - Papad Company Wise', type: 'company-wise' },
+      { label: 'Flour Out Return Details - Item Wise', type: 'item-wise' }
+    ]
+  },
+  {
+    id: 'papad-in',
+    title: 'Papad In Reports',
+    badge: 'Papad Receipts & Inward Production from Contractors',
+    icon: <ProductionIcon sx={{ fontSize: 32, color: '#4f46e5' }} />,
+    color: '#4f46e5',
+    path: '/reports/category/papad-in',
+    subReports: [
+      { label: 'Papad In Register (In Order)', type: 'register' },
+      { label: 'Papad In Details - Date Wise', type: 'date-wise' },
+      { label: 'Papad In Details - Month Wise', type: 'month-wise' },
+      { label: 'Papad In Details - Papad Company Wise', type: 'company-wise' },
+      { label: 'Papad In Details - Item Wise', type: 'item-wise' }
+    ]
+  },
+  {
+    id: 'papad-return',
+    title: 'Papad Return Reports',
+    badge: 'Papad Return & Wastage/Defective Adjustments',
+    icon: <ReturnIcon sx={{ fontSize: 32, color: '#9333ea' }} />,
+    color: '#9333ea',
+    path: '/reports/category/papad-return',
+    subReports: [
+      { label: 'Papad Return Register (In Order)', type: 'register' },
+      { label: 'Papad Return Details - Date Wise', type: 'date-wise' },
+      { label: 'Papad Return Details - Month Wise', type: 'month-wise' },
+      { label: 'Papad Return Details - Papad Company Wise', type: 'company-wise' },
+      { label: 'Papad Return Details - Type Wise', type: 'type-wise' }
+    ]
   }
 ];
 

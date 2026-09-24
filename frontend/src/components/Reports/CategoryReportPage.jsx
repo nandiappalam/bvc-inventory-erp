@@ -173,6 +173,54 @@ const CATEGORY_CONFIGS = {
       { id: 'papad-in', label: 'Papad In Pending Register' },
       { id: 'purchase-reqs', label: 'Pending Purchase Requisitions' }
     ]
+  },
+  'flour-out': {
+    title: 'Flour Out Reports',
+    badge: 'Outward Flour Issues to Papad Manufacturers & Mills',
+    defaultSub: 'register',
+    subReports: [
+      { id: 'register', label: 'Flour Out Register (In Order)' },
+      { id: 'date-wise', label: 'Flour Out Details - Date Wise' },
+      { id: 'month-wise', label: 'Flour Out Details - Month Wise' },
+      { id: 'company-wise', label: 'Flour Out Details - Papad Company Wise' },
+      { id: 'item-wise', label: 'Flour Out Details - Item Wise' }
+    ]
+  },
+  'flour-out-return': {
+    title: 'Flour Out Return Reports',
+    badge: 'Flour Returns & Reversals from Papad Companies',
+    defaultSub: 'register',
+    subReports: [
+      { id: 'register', label: 'Flour Out Return Register (In Order)' },
+      { id: 'date-wise', label: 'Flour Out Return Details - Date Wise' },
+      { id: 'month-wise', label: 'Flour Out Return Details - Month Wise' },
+      { id: 'company-wise', label: 'Flour Out Return Details - Papad Company Wise' },
+      { id: 'item-wise', label: 'Flour Out Return Details - Item Wise' }
+    ]
+  },
+  'papad-in': {
+    title: 'Papad In Reports',
+    badge: 'Papad Receipts & Inward Production from Contractors',
+    defaultSub: 'register',
+    subReports: [
+      { id: 'register', label: 'Papad In Register (In Order)' },
+      { id: 'date-wise', label: 'Papad In Details - Date Wise' },
+      { id: 'month-wise', label: 'Papad In Details - Month Wise' },
+      { id: 'company-wise', label: 'Papad In Details - Papad Company Wise' },
+      { id: 'item-wise', label: 'Papad In Details - Item Wise' }
+    ]
+  },
+  'papad-return': {
+    title: 'Papad Return Reports',
+    badge: 'Papad Return & Wastage/Defective Adjustments',
+    defaultSub: 'register',
+    subReports: [
+      { id: 'register', label: 'Papad Return Register (In Order)' },
+      { id: 'date-wise', label: 'Papad Return Details - Date Wise' },
+      { id: 'month-wise', label: 'Papad Return Details - Month Wise' },
+      { id: 'company-wise', label: 'Papad Return Details - Papad Company Wise' },
+      { id: 'type-wise', label: 'Papad Return Details - Type Wise' }
+    ]
   }
 };
 
@@ -982,6 +1030,235 @@ const getCategoryColumns = (categoryKey, subReportId) => {
       { id: 'approved_qty', label: 'Approved Qty', align: 'right', isNumber: true },
       { id: 'pending_qty', label: 'Pending Qty', align: 'right', isNumber: true },
       { id: 'status', label: 'Status' }
+    ];
+  }
+
+  if (categoryKey === 'flour-out') {
+    if (subReportId === 'date-wise') {
+      return [
+        { id: 'date', label: 'Date' },
+        { id: 'voucher_count', label: 'Voucher Count', align: 'right', isNumber: true },
+        { id: 'item_count', label: 'Total Items', align: 'right', isNumber: true },
+        { id: 'total_qty', label: 'Total Bags', align: 'right', isNumber: true },
+        { id: 'total_wt', label: 'Total Weight (kg)', align: 'right', isNumber: true },
+        { id: 'total_papad_kg', label: 'Total Papad (kg)', align: 'right', isNumber: true },
+        { id: 'total_wages', label: 'Total Wages (₹)', align: 'right', isNumber: true }
+      ];
+    }
+    if (subReportId === 'month-wise') {
+      return [
+        { id: 'month', label: 'Month' },
+        { id: 'voucher_count', label: 'Voucher Count', align: 'right', isNumber: true },
+        { id: 'item_count', label: 'Total Items', align: 'right', isNumber: true },
+        { id: 'total_qty', label: 'Total Bags', align: 'right', isNumber: true },
+        { id: 'total_wt', label: 'Total Weight (kg)', align: 'right', isNumber: true },
+        { id: 'total_papad_kg', label: 'Total Papad (kg)', align: 'right', isNumber: true },
+        { id: 'total_wages', label: 'Total Wages (₹)', align: 'right', isNumber: true }
+      ];
+    }
+    if (subReportId === 'company-wise') {
+      return [
+        { id: 'papad_company', label: 'Papad Company' },
+        { id: 'voucher_count', label: 'Vouchers', align: 'right', isNumber: true },
+        { id: 'total_qty', label: 'Total Bags', align: 'right', isNumber: true },
+        { id: 'total_wt', label: 'Total Weight (kg)', align: 'right', isNumber: true },
+        { id: 'total_papad_kg', label: 'Total Papad (kg)', align: 'right', isNumber: true },
+        { id: 'total_wages', label: 'Total Wages (₹)', align: 'right', isNumber: true }
+      ];
+    }
+    if (subReportId === 'item-wise') {
+      return [
+        { id: 'item_name', label: 'Item Name' },
+        { id: 'lot_no', label: 'Lot No' },
+        { id: 'voucher_count', label: 'Vouchers', align: 'right', isNumber: true },
+        { id: 'total_qty', label: 'Total Bags', align: 'right', isNumber: true },
+        { id: 'total_wt', label: 'Total Weight (kg)', align: 'right', isNumber: true },
+        { id: 'total_papad_kg', label: 'Total Papad (kg)', align: 'right', isNumber: true },
+        { id: 'total_wages', label: 'Total Wages (₹)', align: 'right', isNumber: true }
+      ];
+    }
+    return [
+      { id: 'date', label: 'Date' },
+      { id: 's_no', label: 'S.No' },
+      { id: 'papad_company', label: 'Papad Company' },
+      { id: 'item_name', label: 'Item Name' },
+      { id: 'lot_no', label: 'Lot No' },
+      { id: 'weight', label: 'Weight (kg)', align: 'right', isNumber: true },
+      { id: 'qty', label: 'Qty (Bags)', align: 'right', isNumber: true },
+      { id: 'total_wt', label: 'Total Wt (kg)', align: 'right', isNumber: true },
+      { id: 'papad_kg', label: 'Papad (kg)', align: 'right', isNumber: true },
+      { id: 'wages_bag', label: 'Wages / Bag (₹)', align: 'right', isNumber: true },
+      { id: 'wages', label: 'Wages (₹)', align: 'right', isNumber: true }
+    ];
+  }
+
+  if (categoryKey === 'flour-out-return') {
+    if (subReportId === 'date-wise') {
+      return [
+        { id: 'date', label: 'Date' },
+        { id: 'return_count', label: 'Return Count', align: 'right', isNumber: true },
+        { id: 'item_count', label: 'Total Items', align: 'right', isNumber: true },
+        { id: 'total_qty', label: 'Total Bags', align: 'right', isNumber: true },
+        { id: 'total_wt', label: 'Total Weight (kg)', align: 'right', isNumber: true },
+        { id: 'total_papad_kg', label: 'Total Papad (kg)', align: 'right', isNumber: true },
+        { id: 'total_wages', label: 'Total Wages (₹)', align: 'right', isNumber: true }
+      ];
+    }
+    if (subReportId === 'month-wise') {
+      return [
+        { id: 'month', label: 'Month' },
+        { id: 'return_count', label: 'Return Count', align: 'right', isNumber: true },
+        { id: 'item_count', label: 'Total Items', align: 'right', isNumber: true },
+        { id: 'total_qty', label: 'Total Bags', align: 'right', isNumber: true },
+        { id: 'total_wt', label: 'Total Weight (kg)', align: 'right', isNumber: true },
+        { id: 'total_papad_kg', label: 'Total Papad (kg)', align: 'right', isNumber: true },
+        { id: 'total_wages', label: 'Total Wages (₹)', align: 'right', isNumber: true }
+      ];
+    }
+    if (subReportId === 'company-wise') {
+      return [
+        { id: 'papad_company', label: 'Papad Company' },
+        { id: 'return_count', label: 'Returns', align: 'right', isNumber: true },
+        { id: 'total_qty', label: 'Total Bags', align: 'right', isNumber: true },
+        { id: 'total_wt', label: 'Total Weight (kg)', align: 'right', isNumber: true },
+        { id: 'total_papad_kg', label: 'Total Papad (kg)', align: 'right', isNumber: true },
+        { id: 'total_wages', label: 'Total Wages (₹)', align: 'right', isNumber: true }
+      ];
+    }
+    if (subReportId === 'item-wise') {
+      return [
+        { id: 'item_name', label: 'Item Name' },
+        { id: 'lot_no', label: 'Lot No' },
+        { id: 'return_count', label: 'Returns', align: 'right', isNumber: true },
+        { id: 'total_qty', label: 'Total Bags', align: 'right', isNumber: true },
+        { id: 'total_wt', label: 'Total Weight (kg)', align: 'right', isNumber: true },
+        { id: 'total_papad_kg', label: 'Total Papad (kg)', align: 'right', isNumber: true },
+        { id: 'total_wages', label: 'Total Wages (₹)', align: 'right', isNumber: true }
+      ];
+    }
+    return [
+      { id: 'date', label: 'Date' },
+      { id: 's_no', label: 'S.No' },
+      { id: 'papad_company', label: 'Papad Company' },
+      { id: 'tax_type', label: 'Tax Type' },
+      { id: 'item_name', label: 'Item Name' },
+      { id: 'lot_no', label: 'Lot No' },
+      { id: 'weight', label: 'Weight (kg)', align: 'right', isNumber: true },
+      { id: 'qty', label: 'Qty (Bags)', align: 'right', isNumber: true },
+      { id: 'total_wt', label: 'Total Wt (kg)', align: 'right', isNumber: true },
+      { id: 'papad_kg', label: 'Papad (kg)', align: 'right', isNumber: true },
+      { id: 'cost', label: 'Cost (₹)', align: 'right', isNumber: true },
+      { id: 'wages_bag', label: 'Wages / Bag (₹)', align: 'right', isNumber: true },
+      { id: 'wages', label: 'Wages (₹)', align: 'right', isNumber: true }
+    ];
+  }
+
+  if (categoryKey === 'papad-in') {
+    if (subReportId === 'date-wise') {
+      return [
+        { id: 'date', label: 'Date' },
+        { id: 'receipt_count', label: 'Receipt Count', align: 'right', isNumber: true },
+        { id: 'item_count', label: 'Total Items', align: 'right', isNumber: true },
+        { id: 'total_qty', label: 'Total Bags', align: 'right', isNumber: true },
+        { id: 'total_wt', label: 'Total Weight (kg)', align: 'right', isNumber: true },
+        { id: 'total_papad_kg', label: 'Total Papad (kg)', align: 'right', isNumber: true },
+        { id: 'total_wages', label: 'Total Wages (₹)', align: 'right', isNumber: true }
+      ];
+    }
+    if (subReportId === 'month-wise') {
+      return [
+        { id: 'month', label: 'Month' },
+        { id: 'receipt_count', label: 'Receipt Count', align: 'right', isNumber: true },
+        { id: 'item_count', label: 'Total Items', align: 'right', isNumber: true },
+        { id: 'total_qty', label: 'Total Bags', align: 'right', isNumber: true },
+        { id: 'total_wt', label: 'Total Weight (kg)', align: 'right', isNumber: true },
+        { id: 'total_papad_kg', label: 'Total Papad (kg)', align: 'right', isNumber: true },
+        { id: 'total_wages', label: 'Total Wages (₹)', align: 'right', isNumber: true }
+      ];
+    }
+    if (subReportId === 'company-wise') {
+      return [
+        { id: 'papad_company', label: 'Papad Company' },
+        { id: 'receipt_count', label: 'Receipts', align: 'right', isNumber: true },
+        { id: 'total_qty', label: 'Total Bags', align: 'right', isNumber: true },
+        { id: 'total_wt', label: 'Total Weight (kg)', align: 'right', isNumber: true },
+        { id: 'total_papad_kg', label: 'Total Papad (kg)', align: 'right', isNumber: true },
+        { id: 'total_wages', label: 'Total Wages (₹)', align: 'right', isNumber: true }
+      ];
+    }
+    if (subReportId === 'item-wise') {
+      return [
+        { id: 'item_name', label: 'Item Name' },
+        { id: 'lot_no', label: 'Lot No' },
+        { id: 'receipt_count', label: 'Receipts', align: 'right', isNumber: true },
+        { id: 'total_qty', label: 'Total Bags', align: 'right', isNumber: true },
+        { id: 'total_wt', label: 'Total Weight (kg)', align: 'right', isNumber: true },
+        { id: 'total_papad_kg', label: 'Total Papad (kg)', align: 'right', isNumber: true },
+        { id: 'total_wages', label: 'Total Wages (₹)', align: 'right', isNumber: true }
+      ];
+    }
+    return [
+      { id: 'date', label: 'Date' },
+      { id: 's_no', label: 'S.No' },
+      { id: 'papad_company', label: 'Papad Company' },
+      { id: 'item_name', label: 'Item Name' },
+      { id: 'lot_no', label: 'Lot No' },
+      { id: 'weight', label: 'Weight (kg)', align: 'right', isNumber: true },
+      { id: 'qty', label: 'Qty (Bags)', align: 'right', isNumber: true },
+      { id: 'total_wt', label: 'Total Wt (kg)', align: 'right', isNumber: true },
+      { id: 'papad_kg', label: 'Papad (kg)', align: 'right', isNumber: true },
+      { id: 'box_papad', label: 'Box Papad', align: 'right', isNumber: true },
+      { id: 'wt_papad', label: 'Wt Papad', align: 'right', isNumber: true },
+      { id: 'box_empty', label: 'Box Empty', align: 'right', isNumber: true },
+      { id: 'wt_empty', label: 'Wt Empty', align: 'right', isNumber: true },
+      { id: 'wages_bag', label: 'Wages / Bag (₹)', align: 'right', isNumber: true },
+      { id: 'wages', label: 'Wages (₹)', align: 'right', isNumber: true }
+    ];
+  }
+
+  if (categoryKey === 'papad-return') {
+    if (subReportId === 'date-wise') {
+      return [
+        { id: 'date', label: 'Date' },
+        { id: 'return_count', label: 'Return Count', align: 'right', isNumber: true },
+        { id: 'total_papad_less', label: 'Total Papad Less (kg)', align: 'right', isNumber: true },
+        { id: 'total_payment_less', label: 'Total Payment Less (₹)', align: 'right', isNumber: true }
+      ];
+    }
+    if (subReportId === 'month-wise') {
+      return [
+        { id: 'month', label: 'Month' },
+        { id: 'return_count', label: 'Return Count', align: 'right', isNumber: true },
+        { id: 'total_papad_less', label: 'Total Papad Less (kg)', align: 'right', isNumber: true },
+        { id: 'total_payment_less', label: 'Total Payment Less (₹)', align: 'right', isNumber: true }
+      ];
+    }
+    if (subReportId === 'company-wise') {
+      return [
+        { id: 'papad_company', label: 'Papad Company' },
+        { id: 'return_count', label: 'Return Count', align: 'right', isNumber: true },
+        { id: 'total_papad_less', label: 'Total Papad Less (kg)', align: 'right', isNumber: true },
+        { id: 'total_payment_less', label: 'Total Payment Less (₹)', align: 'right', isNumber: true }
+      ];
+    }
+    if (subReportId === 'type-wise') {
+      return [
+        { id: 'type', label: 'Adjustment Type' },
+        { id: 'return_count', label: 'Return Count', align: 'right', isNumber: true },
+        { id: 'total_papad_less', label: 'Total Papad Less (kg)', align: 'right', isNumber: true },
+        { id: 'total_payment_less', label: 'Total Payment Less (₹)', align: 'right', isNumber: true }
+      ];
+    }
+    return [
+      { id: 'date', label: 'Date' },
+      { id: 's_no', label: 'S.No' },
+      { id: 'papad_company', label: 'Papad Company' },
+      { id: 'type', label: 'Type' },
+      { id: 'papad_balance', label: 'Papad Bal (kg)', align: 'right', isNumber: true },
+      { id: 'payment_balance', label: 'Payment Bal (₹)', align: 'right', isNumber: true },
+      { id: 'papad_less', label: 'Papad Less (kg)', align: 'right', isNumber: true },
+      { id: 'payment_less', label: 'Payment Less (₹)', align: 'right', isNumber: true },
+      { id: 'remarks', label: 'Remarks' }
     ];
   }
 

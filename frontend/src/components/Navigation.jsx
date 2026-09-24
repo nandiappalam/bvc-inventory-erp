@@ -644,6 +644,20 @@ const Navigation = () => {
       ]
     },
     {
+      groupTitle: 'Flour Out',
+      items: [
+        { name: 'Flour Out Reports', path: '/reports/category/flour-out', permission: 'Flour Out' },
+        { name: 'Flour Out Return Reports', path: '/reports/category/flour-out-return', permission: 'Flour Out Return' }
+      ]
+    },
+    {
+      groupTitle: 'Papad',
+      items: [
+        { name: 'Papad In Reports', path: '/reports/category/papad-in', permission: 'Papad In' },
+        { name: 'Papad Return Reports', path: '/reports/category/papad-return', permission: 'Papad Return' }
+      ]
+    },
+    {
       groupTitle: 'Tax',
       items: [
         { name: 'Tax Reports', path: '/reports/category/tax', permission: 'Voucher' }

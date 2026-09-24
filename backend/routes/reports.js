@@ -5654,6 +5654,418 @@ const categoryReportHandler = async (req, res) => {
         const result = await db.query(sql);
         rows = result.rows || [];
       }
+    } else if (categoryKey === 'flour-out') {
+      let where = 'WHERE 1=1';
+      const params = [];
+      if (from_date) { where += ' AND fo.date >= ?'; params.push(from_date); }
+      if (to_date) { where += ' AND fo.date <= ?'; params.push(to_date); }
+      if (item) { where += ' AND LOWER(foi.item_name) LIKE LOWER(?)'; params.push(`%${item}%`); }
+      if (lot_no) { where += ' AND LOWER(foi.lot_no) LIKE LOWER(?)'; params.push(`%${lot_no}%`); }
+      if (search) { 
+        where += ' AND (LOWER(COALESCE(pcm.name, fo.papad_company, "")) LIKE LOWER(?) OR LOWER(COALESCE(foi.item_name, "")) LIKE LOWER(?) OR LOWER(COALESCE(foi.lot_no, "")) LIKE LOWER(?) OR LOWER(CAST(fo.s_no AS TEXT)) LIKE LOWER(?))'; 
+        params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`); 
+      }
+
+      let sql = '';
+      if (sub_type === 'date-wise') {
+        sql = `
+          SELECT 
+            fo.date,
+            COUNT(DISTINCT fo.id) as voucher_count,
+            COUNT(foi.id) as item_count,
+            SUM(COALESCE(foi.qty, 0)) as total_qty,
+            SUM(COALESCE(foi.total_wt, foi.qty * foi.weight, 0)) as total_wt,
+            SUM(COALESCE(foi.papad_kg, 0)) as total_papad_kg,
+            SUM(COALESCE(foi.wages, 0)) as total_wages
+          FROM flour_out fo
+          LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(fo.papad_company AS TEXT) OR pcm.name = fo.papad_company)
+          LEFT JOIN flour_out_items foi ON fo.id = foi.flour_out_id
+          ${where}
+          GROUP BY fo.date
+          ORDER BY fo.date DESC
+        `;
+      } else if (sub_type === 'month-wise') {
+        sql = `
+          SELECT 
+            STRFTIME('%Y-%m', fo.date) as month,
+            COUNT(DISTINCT fo.id) as voucher_count,
+            COUNT(foi.id) as item_count,
+            SUM(COALESCE(foi.qty, 0)) as total_qty,
+            SUM(COALESCE(foi.total_wt, foi.qty * foi.weight, 0)) as total_wt,
+            SUM(COALESCE(foi.papad_kg, 0)) as total_papad_kg,
+            SUM(COALESCE(foi.wages, 0)) as total_wages
+          FROM flour_out fo
+          LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(fo.papad_company AS TEXT) OR pcm.name = fo.papad_company)
+          LEFT JOIN flour_out_items foi ON fo.id = foi.flour_out_id
+          ${where}
+          GROUP BY STRFTIME('%Y-%m', fo.date)
+          ORDER BY month DESC
+        `;
+      } else if (sub_type === 'company-wise') {
+        sql = `
+          SELECT 
+            COALESCE(pcm.name, fo.papad_company, 'Unknown Company') as papad_company,
+            COUNT(DISTINCT fo.id) as voucher_count,
+            COUNT(foi.id) as item_count,
+            SUM(COALESCE(foi.qty, 0)) as total_qty,
+            SUM(COALESCE(foi.total_wt, foi.qty * foi.weight, 0)) as total_wt,
+            SUM(COALESCE(foi.papad_kg, 0)) as total_papad_kg,
+            SUM(COALESCE(foi.wages, 0)) as total_wages
+          FROM flour_out fo
+          LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(fo.papad_company AS TEXT) OR pcm.name = fo.papad_company)
+          LEFT JOIN flour_out_items foi ON fo.id = foi.flour_out_id
+          ${where}
+          GROUP BY COALESCE(pcm.name, fo.papad_company)
+          ORDER BY total_wt DESC
+        `;
+      } else if (sub_type === 'item-wise') {
+        sql = `
+          SELECT 
+            COALESCE(foi.item_name, 'Flour Item') as item_name,
+            COALESCE(foi.lot_no, '-') as lot_no,
+            COUNT(DISTINCT fo.id) as voucher_count,
+            SUM(COALESCE(foi.qty, 0)) as total_qty,
+            SUM(COALESCE(foi.total_wt, foi.qty * foi.weight, 0)) as total_wt,
+            SUM(COALESCE(foi.papad_kg, 0)) as total_papad_kg,
+            SUM(COALESCE(foi.wages, 0)) as total_wages
+          FROM flour_out fo
+          LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(fo.papad_company AS TEXT) OR pcm.name = fo.papad_company)
+          LEFT JOIN flour_out_items foi ON fo.id = foi.flour_out_id
+          ${where}
+          GROUP BY foi.item_name, foi.lot_no
+          ORDER BY total_wt DESC
+        `;
+      } else {
+        // Register (In Order)
+        sql = `
+          SELECT 
+            fo.id,
+            fo.date,
+            COALESCE(CAST(fo.s_no AS TEXT), CAST(fo.id AS TEXT)) as s_no,
+            COALESCE(pcm.name, fo.papad_company, 'Papad Company') as papad_company,
+            COALESCE(foi.item_name, 'Flour Item') as item_name,
+            COALESCE(foi.lot_no, '-') as lot_no,
+            COALESCE(foi.weight, 0) as weight,
+            COALESCE(foi.qty, 0) as qty,
+            COALESCE(foi.total_wt, foi.qty * foi.weight, 0) as total_wt,
+            COALESCE(foi.papad_kg, 0) as papad_kg,
+            COALESCE(foi.wages_bag, 0) as wages_bag,
+            COALESCE(foi.wages, 0) as wages,
+            fo.remarks
+          FROM flour_out fo
+          LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(fo.papad_company AS TEXT) OR pcm.name = fo.papad_company)
+          LEFT JOIN flour_out_items foi ON fo.id = foi.flour_out_id
+          ${where}
+          ORDER BY fo.date DESC, fo.id DESC, foi.id ASC
+        `;
+      }
+      const result = await db.query(sql, params);
+      rows = result.rows || [];
+    } else if (categoryKey === 'flour-out-return') {
+      let where = 'WHERE 1=1';
+      const params = [];
+      if (from_date) { where += ' AND foret.date >= ?'; params.push(from_date); }
+      if (to_date) { where += ' AND foret.date <= ?'; params.push(to_date); }
+      if (item) { where += ' AND LOWER(fori.item_name) LIKE LOWER(?)'; params.push(`%${item}%`); }
+      if (lot_no) { where += ' AND LOWER(fori.lot_no) LIKE LOWER(?)'; params.push(`%${lot_no}%`); }
+      if (search) { 
+        where += ' AND (LOWER(COALESCE(pcm.name, foret.papad_company, "")) LIKE LOWER(?) OR LOWER(COALESCE(fori.item_name, "")) LIKE LOWER(?) OR LOWER(COALESCE(fori.lot_no, "")) LIKE LOWER(?) OR LOWER(CAST(foret.s_no AS TEXT)) LIKE LOWER(?))'; 
+        params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`); 
+      }
+
+      let sql = '';
+      if (sub_type === 'date-wise') {
+        sql = `
+          SELECT 
+            foret.date,
+            COUNT(DISTINCT foret.id) as return_count,
+            COUNT(fori.id) as item_count,
+            SUM(COALESCE(fori.qty, 0)) as total_qty,
+            SUM(COALESCE(fori.total_wt, fori.qty * fori.weight, 0)) as total_wt,
+            SUM(COALESCE(fori.papad_kg, 0)) as total_papad_kg,
+            SUM(COALESCE(fori.wages, 0)) as total_wages
+          FROM flour_out_returns foret
+          LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(foret.papad_company AS TEXT) OR pcm.name = foret.papad_company)
+          LEFT JOIN flour_out_return_items fori ON foret.id = fori.flour_out_return_id
+          ${where}
+          GROUP BY foret.date
+          ORDER BY foret.date DESC
+        `;
+      } else if (sub_type === 'month-wise') {
+        sql = `
+          SELECT 
+            STRFTIME('%Y-%m', foret.date) as month,
+            COUNT(DISTINCT foret.id) as return_count,
+            COUNT(fori.id) as item_count,
+            SUM(COALESCE(fori.qty, 0)) as total_qty,
+            SUM(COALESCE(fori.total_wt, fori.qty * fori.weight, 0)) as total_wt,
+            SUM(COALESCE(fori.papad_kg, 0)) as total_papad_kg,
+            SUM(COALESCE(fori.wages, 0)) as total_wages
+          FROM flour_out_returns foret
+          LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(foret.papad_company AS TEXT) OR pcm.name = foret.papad_company)
+          LEFT JOIN flour_out_return_items fori ON foret.id = fori.flour_out_return_id
+          ${where}
+          GROUP BY STRFTIME('%Y-%m', foret.date)
+          ORDER BY month DESC
+        `;
+      } else if (sub_type === 'company-wise') {
+        sql = `
+          SELECT 
+            COALESCE(pcm.name, foret.papad_company, 'Unknown Company') as papad_company,
+            COUNT(DISTINCT foret.id) as return_count,
+            COUNT(fori.id) as item_count,
+            SUM(COALESCE(fori.qty, 0)) as total_qty,
+            SUM(COALESCE(fori.total_wt, fori.qty * fori.weight, 0)) as total_wt,
+            SUM(COALESCE(fori.papad_kg, 0)) as total_papad_kg,
+            SUM(COALESCE(fori.wages, 0)) as total_wages
+          FROM flour_out_returns foret
+          LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(foret.papad_company AS TEXT) OR pcm.name = foret.papad_company)
+          LEFT JOIN flour_out_return_items fori ON foret.id = fori.flour_out_return_id
+          ${where}
+          GROUP BY COALESCE(pcm.name, foret.papad_company)
+          ORDER BY total_wt DESC
+        `;
+      } else if (sub_type === 'item-wise') {
+        sql = `
+          SELECT 
+            COALESCE(fori.item_name, 'Flour Return Item') as item_name,
+            COALESCE(fori.lot_no, '-') as lot_no,
+            COUNT(DISTINCT foret.id) as return_count,
+            SUM(COALESCE(fori.qty, 0)) as total_qty,
+            SUM(COALESCE(fori.total_wt, fori.qty * fori.weight, 0)) as total_wt,
+            SUM(COALESCE(fori.papad_kg, 0)) as total_papad_kg,
+            SUM(COALESCE(fori.wages, 0)) as total_wages
+          FROM flour_out_returns foret
+          LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(foret.papad_company AS TEXT) OR pcm.name = foret.papad_company)
+          LEFT JOIN flour_out_return_items fori ON foret.id = fori.flour_out_return_id
+          ${where}
+          GROUP BY fori.item_name, fori.lot_no
+          ORDER BY total_wt DESC
+        `;
+      } else {
+        // Register (In Order)
+        sql = `
+          SELECT 
+            foret.id,
+            foret.date,
+            COALESCE(CAST(foret.s_no AS TEXT), CAST(foret.id AS TEXT)) as s_no,
+            COALESCE(pcm.name, foret.papad_company, 'Papad Company') as papad_company,
+            COALESCE(foret.tax_type, '-') as tax_type,
+            COALESCE(fori.item_name, 'Flour Item') as item_name,
+            COALESCE(fori.lot_no, '-') as lot_no,
+            COALESCE(fori.weight, 0) as weight,
+            COALESCE(fori.qty, 0) as qty,
+            COALESCE(fori.total_wt, fori.qty * fori.weight, 0) as total_wt,
+            COALESCE(fori.papad_kg, 0) as papad_kg,
+            COALESCE(fori.cost, 0) as cost,
+            COALESCE(fori.wages_bag, 0) as wages_bag,
+            COALESCE(fori.wages, 0) as wages,
+            foret.remarks
+          FROM flour_out_returns foret
+          LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(foret.papad_company AS TEXT) OR pcm.name = foret.papad_company)
+          LEFT JOIN flour_out_return_items fori ON foret.id = fori.flour_out_return_id
+          ${where}
+          ORDER BY foret.date DESC, foret.id DESC, fori.id ASC
+        `;
+      }
+      const result = await db.query(sql, params);
+      rows = result.rows || [];
+    } else if (categoryKey === 'papad-in') {
+      let where = "WHERE (fo.papad_company IS NOT NULL AND fo.papad_company != '')";
+      const params = [];
+      if (from_date) { where += ' AND fo.date >= ?'; params.push(from_date); }
+      if (to_date) { where += ' AND fo.date <= ?'; params.push(to_date); }
+      if (item) { where += ' AND LOWER(foi.item_name) LIKE LOWER(?)'; params.push(`%${item}%`); }
+      if (lot_no) { where += ' AND LOWER(foi.lot_no) LIKE LOWER(?)'; params.push(`%${lot_no}%`); }
+      if (search) { 
+        where += ' AND (LOWER(COALESCE(pcm.name, fo.papad_company, "")) LIKE LOWER(?) OR LOWER(COALESCE(foi.item_name, "")) LIKE LOWER(?) OR LOWER(COALESCE(foi.lot_no, "")) LIKE LOWER(?) OR LOWER(CAST(fo.s_no AS TEXT)) LIKE LOWER(?))'; 
+        params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`); 
+      }
+
+      let sql = '';
+      if (sub_type === 'date-wise') {
+        sql = `
+          SELECT 
+            fo.date,
+            COUNT(DISTINCT fo.id) as receipt_count,
+            COUNT(foi.id) as item_count,
+            SUM(COALESCE(foi.qty, 0)) as total_qty,
+            SUM(COALESCE(foi.total_wt, foi.qty * foi.weight, 0)) as total_wt,
+            SUM(COALESCE(foi.papad_kg, 0)) as total_papad_kg,
+            SUM(COALESCE(foi.wages, 0)) as total_wages
+          FROM flour_out fo
+          LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(fo.papad_company AS TEXT) OR pcm.name = fo.papad_company)
+          LEFT JOIN flour_out_items foi ON fo.id = foi.flour_out_id
+          ${where}
+          GROUP BY fo.date
+          ORDER BY fo.date DESC
+        `;
+      } else if (sub_type === 'month-wise') {
+        sql = `
+          SELECT 
+            STRFTIME('%Y-%m', fo.date) as month,
+            COUNT(DISTINCT fo.id) as receipt_count,
+            COUNT(foi.id) as item_count,
+            SUM(COALESCE(foi.qty, 0)) as total_qty,
+            SUM(COALESCE(foi.total_wt, foi.qty * foi.weight, 0)) as total_wt,
+            SUM(COALESCE(foi.papad_kg, 0)) as total_papad_kg,
+            SUM(COALESCE(foi.wages, 0)) as total_wages
+          FROM flour_out fo
+          LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(fo.papad_company AS TEXT) OR pcm.name = fo.papad_company)
+          LEFT JOIN flour_out_items foi ON fo.id = foi.flour_out_id
+          ${where}
+          GROUP BY STRFTIME('%Y-%m', fo.date)
+          ORDER BY month DESC
+        `;
+      } else if (sub_type === 'company-wise') {
+        sql = `
+          SELECT 
+            COALESCE(pcm.name, fo.papad_company, 'Papad Company') as papad_company,
+            COUNT(DISTINCT fo.id) as receipt_count,
+            COUNT(foi.id) as item_count,
+            SUM(COALESCE(foi.qty, 0)) as total_qty,
+            SUM(COALESCE(foi.total_wt, foi.qty * foi.weight, 0)) as total_wt,
+            SUM(COALESCE(foi.papad_kg, 0)) as total_papad_kg,
+            SUM(COALESCE(foi.wages, 0)) as total_wages
+          FROM flour_out fo
+          LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(fo.papad_company AS TEXT) OR pcm.name = fo.papad_company)
+          LEFT JOIN flour_out_items foi ON fo.id = foi.flour_out_id
+          ${where}
+          GROUP BY COALESCE(pcm.name, fo.papad_company)
+          ORDER BY total_wt DESC
+        `;
+      } else if (sub_type === 'item-wise') {
+        sql = `
+          SELECT 
+            COALESCE(foi.item_name, 'Papad Item') as item_name,
+            COALESCE(foi.lot_no, '-') as lot_no,
+            COUNT(DISTINCT fo.id) as receipt_count,
+            SUM(COALESCE(foi.qty, 0)) as total_qty,
+            SUM(COALESCE(foi.total_wt, foi.qty * foi.weight, 0)) as total_wt,
+            SUM(COALESCE(foi.papad_kg, 0)) as total_papad_kg,
+            SUM(COALESCE(foi.wages, 0)) as total_wages
+          FROM flour_out fo
+          LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(fo.papad_company AS TEXT) OR pcm.name = fo.papad_company)
+          LEFT JOIN flour_out_items foi ON fo.id = foi.flour_out_id
+          ${where}
+          GROUP BY foi.item_name, foi.lot_no
+          ORDER BY total_wt DESC
+        `;
+      } else {
+        // Register (In Order)
+        sql = `
+          SELECT 
+            fo.id,
+            fo.date,
+            COALESCE(CAST(fo.s_no AS TEXT), CAST(fo.id AS TEXT)) as s_no,
+            COALESCE(pcm.name, fo.papad_company, 'Papad Company') as papad_company,
+            COALESCE(foi.item_name, 'Papad Item') as item_name,
+            COALESCE(foi.lot_no, '-') as lot_no,
+            COALESCE(foi.weight, 0) as weight,
+            COALESCE(foi.qty, 0) as qty,
+            COALESCE(foi.total_wt, foi.qty * foi.weight, 0) as total_wt,
+            COALESCE(foi.papad_kg, 0) as papad_kg,
+            COALESCE(foi.box_papad, 0) as box_papad,
+            COALESCE(foi.wt_papad, 0) as wt_papad,
+            COALESCE(foi.box_empty, 0) as box_empty,
+            COALESCE(foi.wt_empty, 0) as wt_empty,
+            COALESCE(foi.wages_bag, 0) as wages_bag,
+            COALESCE(foi.wages, 0) as wages,
+            fo.remarks
+          FROM flour_out fo
+          LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(fo.papad_company AS TEXT) OR pcm.name = fo.papad_company)
+          LEFT JOIN flour_out_items foi ON fo.id = foi.flour_out_id
+          ${where}
+          ORDER BY fo.date DESC, fo.id DESC, foi.id ASC
+        `;
+      }
+      const result = await db.query(sql, params);
+      rows = result.rows || [];
+    } else if (categoryKey === 'papad-return') {
+      let where = 'WHERE 1=1';
+      const params = [];
+      if (from_date) { where += ' AND pr.date >= ?'; params.push(from_date); }
+      if (to_date) { where += ' AND pr.date <= ?'; params.push(to_date); }
+      if (search) { 
+        where += ' AND (LOWER(COALESCE(pcm.name, pr.papad_company, "")) LIKE LOWER(?) OR LOWER(COALESCE(pr.type, "")) LIKE LOWER(?) OR LOWER(CAST(pr.s_no AS TEXT)) LIKE LOWER(?) OR LOWER(COALESCE(pr.remarks, "")) LIKE LOWER(?))'; 
+        params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`); 
+      }
+
+      let sql = '';
+      if (sub_type === 'date-wise') {
+        sql = `
+          SELECT 
+            pr.date,
+            COUNT(DISTINCT pr.id) as return_count,
+            SUM(COALESCE(pr.papad_less, 0)) as total_papad_less,
+            SUM(COALESCE(pr.payment_less, 0)) as total_payment_less
+          FROM papad_return pr
+          LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(pr.papad_company AS TEXT) OR pcm.name = pr.papad_company)
+          ${where}
+          GROUP BY pr.date
+          ORDER BY pr.date DESC
+        `;
+      } else if (sub_type === 'month-wise') {
+        sql = `
+          SELECT 
+            STRFTIME('%Y-%m', pr.date) as month,
+            COUNT(DISTINCT pr.id) as return_count,
+            SUM(COALESCE(pr.papad_less, 0)) as total_papad_less,
+            SUM(COALESCE(pr.payment_less, 0)) as total_payment_less
+          FROM papad_return pr
+          LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(pr.papad_company AS TEXT) OR pcm.name = pr.papad_company)
+          ${where}
+          GROUP BY STRFTIME('%Y-%m', pr.date)
+          ORDER BY month DESC
+        `;
+      } else if (sub_type === 'company-wise') {
+        sql = `
+          SELECT 
+            COALESCE(pcm.name, pr.papad_company, 'Papad Company') as papad_company,
+            COUNT(DISTINCT pr.id) as return_count,
+            SUM(COALESCE(pr.papad_less, 0)) as total_papad_less,
+            SUM(COALESCE(pr.payment_less, 0)) as total_payment_less
+          FROM papad_return pr
+          LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(pr.papad_company AS TEXT) OR pcm.name = pr.papad_company)
+          ${where}
+          GROUP BY COALESCE(pcm.name, pr.papad_company)
+          ORDER BY total_papad_less DESC
+        `;
+      } else if (sub_type === 'type-wise') {
+        sql = `
+          SELECT 
+            COALESCE(pr.type, 'Standard Return') as type,
+            COUNT(DISTINCT pr.id) as return_count,
+            SUM(COALESCE(pr.papad_less, 0)) as total_papad_less,
+            SUM(COALESCE(pr.payment_less, 0)) as total_payment_less
+          FROM papad_return pr
+          LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(pr.papad_company AS TEXT) OR pcm.name = pr.papad_company)
+          ${where}
+          GROUP BY pr.type
+          ORDER BY total_papad_less DESC
+        `;
+      } else {
+        // Register (In Order)
+        sql = `
+          SELECT 
+            pr.id,
+            pr.date,
+            COALESCE(CAST(pr.s_no AS TEXT), CAST(pr.id AS TEXT)) as s_no,
+            COALESCE(pcm.name, pr.papad_company, 'Papad Company') as papad_company,
+            COALESCE(pr.type, 'General') as type,
+            COALESCE(pr.papad_balance, 0) as papad_balance,
+            COALESCE(pr.payment_balance, 0) as payment_balance,
+            COALESCE(pr.papad_less, 0) as papad_less,
+            COALESCE(pr.payment_less, 0) as payment_less,
+            pr.remarks
+          FROM papad_return pr
+          LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(pr.papad_company AS TEXT) OR pcm.name = pr.papad_company)
+          ${where}
+          ORDER BY pr.date DESC, pr.id DESC
+        `;
+      }
+      const result = await db.query(sql, params);
+      rows = result.rows || [];
     }
 
     res.json({ categoryKey, rows });

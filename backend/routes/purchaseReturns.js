@@ -267,7 +267,7 @@ router.get(['/candidates', '/pending-returns'], async (req, res) => {
           retRes = await db.query(`
             SELECT COALESCE(SUM(pri.qty), 0) as returned_qty 
             FROM purchase_return_items pri
-            WHERE pri.lot_no = ? AND pri.lot_no != ''
+            WHERE UPPER(pri.lot_no) = UPPER(?) AND pri.lot_no != ''
           `, [r.lot_no]);
         } else if (r.purchase_id && r.item_name) {
           retRes = await db.query(`
@@ -287,9 +287,9 @@ router.get(['/candidates', '/pending-returns'], async (req, res) => {
         if (r.lot_no) {
           const prodRes = await db.query(`
             SELECT 
-              (SELECT COALESCE(SUM(gi.qty), 0) FROM grain_input_items gi WHERE gi.lot_no = ?) +
-              (SELECT COALESCE(SUM(foi.qty), 0) FROM flour_out_items foi WHERE foi.lot_no = ?) +
-              (SELECT COALESCE(SUM(pi.qty), 0) FROM packing_items pi WHERE (pi.remarks = 'section:from' OR pi.remarks IS NULL OR pi.remarks != 'section:to') AND pi.lot_no = ?) as consumed_qty
+              (SELECT COALESCE(SUM(gi.qty), 0) FROM grain_input_items gi WHERE UPPER(gi.lot_no) = UPPER(?)) +
+              (SELECT COALESCE(SUM(foi.qty), 0) FROM flour_out_items foi WHERE UPPER(foi.lot_no) = UPPER(?)) +
+              (SELECT COALESCE(SUM(pi.qty), 0) FROM packing_items pi WHERE (pi.remarks = 'section:from' OR pi.remarks IS NULL OR pi.remarks != 'section:to') AND UPPER(pi.lot_no) = UPPER(?)) as consumed_qty
           `, [r.lot_no, r.lot_no, r.lot_no]);
           if (prodRes?.rows?.length) {
             consumedInProduction = parseFloat(prodRes.rows[0]?.consumed_qty) || 0;
@@ -301,8 +301,8 @@ router.get(['/candidates', '/pending-returns'], async (req, res) => {
       const remQty = parseFloat(r.remaining_quantity) || receivedQty;
       const eligibleReturnQty = Math.max(0, receivedQty - previouslyReturned - consumedInProduction);
 
-      const isReturned = (previouslyReturned >= (receivedQty - 0.001) && previouslyReturned > 0) || (r.unloading_status === 'RETURNED' && previouslyReturned > 0);
-      const isProcessed = (consumedInProduction >= (receivedQty - 0.001) && consumedInProduction > 0);
+      const isProcessed = (consumedInProduction > 0);
+      const isReturned = (previouslyReturned >= (receivedQty - 0.001) && previouslyReturned > 0) && !isProcessed;
 
       const isQcRejected = r.qc_status === 'REJECTED' || r.qc_status === 'FAIL' || r.qc_overall_result === 'REJECTED' || r.qc_overall_result === 'FAIL';
       const isQcHold = r.qc_status === 'HOLD' || r.qc_overall_result === 'HOLD' || r.approval_status === 'ON_HOLD';
@@ -310,14 +310,20 @@ router.get(['/candidates', '/pending-returns'], async (req, res) => {
       const isNotApproved = r.approval_status && r.approval_status !== 'APPROVED';
       const isLabPending = !r.qc_id || r.qc_status === 'PENDING' || !r.qc_status;
 
-      if (isReturned) {
+      let statusCategory = 'FACTORY_STOCK';
+      let statusBadge = 'Factory Stock';
+      let defaultReason = 'Factory RM Stock';
+
+      if (isProcessed) {
+        statusCategory = 'PROCESSED';
+        statusBadge = (consumedInProduction >= (receivedQty - 0.001)) 
+          ? 'Processed in Production' 
+          : `Partially Processed (${consumedInProduction} Bags in Production)`;
+        defaultReason = 'Lot processed / consumed in factory production (input item lot)';
+      } else if (isReturned) {
         statusCategory = 'RETURNED';
         statusBadge = 'Returned';
         defaultReason = 'Goods returned to supplier (Debit Note issued)';
-      } else if (isProcessed) {
-        statusCategory = 'PROCESSED';
-        statusBadge = 'Processed in Production';
-        defaultReason = 'Lot processed / consumed in factory production';
       } else if (isQcRejected) {
         statusCategory = 'QC_REJECTED';
         statusBadge = 'QC Rejected';
@@ -931,6 +937,14 @@ router.post('/', async (req, res) => {
 
     // 7. Auto-create Debit Note / Purchase Return voucher in Financial Ledger
     try {
+      const return_inv_no = formData.returnInvNo || formData.return_inv_no || `PR-${purchaseReturnId}`;
+      const s_no = formData.sNo || formData.s_no || purchaseReturnId;
+      const base_amount = parseFloat(totals?.baseAmount ?? totals?.base_amount ?? totals?.totalAmount ?? 0);
+      const tax_amount = parseFloat(totals?.taxAmount ?? totals?.tax_amount ?? totals?.vat ?? 0);
+      const disc_amount = parseFloat(totals?.discAmount ?? totals?.disc_amount ?? 0);
+      const net_amount = parseFloat(totals?.netAmount ?? totals?.net_amount ?? totals?.grandTotal ?? 0);
+      const grand_total = parseFloat(totals?.grandTotal ?? totals?.grand_total ?? totals?.netAmount ?? 0);
+
       await createPurchaseReturnVoucherChain({
         supplier: formData.supplier,
         date: formData.date,
@@ -941,7 +955,7 @@ router.post('/', async (req, res) => {
         taxAmount: tax_amount,
         discAmount: disc_amount,
         netAmount: net_amount,
-        grandTotal: totals.grandTotal ?? totals.grand_total ?? grand_total,
+        grandTotal: grand_total,
         narration: formData.remarks || `Purchase Return #${return_inv_no}`
       });
     } catch (ledgerErr) {
