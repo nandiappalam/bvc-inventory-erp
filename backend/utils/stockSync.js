@@ -25,11 +25,12 @@ const deductFlourOutStock = async (flourOutId, date, items) => {
       if (lotResult.rows.length > 0) {
         const lot = lotResult.rows[0];
         const deduct = Math.min(lot.remaining_quantity, remainingToDeduct);
+        const newRemaining = Math.max(0, (parseFloat(lot.remaining_quantity) || 0) - deduct);
         await db.run(`
           UPDATE stock_lots 
-          SET remaining_quantity = MAX(0, remaining_quantity - ?)
+          SET remaining_quantity = ?
           WHERE id = ?
-        `, [deduct, lot.id]);
+        `, [newRemaining, lot.id]);
         remainingToDeduct -= deduct;
       }
     }
@@ -46,11 +47,12 @@ const deductFlourOutStock = async (flourOutId, date, items) => {
       for (const lot of availableLots.rows) {
         if (remainingToDeduct <= 0) break;
         const deduct = Math.min(lot.remaining_quantity, remainingToDeduct);
+        const newRemaining = Math.max(0, (parseFloat(lot.remaining_quantity) || 0) - deduct);
         await db.run(`
           UPDATE stock_lots 
-          SET remaining_quantity = MAX(0, remaining_quantity - ?)
+          SET remaining_quantity = ?
           WHERE id = ?
-        `, [deduct, lot.id]);
+        `, [newRemaining, lot.id]);
         remainingToDeduct -= deduct;
       }
     }
@@ -152,9 +154,10 @@ const revertPapadInStock = async (papadInId) => {
       if (lotNo && qty > 0) {
         await db.run(`
           UPDATE stock_lots
-          SET quantity = MAX(0, quantity - ?), remaining_quantity = MAX(0, remaining_quantity - ?)
+          SET quantity = CASE WHEN quantity - ? < 0 THEN 0 ELSE quantity - ? END,
+              remaining_quantity = CASE WHEN remaining_quantity - ? < 0 THEN 0 ELSE remaining_quantity - ? END
           WHERE item_name = ? AND lot_no = ?
-        `, [qty, qty, itemName, lotNo]);
+        `, [qty, qty, qty, qty, itemName, lotNo]);
       }
     }
   } catch (err) {

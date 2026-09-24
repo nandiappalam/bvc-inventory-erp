@@ -5715,7 +5715,7 @@ const categoryReportHandler = async (req, res) => {
           LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(fo.papad_company AS TEXT) OR pcm.name = fo.papad_company)
           LEFT JOIN flour_out_items foi ON fo.id = foi.flour_out_id
           ${where}
-          GROUP BY COALESCE(pcm.name, fo.papad_company)
+          GROUP BY fo.papad_company, pcm.name
           ORDER BY total_wt DESC
         `;
       } else if (sub_type === 'item-wise') {
@@ -5822,7 +5822,7 @@ const categoryReportHandler = async (req, res) => {
           LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(foret.papad_company AS TEXT) OR pcm.name = foret.papad_company)
           LEFT JOIN flour_out_return_items fori ON foret.id = fori.flour_out_return_id
           ${where}
-          GROUP BY COALESCE(pcm.name, foret.papad_company)
+          GROUP BY foret.papad_company, pcm.name
           ORDER BY total_wt DESC
         `;
       } else if (sub_type === 'item-wise') {
@@ -5931,7 +5931,7 @@ const categoryReportHandler = async (req, res) => {
           LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(fo.papad_company AS TEXT) OR pcm.name = fo.papad_company)
           LEFT JOIN flour_out_items foi ON fo.id = foi.flour_out_id
           ${where}
-          GROUP BY COALESCE(pcm.name, fo.papad_company)
+          GROUP BY fo.papad_company, pcm.name
           ORDER BY total_wt DESC
         `;
       } else if (sub_type === 'item-wise') {
@@ -6028,7 +6028,7 @@ const categoryReportHandler = async (req, res) => {
           FROM papad_return pr
           LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(pr.papad_company AS TEXT) OR pcm.name = pr.papad_company)
           ${where}
-          GROUP BY COALESCE(pcm.name, pr.papad_company)
+          GROUP BY pr.papad_company, pcm.name
           ORDER BY total_papad_less DESC
         `;
       } else if (sub_type === 'type-wise') {

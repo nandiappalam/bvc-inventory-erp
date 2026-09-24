@@ -218,7 +218,7 @@ router.post('/', async (req, res) => {
 
     // Safely try to add address column to flour_out table if it doesn't exist
     try {
-      await db.run('ALTER TABLE flour_out ADD COLUMN address TEXT');
+      await db.run('ALTER TABLE flour_out ADD COLUMN IF NOT EXISTS address TEXT');
     } catch (err) {
       // Ignore if column already exists
     }

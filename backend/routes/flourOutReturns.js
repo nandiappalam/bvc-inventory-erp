@@ -7,15 +7,15 @@ router.get('/', async (req, res) => {
   try {
     const result = await db.query(`
       SELECT 
-        for.id,
-        for.s_no as s_no,
-        for.s_no as sno,
-        for.date,
-        COALESCE(pcm.name, for.papad_company) as papad_company,
-        COALESCE(pcm.name, for.papad_company) as papadCompany,
-        COALESCE(pcm.name, for.papad_company) as flour_mill,
-        for.tax_type,
-        for.remarks,
+        foret.id,
+        foret.s_no as s_no,
+        foret.s_no as sno,
+        foret.date,
+        COALESCE(pcm.name, foret.papad_company) as papad_company,
+        COALESCE(pcm.name, foret.papad_company) as papadCompany,
+        COALESCE(pcm.name, foret.papad_company) as flour_mill,
+        foret.tax_type,
+        foret.remarks,
         fori.id as item_id,
         fori.item_name,
         fori.lot_no,
@@ -27,10 +27,10 @@ router.get('/', async (req, res) => {
         fori.wages_bag as wages_per_bag,
         fori.wages_bag as wages_per_kg,
         fori.wages
-      FROM flour_out_returns for
-      LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(for.papad_company AS TEXT) OR pcm.name = for.papad_company)
-      LEFT JOIN flour_out_return_items fori ON for.id = fori.flour_out_return_id
-      ORDER BY for.created_at DESC, fori.id ASC
+      FROM flour_out_returns foret
+      LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(foret.papad_company AS TEXT) OR pcm.name = foret.papad_company)
+      LEFT JOIN flour_out_return_items fori ON foret.id = fori.flour_out_return_id
+      ORDER BY foret.created_at DESC, fori.id ASC
     `)
     res.json(result.rows)
   } catch (error) {
