@@ -4080,8 +4080,17 @@ router.get('/vehicle-inspection', async (req, res) => {
 // Category Report Router Endpoint (Stock, Purchase, Purchase Return, Sales, Sales Return, Tax, Production, Pending)
 const categoryReportHandler = async (req, res) => {
   try {
-    const categoryKey = req.params.categoryKey;
-    const { sub_type, from_date, to_date, item, godown, lot_no, item_group, search } = req.query;
+    let categoryKey = String(req.params.categoryKey || '').toLowerCase().trim().replace(/_/g, '-');
+    if (categoryKey.endsWith('s') && !['sales'].includes(categoryKey)) {
+      if (categoryKey === 'flour-outs') categoryKey = 'flour-out';
+      if (categoryKey === 'flour-out-returns') categoryKey = 'flour-out-return';
+      if (categoryKey === 'papad-ins') categoryKey = 'papad-in';
+      if (categoryKey === 'papad-returns') categoryKey = 'papad-return';
+    }
+    const sub_type = req.query.sub_type || req.params.subReport || req.query.subType || req.query.type || 'register';
+    const from_date = req.query.from_date || req.query.fromDate || req.query.startDate;
+    const to_date = req.query.to_date || req.query.toDate || req.query.endDate;
+    const { item, godown, lot_no, item_group, search } = req.query;
 
     let rows = [];
 
@@ -5704,7 +5713,7 @@ const categoryReportHandler = async (req, res) => {
       } else if (sub_type === 'company-wise') {
         sql = `
           SELECT 
-            COALESCE(pcm.name, fo.papad_company, 'Unknown Company') as papad_company,
+            COALESCE(MAX(pcm.name), fo.papad_company, 'Unknown Company') as papad_company,
             COUNT(DISTINCT fo.id) as voucher_count,
             COUNT(foi.id) as item_count,
             SUM(COALESCE(foi.qty, 0)) as total_qty,
@@ -5715,7 +5724,7 @@ const categoryReportHandler = async (req, res) => {
           LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(fo.papad_company AS TEXT) OR pcm.name = fo.papad_company)
           LEFT JOIN flour_out_items foi ON fo.id = foi.flour_out_id
           ${where}
-          GROUP BY fo.papad_company, pcm.name
+          GROUP BY fo.papad_company
           ORDER BY total_wt DESC
         `;
       } else if (sub_type === 'item-wise') {
@@ -5811,7 +5820,7 @@ const categoryReportHandler = async (req, res) => {
       } else if (sub_type === 'company-wise') {
         sql = `
           SELECT 
-            COALESCE(pcm.name, foret.papad_company, 'Unknown Company') as papad_company,
+            COALESCE(MAX(pcm.name), foret.papad_company, 'Unknown Company') as papad_company,
             COUNT(DISTINCT foret.id) as return_count,
             COUNT(fori.id) as item_count,
             SUM(COALESCE(fori.qty, 0)) as total_qty,
@@ -5822,7 +5831,7 @@ const categoryReportHandler = async (req, res) => {
           LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(foret.papad_company AS TEXT) OR pcm.name = foret.papad_company)
           LEFT JOIN flour_out_return_items fori ON foret.id = fori.flour_out_return_id
           ${where}
-          GROUP BY foret.papad_company, pcm.name
+          GROUP BY foret.papad_company
           ORDER BY total_wt DESC
         `;
       } else if (sub_type === 'item-wise') {
@@ -5920,7 +5929,7 @@ const categoryReportHandler = async (req, res) => {
       } else if (sub_type === 'company-wise') {
         sql = `
           SELECT 
-            COALESCE(pcm.name, fo.papad_company, 'Papad Company') as papad_company,
+            COALESCE(MAX(pcm.name), fo.papad_company, 'Papad Company') as papad_company,
             COUNT(DISTINCT fo.id) as receipt_count,
             COUNT(foi.id) as item_count,
             SUM(COALESCE(foi.qty, 0)) as total_qty,
@@ -5931,7 +5940,7 @@ const categoryReportHandler = async (req, res) => {
           LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(fo.papad_company AS TEXT) OR pcm.name = fo.papad_company)
           LEFT JOIN flour_out_items foi ON fo.id = foi.flour_out_id
           ${where}
-          GROUP BY fo.papad_company, pcm.name
+          GROUP BY fo.papad_company
           ORDER BY total_wt DESC
         `;
       } else if (sub_type === 'item-wise') {
@@ -6021,14 +6030,14 @@ const categoryReportHandler = async (req, res) => {
       } else if (sub_type === 'company-wise') {
         sql = `
           SELECT 
-            COALESCE(pcm.name, pr.papad_company, 'Papad Company') as papad_company,
+            COALESCE(MAX(pcm.name), pr.papad_company, 'Papad Company') as papad_company,
             COUNT(DISTINCT pr.id) as return_count,
             SUM(COALESCE(pr.papad_less, 0)) as total_papad_less,
             SUM(COALESCE(pr.payment_less, 0)) as total_payment_less
           FROM papad_return pr
           LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(pr.papad_company AS TEXT) OR pcm.name = pr.papad_company)
           ${where}
-          GROUP BY pr.papad_company, pcm.name
+          GROUP BY pr.papad_company
           ORDER BY total_papad_less DESC
         `;
       } else if (sub_type === 'type-wise') {
@@ -6076,6 +6085,8 @@ const categoryReportHandler = async (req, res) => {
 };
 
 router.get('/category/:categoryKey', categoryReportHandler);
+router.get('/category/:categoryKey/:subReport', categoryReportHandler);
 router.get('/:categoryKey', categoryReportHandler);
+router.get('/:categoryKey/:subReport', categoryReportHandler);
 
 module.exports = router

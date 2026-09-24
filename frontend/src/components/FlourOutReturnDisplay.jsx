@@ -2,6 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { EntryDisplay } from './entry';
 import { printHtml } from '../utils/printHelper';
+import api from '../utils/api';
 
 // Column definitions for Flour Out Return Display
 const columns = [
@@ -53,13 +54,13 @@ const FlourOutReturnDisplay = () => {
 
     const doDelete = async () => {
       try {
-        const res = await fetch(`/api/flour-out-return/${id}`, { method: 'DELETE' });
-        if (res.ok) {
+        const res = await api(`/flour-out-return/${id}`, { method: 'DELETE' });
+        if (res && res.success !== false) {
           if (showAlert) showAlert('Success', 'Record deleted successfully', refresh);
           else { alert('Record deleted successfully'); if (refresh) refresh(); }
         } else {
-          if (showAlert) showAlert('Error', 'Delete failed');
-          else alert('Delete failed');
+          if (showAlert) showAlert('Error', res?.message || 'Delete failed');
+          else alert(res?.message || 'Delete failed');
         }
       } catch (err) {
         console.error(err);
@@ -80,9 +81,10 @@ const FlourOutReturnDisplay = () => {
   return (
     <EntryDisplay
       title="Flour Out Return Display"
-      apiEndpoint="/api/flour-out-return"
+      apiEndpoint="/flour-out-return"
       columns={columns}
       onEdit={handleEdit}
+      onDelete={handleDelete}
       onPrint={handlePrint}
       addNewLink="/entry/flour-out-return-create"
     />

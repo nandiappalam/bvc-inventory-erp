@@ -186,6 +186,7 @@ export async function getNextSNo(endpoint) {
 }
 
 // Attach properties to api function for backward compatibility and to prevent runtime errors
+api.api = api;
 api.get = (endpoint, options = {}) => api(endpoint, { ...options, method: "GET" });
 api.post = (endpoint, body, options = {}) => api(endpoint, { ...options, method: "POST", body });
 api.put = (endpoint, body, options = {}) => api(endpoint, { ...options, method: "PUT", body });
@@ -194,6 +195,10 @@ api.getMasters = getMasters;
 api.getNextLot = getNextLot;
 api.getNextSNo = getNextSNo;
 api.deleteMaster = (table, id) => api(`/masters/${table}/${id}`, { method: 'DELETE' });
+api.createFlourOut = (formData, items) => api('/flour-out', { method: 'POST', body: { formData, items } });
+api.updateFlourOut = (id, formData, items) => api(`/flour-out/${id}`, { method: 'PUT', body: { formData, items } });
+api.deleteFlourOut = (id) => api(`/flour-out/${id}`, { method: 'DELETE' });
+api.createFlourOutReturn = (payload) => api('/flour-out-return', { method: 'POST', body: payload });
 
 // Export for backward compatibility
 export default api;

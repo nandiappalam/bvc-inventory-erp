@@ -38,9 +38,8 @@ const FlourOutReturnCreation = () => {
     if (editId) {
       const fetchRecord = async () => {
         try {
-          const res = await fetch(`/api/flour-out-return/${editId}`);
-          if (res.ok) {
-            const data = await res.json();
+          const data = await api(`/flour-out-return/${editId}`);
+          if (data) {
             setFormData({
               sno: data.s_no || data.sno || editId,
               date: data.date ? data.date.substring(0, 10) : new Date().toISOString().slice(0, 10),
@@ -165,12 +164,10 @@ const FlourOutReturnCreation = () => {
 
       let result;
       if (editId) {
-        const res = await fetch(`/api/flour-out-return/${editId}`, {
+        result = await api(`/flour-out-return/${editId}`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(data)
+          body: data
         });
-        result = await res.json();
       } else {
         result = await api.createFlourOutReturn(data);
       }

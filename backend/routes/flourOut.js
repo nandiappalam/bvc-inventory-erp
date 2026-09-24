@@ -189,13 +189,15 @@ router.post('/', async (req, res) => {
 
     const activeItems = (items || []).filter(item => item.item_name || item.itemName);
 
+    const rawComp = formData.papad_company || formData.papadCompany || formData.company || '';
+
     // Validation
-    if (!formData.date || !formData.papad_company || activeItems.length === 0) {
-      return res.status(400).json({ message: 'Date, papad company, and at least one item are required' })
+    if (!formData.date || !rawComp || activeItems.length === 0) {
+      return res.status(400).json({ success: false, message: 'Date, papad company, and at least one item are required' })
     }
 
     if (activeItems.some(item => !(item.item_name || item.itemName) || parseFloat(item.qty) <= 0)) {
-      return res.status(400).json({ message: 'All items must have a name and positive quantity' })
+      return res.status(400).json({ success: false, message: 'All items must have a name and positive quantity' })
     }
 
     // Calculate totals
@@ -204,16 +206,16 @@ router.post('/', async (req, res) => {
     const totalWages = activeItems.reduce((sum, item) => sum + (parseFloat(item.wages) || 0), 0)
 
     // Check if papad_company exists in papad_company_master, if not, create it
-    let companyName = formData.papad_company;
-    const isId = /^\d+$/.test(formData.papad_company);
+    let companyName = rawComp;
+    const isId = /^\d+$/.test(String(rawComp));
     const existingCompany = isId
-      ? await db.query('SELECT id, name FROM papad_company_master WHERE id = ?', [formData.papad_company])
-      : await db.query('SELECT id, name FROM papad_company_master WHERE name = ?', [formData.papad_company]);
+      ? await db.query('SELECT id, name FROM papad_company_master WHERE id = ?', [rawComp])
+      : await db.query('SELECT id, name FROM papad_company_master WHERE name = ?', [rawComp]);
 
     if (existingCompany.rows.length > 0) {
       companyName = existingCompany.rows[0].name;
     } else if (!isId) {
-      await db.run('INSERT INTO papad_company_master (name, status) VALUES (?, ?)', [formData.papad_company, 'Active']);
+      await db.run('INSERT INTO papad_company_master (name, status) VALUES (?, ?)', [rawComp, 'Active']);
     }
 
     // Safely try to add address column to flour_out table if it doesn't exist
@@ -260,6 +262,7 @@ router.post('/', async (req, res) => {
       await deductFlourOutStock(flourOutId, formData.date, activeItems);
 
       res.status(201).json({
+        success: true,
         message: 'Flour out record saved successfully!',
         id: flourOutId
       })
@@ -270,7 +273,7 @@ router.post('/', async (req, res) => {
     }
   } catch (error) {
     console.error('Error saving flour out:', error)
-    res.status(500).json({ message: 'Error saving flour out', error: error.message })
+    res.status(500).json({ success: false, message: 'Error saving flour out', error: error.message })
   }
 })
 
@@ -291,12 +294,13 @@ router.put('/:id', async (req, res) => {
     const totalWages = activeItems.reduce((sum, item) => sum + (parseFloat(item.wages) || 0), 0)
 
     const sNoVal = formData.sNo || formData.s_no || '';
+    const compVal = formData.papad_company || formData.papadCompany || formData.company || '';
 
     // Update flour out
     await db.run(`
       UPDATE flour_out SET s_no = ?, date = ?, papad_company = ?, remarks = ?, total_qty = ?, total_weight = ?, total_wages = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
-    `, [sNoVal, formData.date, formData.papad_company, formData.remarks, totalQty, totalWeight, totalWages, flourOutId])
+    `, [sNoVal, formData.date, compVal, formData.remarks, totalQty, totalWeight, totalWages, flourOutId])
 
     // Delete existing items
     await db.run('DELETE FROM flour_out_items WHERE flour_out_id = ?', [flourOutId])

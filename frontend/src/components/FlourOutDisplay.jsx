@@ -130,9 +130,10 @@ const FlourOutDisplay = () => {
   return (
     <EntryDisplay
       title="Flour Out Display"
-      apiEndpoint="/api/flour-out"
+      apiEndpoint="/flour-out"
       columns={columns}
       onEdit={handleEdit}
+      onDelete={handleDelete}
       onPrint={handlePrint}
       addNewLink="/entry/flour-out-create"
     />

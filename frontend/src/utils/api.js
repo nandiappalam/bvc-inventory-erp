@@ -47,9 +47,15 @@ export async function api(endpoint, options = {}) {
     }
     const selComp = localStorage.getItem('erp_selected_company') || localStorage.getItem('erp_company');
     if (selComp) {
-      const parsedComp = JSON.parse(selComp);
-      if (parsedComp && parsedComp.id) {
-        authHeaders['X-Company-Id'] = String(parsedComp.id);
+      try {
+        const parsedComp = JSON.parse(selComp);
+        if (parsedComp && typeof parsedComp === 'object' && parsedComp.id) {
+          authHeaders['X-Company-Id'] = String(parsedComp.id);
+        } else if (parsedComp) {
+          authHeaders['X-Company-Id'] = String(parsedComp);
+        }
+      } catch (e) {
+        authHeaders['X-Company-Id'] = String(selComp);
       }
     }
     const storedUser = localStorage.getItem('erp_user');

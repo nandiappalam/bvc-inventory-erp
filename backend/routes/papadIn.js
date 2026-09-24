@@ -123,33 +123,56 @@ router.get('/:id', async (req, res) => {
 // POST create new papad in record
 router.post('/', async (req, res) => {
   try {
-    const { formData, items, totals } = req.body
+    const body = req.body || {};
+    const formData = body.formData || body;
+    const items = body.items || [];
+    const totals = body.totals || {};
+
+    const sNo = formData.sNo || formData.s_no || formData.sno || '1';
+    const date = formData.date || new Date().toISOString().split('T')[0];
+    const papadCompany = formData.papadCompany || formData.papad_company || formData.company || '';
+    const remarks = formData.remarks || '';
+
+    const totalQty = totals.totalQty !== undefined ? parseFloat(totals.totalQty) : items.reduce((acc, it) => acc + (parseFloat(it.qty || it.box_papad) || 0), 0);
+    const totalWeight = totals.totalWeight !== undefined ? parseFloat(totals.totalWeight) : items.reduce((acc, it) => acc + (parseFloat(it.totalWt || it.tot_wt || it.wt_papad || it.weight) || 0), 0);
+    const totalWages = totals.totalWages !== undefined ? parseFloat(totals.totalWages) : items.reduce((acc, it) => acc + (parseFloat(it.wages) || 0), 0);
+
+    // Check if papad company exists in master, if not insert
+    if (papadCompany) {
+      try {
+        const existingComp = await db.query('SELECT id FROM papad_company_master WHERE name = ? OR CAST(id AS TEXT) = ?', [papadCompany, String(papadCompany)]);
+        if (existingComp.rows.length === 0) {
+          await db.run('INSERT INTO papad_company_master (name, status) VALUES (?, ?)', [papadCompany, 'Active']);
+        }
+      } catch (e) {}
+    }
 
     // Insert papad in (stored in flour_out table)
     const result = await db.run(`
       INSERT INTO flour_out (s_no, date, papad_company, remarks, total_qty, total_weight, total_wages)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `, [
-      formData.sNo, 
-      formData.date, 
-      formData.papadCompany || formData.company, 
-      formData.remarks, 
-      totals.totalQty, 
-      totals.totalWeight, 
-      totals.totalWages
-    ])
+      sNo, 
+      date, 
+      papadCompany, 
+      remarks, 
+      totalQty || 0, 
+      totalWeight || 0, 
+      totalWages || 0
+    ]);
 
-    const flourOutId = result.lastID
+    const flourOutId = result.lastID;
 
     // Insert items
     for (const item of items) {
-      // Check if item exists in item_master, if not, create it
       const itemName = item.itemName || item.item_name || '';
       if (itemName) {
-        const existingItem = await db.query('SELECT id FROM item_master WHERE item_name = ?', [itemName])
-        if (existingItem.rows.length === 0) {
-          await db.run('INSERT INTO item_master (item_name, status) VALUES (?, ?)', [itemName, 'Active'])
-        }
+        try {
+          const existingItem = await db.query('SELECT id FROM item_master WHERE item_name = ?', [itemName]);
+          if (existingItem.rows.length === 0) {
+            await db.run('INSERT INTO item_master (item_name, status) VALUES (?, ?)', [itemName, 'Active']);
+          }
+        } catch (e) {}
       }
 
       await db.run(`
@@ -160,8 +183,8 @@ router.post('/', async (req, res) => {
         itemName, 
         item.lotNo || item.lot_no || '', 
         parseFloat(item.weight) || 0, 
-        parseFloat(item.qty) || 0, 
-        parseFloat(item.totalWt || item.total_wt) || 0, 
+        parseFloat(item.qty || item.box_papad) || 0, 
+        parseFloat(item.totalWt || item.tot_wt || item.total_wt) || 0, 
         parseFloat(item.papadKg || item.kg) || 0, 
         parseFloat(item.wagesBag || item.wages_bag) || 0, 
         parseFloat(item.wages) || 0,
@@ -171,11 +194,11 @@ router.post('/', async (req, res) => {
         parseFloat(item.wt_empty) || 0,
         typeof item.papad_details === 'string' ? item.papad_details : JSON.stringify(item.papad_details || []),
         typeof item.empty_details === 'string' ? item.empty_details : JSON.stringify(item.empty_details || [])
-      ])
+      ]);
     }
 
     // Add stock movement and stock lot for Papad In
-    await addPapadInStock(flourOutId, formData.date, items)
+    await addPapadInStock(flourOutId, date, items);
 
     try {
       await rebuildStockLedger();
@@ -187,18 +210,30 @@ router.post('/', async (req, res) => {
       success: true,
       message: 'Papad In record saved successfully!',
       id: flourOutId
-    })
+    });
   } catch (error) {
-    console.error('Error saving papad in record:', error)
-    res.status(500).json({ success: false, message: 'Error saving papad in record', error: error.message })
+    console.error('Error saving papad in record:', error);
+    res.status(500).json({ success: false, message: 'Error saving papad in record', error: error.message });
   }
-})
+});
 
 // PUT update papad in record
 router.put('/:id', async (req, res) => {
   try {
-    const { formData, items, totals } = req.body
-    const flourOutId = req.params.id
+    const body = req.body || {};
+    const formData = body.formData || body;
+    const items = body.items || [];
+    const totals = body.totals || {};
+    const flourOutId = req.params.id;
+
+    const sNo = formData.sNo || formData.s_no || formData.sno || '1';
+    const date = formData.date || new Date().toISOString().split('T')[0];
+    const papadCompany = formData.papadCompany || formData.papad_company || formData.company || '';
+    const remarks = formData.remarks || '';
+
+    const totalQty = totals.totalQty !== undefined ? parseFloat(totals.totalQty) : items.reduce((acc, it) => acc + (parseFloat(it.qty || it.box_papad) || 0), 0);
+    const totalWeight = totals.totalWeight !== undefined ? parseFloat(totals.totalWeight) : items.reduce((acc, it) => acc + (parseFloat(it.totalWt || it.tot_wt || it.wt_papad || it.weight) || 0), 0);
+    const totalWages = totals.totalWages !== undefined ? parseFloat(totals.totalWages) : items.reduce((acc, it) => acc + (parseFloat(it.wages) || 0), 0);
 
     // Update flour_out
     await db.run(`
@@ -206,18 +241,18 @@ router.put('/:id', async (req, res) => {
       total_qty = ?, total_weight = ?, total_wages = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `, [
-      formData.sNo, 
-      formData.date, 
-      formData.papadCompany || formData.company, 
-      formData.remarks, 
-      totals.totalQty, 
-      totals.totalWeight, 
-      totals.totalWages, 
+      sNo, 
+      date, 
+      papadCompany, 
+      remarks, 
+      totalQty || 0, 
+      totalWeight || 0, 
+      totalWages || 0, 
       flourOutId
-    ])
+    ]);
 
     // Revert old stock
-    await revertPapadInStock(flourOutId)
+    await revertPapadInStock(flourOutId);
 
     // Delete existing items
     await db.run('DELETE FROM flour_out_items WHERE flour_out_id = ?', [flourOutId])
@@ -255,7 +290,7 @@ router.put('/:id', async (req, res) => {
     }
 
     // Add updated stock
-    await addPapadInStock(flourOutId, formData.date, items)
+    await addPapadInStock(flourOutId, date, items)
 
     try {
       await rebuildStockLedger();
