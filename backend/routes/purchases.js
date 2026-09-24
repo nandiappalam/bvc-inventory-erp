@@ -59,28 +59,47 @@ router.get('/purchase-list', async (req, res) => {
       p.id,
       COALESCE(p.s_no, p.id) AS s_no,
       p.inv_no AS invoice_no,
+      p.inv_no,
       COALESCE(p.source_order_no, p.po_no, '') AS po_no,
       p.date AS invoice_date,
-      s.name AS supplier_name,
+      p.date,
+      COALESCE(s.name, s.print_name, p.supplier) AS supplier_name,
+      COALESCE(s.print_name, s.name, p.supplier) AS supplier_print_name,
       COALESCE(s.address1, p.address, '') AS address,
+      COALESCE(s.gst_number, '') AS supplier_gstin,
+      COALESCE(s.phone_off, s.mobile1, '') AS supplier_phone,
       COALESCE(im.item_name, pi.item_name, '') AS item_name,
+      pi.item_id,
       pi.lot_no,
-      pi.per_unit_weight AS weight,
-      pi.total_weight,
+      COALESCE(pi.qty, 1) AS qty,
+      COALESCE(pi.per_unit_weight, pi.weight, 0) AS weight,
+      COALESCE(pi.per_unit_weight, pi.weight, 0) AS per_unit_weight,
+      COALESCE(pi.total_weight, (pi.qty * COALESCE(pi.per_unit_weight, pi.weight, 1)), 0) AS total_weight,
       pi.rate,
-      (pi.qty * pi.rate) AS base_amount,
+      (COALESCE(pi.qty, 1) * COALESCE(pi.rate, 0)) AS base_amount,
       pi.disc_percent,
       pi.disc_amount,
       pi.tax_percent,
       pi.tax_amount,
       pi.amount,
       0 AS total_deduction,
-      COALESCE(pi.amount, 0) AS grand_total,
+      COALESCE(pi.amount, (COALESCE(pi.qty, 1) * COALESCE(pi.rate, 0)), 0) AS grand_total,
+      p.payment_mode,
+      p.tax_type,
+      p.vehicle_no,
+      p.driver_name,
+      p.driver_phone,
+      p.transport,
+      p.lr_no,
+      p.lr_date,
+      p.remarks,
+      COALESCE(gm.godown_name, p.godown, 'Main Godown') AS godown_name,
       COALESCE(qi.id, (SELECT id FROM qc_inspections WHERE rm_lot_no = pi.lot_no OR CAST(purchase_id AS TEXT) = CAST(p.id AS TEXT) LIMIT 1)) AS qc_id
     FROM purchases p
     LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(p.supplier AS TEXT) OR s.name = CAST(p.supplier AS TEXT) OR s.print_name = CAST(p.supplier AS TEXT))
     LEFT JOIN purchase_items pi ON CAST(pi.purchase_id AS TEXT) = CAST(p.id AS TEXT)
     LEFT JOIN item_master im ON (CAST(im.id AS TEXT) = CAST(pi.item_id AS TEXT) OR im.item_name = CAST(pi.item_name AS TEXT))
+    LEFT JOIN godown_master gm ON (CAST(gm.id AS TEXT) = CAST(p.godown AS TEXT) OR gm.godown_name = CAST(p.godown AS TEXT))
     LEFT JOIN qc_inspections qi ON (qi.rm_lot_no = pi.lot_no OR CAST(qi.purchase_id AS TEXT) = CAST(p.id AS TEXT) OR CAST(qi.purchase_id AS TEXT) = ('PUR-' || CAST(p.id AS TEXT)))
     ORDER BY p.id DESC`;
  

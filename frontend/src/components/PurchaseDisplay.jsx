@@ -4,6 +4,7 @@ import { EntryDisplay } from './entry';
 import { deletePurchase } from '../utils/api';
 import { printHtml } from '../utils/printHelper';
 import { generateVehicleInPassHtml } from '../utils/vehiclePassPrint';
+import { generatePurchasePrintHtml } from '../utils/purchasePrintHelper';
 import { useAuth } from '../context/AuthContext';
 import './PurchaseDisplay.css';
 
@@ -60,27 +61,26 @@ const handleDelete = async (id, onSuccess) => {
   }
 };
 
-// Handle standard Purchase Invoice print
-const handlePrint = (row) => {
-  const html = `
-    <div style="font-family: Arial, sans-serif; padding: 20px;">
-      <h2 style="color: #1f4fb2; border-bottom: 2px solid #1f4fb2; padding-bottom: 10px;">Purchase Receipt</h2>
-      <table style="border-collapse: collapse; width: 100%; margin-top: 15px;">
-        <tr><th style="border: 1px solid #ccc; padding: 10px; text-align: left; background: #1f4fb2; color: white; font-weight: bold; width: 150px;">S.No</th><td style="border: 1px solid #ccc; padding: 10px;">${row.s_no || row.id || ''}</td></tr>
-        <tr><th style="border: 1px solid #ccc; padding: 10px; text-align: left; background: #1f4fb2; color: white; font-weight: bold;">Invoice No</th><td style="border: 1px solid #ccc; padding: 10px;">${row.inv_no || row.invoice_no || ''}</td></tr>
-        <tr><th style="border: 1px solid #ccc; padding: 10px; text-align: left; background: #1f4fb2; color: white; font-weight: bold;">Date</th><td style="border: 1px solid #ccc; padding: 10px;">${row.date || row.invoice_date || ''}</td></tr>
-        <tr><th style="border: 1px solid #ccc; padding: 10px; text-align: left; background: #1f4fb2; color: white; font-weight: bold;">Supplier</th><td style="border: 1px solid #ccc; padding: 10px;">${row.supplier_name || row.supplier || ''}</td></tr>
-        <tr><th style="border: 1px solid #ccc; padding: 10px; text-align: left; background: #1f4fb2; color: white; font-weight: bold;">Item</th><td style="border: 1px solid #ccc; padding: 10px;">${row.item_name || row.item || ''}</td></tr>
-        <tr><th style="border: 1px solid #ccc; padding: 10px; text-align: left; background: #1f4fb2; color: white; font-weight: bold;">Lot No</th><td style="border: 1px solid #ccc; padding: 10px;">${row.lot_no || ''}</td></tr>
-        <tr><th style="border: 1px solid #ccc; padding: 10px; text-align: left; background: #1f4fb2; color: white; font-weight: bold;">Qty / Wt</th><td style="border: 1px solid #ccc; padding: 10px;">${row.weight || row.qty || ''}</td></tr>
-        <tr><th style="border: 1px solid #ccc; padding: 10px; text-align: left; background: #1f4fb2; color: white; font-weight: bold;">Rate</th><td style="border: 1px solid #ccc; padding: 10px;">${row.rate || ''}</td></tr>
-        <tr><th style="border: 1px solid #ccc; padding: 10px; text-align: left; background: #1f4fb2; color: white; font-weight: bold;">Amount</th><td style="border: 1px solid #ccc; padding: 10px;">${row.amount || ''}</td></tr>
-        <tr><th style="border: 1px solid #ccc; padding: 10px; text-align: left; background: #1f4fb2; color: white; font-weight: bold;">Tax</th><td style="border: 1px solid #ccc; padding: 10px;">${row.tax_amount || '0'}</td></tr>
-        <tr><th style="border: 1px solid #ccc; padding: 10px; text-align: left; background: #1f4fb2; color: white; font-weight: bold;">Total</th><td style="border: 1px solid #ccc; padding: 10px;">${row.grand_total || row.amount || ''}</td></tr>
-      </table>
-    </div>
-  `;
-  printHtml(html, `Purchase - ${row.inv_no || row.invoice_no || 'Receipt'}`);
+// Handle standard Purchase Invoice print with clear itemized table and voucher details
+const handlePrint = async (row, selectedCompany) => {
+  let fullData = { ...row };
+  
+  if (row.id) {
+    try {
+      const resp = await fetch(`/api/purchases/${row.id}`);
+      if (resp.ok) {
+        const fetched = await resp.json();
+        if (fetched) {
+          fullData = { ...row, ...fetched };
+        }
+      }
+    } catch (e) {
+      console.warn('Could not fetch full purchase details for print, using row data:', e);
+    }
+  }
+
+  const html = generatePurchasePrintHtml(fullData, selectedCompany);
+  printHtml(html, `Purchase_Invoice_${fullData.inv_no || fullData.invoice_no || fullData.s_no || 'Receipt'}`);
 };
 
 // Handle In-Pass Print for Vehicle Gate Entry with full Vehicle / Driver / Lot details
@@ -123,7 +123,7 @@ const PurchaseDisplay = () => {
         <button 
           className="action-btn print-btn" 
           style={{ backgroundColor: '#0288d1', color: '#ffffff', border: 'none', padding: '5px 11px', borderRadius: '4px', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}
-          onClick={() => handlePrint(row)}
+          onClick={() => handlePrint(row, selectedCompany)}
         >
           Print
         </button>
