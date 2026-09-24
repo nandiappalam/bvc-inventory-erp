@@ -9,6 +9,30 @@ const columns = [
   { key: 'sno', title: 'S.No', render: (_val, row, idx) => idx !== undefined ? idx + 1 : (row.s_no || '') },
   { key: 'date', title: 'Date' },
   { key: 'return_inv_no', title: 'Return Inv No' },
+  {
+    key: 'source',
+    title: 'Source / Method',
+    render: (_val, row) => {
+      const isQc = row.source === 'QC_REJECTION' || row.source === 'IQR_REJECTION';
+      return (
+        <span style={{
+          padding: '2px 8px',
+          borderRadius: '4px',
+          fontSize: '11px',
+          fontWeight: 'bold',
+          color: isQc ? '#b45309' : '#1d4ed8',
+          backgroundColor: isQc ? '#fef3c7' : '#dbeafe'
+        }}>
+          {isQc ? 'QC / IQR' : 'Manual Invoice'}
+        </span>
+      );
+    }
+  },
+  { 
+    key: 'purchase_inv_no', 
+    title: 'Orig. Inv #', 
+    render: (_val, row) => row.purchase_inv_no || (row.purchase_id ? `#${row.purchase_id}` : '-') 
+  },
   { 
     key: 'supplier', 
     title: 'Supplier', 
@@ -24,7 +48,6 @@ const columns = [
     title: 'Weight', 
     render: (_val, row) => row.item_weights || row.weight || '-' 
   },
-  { key: 'type', title: 'Type' },
   { key: 'total_qty', title: 'Total Qty' },
   { key: 'total_weight', title: 'Total Weight' },
   { key: 'total_amount', title: 'Total Amount' },

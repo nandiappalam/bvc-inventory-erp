@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, useParams, useLocation } from 'react-router-dom';
 import { EntryTopFrame, EntryItemsTable, EntryTotalsRow, EntryActions } from '../../../components/entry';
 import purchaseOrderService from '../services/purchaseOrderService';
 import api from '../../../utils/api';
@@ -7,8 +7,10 @@ import { saveModuleDraft, loadModuleDraft, clearModuleDraft } from '../../../uti
 
 const PurchaseOrderCreate = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { id: paramId } = useParams();
   const [searchParams] = useSearchParams();
-  const editingId = searchParams.get('id');
+  const editingId = paramId || searchParams.get('id') || searchParams.get('editId') || location.state?.id || location.state?.editId;
 
   const [formData, setFormData] = useState({
     sNo: '',
@@ -299,30 +301,37 @@ const PurchaseOrderCreate = () => {
         const linkedPrId = searchParams.get('pr_id') || searchParams.get('purchase_request_id');
 
         if (editingId) {
-          const existing = await purchaseOrderService.get(editingId);
+          let existing = await purchaseOrderService.get(editingId).catch(() => null);
+          if (!existing) {
+            const rawRes = await api(`/purchase-orders/${editingId}`).catch(() => null);
+            const rawData = rawRes?.data || rawRes;
+            if (rawData && (rawData.id || rawData.s_no || rawData.sNo || rawData.inv_no || rawData.invNo)) {
+              existing = rawData;
+            }
+          }
           if (existing) {
             const fmtDate = (d) => d ? String(d).split('T')[0].split(' ')[0] : '';
             const poDateVal = fmtDate(existing.poDate || existing.po_date || existing.date);
-            const dateVal = fmtDate(existing.date);
+            const dateVal = fmtDate(existing.date || existing.poDate || existing.po_date);
             const invDateVal = fmtDate(existing.invDate || existing.inv_date);
 
             const suppId = String(existing.supplierId || existing.supplier_id || existing.supplier || '');
             const suppName = existing.supplierName || existing.supplier_name || existing.supplier || '';
             const invNoVal = existing.invNo || existing.inv_no || existing.orderNo || '';
-            const sNoVal = String(existing.sNo || existing.s_no || '');
+            const sNoVal = String(existing.sNo || existing.s_no || editingId);
 
             setFormData({
               sNo: sNoVal,
               s_no: sNoVal,
-              date: dateVal,
+              date: dateVal || new Date().toISOString().split('T')[0],
               payType: existing.payType || existing.pay_type || existing.paymentTerms || 'Cash',
-              type: existing.type || 'Urad',
-              invNo: invNoVal,
-              inv_no: invNoVal,
+              type: existing.type || existing.purchaseType || 'Urad',
+              invNo: invNoVal || `PO-${sNoVal}`,
+              inv_no: invNoVal || `PO-${sNoVal}`,
               invDate: invDateVal,
               inv_date: invDateVal,
               taxType: existing.taxType || existing.tax_type || 'Exclusive',
-              poDate: poDateVal || dateVal,
+              poDate: poDateVal || dateVal || new Date().toISOString().split('T')[0],
               terms: existing.terms || '',
               fob: existing.fob || '',
               shipVia: existing.shipVia || existing.ship_via || '',
@@ -334,17 +343,18 @@ const PurchaseOrderCreate = () => {
               address: existing.address || '',
               sender: existing.sender || '',
               remarks: existing.remarks || existing.internalRemarks || '',
-              purchase_request_id: existing.purchase_request_id || existing.pr_id || '',
-              pr_no: existing.pr_no || '',
+              purchase_request_id: existing.purchase_request_id || existing.purchaseRequestId || existing.pr_id || '',
+              pr_no: existing.pr_no || existing.prNo || '',
               taxPercent: String(existing.taxPercent !== undefined ? existing.taxPercent : (existing.tax_percent !== undefined ? existing.tax_percent : '18')),
-              amount: String(existing.amount || '0.00'),
-              billAmt: String(existing.billAmt || existing.bill_amt || '0.00'),
-              taxAmt: String(existing.taxAmt || existing.tax_amt || '0.00'),
-              totAmt: String(existing.totAmt || existing.total_amt || '0.00')
+              amount: String(existing.amount !== undefined ? existing.amount : '0.00'),
+              billAmt: String(existing.billAmt !== undefined ? existing.billAmt : (existing.bill_amt !== undefined ? existing.bill_amt : '0.00')),
+              taxAmt: String(existing.taxAmt !== undefined ? existing.taxAmt : (existing.tax_amt !== undefined ? existing.tax_amt : '0.00')),
+              totAmt: String(existing.totAmt !== undefined ? existing.totAmt : (existing.total_amt !== undefined ? existing.total_amt : '0.00'))
             });
 
-            if (existing.items && existing.items.length > 0) {
-              setItems(existing.items.map((it, idx) => {
+            const rawItems = existing.items || existing.purchase_order_items || [];
+            if (rawItems && rawItems.length > 0) {
+              setItems(rawItems.map((it, idx) => {
                 const name = it.itemName || it.item_name || '';
                 const itemId = String(it.item_id || it.itemId || '');
                 const qtyVal = String(it.qty !== undefined ? it.qty : '');
@@ -367,14 +377,15 @@ const PurchaseOrderCreate = () => {
                   rate: rateVal,
                   disc_percent: discVal,
                   tax_percent: taxVal,
-                  ed_percent: String(it.ed_percent || ''),
-                  amount: String(it.amount || '0.00')
+                  ed_percent: String(it.ed_percent !== undefined ? it.ed_percent : (it.edPercent || '')),
+                  amount: String(it.amount !== undefined ? it.amount : '0.00')
                 };
               }));
             }
 
-            if (existing.deductions && existing.deductions.length > 0) {
-              setSelectedDeductions(existing.deductions.map(d => ({
+            const rawDeductions = existing.deductions || existing.purchase_order_deductions || [];
+            if (rawDeductions && rawDeductions.length > 0) {
+              setSelectedDeductions(rawDeductions.map(d => ({
                 id: d.id,
                 deduction: d.deduction || d.deduction_name || '',
                 deduction_name: d.deduction_name || d.deduction || '',
@@ -457,8 +468,21 @@ const PurchaseOrderCreate = () => {
     }
   }, [formData, items, selectedDeductions, editingId]);
 
-  const handleFormChange = (e) => {
-    const { name, value } = e.target;
+  const handleFormChange = (e, val) => {
+    let name, value;
+    if (e && e.target && e.target.name !== undefined) {
+      name = e.target.name;
+      value = e.target.value;
+    } else if (typeof e === 'string') {
+      name = e;
+      value = val;
+    } else if (e && e.name !== undefined) {
+      name = e.name;
+      value = e.value;
+    } else {
+      return;
+    }
+
     setFormData(prev => {
       const updated = { ...prev, [name]: value };
 
@@ -470,13 +494,20 @@ const PurchaseOrderCreate = () => {
         }
       }
 
-      if (name === 'supplierId' && typeof value === 'object' && value) {
-        updated.supplierId = value.id;
-        updated.supplierName = value.name || value.supplier_name || '';
-        updated.address = value.address || value.address1 || '';
+      if (name === 'supplierId' || name === 'supplier_id') {
+        if (typeof value === 'object' && value) {
+          updated.supplierId = value.id;
+          updated.supplier_id = value.id;
+          updated.supplierName = value.name || value.supplier_name || '';
+          updated.supplier_name = value.name || value.supplier_name || '';
+          updated.address = value.address || value.address1 || '';
+        } else {
+          updated.supplierId = value;
+          updated.supplier_id = value;
+        }
       }
 
-      if (name === 'taxPercent') {
+      if (name === 'taxPercent' || name === 'tax_percent') {
         recalculateAllTotals(items, selectedDeductions, value);
       }
 
@@ -663,6 +694,71 @@ const PurchaseOrderCreate = () => {
       setMessageType('error');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCancel = () => {
+    if (window.confirm('Are you sure you want to cancel? Any unsaved changes will be discarded.')) {
+      clearModuleDraft('po_create');
+      navigate('/entry/purchase-order-list');
+    }
+  };
+
+  const handleRefresh = async () => {
+    if (editingId) {
+      window.location.reload();
+    } else {
+      clearModuleDraft('po_create');
+      try {
+        const nextSNo = await purchaseOrderService.getNextSNo();
+        setFormData({
+          sNo: String(nextSNo || '1'),
+          s_no: String(nextSNo || '1'),
+          date: new Date().toISOString().split('T')[0],
+          payType: 'Cash',
+          type: 'Urad',
+          invNo: `PO-${nextSNo || '1'}`,
+          inv_no: `PO-${nextSNo || '1'}`,
+          invDate: '',
+          inv_date: '',
+          taxType: 'Exclusive',
+          poDate: new Date().toISOString().split('T')[0],
+          terms: '',
+          fob: '',
+          shipVia: '',
+          sign: '',
+          supplierId: '',
+          supplier_id: '',
+          supplierName: '',
+          supplier_name: '',
+          address: '',
+          sender: '',
+          remarks: '',
+          purchase_request_id: '',
+          pr_no: '',
+          taxPercent: '18',
+          amount: '0.00',
+          billAmt: '0.00',
+          taxAmt: '0.00',
+          totAmt: '0.00'
+        });
+        setItems([{
+          id: 1,
+          item_id: '',
+          item_name: '',
+          weight: '',
+          qty: '',
+          tot_wt: '',
+          purc_rate: '',
+          disc_percent: '',
+          tax_percent: '5',
+          ed_percent: '',
+          amount: '0.00'
+        }]);
+        setSelectedDeductions([]);
+      } catch (e) {
+        console.error(e);
+      }
     }
   };
 
@@ -908,6 +1004,9 @@ const PurchaseOrderCreate = () => {
 
         <EntryActions 
           onSave={handleSave}
+          onCancel={handleCancel}
+          onRefresh={handleRefresh}
+          onBack={() => navigate('/entry/purchase-order-list')}
           saving={loading}
           saveText={editingId ? "Update" : "Save"}
         />

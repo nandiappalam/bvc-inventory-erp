@@ -212,25 +212,34 @@ const LotGenealogyDashboard = () => {
             <Typography variant="h6" sx={{ fontWeight: 800, color: '#0f172a' }}>
               {lotDetails?.remainingQuantity ?? '0'} <span style={{ fontSize: '13px', fontWeight: 500 }}>KG</span>
             </Typography>
-            <Typography variant="caption" sx={{ color: '#059669', fontWeight: 600 }}>
-              Original: {lotDetails?.quantity ?? 0} KG
+            <Typography variant="caption" sx={{ color: lotDetails?.totalReturnedQty > 0 ? '#b91c1c' : '#059669', fontWeight: 600, display: 'block' }}>
+              {lotDetails?.totalReturnedQty > 0 ? `Returned: ${lotDetails.totalReturnedQty} Bags (${lotDetails.totalReturnedWeight || lotDetails.totalReturnedQty * 50} KG)` : `Original: ${lotDetails?.quantity ?? 0} KG`}
             </Typography>
           </Paper>
         </Grid>
 
         <Grid item xs={6} md={2}>
           <Paper elevation={0} sx={{ p: 2, borderRadius: '10px', border: '1px solid #e2e8f0', bgcolor: '#f8fafc' }}>
-            <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600 }}>QC STATUS</Typography>
-            <Box sx={{ mt: 0.5 }}>
+            <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600 }}>QC & RETURN STATUS</Typography>
+            <Box sx={{ mt: 0.5, display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
               <Chip
                 label={lotDetails?.qcStatus || 'ACCEPTED'}
                 size="small"
-                color={lotDetails?.qcStatus === 'REJECTED' ? 'error' : 'success'}
+                color={lotDetails?.qcStatus === 'RETURNED' || lotDetails?.qcStatus === 'REJECTED' ? 'error' : (lotDetails?.qcStatus === 'PARTIALLY_RETURNED' ? 'warning' : 'success')}
                 sx={{ fontWeight: 700, fontSize: '12px' }}
               />
+              {lotDetails?.purchaseReturns?.length > 0 && (
+                <Chip
+                  label="DEBIT NOTE ISSUED"
+                  size="small"
+                  color="error"
+                  variant="outlined"
+                  sx={{ fontWeight: 700, fontSize: '10px', height: '20px' }}
+                />
+              )}
             </Box>
             <Typography variant="caption" sx={{ color: '#64748b', mt: 0.5, display: 'block' }}>
-              {lotDetails?.qc?.qc_no ? `QC #${lotDetails.qc.qc_no}` : 'Inward Verified'}
+              {lotDetails?.qc?.qc_no ? `QC #${lotDetails.qc.qc_no}` : (lotDetails?.purchaseReturns?.length > 0 ? `Ret Inv #${lotDetails.purchaseReturns[0].return_inv_no || lotDetails.purchaseReturns[0].return_s_no}` : 'Inward Verified')}
             </Typography>
           </Paper>
         </Grid>
@@ -453,8 +462,29 @@ const LotGenealogyDashboard = () => {
                             </Typography>
                           </Stack>
                           <Divider sx={{ mb: 1.5 }} />
-                          {lotDetails?.salesDispatches?.length > 0 || lotDetails?.jobworkMovements?.length > 0 ? (
+                          {lotDetails?.salesDispatches?.length > 0 || lotDetails?.jobworkMovements?.length > 0 || lotDetails?.purchaseReturns?.length > 0 ? (
                             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                              {lotDetails.purchaseReturns?.map((pr, i) => (
+                                <Box key={`pr-${i}`} sx={{ p: 1, bgcolor: '#fef2f2', borderRadius: '6px', border: '1px solid #fecaca' }}>
+                                  <Stack direction="row" justifyContent="space-between" alignItems="center">
+                                    <Typography variant="body2" sx={{ fontWeight: 700, color: '#991b1b' }}>
+                                      Purchase Return (Debit Note)
+                                    </Typography>
+                                    <Chip label="RETURNED" size="small" color="error" sx={{ fontSize: '10px', height: '20px', fontWeight: 700 }} />
+                                  </Stack>
+                                  <Typography variant="caption" sx={{ color: '#991b1b', display: 'block', mt: 0.5 }}>
+                                    Supplier: <strong>{pr.supplier_name}</strong> | Ret Inv: <strong>#{pr.return_inv_no || pr.return_s_no}</strong>
+                                  </Typography>
+                                  <Typography variant="caption" sx={{ color: '#b91c1c', display: 'block' }}>
+                                    Returned Qty: <strong>{pr.qty} Bags ({pr.total_wt || pr.qty * 50} KG)</strong> | Date: <strong>{pr.return_date}</strong>
+                                  </Typography>
+                                  {pr.reason && (
+                                    <Typography variant="caption" sx={{ color: '#7f1d1d', display: 'block', fontStyle: 'italic', mt: 0.25 }}>
+                                      Reason: {pr.reason}
+                                    </Typography>
+                                  )}
+                                </Box>
+                              ))}
                               {lotDetails.jobworkMovements?.map((jw, i) => (
                                 <Box key={`jw-${i}`} sx={{ p: 1, bgcolor: '#fef3c7', borderRadius: '6px', border: '1px solid #fde68a' }}>
                                   <Typography variant="body2" sx={{ fontWeight: 600 }}>Contractor: {jw.contractor_name}</Typography>
@@ -470,7 +500,7 @@ const LotGenealogyDashboard = () => {
                             </Box>
                           ) : (
                             <Typography variant="body2" sx={{ color: '#64748b' }}>
-                              Material currently in stock in <strong>{lotDetails?.godown || 'Main Godown'}</strong>. No downstream customer dispatches or contractor transfers.
+                              Material currently in stock in <strong>{lotDetails?.godown || 'Main Godown'}</strong>. No downstream customer dispatches, contractor transfers, or vendor returns.
                             </Typography>
                           )}
                         </CardContent>
@@ -536,7 +566,27 @@ const LotGenealogyDashboard = () => {
                           </TableRow>
                         ))}
 
-                        {/* 3. Inward Purchase Stage */}
+                        {/* 3. Purchase Return / Debit Note Stage */}
+                        {lotDetails?.purchaseReturns?.map((pr, idx) => (
+                          <TableRow key={`back-pr-${idx}`} sx={{ bgcolor: '#fef2f2' }}>
+                            <TableCell>
+                              <Chip label="Purchase Return" size="small" color="error" sx={{ fontWeight: 700 }} />
+                            </TableCell>
+                            <TableCell sx={{ fontWeight: 600 }}>
+                              Returned to: {pr.supplier_name} | Ret Inv #{pr.return_inv_no || pr.return_s_no}
+                            </TableCell>
+                            <TableCell>{pr.item_name || lotDetails?.itemName}</TableCell>
+                            <TableCell sx={{ fontWeight: 700, color: '#dc2626' }}>
+                              -{pr.total_wt || pr.qty * 50} KG ({pr.qty} Bags)
+                            </TableCell>
+                            <TableCell>
+                              <Chip label={pr.return_status || 'RETURNED'} size="small" color="error" sx={{ fontWeight: 600 }} />
+                            </TableCell>
+                            <TableCell>{pr.return_date || 'N/A'}</TableCell>
+                          </TableRow>
+                        ))}
+
+                        {/* 4. Inward Purchase Stage */}
                         {lotDetails?.purchase && (
                           <TableRow key="back-pur">
                             <TableCell>
@@ -556,8 +606,8 @@ const LotGenealogyDashboard = () => {
                           </TableRow>
                         )}
 
-                        {/* Fallback if no purchase or milling records exist */}
-                        {!lotDetails?.purchase && (!lotDetails?.millingOutputs || lotDetails.millingOutputs.length === 0) && (
+                        {/* Fallback if no purchase, return, or milling records exist */}
+                        {!lotDetails?.purchase && (!lotDetails?.purchaseReturns || lotDetails.purchaseReturns.length === 0) && (!lotDetails?.millingOutputs || lotDetails.millingOutputs.length === 0) && (
                           <TableRow>
                             <TableCell>
                               <Chip label="Stock Lot" size="small" color="default" sx={{ fontWeight: 600 }} />

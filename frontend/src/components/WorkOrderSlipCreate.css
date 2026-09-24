@@ -141,15 +141,16 @@
 
 .wo-form-header-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  margin-bottom: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 18px 24px;
+  margin-bottom: 24px;
 }
 
 .wo-field-group {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
 }
 
 .wo-field-group.full-width {
@@ -158,30 +159,32 @@
 
 .wo-field-group label {
   font-weight: 700;
-  font-size: 14px;
-  min-width: 105px;
-  color: #1e293b;
+  font-size: 13px;
+  color: #334155;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .wo-input-combo {
-  flex: 1;
+  width: 100%;
 }
 
 .wo-input {
   width: 100%;
   height: 42px;
   padding: 8px 14px;
-  border: 1px solid #94a3b8;
+  border: 1.5px solid #cbd5e1;
   border-radius: 6px;
   font-size: 14px;
   color: #0f172a;
   outline: none;
   background-color: #ffffff;
   box-sizing: border-box;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 .wo-input:focus {
   border-color: #2563eb;
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
 }
 
 .wo-input.select, select.wo-input, select.wo-table-input {
@@ -189,14 +192,17 @@
   appearance: auto;
   color: #0f172a;
   background-color: #ffffff;
+  font-size: 14px;
+  font-weight: 500;
 }
 
 /* Section Cards */
 .wo-section-card {
   border: 1.5px solid #cbd5e1;
-  border-radius: 6px;
-  margin-bottom: 22px;
+  border-radius: 8px;
+  margin-bottom: 24px;
   background-color: #ffffff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
   overflow: hidden;
 }
 
@@ -205,21 +211,23 @@
   justify-content: space-between;
   align-items: center;
   background-color: #f8fafc;
-  padding: 10px 16px;
+  padding: 12px 18px;
   border-bottom: 1.5px solid #cbd5e1;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .wo-section-title-wrap {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .wo-section-num {
   background-color: #1e293b;
   color: #ffffff;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   display: inline-flex;
   align-items: center;
@@ -239,7 +247,7 @@
 .wo-section-badge {
   font-size: 12px;
   font-weight: 700;
-  padding: 3px 10px;
+  padding: 4px 12px;
   border-radius: 12px;
 }
 .wo-section-badge.input-badge {
@@ -262,10 +270,12 @@
 .wo-table-wrapper {
   overflow-x: auto;
   border-top: none;
+  min-width: 100%;
 }
 
 .wo-slip-table {
   width: 100%;
+  min-width: 850px;
   border-collapse: collapse;
   font-size: 13px;
   background: #ffffff;
@@ -276,24 +286,25 @@
   color: #0f172a;
   font-weight: 800;
   text-transform: uppercase;
-  padding: 8px 8px;
+  padding: 10px 10px;
   border: 1px solid #cbd5e1;
   text-align: center;
   font-size: 12px;
+  white-space: nowrap;
 }
 
 .wo-slip-table td {
-  padding: 5px 6px;
+  padding: 8px 8px;
   border: 1px solid #cbd5e1;
   vertical-align: middle;
 }
 
 .wo-table-input {
   width: 100%;
-  height: 38px;
-  padding: 6px 10px;
-  border: 1px solid #cbd5e1;
-  border-radius: 4px;
+  height: 40px;
+  padding: 6px 12px;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 6px;
   font-size: 13px;
   color: #0f172a;
   background-color: #ffffff;
@@ -302,11 +313,15 @@
 .wo-table-input:focus {
   border-color: #2563eb;
   outline: none;
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
 }
 
-.wo-table-input.select {
+.wo-table-input.select, select.wo-table-input {
   cursor: pointer;
+  min-width: 180px;
+  font-size: 13px;
+  color: #0f172a;
+  background-color: #ffffff;
 }
 
 .wo-table-input.bold-number {
@@ -326,7 +341,7 @@
 
 .wo-lot-gen-wrap {
   display: flex;
-  gap: 4px;
+  gap: 6px;
   align-items: center;
 }
 
@@ -336,10 +351,11 @@
   color: #334155;
   font-size: 11px;
   font-weight: 700;
-  padding: 6px 8px;
+  padding: 8px 10px;
   border-radius: 4px;
   cursor: pointer;
   white-space: nowrap;
+  height: 40px;
 }
 .wo-lot-gen-btn:hover {
   background: #e2e8f0;
@@ -350,12 +366,15 @@
   background: #ef4444;
   color: #ffffff;
   border: none;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   border-radius: 4px;
   cursor: pointer;
   font-weight: bold;
   line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .wo-btn-delete:hover {
   background: #dc2626;
@@ -365,7 +384,7 @@
   background: #0284c7;
   color: #ffffff;
   border: none;
-  padding: 4px 10px;
+  padding: 6px 14px;
   border-radius: 4px;
   font-weight: 600;
   font-size: 12px;
@@ -377,7 +396,7 @@
 
 .wo-slip-table tfoot td {
   background-color: #f8fafc;
-  padding: 8px 8px;
+  padding: 10px 10px;
   border: 1px solid #cbd5e1;
 }
 
@@ -386,7 +405,7 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 12px;
-  padding: 12px 16px;
+  padding: 14px 18px;
   background-color: #fcfcfd;
   border-top: 1px dashed #cbd5e1;
 }
@@ -398,17 +417,17 @@
   background: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 6px;
-  padding: 8px 12px;
+  padding: 10px 14px;
 }
 
 .wo-classic-card .card-label {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   color: #475569;
 }
 
 .wo-classic-card .card-val {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 800;
   color: #b45309;
 }
@@ -416,8 +435,19 @@
 .wo-footer-details {
   display: flex;
   gap: 20px;
-  margin-bottom: 20px;
+  margin-bottom: 24px;
   flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.wo-footer-details .remarks-field {
+  flex: 1;
+  min-width: 300px;
+}
+
+.wo-footer-details .status-field {
+  width: 280px;
+  min-width: 240px;
 }
 
 /* Metrics Summary Strip */

@@ -34,7 +34,7 @@ import {
   Inventory as InventoryIcon,
   ShoppingCart as PurchaseIcon
 } from '@mui/icons-material';
-import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
+import { useNavigate, useSearchParams, useLocation, useParams } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { saveModuleDraft, loadModuleDraft, clearModuleDraft } from '../../utils/draftHelper';
 import api from '../../services/api.js';
@@ -61,10 +61,11 @@ const PRIORITIES = [
 const PurchaseRequestCreate = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { id: paramId } = useParams();
   const [searchParams] = useSearchParams();
   const { user } = useAuth();
 
-  const editId = searchParams.get('id') || location.state?.editId;
+  const editId = paramId || searchParams.get('id') || searchParams.get('editId') || location.state?.editId || location.state?.id;
 
   // Master Data States
   const [itemsList, setItemsList] = useState([]);
@@ -848,28 +849,44 @@ const PurchaseRequestCreate = () => {
       </Grid>
 
       {/* Bottom Action Controls */}
-      <Paper elevation={3} sx={{ p: 2.5, borderRadius: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fff', border: '1px solid #e2e8f0' }}>
-        <Button
-          variant="outlined"
-          color="warning"
-          startIcon={<ResetIcon />}
-          onClick={handleReset}
-          disabled={submitting}
-          sx={{ textTransform: 'none', fontWeight: '700' }}
-        >
-          Reset Form
-        </Button>
-
-        <Box sx={{ display: 'flex', gap: 2 }}>
+      <Paper elevation={3} sx={{ p: 2.5, borderRadius: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fff', border: '1px solid #e2e8f0', flexWrap: 'wrap', gap: 2 }}>
+        <Box sx={{ display: 'flex', gap: 1.5 }}>
           <Button
             variant="outlined"
-            color="secondary"
-            startIcon={<CancelIcon />}
-            onClick={() => navigate('/entry/purchase-request-display')}
-            disabled={submitting}
-            sx={{ textTransform: 'none', fontWeight: '600' }}
+            startIcon={<BackIcon />}
+            onClick={() => navigate(-1)}
+            sx={{ textTransform: 'none', fontWeight: '700', borderColor: '#64748b', color: '#334155' }}
           >
-            Cancel
+            ← Back
+          </Button>
+
+          <Button
+            variant="outlined"
+            color="warning"
+            startIcon={<ResetIcon />}
+            onClick={handleReset}
+            disabled={submitting}
+            sx={{ textTransform: 'none', fontWeight: '700' }}
+          >
+            ↻ Refresh
+          </Button>
+        </Box>
+
+        <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
+          <Button
+            variant="outlined"
+            color="error"
+            startIcon={<CancelIcon />}
+            onClick={() => {
+              if (window.confirm('Are you sure you want to cancel? Any unsaved changes will be discarded.')) {
+                clearModuleDraft('pr_create');
+                navigate('/entry/purchase-request-display');
+              }
+            }}
+            disabled={submitting}
+            sx={{ textTransform: 'none', fontWeight: '700' }}
+          >
+            ✕ Cancel
           </Button>
 
           <Button
@@ -880,18 +897,18 @@ const PurchaseRequestCreate = () => {
             disabled={submitting}
             sx={{ backgroundColor: '#475569', '&:hover': { backgroundColor: '#334155' }, fontWeight: '700', textTransform: 'none' }}
           >
-            Save as Draft
+            {editId ? 'Update Draft' : 'Save as Draft'}
           </Button>
 
           <Button
             variant="contained"
             color="success"
             startIcon={submitting ? <CircularProgress size={18} color="inherit" /> : <SendIcon />}
-            onClick={() => handleSubmitForm('Submitted')}
+            onClick={() => handleSubmitForm(editId ? (status === 'Approved' ? 'Approved' : 'Submitted') : 'Submitted')}
             disabled={submitting}
             sx={{ backgroundColor: '#16a34a', '&:hover': { backgroundColor: '#15803d' }, fontWeight: '800', px: 3, textTransform: 'none' }}
           >
-            Submit Requisition
+            {editId ? 'Update Requisition' : 'Submit Requisition'}
           </Button>
         </Box>
       </Paper>

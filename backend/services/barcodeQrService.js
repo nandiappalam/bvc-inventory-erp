@@ -159,15 +159,67 @@ class BarcodeQrService {
       WHERE si.lot_no = ?
     `, [lotNo]);
 
+    // 7. Purchase Returns / Vendor Rejections
+    let purchaseReturns = [];
+    try {
+      const prRes = await db.query(`
+        SELECT 
+          pri.id as item_id,
+          pri.purchase_return_id,
+          pri.lot_no,
+          pri.item_name,
+          pri.weight,
+          pri.qty,
+          pri.total_wt,
+          pri.rate,
+          pri.amount,
+          pri.reason,
+          pri.iqr_no,
+          pri.qc_no,
+          pri.source,
+          pr.s_no as return_s_no,
+          pr.return_inv_no,
+          SUBSTR(CAST(pr.date AS TEXT), 1, 10) as return_date,
+          COALESCE(sm.name, pr.supplier) as supplier_name,
+          COALESCE(pr.status, 'RETURNED') as return_status,
+          pr.approval_status
+        FROM purchase_return_items pri
+        JOIN purchase_returns pr ON pri.purchase_return_id = pr.id
+        LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(pr.supplier AS TEXT) OR sm.name = pr.supplier)
+        WHERE pri.lot_no = ?
+        ORDER BY pr.id DESC
+      `, [lotNo]);
+      purchaseReturns = prRes.rows || [];
+    } catch (e) {
+      console.warn('Notice: Error querying purchase returns in barcodeQrService:', e.message);
+    }
+
+    const totalReturnedQty = purchaseReturns.reduce((sum, pr) => sum + (parseFloat(pr.qty) || 0), 0);
+    const totalReturnedWeight = purchaseReturns.reduce((sum, pr) => sum + (parseFloat(pr.total_wt) || 0), 0);
+
+    let effectiveStock = parseFloat(stockInfo?.remaining_quantity ?? stockInfo?.quantity ?? purchaseInfo?.total_weight ?? 0);
+    if (totalReturnedQty > 0 && effectiveStock === parseFloat(stockInfo?.quantity || 0) && effectiveStock > 0) {
+      effectiveStock = Math.max(0, effectiveStock - totalReturnedQty);
+    }
+
+    let effectiveQcStatus = stockInfo?.qc_status || qcInfo?.overall_result || 'PASSED';
+    if (stockInfo?.unloading_status === 'RETURNED' || (purchaseReturns.length > 0 && effectiveStock === 0)) {
+      effectiveQcStatus = 'RETURNED';
+    } else if (purchaseReturns.length > 0 && effectiveStock > 0) {
+      effectiveQcStatus = 'PARTIALLY_RETURNED';
+    }
+
     return {
       code: originalCode,
       type: 'LOT',
       lotNo,
-      itemName: stockInfo?.item_name || purchaseInfo?.item_name || 'Agri Commodity',
-      currentStock: parseFloat(stockInfo?.quantity || purchaseInfo?.total_weight || 0),
+      itemName: stockInfo?.item_name || purchaseInfo?.item_name || (purchaseReturns[0]?.item_name) || 'Agri Commodity',
+      currentStock: effectiveStock,
+      totalReturnedQty,
+      totalReturnedWeight,
       unit: stockInfo?.unit || 'KG',
       currentGodown: stockInfo?.godown_name || 'Central Godown',
-      qcStatus: stockInfo?.qc_status || qcInfo?.overall_result || 'PASSED',
+      qcStatus: effectiveQcStatus,
       purchase: purchaseInfo ? {
         voucherNo: `PUR-${purchaseInfo.s_no || purchaseInfo.purchase_id}`,
         invoiceNo: purchaseInfo.inv_no,
@@ -186,6 +238,7 @@ class BarcodeQrService {
         result: qcInfo.overall_result,
         remarks: qcInfo.remarks
       } : null,
+      purchaseReturns,
       millingUsage: {
         inputs: millingInputRes.rows || [],
         outputs: millingOutputRes.rows || []

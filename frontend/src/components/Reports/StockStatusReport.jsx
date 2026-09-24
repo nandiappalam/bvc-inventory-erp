@@ -503,6 +503,7 @@ const StockStatusReport = () => {
                 <th style={{...styles.th, textAlign: 'right'}}>Weight (KG)</th>
                 <th style={{...styles.th, textAlign: 'right'}}>Opening Stock</th>
                 <th style={{...styles.th, textAlign: 'right'}}>Total Purchased/In</th>
+                <th style={{...styles.th, textAlign: 'right'}}>Purch Returned</th>
                 <th style={{...styles.th, textAlign: 'right'}}>Total Sold/Out</th>
                 <th style={{...styles.th, textAlign: 'right'}}>Current Balance</th>
                 <th style={{...styles.th, textAlign: 'right'}}>Weight Balance (KG)</th>
@@ -511,7 +512,7 @@ const StockStatusReport = () => {
             <tbody>
               {filteredData.length === 0 ? (
                 <tr>
-                  <td colSpan="8" className="text-center" style={styles.noData}>No stock records matching criteria</td>
+                  <td colSpan="9" className="text-center" style={styles.noData}>No stock records matching criteria</td>
                 </tr>
               ) : (
                 filteredData.map((row, index) => {
@@ -545,6 +546,9 @@ const StockStatusReport = () => {
                       <td className="text-right" style={{...styles.td, textAlign: 'right'}}>{parseFloat(row.weight || 0).toFixed(2)}</td>
                       <td className="text-right" style={{...styles.td, textAlign: 'right'}}>{parseFloat(row.opening_qty || 0).toFixed(2)}</td>
                       <td className="text-right" style={{...styles.td, textAlign: 'right'}}>{parseFloat(row.total_purchased || 0).toFixed(2)}</td>
+                      <td className="text-right" style={{...styles.td, textAlign: 'right', color: (row.total_returned || 0) > 0 ? '#b45309' : 'inherit', fontWeight: (row.total_returned || 0) > 0 ? 'bold' : 'normal'}}>
+                        {parseFloat(row.total_returned || 0).toFixed(2)}
+                      </td>
                       <td className="text-right" style={{...styles.td, textAlign: 'right'}}>{parseFloat(row.total_sold || 0).toFixed(2)}</td>
                       <td className="text-right" style={{
                         ...styles.td,
@@ -584,6 +588,7 @@ const StockStatusReport = () => {
                 <th style={styles.th}>Purchase Date</th>
                 <th style={{...styles.th, textAlign: 'right'}}>Weight (KG)</th>
                 <th style={{...styles.th, textAlign: 'right'}}>Purchased</th>
+                <th style={{...styles.th, textAlign: 'right'}}>Returned</th>
                 <th style={{...styles.th, textAlign: 'right'}}>Sold</th>
                 <th style={{...styles.th, textAlign: 'right'}}>Remaining</th>
                 <th style={{...styles.th, textAlign: 'right'}}>Weight Remaining (KG)</th>
@@ -593,7 +598,7 @@ const StockStatusReport = () => {
             <tbody>
               {filteredData.length === 0 ? (
                 <tr>
-                  <td colSpan="11" className="text-center" style={styles.noData}>No lots matching criteria</td>
+                  <td colSpan="12" className="text-center" style={styles.noData}>No lots matching criteria</td>
                 </tr>
               ) : (
                 filteredData.map((row, index) => {
@@ -653,7 +658,10 @@ const StockStatusReport = () => {
                         <td style={styles.td}>{row.created_at ? new Date(row.created_at).toLocaleDateString() : '-'}</td>
                         <td className="text-right" style={{...styles.td, textAlign: 'right'}}>{parseFloat(row.weight || 0).toFixed(2)}</td>
                         <td className="text-right" style={{...styles.td, textAlign: 'right'}}>{parseFloat(row.purchased_qty || 0).toFixed(2)}</td>
-                        <td className="text-right" style={{...styles.td, textAlign: 'right'}}>{parseFloat(row.sold_qty || 0).toFixed(2)}</td>
+                        <td className="text-right" style={{...styles.td, textAlign: 'right', color: (row.returned_qty || 0) > 0 ? '#b45309' : 'inherit', fontWeight: (row.returned_qty || 0) > 0 ? 'bold' : 'normal'}}>
+                          {parseFloat(row.returned_qty || 0).toFixed(2)}
+                        </td>
+                        <td className="text-right" style={{...styles.td, textAlign: 'right'}}>{parseFloat(row.actual_sold_qty ?? row.sold_qty ?? 0).toFixed(2)}</td>
                         <td className="text-right" style={{
                           ...styles.td,
                           textAlign: 'right',

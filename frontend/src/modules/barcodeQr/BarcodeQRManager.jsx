@@ -40,6 +40,7 @@ import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import FactoryIcon from '@mui/icons-material/Factory';
 import AcUnitIcon from '@mui/icons-material/AcUnit';
 import VerifiedUserIcon from '@mui/icons-material/VerifiedUser';
+import AssignmentReturnIcon from '@mui/icons-material/AssignmentReturn';
 import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import QRCode from 'qrcode';
@@ -624,6 +625,39 @@ export default function BarcodeQRManager() {
                     </CardContent>
                   </Card>
                 </Grid>
+
+                {/* 5. Purchase Returns / Vendor Rejection */}
+                {lookupResult?.purchaseReturns?.length > 0 && (
+                  <Grid item xs={12}>
+                    <Card variant="outlined" sx={{ bgcolor: '#fef2f2', borderColor: '#fecaca' }}>
+                      <CardContent sx={{ p: 2 }}>
+                        <Typography variant="subtitle2" sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1, mb: 1, color: '#991b1b' }}>
+                          <AssignmentReturnIcon color="error" fontSize="small" /> Purchase Returns (Debit Note Reversals)
+                        </Typography>
+                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                          {lookupResult.purchaseReturns.map((pr, idx) => (
+                            <Box key={`dossier-pr-${idx}`} sx={{ p: 1.5, bgcolor: '#ffffff', borderRadius: '6px', border: '1px solid #fee2e2' }}>
+                              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
+                                <Typography variant="body2" sx={{ fontWeight: 700, color: '#991b1b' }}>
+                                  Return Inv #{pr.return_inv_no || pr.return_s_no} → {pr.supplier_name}
+                                </Typography>
+                                <Chip label="DEBIT NOTE POSTED" size="small" color="error" sx={{ fontWeight: 700, fontSize: '10px' }} />
+                              </Box>
+                              <Typography variant="caption" sx={{ color: '#64748b', display: 'block' }}>
+                                Returned: <strong>{pr.qty} Bags ({pr.total_wt || pr.qty * 50} KG)</strong> | Date: <strong>{pr.return_date}</strong>
+                              </Typography>
+                              {pr.reason && (
+                                <Typography variant="caption" sx={{ color: '#7f1d1d', display: 'block', mt: 0.25, fontStyle: 'italic' }}>
+                                  Reason: {pr.reason}
+                                </Typography>
+                              )}
+                            </Box>
+                          ))}
+                        </Box>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                )}
               </Grid>
             </Box>
           ) : (

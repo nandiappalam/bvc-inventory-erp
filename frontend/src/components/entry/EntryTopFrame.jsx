@@ -153,7 +153,34 @@ const validateEntryConfig = (fields, columns) => true;
 export const EntryTopFrame = ({ fields = [], data = {}, onChange = () => {}, columns: colCount = 3, taxType, taxRate, onTaxChange, nextSnoEndpoint, hideStockType = false }) => {
   const generateSno = () => '1';
 
+  // Check if we are in Edit / Update mode so existing records are never wiped
+  const isEditMode = Boolean(
+    data?.id || 
+    window.location.pathname.includes('/edit') || 
+    new URLSearchParams(window.location.search).get('id') || 
+    new URLSearchParams(window.location.search).get('editId') ||
+    new URLSearchParams(window.location.search).get('po_id')
+  );
+
+  // Unified onChange handler ensuring safe synthetic event and direct (name, value) calling
+  const invokeOnChange = (name, value) => {
+    if (typeof onChange === 'function') {
+      const syntheticEvent = {
+        target: { name, value },
+        currentTarget: { name, value },
+        name,
+        value
+      };
+      onChange(syntheticEvent, value);
+    }
+    if (onTaxChange && (name === 'tax_type' || name === 'tax_rate')) {
+      onTaxChange({ taxType: data.tax_type || 'Exclusive', taxRate: parseFloat(data.tax_rate) || 18 });
+    }
+  };
+
   useEffect(() => {
+    if (isEditMode) return;
+
     // Auto-fetch next purchase/flour-out S.No only for creation mode.
     const fetchNext = async () => {
       try {
@@ -187,7 +214,7 @@ export const EntryTopFrame = ({ fields = [], data = {}, onChange = () => {}, col
           }
           
           if (!data[fieldToSet]) {
-            onChange({ target: { name: fieldToSet, value: String(nextSno) } });
+            invokeOnChange(fieldToSet, String(nextSno));
           }
         }
       } catch (err) {
@@ -209,17 +236,18 @@ export const EntryTopFrame = ({ fields = [], data = {}, onChange = () => {}, col
     if (!data || !data[fieldToCheck]) {
       fetchNext();
     }
-  }, []);
+  }, [isEditMode]);
 
   useEffect(() => {
+    if (isEditMode) return;
     if (!data.date) {
-      onChange({ target: { name: 'date', value: new Date().toISOString().split('T')[0] } });
+      invokeOnChange('date', new Date().toISOString().split('T')[0]);
     }
     const isAdvance = window.location.pathname.toLowerCase().includes('advance');
     if (!hideStockType && !isAdvance && !data.stock_type && !data.stockType) {
-      onChange({ target: { name: 'stock_type', value: 'RM' } });
+      invokeOnChange('stock_type', 'RM');
     }
-  }, []);
+  }, [isEditMode]);
 
   const userHasExplicitCols = fields.some(f => f && f.col !== undefined && f.col !== null);
 
@@ -377,7 +405,7 @@ export const EntryTopFrame = ({ fields = [], data = {}, onChange = () => {}, col
               key={field.name} 
               field={field} 
               data={data}
-              onChange={handleChange}
+              onChange={invokeOnChange}
               autoFillFields={field.autoFillFields || []}
               generateSno={generateSno}
               api={api}
@@ -534,7 +562,9 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
     }
   };
 
-  const effectiveOptions = masterOptions || [];
+  const effectiveOptions = (field.options && Array.isArray(field.options) && field.options.length > 0)
+    ? field.options
+    : (masterOptions || []);
 
   if (isSelectField || field.masterType || effectiveOptions.length > 0) {
     let rawVal = (data[field.name] !== undefined && data[field.name] !== null) ? String(data[field.name]) : '';
@@ -590,6 +620,11 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
           className="form-control form-select"
         >
           <option value="">Select...</option>
+          {selectValue && !effectiveOptions.some(opt => String(getOptionValue(opt)).toLowerCase() === String(selectValue).toLowerCase()) && (
+            <option value={selectValue}>
+              {data[field.name + '_name'] || data[field.name + 'Name'] || data.supplierName || data.supplier_name || data.customerName || data.customer_name || data.godownName || data.godown_name || selectValue}
+            </option>
+          )}
           {effectiveOptions.map((opt, idx) => {
             const optVal = getOptionValue(opt);
             const optLabel = getOptionLabel(opt);
@@ -605,13 +640,21 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
   }
 
   if (isTextarea) {
+    let rawTextValue = data[field.name] !== undefined && data[field.name] !== null ? data[field.name] : '';
+    if (!rawTextValue) {
+      if (field.name === 'address') {
+        rawTextValue = data.supplier_details || data.supplierDetails || data.customer_details || data.party_details || '';
+      } else if (field.name === 'supplier_details' || field.name === 'supplierDetails') {
+        rawTextValue = data.address || '';
+      }
+    }
     return (
       <div className="entry-top-field-group" style={{ ...styles.fieldGroup, alignItems: 'flex-start', minHeight: '52px' }}>
         <label style={{ ...styles.label, paddingTop: '4px' }}>{field.label}</label>
         <span style={{ ...styles.colon, paddingTop: '4px' }}>:</span>
         <textarea
           name={field.name}
-          value={data[field.name] || ''}
+          value={rawTextValue || ''}
           onChange={(e) => onChange(field.name, e.target.value)}
           readOnly={field.readOnly}
           style={{ ...styles.input, height: '48px', minHeight: '48px', resize: 'vertical', fontFamily: 'inherit', padding: '4px 6px' }}

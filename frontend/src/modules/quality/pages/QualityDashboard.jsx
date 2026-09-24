@@ -402,7 +402,18 @@ export default function QualityDashboard() {
                     </span>
                   </TableCell>
                   <TableCell style={{ padding: '10px 8px', textAlign: 'right' }}>
-                    <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
+                    <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end', alignItems: 'center' }}>
+                      {(row.overallResult === 'REJECTED' || row.overallResult === 'FAIL') && (
+                        <Button 
+                          variant="contained" 
+                          color="error" 
+                          size="small" 
+                          onClick={() => navigate(`/entry/purchase-return-create?source=qc&lotNo=${encodeURIComponent(row.lotNo || '')}&purchaseId=${encodeURIComponent(row.purchaseId || '')}`)}
+                          sx={{ fontWeight: 800, px: 1, py: 0.25, fontSize: 10.5 }}
+                        >
+                          Create Return
+                        </Button>
+                      )}
                       <Button 
                         variant="outlined" 
                         size="small" 

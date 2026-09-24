@@ -515,6 +515,10 @@ const getCategoryColumns = (categoryKey, subReportId) => {
         { id: 'item_name', label: 'Item Name' },
         { id: 'item_group', label: 'Item Group' },
         { id: 'lot_no', label: 'Lot No' },
+        { id: 'opening_qty', label: 'Opening Qty', align: 'right', isNumber: true },
+        { id: 'total_purchased', label: 'Input Qty', align: 'right', isNumber: true },
+        { id: 'total_returned', label: 'Returned Qty', align: 'right', isNumber: true },
+        { id: 'total_sold', label: 'Issued / Out Qty', align: 'right', isNumber: true },
         { id: 'available_qty', label: 'Balance Qty', align: 'right', isNumber: true },
         { id: 'weight', label: 'Weight (kg)', align: 'right', isNumber: true }
       ];
@@ -526,6 +530,7 @@ const getCategoryColumns = (categoryKey, subReportId) => {
       { id: 'godown_name', label: 'Godown' },
       { id: 'opening_qty', label: 'Inward / Opening Qty', align: 'right', isNumber: true },
       { id: 'total_purchased', label: 'Input Qty', align: 'right', isNumber: true },
+      { id: 'total_returned', label: 'Returned Qty', align: 'right', isNumber: true },
       { id: 'total_sold', label: 'Output / Issued Qty', align: 'right', isNumber: true },
       { id: 'wastage_qty', label: 'Wastage Qty', align: 'right', isNumber: true },
       { id: 'available_qty', label: 'Balance Qty', align: 'right', isNumber: true },

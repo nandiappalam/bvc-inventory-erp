@@ -864,17 +864,27 @@ module.exports = async function autoMigrate() {
   }
 
   await safeAddColumn('customer_master', 'email', 'TEXT');
+  await safeAddColumn('customer_master', 'city', 'TEXT');
   await safeAddColumn('customer_master', 'transport', 'TEXT');
   await safeAddColumn('customer_master', 'limit_days', 'INTEGER');
   await safeAddColumn('customer_master', 'limit_amount', 'REAL');
   await safeAddColumn('customer_master', 'balance_type', "TEXT DEFAULT 'Dr'");
   await safeAddColumn('customer_master', 'status', "TEXT DEFAULT 'Active'");
   await safeAddColumn('supplier_master', 'email', 'TEXT');
+  await safeAddColumn('supplier_master', 'city', 'TEXT');
   await safeAddColumn('supplier_master', 'transport', 'TEXT');
   await safeAddColumn('supplier_master', 'limit_days', 'INTEGER');
   await safeAddColumn('supplier_master', 'limit_amount', 'REAL');
   await safeAddColumn('supplier_master', 'balance_type', "TEXT DEFAULT 'Dr'");
   await safeAddColumn('supplier_master', 'status', "TEXT DEFAULT 'Active'");
+  await safeAddColumn('purchases', 'bill_amt', 'REAL DEFAULT 0');
+  await safeAddColumn('purchases', 'total_amt', 'REAL DEFAULT 0');
+  await safeAddColumn('sales', 'total_amt', 'REAL DEFAULT 0');
+  await safeAddColumn('sales', 'inv_no', 'TEXT');
+  await safeAddColumn('purchase_items', 'total_amt', 'REAL DEFAULT 0');
+  await safeAddColumn('purchase_items', 'total_amount', 'REAL DEFAULT 0');
+  await safeAddColumn('sales_items', 'amount', 'REAL DEFAULT 0');
+  await safeAddColumn('sales_items', 'total_amount', 'REAL DEFAULT 0');
 
   // Item groups status
   await safeAddColumn('item_groups', 'status', "TEXT DEFAULT 'Active'");

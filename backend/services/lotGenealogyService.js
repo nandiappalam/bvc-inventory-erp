@@ -136,6 +136,42 @@ async function searchLots(query = '', filters = {}) {
     }
   }
 
+  // 5. Search Purchase Returns / Vendor Return records
+  try {
+    const prLots = await db.query(`
+      SELECT DISTINCT
+        pri.lot_no as lotNo,
+        pri.item_name as itemName,
+        COALESCE(sm.name, pr.supplier) as supplierName,
+        pr.return_inv_no as returnInvNo,
+        SUBSTR(CAST(pr.date AS TEXT), 1, 10) as returnDate,
+        pri.qty as returnedQty,
+        pri.reason,
+        COALESCE(pr.status, 'RETURNED') as status
+      FROM purchase_return_items pri
+      JOIN purchase_returns pr ON pri.purchase_return_id = pr.id
+      LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(pr.supplier AS TEXT) OR sm.name = pr.supplier)
+      WHERE pri.lot_no IS NOT NULL AND pri.lot_no != '' ${q ? 'AND (LOWER(pri.lot_no) LIKE ? OR LOWER(pri.item_name) LIKE ? OR LOWER(pr.return_inv_no) LIKE ? OR LOWER(COALESCE(sm.name, pr.supplier, \'\')) LIKE ?)' : ''}
+      LIMIT 50
+    `, q ? [`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`] : []);
+
+    for (const row of (prLots.rows || [])) {
+      if (row.lotNo && !lotsMap.has(row.lotNo)) {
+        lotsMap.set(row.lotNo, {
+          lotNo: row.lotNo,
+          itemName: row.itemName,
+          supplier: row.supplierName,
+          voucherNo: row.returnInvNo,
+          date: row.returnDate,
+          location: 'Returned to Supplier',
+          qcStatus: 'RETURNED'
+        });
+      }
+    }
+  } catch (prErr) {
+    // Ignore if table temporarily unpopulated
+  }
+
   return Array.from(lotsMap.values());
 }
 
@@ -380,19 +416,72 @@ async function getLotDetails(lotNo) {
     WHERE LOWER(si.lot_no) = LOWER(?)
   `, [cleanLotNo]);
 
+  // 10. Purchase Returns / Vendor Return Rejections
+  let purchaseReturns = [];
+  try {
+    const prRes = await db.query(`
+      SELECT 
+        pri.id as item_id,
+        pri.purchase_return_id,
+        pri.lot_no,
+        pri.item_name,
+        pri.weight,
+        pri.qty,
+        pri.total_wt,
+        pri.rate,
+        pri.amount,
+        pri.reason,
+        pri.iqr_no,
+        pri.qc_no,
+        pri.source,
+        pr.s_no as return_s_no,
+        pr.return_inv_no,
+        SUBSTR(CAST(pr.date AS TEXT), 1, 10) as return_date,
+        pr.supplier as supplier_raw,
+        COALESCE(sm.name, pr.supplier) as supplier_name,
+        COALESCE(pr.status, 'RETURNED') as return_status,
+        pr.approval_status
+      FROM purchase_return_items pri
+      JOIN purchase_returns pr ON pri.purchase_return_id = pr.id
+      LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(pr.supplier AS TEXT) OR sm.name = pr.supplier)
+      WHERE LOWER(pri.lot_no) = LOWER(?) OR (CAST(? AS TEXT) != '' AND LOWER(pri.lot_no) = LOWER(CAST(? AS TEXT)))
+      ORDER BY pr.id DESC
+    `, [cleanLotNo, effectiveParentLot || '', effectiveParentLot || '']);
+    purchaseReturns = prRes.rows || [];
+  } catch (prErr) {
+    console.warn('Notice: Error querying purchase returns for lot:', prErr.message);
+  }
+
+  const totalReturnedQty = purchaseReturns.reduce((sum, pr) => sum + (parseFloat(pr.qty) || 0), 0);
+  const totalReturnedWeight = purchaseReturns.reduce((sum, pr) => sum + (parseFloat(pr.total_wt) || 0), 0);
+
   // Determine standard item name & quantities
-  const finalItemName = stockLot.item_name || purchase?.itemName || millingOutputs[0]?.finished_product || millingConsumptions[0]?.target_product || 'Raw Material';
+  const finalItemName = stockLot.item_name || purchase?.itemName || millingOutputs[0]?.finished_product || millingConsumptions[0]?.target_product || (purchaseReturns[0]?.item_name) || 'Raw Material';
   const finalQty = stockLot.quantity || purchase?.qty || (millingOutputs[0]?.output_kgs ? millingOutputs[0].output_kgs / 50 : 0);
-  const finalRemaining = stockLot.remaining_quantity ?? stockLot.quantity ?? (millingOutputs[0]?.output_kgs ? millingOutputs[0].output_kgs / 50 : 0);
+  let finalRemaining = stockLot.remaining_quantity ?? stockLot.quantity ?? (millingOutputs[0]?.output_kgs ? millingOutputs[0].output_kgs / 50 : 0);
+
+  // If purchase return exists and stock_lots didn't reflect reduction, reflect it in calculation
+  if (totalReturnedQty > 0 && finalRemaining === finalQty && finalQty > 0) {
+    finalRemaining = Math.max(0, finalQty - totalReturnedQty);
+  }
+
+  let determinedQcStatus = stockLot.qc_status || (qc?.overall_result ? qc.overall_result.toUpperCase() : 'ACCEPTED');
+  if (stockLot.unloading_status === 'RETURNED' || (purchaseReturns.length > 0 && finalRemaining === 0)) {
+    determinedQcStatus = 'RETURNED';
+  } else if (purchaseReturns.length > 0 && finalRemaining > 0) {
+    determinedQcStatus = 'PARTIALLY_RETURNED';
+  }
 
   return {
     lotNo: cleanLotNo,
     itemName: finalItemName,
     quantity: finalQty,
     remainingQuantity: finalRemaining,
+    totalReturnedQty,
+    totalReturnedWeight,
     unit: purchase?.unit || 'KG',
     godown: stockLot.current_godown || stockLot.godown_name || 'Main Godown',
-    qcStatus: stockLot.qc_status || (qc?.overall_result ? qc.overall_result.toUpperCase() : 'ACCEPTED'),
+    qcStatus: determinedQcStatus,
     purchase,
     vehicle,
     qc,
@@ -403,6 +492,7 @@ async function getLotDetails(lotNo) {
     workOrderOutputs: millingOutputs,
     jobworkMovements: jobworkOutRes.rows || [],
     salesDispatches: salesRes.rows || [],
+    purchaseReturns,
     parents: genealogyParents.rows || [],
     children: genealogyChildren.rows || []
   };
@@ -411,6 +501,7 @@ async function getLotDetails(lotNo) {
 /**
  * Builds Full Forward Traceability Tree (Where did this raw material / lot go?)
  * RM Lot -> QC -> Godown -> Production Batch / Milling -> Output Lots -> Jobwork -> Finished Goods -> Sales -> Customers
+ * AND / OR Purchase Return / Debit Note -> Returned to Supplier
  */
 async function buildForwardTrace(lotNo) {
   const details = await getLotDetails(lotNo);
@@ -423,6 +514,7 @@ async function buildForwardTrace(lotNo) {
     item: details.itemName,
     quantity: details.quantity,
     remainingQuantity: details.remainingQuantity,
+    totalReturnedQty: details.totalReturnedQty || 0,
     stage: details.purchase?.isDerivedFromParent ? 'Milled Output' : 'Raw Inward Material',
     children: []
   };
@@ -442,7 +534,7 @@ async function buildForwardTrace(lotNo) {
   // Node 2: QC Inspection
   const qcNode = {
     id: `QC-${details.lotNo}`,
-    name: details.qc?.qc_no || (details.qcStatus === 'ACCEPTED' ? 'QC Verified (ACCEPTED)' : 'QC Inward Check'),
+    name: details.qc?.qc_no || (details.qcStatus === 'ACCEPTED' ? 'QC Verified (ACCEPTED)' : (details.qcStatus === 'RETURNED' ? 'QC Rejected / Returned' : 'QC Inward Check')),
     type: 'QC',
     status: details.qc?.overall_result || details.qcStatus || 'ACCEPTED',
     inspector: details.qc?.inspector || 'Chief Chemist',
@@ -459,6 +551,26 @@ async function buildForwardTrace(lotNo) {
     remainingQuantity: details.remainingQuantity,
     children: []
   };
+
+  // Node 3.1: Purchase Returns (Debit Note / Returned to Supplier)
+  if (details.purchaseReturns && details.purchaseReturns.length > 0) {
+    for (const pr of details.purchaseReturns) {
+      storageNode.children.push({
+        id: `PUR-RET-${pr.return_inv_no || pr.purchase_return_id}`,
+        name: `Purchase Return #${pr.return_inv_no || pr.return_s_no} → ${pr.supplier_name}`,
+        type: 'PURCHASE_RETURN',
+        supplier: pr.supplier_name,
+        voucherNo: pr.return_inv_no || pr.return_s_no,
+        qty: pr.qty,
+        weight: pr.total_wt || (pr.weight * pr.qty),
+        date: pr.return_date,
+        reason: pr.reason || 'QC Rejection / Returned to Vendor',
+        status: pr.return_status || 'RETURNED',
+        qcNo: pr.qc_no || '',
+        iqrNo: pr.iqr_no || ''
+      });
+    }
+  }
 
   // Node 4: Production Milling / Work Orders & Child Lots
   if (details.millingConsumptions.length > 0) {
@@ -557,7 +669,8 @@ async function buildBackwardTrace(lotNo) {
     type: 'FINISHED_LOT',
     item: details.itemName,
     quantity: details.quantity,
-    stage: details.purchase?.isDerivedFromParent ? 'Milled Product' : 'Raw Inward Stock',
+    totalReturnedQty: details.totalReturnedQty || 0,
+    stage: details.purchase?.isDerivedFromParent ? 'Milled Product' : (details.purchaseReturns?.length > 0 ? 'Returned / Raw Material' : 'Raw Inward Stock'),
     parents: []
   };
 
@@ -584,7 +697,8 @@ async function buildBackwardTrace(lotNo) {
           purchaseVoucher: rawLotDetails?.purchase?.voucherNo || 'N/A',
           purchaseDate: rawLotDetails?.purchase?.purchaseDate || 'N/A',
           qcResult: rawLotDetails?.qc?.overall_result || rawLotDetails?.qcStatus || 'ACCEPTED',
-          vehicleNo: rawLotDetails?.purchase?.vehicleNo || 'N/A'
+          vehicleNo: rawLotDetails?.purchase?.vehicleNo || 'N/A',
+          hasReturn: (rawLotDetails?.purchaseReturns?.length > 0)
         });
       }
 
@@ -609,6 +723,23 @@ async function buildBackwardTrace(lotNo) {
     });
   }
 
+  // 3. Purchase Return / Return to Vendor Stage
+  if (details.purchaseReturns && details.purchaseReturns.length > 0) {
+    for (const pr of details.purchaseReturns) {
+      backwardTree.parents.push({
+        id: `BACK-RET-${pr.return_inv_no || pr.purchase_return_id}`,
+        name: `Returned to Vendor: Inv #${pr.return_inv_no || pr.return_s_no} (${pr.qty} Bags / ${pr.total_wt} KG)`,
+        type: 'PURCHASE_RETURN',
+        supplier: pr.supplier_name,
+        returnDate: pr.return_date,
+        reason: pr.reason,
+        status: pr.return_status,
+        qcNo: pr.qc_no,
+        iqrNo: pr.iqr_no
+      });
+    }
+  }
+
   return backwardTree;
 }
 
@@ -628,6 +759,7 @@ async function generateRecallReport(lotNo) {
   const affectedSuppliers = [];
   const affectedBatches = [];
   const affectedGodowns = [details.godown || 'Main Godown'];
+  const returnedToSuppliers = [];
 
   if (details.purchase?.supplierName) {
     affectedSuppliers.push({
@@ -636,6 +768,21 @@ async function generateRecallReport(lotNo) {
       date: details.purchase.purchaseDate,
       vehicleNo: details.purchase.vehicleNo
     });
+  }
+
+  // Purchase return vendor details
+  if (details.purchaseReturns && details.purchaseReturns.length > 0) {
+    for (const pr of details.purchaseReturns) {
+      returnedToSuppliers.push({
+        supplierName: pr.supplier_name,
+        returnInvNo: pr.return_inv_no || pr.return_s_no,
+        date: pr.return_date,
+        returnedQty: pr.qty,
+        returnedWeight: pr.total_wt,
+        reason: pr.reason,
+        status: pr.return_status
+      });
+    }
   }
 
   // Flatten forward sales
@@ -672,8 +819,11 @@ async function generateRecallReport(lotNo) {
     lotStatus: details.qcStatus,
     currentStockKg: details.remainingQuantity,
     originalQtyKg: details.quantity,
-    recallSeverityLevel: details.qcStatus === 'REJECTED' ? 'CRITICAL' : 'STANDARD_AUDIT',
+    totalReturnedQty: details.totalReturnedQty || 0,
+    totalReturnedWeight: details.totalReturnedWeight || 0,
+    recallSeverityLevel: details.qcStatus === 'REJECTED' || details.qcStatus === 'RETURNED' ? 'CRITICAL' : 'STANDARD_AUDIT',
     affectedSuppliers,
+    returnedToSuppliers,
     affectedBatches,
     affectedGodowns,
     affectedCustomers,

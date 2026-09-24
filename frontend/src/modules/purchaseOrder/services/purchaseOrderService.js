@@ -109,8 +109,15 @@ export const listPurchaseOrders = async () => {
 };
 
 export const getPurchaseOrder = async (id) => {
-  const result = await api(`/purchase-orders/${id}`);
-  return result?.success ? toForm(result.data) : null;
+  try {
+    const result = await api(`/purchase-orders/${id}`);
+    const data = (result && result.success && result.data) ? result.data : (result?.data || result);
+    if (!data || data.error) return null;
+    return toForm(data);
+  } catch (e) {
+    console.error('Error fetching purchase order:', e);
+    return null;
+  }
 };
 
 export const getNextSNo = async () => {

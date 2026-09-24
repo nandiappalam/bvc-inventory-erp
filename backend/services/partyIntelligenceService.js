@@ -9,8 +9,8 @@ class PartyIntelligenceService {
       const suppCountRes = await db.query("SELECT COUNT(*) as cnt FROM supplier_master WHERE status = 'Active' OR status IS NULL");
       const custCountRes = await db.query("SELECT COUNT(*) as cnt FROM customer_master WHERE status = 'Active' OR status IS NULL");
       
-      const purSumRes = await db.query('SELECT SUM(COALESCE(grand_total, net_amount, total_amount, bill_amt, 0)) as total_pur, SUM(COALESCE(total_weight, total_wt, 0)) as total_wt FROM purchases');
-      const salesSumRes = await db.query('SELECT SUM(COALESCE(grand_total, total_amount, bill_amt, 0)) as total_sales, SUM(COALESCE(total_weight, total_wt, 0)) as total_wt FROM sales');
+      const purSumRes = await db.query('SELECT SUM(COALESCE(grand_total, net_amount, total_amount, 0)) as total_pur, SUM(COALESCE(total_weight, 0)) as total_wt FROM purchases');
+      const salesSumRes = await db.query('SELECT SUM(COALESCE(grand_total, total_amount, 0)) as total_sales, SUM(COALESCE(total_weight, total_wt, 0)) as total_wt FROM sales');
 
       let totalQc = 0;
       let passedCnt = 0;
@@ -79,7 +79,7 @@ class PartyIntelligenceService {
           s.email,
           s.gst_number,
           s.area,
-          s.city,
+          COALESCE(s.address3, s.area, s.address4, s.state, '') as city,
           s.limit_days,
           s.limit_amount,
           s.opening_balance
@@ -93,8 +93,8 @@ class PartyIntelligenceService {
           p.s_no,
           p.supplier,
           p.date,
-          COALESCE(p.total_weight, p.total_wt, 0) as total_weight,
-          COALESCE(p.grand_total, p.net_amount, p.total_amount, p.bill_amt, 0) as amount,
+          COALESCE(p.total_weight, 0) as total_weight,
+          COALESCE(p.grand_total, p.net_amount, p.total_amount, 0) as amount,
           p.po_no
         FROM purchases p
       `)).rows || [];
@@ -196,8 +196,8 @@ class PartyIntelligenceService {
           p.date,
           p.inv_no,
           p.supplier,
-          COALESCE(p.grand_total, p.net_amount, p.total_amount, p.bill_amt, 0) as amount,
-          COALESCE(p.total_weight, p.total_wt, 0) as total_weight,
+          COALESCE(p.grand_total, p.net_amount, p.total_amount, 0) as amount,
+          COALESCE(p.total_weight, 0) as total_weight,
           p.total_qty,
           p.vehicle_no,
           p.lorry_no,
@@ -206,7 +206,7 @@ class PartyIntelligenceService {
           pi.qty,
           pi.rate,
           pi.lot_no,
-          COALESCE(pi.amount, pi.total_amt, 0) as item_amt,
+          COALESCE(pi.amount, 0) as item_amt,
           COALESCE(pi.total_weight, pi.weight, 0) as item_wt
         FROM purchases p
         LEFT JOIN purchase_items pi ON pi.purchase_id = p.id
@@ -370,7 +370,7 @@ class PartyIntelligenceService {
           c.email,
           c.gst_number,
           c.area,
-          c.city,
+          COALESCE(c.address3, c.area, c.address4, c.state, '') as city,
           c.limit_days,
           c.limit_amount,
           c.opening_balance
@@ -385,7 +385,7 @@ class PartyIntelligenceService {
           s.customer,
           s.date,
           COALESCE(s.total_weight, s.total_wt, 0) as total_weight,
-          COALESCE(s.grand_total, s.total_amount, s.bill_amt, 0) as amount
+          COALESCE(s.grand_total, s.total_amount, 0) as amount
         FROM sales s
       `)).rows || [];
 
@@ -454,15 +454,15 @@ class PartyIntelligenceService {
           s.id,
           s.s_no,
           s.date,
-          s.inv_no,
+          COALESCE(CAST(s.s_no AS TEXT), CAST(s.id AS TEXT)) as inv_no,
           s.customer,
-          COALESCE(s.grand_total, s.total_amount, s.bill_amt, 0) as amount,
+          COALESCE(s.grand_total, s.total_amount, 0) as amount,
           COALESCE(s.total_weight, s.total_wt, 0) as total_weight,
           s.total_qty,
           si.item_name,
           si.qty,
           si.rate,
-          COALESCE(si.total_amt, si.amount, 0) as item_amt,
+          COALESCE(si.total_amt, 0) as item_amt,
           COALESCE(si.total_wt, si.weight, 0) as item_wt
         FROM sales s
         LEFT JOIN sales_items si ON si.sales_id = s.id
@@ -491,12 +491,12 @@ class PartyIntelligenceService {
         const quotRes = await db.query(`
           SELECT 
             q.*,
-            COALESCE(q.quote_no, CAST(q.id AS TEXT)) as quote_no,
-            COALESCE(q.quote_date, q.date) as quote_date
+            COALESCE(q.bill_no, CAST(q.s_no AS TEXT), CAST(q.id AS TEXT)) as quote_no,
+            q.date as quote_date
           FROM quotations q 
-          WHERE LOWER(TRIM(customer_name)) = ? OR CAST(customer_id AS TEXT) = ?
-          ORDER BY quote_date DESC
-        `, [custNameLower, custIdStr]);
+          WHERE LOWER(TRIM(customer)) = ? OR LOWER(TRIM(customer)) = ?
+          ORDER BY q.date DESC
+        `, [custNameLower, custPrintLower || custNameLower]);
         quotRecords = quotRes.rows || [];
       } catch (_) {}
 

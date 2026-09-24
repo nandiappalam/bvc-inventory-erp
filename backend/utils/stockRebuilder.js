@@ -121,6 +121,9 @@ async function rebuildStockLedger() {
           lot_no: normLot,
           purchased_qty: parseFloat(initialQty) || 0,
           remaining_quantity: parseFloat(initialQty) || 0,
+          returned_qty: 0,
+          consumed_qty: 0,
+          sold_qty: 0,
           rate: parseFloat(rate) || 0,
           date: date,
           type: type,
@@ -341,6 +344,7 @@ async function rebuildStockLedger() {
       if (lotMap.has(key)) {
         const lot = lotMap.get(key);
         lot.remaining_quantity = Math.max(0, lot.remaining_quantity - qty);
+        lot.consumed_qty = (lot.consumed_qty || 0) + qty;
       }
       const { godownId, godownName } = await resolveOutflowGodown(row.item_name, row.lot_no, 3, 'Raw Material Godown');
       await db.run(`
@@ -365,6 +369,7 @@ async function rebuildStockLedger() {
       if (lotMap.has(key)) {
         const lot = lotMap.get(key);
         lot.remaining_quantity = Math.max(0, lot.remaining_quantity - qty);
+        lot.sold_qty = (lot.sold_qty || 0) + qty;
       }
       const { godownId, godownName } = await resolveOutflowGodown(row.item_name, row.lot_no, 4, 'Finished Goods Godown');
       await db.run(`
@@ -390,6 +395,7 @@ async function rebuildStockLedger() {
         if (lotMap.has(key)) {
           const lot = lotMap.get(key);
           lot.remaining_quantity = Math.max(0, lot.remaining_quantity - qty);
+          lot.consumed_qty = (lot.consumed_qty || 0) + qty;
         }
         const { godownId, godownName } = await resolveOutflowGodown(row.item_name, row.lot_no, 4, 'Finished Goods Godown');
         await db.run(`
@@ -416,6 +422,7 @@ async function rebuildStockLedger() {
         if (lotMap.has(key)) {
           const lot = lotMap.get(key);
           lot.remaining_quantity = Math.max(0, lot.remaining_quantity - qty);
+          lot.consumed_qty = (lot.consumed_qty || 0) + qty;
         }
         const { godownId, godownName } = await resolveOutflowGodown(row.item_name, row.lot_no, 4, 'Finished Goods Godown');
         await db.run(`
@@ -428,7 +435,7 @@ async function rebuildStockLedger() {
     // E. Purchase Returns
     try {
       const purchaseReturns = await db.query(`
-        SELECT pri.*, pr.date, pr.id as purchase_return_id
+        SELECT pri.*, pr.date, pr.id as purchase_return_id, pr.godown as return_godown
         FROM purchase_return_items pri
         JOIN purchase_returns pr ON pri.purchase_return_id = pr.id
         ORDER BY pr.date ASC, pri.id ASC
@@ -436,30 +443,47 @@ async function rebuildStockLedger() {
       for (const row of purchaseReturns.rows) {
         if (!row.item_name) continue;
         const qty = parseFloat(row.qty) || 0;
-        const wt = parseFloat(row.total_wt) || (qty * (parseFloat(row.weight) || 1));
+        const uWeight = parseFloat(row.weight) || 50;
+        const wt = parseFloat(row.total_wt) || (qty * uWeight);
+        const rate = parseFloat(row.rate) || 0;
+        const amt = parseFloat(row.amount || row.total_amt) || (qty * rate);
+
+        let itemId = row.item_id || null;
+        if (!itemId) {
+          const im = await db.query(`SELECT id FROM item_master WHERE UPPER(TRIM(item_name)) = UPPER(TRIM(?)) LIMIT 1`, [row.item_name]);
+          if (im.rows.length > 0) itemId = im.rows[0].id;
+        }
+
         const key = `${row.item_name.trim().toUpperCase()}:::${(row.lot_no || '').trim().toUpperCase()}`;
         if (lotMap.has(key)) {
           const lot = lotMap.get(key);
           lot.remaining_quantity = Math.max(0, lot.remaining_quantity - qty);
+          lot.returned_qty = (lot.returned_qty || 0) + qty;
         }
         const { godownId, godownName } = await resolveOutflowGodown(row.item_name, row.lot_no, 3, 'Raw Material Godown');
         await db.run(`
-          INSERT INTO stock (date, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, godown_id)
-          VALUES (?, ?, ?, ?, ?, ?, ?, 'Purchase Return', ?, ?, ?)
-        `, [row.date, row.item_name, row.lot_no || '', -qty, -wt, row.rate || 0, -(row.total_amt || 0), row.purchase_return_id, godownName, godownId]);
+          INSERT INTO stock (date, item_id, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, godown_id, status)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Purchase Return', ?, ?, ?, 'Active')
+        `, [row.date, itemId, row.item_name, row.lot_no || '', -qty, -wt, rate, -amt, row.purchase_return_id, godownName, godownId]);
       }
     } catch (e) {}
 
     // 4. Save normalized lotMap into `stock_lots` table
     for (const [key, lot] of lotMap.entries()) {
       let itemId = null;
-      const im = await db.query(`SELECT id FROM item_master WHERE UPPER(TRIM(item_name)) = UPPER(TRIM(?))`, [lot.item_name]);
+      const im = await db.query(`SELECT id FROM item_master WHERE UPPER(TRIM(item_name)) = UPPER(TRIM(?)) LIMIT 1`, [lot.item_name]);
       if (im.rows.length > 0) itemId = im.rows[0].id;
+
+      const isFullyReturned = (lot.returned_qty || 0) >= (lot.purchased_qty - 0.001) && (lot.returned_qty || 0) > 0;
+      const isConsumed = (lot.consumed_qty || 0) >= (lot.purchased_qty - 0.001) && (lot.consumed_qty || 0) > 0;
+      const lotQcStatus = isFullyReturned ? 'RETURNED' : 'ACCEPTED';
+      const lotUnloadStatus = isFullyReturned ? 'RETURNED' : (isConsumed ? 'CONSUMED' : 'UNLOADED');
+      const usable = (isFullyReturned || isConsumed || lot.remaining_quantity <= 0.001) ? 0 : 1;
 
       await db.run(`
         INSERT INTO stock_lots (godown_id, item_id, item_name, lot_no, purchase_id, quantity, remaining_quantity, rate, qc_status, usable_for_production, approval_status, unloading_status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ACCEPTED', 1, 'APPROVED', 'UNLOADED')
-      `, [lot.godownId || null, itemId, lot.item_name, lot.lot_no, lot.refId || null, lot.purchased_qty, lot.remaining_quantity, lot.rate]);
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'APPROVED', ?)
+      `, [lot.godownId || null, itemId, lot.item_name, lot.lot_no, lot.refId || null, lot.purchased_qty, lot.remaining_quantity, lot.rate, lotQcStatus, usable, lotUnloadStatus]);
     }
 
     console.log(`✓ rebuildStockLedger successfully re-synchronized ${lotMap.size} stock lots & ledger entries.`);

@@ -492,16 +492,23 @@ const PurchaseCreation = () => {
     }
   };
 
-  const handleTopFrameChange = useCallback((e) => {
-    const { name, value } = e.target
-
-    if (name === 'supplier_id') {
-      setFormData((prev) => ({ ...prev, supplier_id: value }))
-      return
+  const handleTopFrameChange = useCallback((e, val) => {
+    let name, value;
+    if (e && e.target && e.target.name !== undefined) {
+      name = e.target.name;
+      value = e.target.value;
+    } else if (typeof e === 'string') {
+      name = e;
+      value = val;
+    } else if (e && e.name !== undefined) {
+      name = e.name;
+      value = e.value;
+    } else {
+      return;
     }
 
-    setFormData((prev) => ({ ...prev, [name]: value }))
-  }, [])
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  }, []);
 
   const handleRowChange = useCallback((index, key, value) => {
     setTableData((prevRows) => {
@@ -889,13 +896,169 @@ const PurchaseCreation = () => {
     // This will be handled by the dedicated deductions section
   ];
 
+  const handleCancel = () => {
+    if (window.confirm('Are you sure you want to cancel? Any unsaved changes will be discarded.')) {
+      clearModuleDraft('purchase_create');
+      navigate('/purchase/display');
+    }
+  };
+
+  const handleRefresh = async () => {
+    if (id) {
+      setLoading(true);
+      try {
+        const result = await api(`/purchases/${id}`);
+        const data = result?.data || result;
+        if (data) {
+          const formatDate = (d) => d ? String(d).split('T')[0].split(' ')[0] : '';
+          const suppId = String(data.supplier || data.supplier_id || data.supplierId || '');
+          const suppName = data.supplier_name || data.supplierName || '';
+
+          setFormData({
+            s_no: String(data.s_no || data.sNo || ''),
+            supplier_id: suppId,
+            supplierId: suppId,
+            supplier_name: suppName,
+            supplierName: suppName,
+            supplier_details: data.address || data.supplier_details || '',
+            address: data.address || data.supplier_details || '',
+            transporter: data.transporter || data.transport || '',
+            transport: data.transporter || data.transport || '',
+            vehicle_no: data.vehicle_no || data.lorry_no || '',
+            lorry_no: data.vehicle_no || data.lorry_no || '',
+            driver_name: data.driver_name || data.driver || '',
+            driver: data.driver_name || data.driver || '',
+            date: formatDate(data.date),
+            inv_no: data.inv_no || data.invNo || '',
+            invNo: data.inv_no || data.invNo || '',
+            inv_date: formatDate(data.inv_date || data.invDate),
+            invDate: formatDate(data.inv_date || data.invDate),
+            godown_id: String(data.godown || data.godown_id || data.godownId || ''),
+            godownId: String(data.godown || data.godown_id || data.godownId || ''),
+            pay_type: data.pay_type || data.payType || 'Cash',
+            tax_type: data.tax_type || data.taxType || 'Exclusive',
+            tax_rate: data.tax_percent !== undefined ? data.tax_percent : (data.tax_rate || 5),
+            gst_no: data.gst_no || '',
+            email: data.email || '',
+            type: data.type || 'Urad',
+            remarks: data.remarks || '',
+            source_order_no: data.source_order_no || data.po_no || '',
+            source_order_id: data.source_order_id || data.purchase_order_id || '',
+            purchase_order_id: data.purchase_order_id || data.source_order_id || '',
+            po_no: data.po_no || data.source_order_no || ''
+          });
+
+          if (Array.isArray(data.items) && data.items.length > 0) {
+            setTableData(data.items.map(it => {
+              const qty = Number(it.qty || 0);
+              const rate = Number(it.rate || it.purc_rate || 0);
+              const disc_percent = Number(it.disc_percent ?? it.discount_percent ?? 0);
+              const tax_percent = Number(it.tax_percent ?? 5);
+              const per_unit_wt = Number(it.per_unit_weight ?? it.weight ?? 0);
+              const total_weight = Number(it.total_weight ?? it.total_wt ?? (qty * per_unit_wt));
+              const base_amount = qty * rate;
+              const disc_amount = base_amount * (disc_percent / 100);
+              const taxable_amount = base_amount - disc_amount;
+              const tax_amount = (taxable_amount * tax_percent) / 100;
+              const amount = base_amount - disc_amount + tax_amount;
+
+              return {
+                ...it,
+                item_id: it.item_id || it.itemId || it.item_name || '',
+                item_name: it.item_name || it.itemName || '',
+                item_label: it.item_name || it.itemName || '',
+                qty,
+                weight: per_unit_wt,
+                per_unit_wt,
+                total_wt: total_weight,
+                total_weight,
+                rate,
+                purc_rate: rate,
+                disc: disc_percent,
+                disc_percent,
+                tax_rate: tax_percent,
+                tax_percent,
+                base_amount,
+                disc_amount,
+                tax_amount,
+                amount: amount.toFixed(2),
+                lot_no: it.lot_no || '',
+                lot_status: 'reserved'
+              };
+            }));
+          }
+        }
+      } catch (e) {
+        console.error('Refresh error:', e);
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      clearModuleDraft('purchase_create');
+      try {
+        const nextSNo = await api.getNextSNo('/purchases/purchase-list');
+        setFormData({
+          s_no: String(nextSNo || '1'),
+          supplier_id: '',
+          supplierId: '',
+          supplier_name: '',
+          supplierName: '',
+          supplier_details: '',
+          address: '',
+          transporter: '',
+          transport: '',
+          vehicle_no: '',
+          lorry_no: '',
+          driver_name: '',
+          driver: '',
+          date: new Date().toISOString().split('T')[0],
+          inv_no: '',
+          invNo: '',
+          inv_date: '',
+          invDate: '',
+          godown_id: '',
+          godownId: '',
+          pay_type: 'Cash',
+          tax_type: 'Exclusive',
+          tax_rate: 5,
+          gst_no: '',
+          email: '',
+          type: 'Urad',
+          remarks: '',
+          source_order_no: '',
+          source_order_id: '',
+          purchase_order_id: '',
+          po_no: ''
+        });
+        setTableData([{
+          sno: 1,
+          item_name: '',
+          lot_no: '',
+          qty: 0,
+          weight: 0,
+          total_wt: 0,
+          rate: 0,
+          disc: 0,
+          tax_rate: 5,
+          amount: 0,
+          lot_status: 'available'
+        }]);
+        setSelectedDeductions([]);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+  };
+
   const isPoWise = Boolean(formData.po_no || formData.source_order_no);
 
   return (
     <div className="window">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '10px' }}>
         <div>
-          <div className="screen-title" style={{ margin: 0 }}>Purchase Creation</div>
+          <div className="screen-title" style={{ margin: 0 }}>
+            {id ? 'Purchase Update / Edit' : 'Purchase Creation'}
+          </div>
           <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
             Creation Mode: <span style={{ fontWeight: 600, color: isPoWise ? '#0284c7' : '#16a34a' }}>{isPoWise ? 'PO Wise (Linked Order)' : 'Direct Purchase (Without PO)'}</span>
           </div>
@@ -1259,11 +1422,14 @@ const PurchaseCreation = () => {
 
         </div>
 
-        {/* MODULAR: EntryActions - Save button - matches SalesCreate */}
+        {/* MODULAR: EntryActions - Back, Cancel, Refresh, Save */}
         <EntryActions
           onSave={handleSubmit}
-          loading={loading}
-          saveText="Save"
+          onCancel={handleCancel}
+          onRefresh={handleRefresh}
+          onBack={() => navigate('/purchase/display')}
+          saving={loading}
+          saveText={id ? 'Update' : 'Save'}
         />
       </form>
 

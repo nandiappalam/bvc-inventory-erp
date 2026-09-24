@@ -130,6 +130,10 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
     }
   };
 
+  const handleTrace = (lot) => {
+    handleManualSearch(lot);
+  };
+
   const handlePrint = () => {
     if (!traceData) return;
     const lotNo = traceData.lotNo || lotInput || 'LOT';
@@ -138,6 +142,7 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
     const grindBatches = traceData.productionHistory?.grindBatches || [];
     const coas = traceData.qualityCertificates?.coas || [];
     const dispatches = traceData.forwardTrace?.dispatches || [];
+    const purReturns = traceData.purchaseReturns || traceData.backwardTrace?.purchaseReturns || [];
 
     const printWindowHtml = `
       <!DOCTYPE html>
@@ -227,6 +232,37 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
                 </tr>
               </table>
             ` : '<p style="margin:0;">Procurement origin linked through batch transformation record.</p>'}
+            ${purReturns && purReturns.length > 0 ? `
+              <div style="margin-top:8px; padding:6px 10px; background:#fffbeb; border:1px solid #fde68a; border-radius:4px;">
+                <div style="font-weight:800; color:#b45309; font-size:10px; margin-bottom:4px;">⚠️ DEBIT NOTE / PURCHASE RETURN DETAILS:</div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Voucher No</th>
+                      <th>Return Date</th>
+                      <th>Supplier</th>
+                      <th>Item</th>
+                      <th style="text-align:right;">Returned Qty</th>
+                      <th style="text-align:right;">Returned Wt (kg)</th>
+                      <th>Return Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${purReturns.map(pr => `
+                      <tr>
+                        <td><strong>${pr.return_voucher_no || '—'}</strong></td>
+                        <td>${pr.date || '—'}</td>
+                        <td>${pr.supplier_name || '—'}</td>
+                        <td>${pr.item_name || '—'}</td>
+                        <td style="text-align:right; color:#dc2626; font-weight:700;">-${pr.returned_qty || 0}</td>
+                        <td style="text-align:right; color:#dc2626; font-weight:700;">-${pr.returned_total_weight_kg || 0} kg</td>
+                        <td>${pr.return_reason || 'Rejection Return'}</td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+            ` : ''}
           </div>
         </div>
 
@@ -394,6 +430,8 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
   };
 
   const supplier = traceData?.backwardTrace?.supplier;
+  const purchaseReturns = traceData?.purchaseReturns || traceData?.backwardTrace?.purchaseReturns || [];
+  const totalReturnedBags = purchaseReturns.reduce((acc, r) => acc + (parseFloat(r.returned_qty) || 0), 0);
   const iqr = traceData?.backwardTrace?.iqr;
   const grindBatches = traceData?.productionHistory?.grindBatches || [];
   const rawCoas = traceData?.qualityCertificates?.coas || [];
@@ -564,6 +602,14 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
                     sx={{ cursor: 'pointer', borderColor: '#8b5cf6', color: '#6d28d9', fontWeight: 600 }}
                   />
                 )}
+                {purchaseReturns.length > 0 && (
+                  <Chip
+                    label={`Debit Note Return: ${totalReturnedBags} Bags`}
+                    color="warning"
+                    size="small"
+                    sx={{ fontWeight: 800, bgcolor: '#fef3c7', color: '#b45309', border: '1px solid #fde68a' }}
+                  />
+                )}
               </Stack>
             </Box>
 
@@ -648,6 +694,25 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
                           <Typography variant="body2">{supplier.address}, {supplier.area} — Ph: {supplier.phone}</Typography>
                         </Grid>
                       </Grid>
+
+                      {purchaseReturns.length > 0 && (
+                        <Box sx={{ mt: 2, p: 1.5, bgcolor: '#fffbeb', borderRadius: 1.5, border: '1px solid #fde68a' }}>
+                          <Typography variant="caption" sx={{ fontWeight: 800, color: '#b45309', display: 'flex', alignItems: 'center', gap: 0.5, mb: 1 }}>
+                            ⚠️ PURCHASE RETURN (DEBIT NOTE) DISPATCHED TO SUPPLIER
+                          </Typography>
+                          {purchaseReturns.map((pr, idx) => (
+                            <Box key={`pr-${idx}`} sx={{ fontSize: '12px', color: '#92400e', mb: idx < purchaseReturns.length - 1 ? 1 : 0, pb: idx < purchaseReturns.length - 1 ? 1 : 0, borderBottom: idx < purchaseReturns.length - 1 ? '1px dashed #fde68a' : 'none' }}>
+                              <Box sx={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
+                                <span>Voucher: {pr.return_voucher_no} ({pr.date})</span>
+                                <span style={{ color: '#dc2626' }}>- {pr.returned_qty} Bags ({pr.returned_total_weight_kg} Kg)</span>
+                              </Box>
+                              <Box sx={{ fontSize: '11px', color: '#78350f', mt: 0.2 }}>
+                                Reason: {pr.return_reason || 'Material Rejection'} | Supplier: {pr.supplier_name}
+                              </Box>
+                            </Box>
+                          ))}
+                        </Box>
+                      )}
                     </Box>
                   ) : (
                     <Box sx={{ p: 2, bgcolor: '#f8fafc', borderRadius: 1.5, border: '1px dashed #cbd5e1' }}>

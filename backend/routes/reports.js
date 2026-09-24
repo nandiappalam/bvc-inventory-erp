@@ -172,11 +172,13 @@ router.get('/stock-status', async (req, res) => {
         (SELECT item_group FROM item_master WHERE LOWER(item_name) = LOWER(stock.item_name) LIMIT 1) as item_group,
         SUM(CASE WHEN type IN ('Opening Stock', 'Open Stock') THEN COALESCE(qty, 0) ELSE 0 END) as opening_qty,
         SUM(CASE WHEN type NOT IN ('Opening Stock', 'Open Stock') AND qty > 0 THEN COALESCE(qty, 0) ELSE 0 END) as total_purchased,
-        SUM(CASE WHEN qty < 0 THEN COALESCE(ABS(qty), 0) ELSE 0 END) as total_sold,
+        SUM(CASE WHEN LOWER(type) = 'purchase return' THEN COALESCE(ABS(qty), 0) ELSE 0 END) as total_returned,
+        SUM(CASE WHEN qty < 0 AND LOWER(type) != 'purchase return' THEN COALESCE(ABS(qty), 0) ELSE 0 END) as total_sold,
         SUM(COALESCE(qty, 0)) as current_balance,
         SUM(CASE WHEN type IN ('Opening Stock', 'Open Stock') THEN COALESCE(weight, 0) ELSE 0 END) as opening_weight,
         SUM(CASE WHEN type NOT IN ('Opening Stock', 'Open Stock') AND qty > 0 THEN COALESCE(weight, 0) ELSE 0 END) as total_purchased_weight,
-        SUM(CASE WHEN qty < 0 THEN COALESCE(ABS(weight), 0) ELSE 0 END) as total_sold_weight,
+        SUM(CASE WHEN LOWER(type) = 'purchase return' THEN COALESCE(ABS(weight), 0) ELSE 0 END) as total_returned_weight,
+        SUM(CASE WHEN qty < 0 AND LOWER(type) != 'purchase return' THEN COALESCE(ABS(weight), 0) ELSE 0 END) as total_sold_weight,
         SUM(COALESCE(weight, 0)) as current_balance_weight
       FROM stock
       WHERE 1=1
@@ -304,7 +306,8 @@ router.get('/godown-stock', async (req, res) => {
         AVG(COALESCE(s.weight, im.weight, 1)) as weight,
         SUM(CASE WHEN s.type IN ('Opening Stock', 'Open Stock', 'Opening') THEN COALESCE(s.qty, 0) ELSE 0 END) as opening_qty,
         SUM(CASE WHEN s.type NOT IN ('Opening Stock', 'Open Stock', 'Opening') AND s.qty > 0 THEN COALESCE(s.qty, 0) ELSE 0 END) as in_qty,
-        SUM(CASE WHEN s.qty < 0 THEN COALESCE(ABS(s.qty), 0) ELSE 0 END) as out_qty,
+        SUM(CASE WHEN LOWER(s.type) = 'purchase return' THEN COALESCE(ABS(s.qty), 0) ELSE 0 END) as return_qty,
+        SUM(CASE WHEN s.qty < 0 AND LOWER(s.type) != 'purchase return' THEN COALESCE(ABS(s.qty), 0) ELSE 0 END) as out_qty,
         SUM(COALESCE(s.qty, 0)) as available_qty,
         AVG(COALESCE(s.rate, 0)) as rate,
         MAX(s.date) as last_transaction_date
@@ -576,11 +579,13 @@ router.get('/lots', async (req, res) => {
         lot_no,
         MIN(date) as created_at,
         SUM(CASE WHEN qty > 0 THEN qty ELSE 0 END) as purchased_qty,
-        SUM(CASE WHEN qty < 0 THEN ABS(qty) ELSE 0 END) as sold_qty,
+        SUM(CASE WHEN LOWER(type) = 'purchase return' THEN ABS(qty) ELSE 0 END) as returned_qty,
+        SUM(CASE WHEN qty < 0 AND LOWER(type) != 'purchase return' THEN ABS(qty) ELSE 0 END) as sold_qty,
         SUM(qty) as remaining_quantity,
         AVG(rate) as rate,
         SUM(CASE WHEN qty > 0 THEN COALESCE(weight, 0) ELSE 0 END) as purchased_weight,
-        SUM(CASE WHEN qty < 0 THEN COALESCE(ABS(weight), 0) ELSE 0 END) as sold_weight,
+        SUM(CASE WHEN LOWER(type) = 'purchase return' THEN COALESCE(ABS(weight), 0) ELSE 0 END) as returned_weight,
+        SUM(CASE WHEN qty < 0 AND LOWER(type) != 'purchase return' THEN COALESCE(ABS(weight), 0) ELSE 0 END) as sold_weight,
         SUM(COALESCE(weight, 0)) as remaining_weight
       FROM stock
       WHERE 1=1
@@ -4131,8 +4136,13 @@ const categoryReportHandler = async (req, res) => {
             s.item_name,
             COALESCE(MAX(NULLIF(TRIM(im.item_group), '')), MAX(NULLIF(TRIM(im.type), '')), 'General') as item_group,
             COALESCE(s.lot_no, 'LOT-GEN') as lot_no,
+            SUM(CASE WHEN s.type IN ('Opening Stock', 'Open Stock', 'Opening') THEN COALESCE(s.qty, 0) ELSE 0 END) as opening_qty,
+            SUM(CASE WHEN s.type NOT IN ('Opening Stock', 'Open Stock', 'Opening') AND s.qty > 0 THEN COALESCE(s.qty, 0) ELSE 0 END) as total_purchased,
+            SUM(CASE WHEN LOWER(COALESCE(s.type, '')) = 'purchase return' THEN COALESCE(ABS(s.qty), 0) ELSE 0 END) as total_returned,
+            SUM(CASE WHEN s.qty < 0 AND LOWER(COALESCE(s.type, '')) NOT LIKE '%wastage%' AND LOWER(COALESCE(s.type, '')) != 'purchase return' THEN COALESCE(ABS(s.qty), 0) ELSE 0 END) as total_sold,
+            SUM(CASE WHEN LOWER(COALESCE(s.type, '')) LIKE '%wastage%' OR LOWER(s.item_name) LIKE '%wastage%' THEN COALESCE(ABS(s.qty), 0) ELSE 0 END) as wastage_qty,
             SUM(COALESCE(s.qty, 0)) as available_qty,
-            SUM(CASE WHEN COALESCE(s.weight, 0) > 0 THEN s.weight ELSE (COALESCE(s.qty, 0) * COALESCE(NULLIF(im.weight, 0), 50)) END) as weight,
+            SUM(COALESCE(s.weight, (COALESCE(s.qty, 0) * COALESCE(NULLIF(im.weight, 0), 50)))) as weight,
             0 as reserved_qty
           FROM stock s
           LEFT JOIN item_master im ON (CAST(s.item_id AS TEXT) = CAST(im.id AS TEXT) OR LOWER(TRIM(s.item_name)) = LOWER(TRIM(im.item_name)) OR s.item_name = im.item_code)
@@ -4153,10 +4163,11 @@ const categoryReportHandler = async (req, res) => {
             COALESCE(g.godown_name, s.godown, 'Main Godown') as godown_name,
             SUM(CASE WHEN s.type IN ('Opening Stock', 'Open Stock', 'Opening') THEN COALESCE(s.qty, 0) ELSE 0 END) as opening_qty,
             SUM(CASE WHEN s.type NOT IN ('Opening Stock', 'Open Stock', 'Opening') AND s.qty > 0 THEN COALESCE(s.qty, 0) ELSE 0 END) as total_purchased,
-            SUM(CASE WHEN s.qty < 0 AND LOWER(COALESCE(s.type, '')) NOT LIKE '%wastage%' THEN COALESCE(ABS(s.qty), 0) ELSE 0 END) as total_sold,
+            SUM(CASE WHEN LOWER(COALESCE(s.type, '')) = 'purchase return' THEN COALESCE(ABS(s.qty), 0) ELSE 0 END) as total_returned,
+            SUM(CASE WHEN s.qty < 0 AND LOWER(COALESCE(s.type, '')) NOT LIKE '%wastage%' AND LOWER(COALESCE(s.type, '')) != 'purchase return' THEN COALESCE(ABS(s.qty), 0) ELSE 0 END) as total_sold,
             SUM(CASE WHEN LOWER(COALESCE(s.type, '')) LIKE '%wastage%' OR LOWER(s.item_name) LIKE '%wastage%' THEN COALESCE(ABS(s.qty), 0) ELSE 0 END) as wastage_qty,
             SUM(COALESCE(s.qty, 0)) as available_qty,
-            SUM(CASE WHEN COALESCE(s.weight, 0) > 0 THEN s.weight ELSE (COALESCE(s.qty, 0) * COALESCE(NULLIF(im.weight, 0), 50)) END) as weight,
+            SUM(COALESCE(s.weight, (COALESCE(s.qty, 0) * COALESCE(NULLIF(im.weight, 0), 50)))) as weight,
             0 as reserved_qty
           FROM stock s
           LEFT JOIN item_master im ON (CAST(s.item_id AS TEXT) = CAST(im.id AS TEXT) OR LOWER(TRIM(s.item_name)) = LOWER(TRIM(im.item_name)) OR s.item_name = im.item_code)

@@ -333,7 +333,8 @@ router.get('/report', async (req, res) => {
         (SELECT item_group FROM item_master WHERE LOWER(item_name) = LOWER(s.item_name) LIMIT 1) as item_group,
         SUM(CASE WHEN s.type IN ('Opening Stock', 'Open Stock') THEN COALESCE(s.qty, 0) ELSE 0 END) as opening_qty,
         SUM(CASE WHEN s.type NOT IN ('Opening Stock', 'Open Stock') AND s.qty > 0 THEN COALESCE(s.qty, 0) ELSE 0 END) as total_purchased,
-        SUM(CASE WHEN s.qty < 0 THEN COALESCE(ABS(s.qty), 0) ELSE 0 END) as total_sold,
+        SUM(CASE WHEN LOWER(s.type) = 'purchase return' THEN COALESCE(ABS(s.qty), 0) ELSE 0 END) as total_returned,
+        SUM(CASE WHEN s.qty < 0 AND LOWER(s.type) != 'purchase return' THEN COALESCE(ABS(s.qty), 0) ELSE 0 END) as total_sold,
         SUM(COALESCE(s.qty, 0)) as balance,
         COALESCE(
           (SELECT CASE WHEN COALESCE(qty, 0) != 0 THEN ROUND(CAST(ABS(weight) / ABS(qty) AS NUMERIC), 2) ELSE 0 END FROM stock WHERE item_name = s.item_name AND qty != 0 LIMIT 1),
@@ -440,7 +441,7 @@ router.get('/lots', async (req, res) => {
       // 1. Purchases
       try {
         const purRes = await db.query(`
-          SELECT pi.qty, pi.weight, pi.rate, pi.total_amt, p.date, p.supplier, p.inv_no, p.id as purchase_id
+          SELECT pi.qty, pi.weight, pi.rate, COALESCE(pi.amount, 0) as total_amt, p.date, p.supplier, p.inv_no, p.id as purchase_id
           FROM purchase_items pi
           JOIN purchases p ON pi.purchase_id = p.id
           WHERE pi.lot_no = ?
@@ -664,6 +665,37 @@ router.get('/lots', async (req, res) => {
         }
       } catch (e) {}
 
+      // 10. Purchase Returns (Supplier Debit Notes)
+      let returnedQty = 0;
+      let returnedWeight = 0;
+      try {
+        const prRes = await db.query(`
+          SELECT pri.qty, pri.weight, pri.total_wt, pri.rate, pri.amount, pri.reason, pr.date, pr.return_inv_no, pr.s_no, pr.id as purchase_return_id, pr.supplier
+          FROM purchase_return_items pri
+          JOIN purchase_returns pr ON pri.purchase_return_id = pr.id
+          WHERE UPPER(pri.lot_no) = UPPER(?) OR UPPER(pri.lot_no) LIKE UPPER(?)
+        `, [row.lot_no, `%${row.lot_no}%`]);
+        for (const prRow of prRes.rows) {
+          const pQty = parseFloat(prRow.qty) || 0;
+          const pWt = parseFloat(prRow.total_wt) || (pQty * (parseFloat(prRow.weight) || 50));
+          returnedQty += pQty;
+          returnedWeight += pWt;
+          lifecycle.push({
+            module: 'Purchase Return (Debit Note)',
+            reference_id: prRow.purchase_return_id,
+            reference_no: prRow.return_inv_no || prRow.s_no,
+            date: prRow.date,
+            party: prRow.supplier || 'Supplier Return',
+            qty: -Math.abs(pQty),
+            weight: -Math.abs(pWt),
+            rate: prRow.rate || 0,
+            amount: -Math.abs(prRow.amount || (pQty * (prRow.rate || 0))),
+            type: 'Return',
+            reason: prRow.reason || 'Material Rejection / Return'
+          });
+        }
+      } catch (e) {}
+
       lifecycle.sort((a, b) => new Date(a.date) - new Date(b.date));
 
       // Processing details for RM (where it was processed and what FG/Wastage was created)
@@ -740,6 +772,9 @@ router.get('/lots', async (req, res) => {
 
       return {
         ...row,
+        returned_qty: returnedQty,
+        returned_weight: returnedWeight,
+        actual_sold_qty: Math.max(0, (row.purchased_qty - row.remaining_quantity - returnedQty)),
         category,
         lifecycle_history: lifecycle,
         processing_details: processingDetails,

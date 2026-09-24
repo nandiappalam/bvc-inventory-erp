@@ -81,7 +81,7 @@ const WorkOrderSlipCreate = () => {
 
   // Section 3: Wastage & Rejection Breakdown
   const [wastageItems, setWastageItems] = useState([
-   /* {
+    /*{
       category: 'Rejection',
       item_name: 'Rejection Waste Flour',
       lot_no: 'REJ-01',
@@ -1159,7 +1159,7 @@ const WorkOrderSlipCreate = () => {
 
         {/* Remarks and Status */}
         <div className="wo-footer-details">
-          <div className="wo-field-group" style={{ flex: 1 }}>
+          <div className="wo-field-group remarks-field">
             <label>Process Instructions / Remarks:</label>
             <input
               type="text"
@@ -1170,8 +1170,8 @@ const WorkOrderSlipCreate = () => {
               className="wo-input"
             />
           </div>
-          <div className="wo-field-group" style={{ width: '220px' }}>
-            <label>Status:</label>
+          <div className="wo-field-group status-field">
+            <label>Work Order Status:</label>
             <select
               name="status"
               value={workOrderData.status}

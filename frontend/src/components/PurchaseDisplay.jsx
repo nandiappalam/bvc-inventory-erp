@@ -91,11 +91,12 @@ const handleInPassPrint = (row, selectedCompany) => {
 
 // Handle edit (navigate)
 const handleEdit = (row, navigate) => {
-  if (!row?.id) {
-    alert('Cannot edit: missing row.id');
+  const targetId = row?.id || row?.s_no;
+  if (!targetId) {
+    alert('Cannot edit: missing record ID');
     return;
   }
-  navigate(`/purchase/edit/${row.id}`);
+  navigate(`/purchase/edit/${targetId}`);
 };
 
 // Custom actions for Purchase

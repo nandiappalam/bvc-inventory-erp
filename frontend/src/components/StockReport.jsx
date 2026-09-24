@@ -456,6 +456,7 @@ const StockReport = () => {
                   <th style={{...styles.th, textAlign: 'right'}}>Weight (KG)</th>
                   <th style={{...styles.th, textAlign: 'right'}}>Opening Stock</th>
                   <th style={{...styles.th, textAlign: 'right'}}>Total Purchased/In</th>
+                  <th style={{...styles.th, textAlign: 'right'}}>Total Returned</th>
                   <th style={{...styles.th, textAlign: 'right'}}>Total Sold/Out</th>
                   <th style={{...styles.th, textAlign: 'right'}}>Balance Stock</th>
                   <th style={{...styles.th, textAlign: 'right'}}>Weight Balance (KG)</th>
@@ -469,6 +470,7 @@ const StockReport = () => {
                   <th style={styles.th}>Purchase/Mfg Date</th>
                   <th style={{...styles.th, textAlign: 'right'}}>Weight (KG)</th>
                   <th style={{...styles.th, textAlign: 'right'}}>Purchased/Yielded</th>
+                  <th style={{...styles.th, textAlign: 'right'}}>Returned</th>
                   <th style={{...styles.th, textAlign: 'right'}}>Sold/Consumed</th>
                   <th style={{...styles.th, textAlign: 'right'}}>Remaining Stock</th>
                   <th style={{...styles.th, textAlign: 'right'}}>Weight Remaining (KG)</th>
@@ -479,7 +481,7 @@ const StockReport = () => {
             <tbody>
               {filteredData.length === 0 ? (
                 <tr>
-                  <td colSpan={reportMode === 'summary' ? 8 : 11} style={styles.noData}>
+                  <td colSpan={reportMode === 'summary' ? 9 : 12} style={styles.noData}>
                     No stock data matching current filters
                   </td>
                 </tr>
@@ -522,6 +524,7 @@ const StockReport = () => {
                             <td style={{...styles.td, textAlign: 'right'}}>{getBagWeight(row).toFixed(2)}</td>
                             <td style={{...styles.td, textAlign: 'right'}}>{parseFloat(row.opening_qty || 0).toFixed(2)}</td>
                             <td style={{...styles.td, textAlign: 'right'}}>{parseFloat(row.total_purchased || 0).toFixed(2)}</td>
+                            <td style={{...styles.td, textAlign: 'right', color: parseFloat(row.total_returned || 0) > 0 ? '#dc2626' : 'inherit', fontWeight: parseFloat(row.total_returned || 0) > 0 ? 'bold' : 'normal'}}>{parseFloat(row.total_returned || 0).toFixed(2)}</td>
                             <td style={{...styles.td, textAlign: 'right'}}>{parseFloat(row.total_sold || 0).toFixed(2)}</td>
                             <td style={{
                               ...styles.td, 
@@ -588,6 +591,7 @@ const StockReport = () => {
                             <td style={styles.td}>{row.created_at ? new Date(row.created_at).toLocaleDateString() : '-'}</td>
                             <td style={{...styles.td, textAlign: 'right'}}>{getBagWeight(row).toFixed(2)}</td>
                             <td style={{...styles.td, textAlign: 'right'}}>{parseFloat(row.purchased_qty || 0).toFixed(2)}</td>
+                            <td style={{...styles.td, textAlign: 'right', color: parseFloat(row.returned_qty || 0) > 0 ? '#dc2626' : 'inherit', fontWeight: parseFloat(row.returned_qty || 0) > 0 ? 'bold' : 'normal'}}>{parseFloat(row.returned_qty || 0).toFixed(2)}</td>
                             <td style={{...styles.td, textAlign: 'right'}}>{parseFloat(row.sold_qty || 0).toFixed(2)}</td>
                             <td style={{
                               ...styles.td, 
@@ -613,7 +617,7 @@ const StockReport = () => {
                       {/* Enriched Details Accordion for Lot Traceability */}
                       {reportMode === 'lot' && isExpanded && (
                         <tr style={{background: '#f8fafc'}}>
-                          <td colSpan={11} style={styles.expandedTd}>
+                          <td colSpan={12} style={styles.expandedTd}>
                             <div style={styles.expandedCard}>
                               <h4 style={styles.expandedHeader}>
                                 🔍 Complete Trace Audit Log for Lot: <span style={{fontFamily: 'monospace', textDecoration: 'underline'}}>{row.lot_no}</span>

@@ -94,40 +94,77 @@ router.get('/purchase-list', async (req, res) => {
  
 router.get('/:id', async (req, res) => {
   try {
-    const purchaseResult = await db.query('SELECT * FROM purchases WHERE id = ?', [req.params.id]);
-    if (purchaseResult.rows.length === 0) {
+    const rawId = req.params.id;
+    const isNum = !isNaN(Number(rawId)) && String(rawId).trim() !== '';
+    const numVal = isNum ? Number(rawId) : null;
+
+    const purchaseResult = await db.query(
+      `SELECT * FROM purchases WHERE id = ? OR inv_no = ? ${isNum ? 'OR s_no = ?' : ''}`,
+      isNum ? [numVal, rawId, numVal] : [rawId, rawId]
+    );
+
+    if (!purchaseResult.rows || purchaseResult.rows.length === 0) {
       return res.status(404).json({ message: 'Purchase not found' });
     }
     const purchaseData = purchaseResult.rows[0];
- 
-    const itemsResult = await db.query('SELECT * FROM purchase_items WHERE purchase_id = ?', [req.params.id])
-    let deductionsResult = []
+    const actualId = purchaseData.id;
+    const sNo = purchaseData.s_no;
+
+    const itemsResult = await db.query(
+      `SELECT pi.*, COALESCE(im.item_name, pi.item_name) as item_name
+       FROM purchase_items pi
+       LEFT JOIN item_master im ON CAST(pi.item_id AS TEXT) = CAST(im.id AS TEXT)
+       WHERE pi.purchase_id = ? OR pi.purchase_id = ?`,
+      [actualId, sNo]
+    );
+
+    let deductionsResult = [];
     try {
-      const d = await db.query('SELECT * FROM purchase_deductions WHERE purchase_id = ?', [req.params.id])
-      deductionsResult = d.rows
+      const d = await db.query(
+        'SELECT * FROM purchase_deductions WHERE purchase_id = ? OR purchase_id = ?',
+        [actualId, sNo]
+      );
+      deductionsResult = d.rows || [];
     } catch (e) {
-      deductionsResult = []
+      deductionsResult = [];
     }
- 
-    const supplierName = purchaseData.supplier ? (await db.query('SELECT name FROM supplier_master WHERE id = ?', [purchaseData.supplier])).rows[0]?.name : purchaseData.supplier;
-    const godownName = purchaseData.godown ? (await db.query('SELECT name FROM godown_master WHERE id = ?', [purchaseData.godown])).rows[0]?.name : purchaseData.godown;
- 
-    purchaseData.supplier_name = supplierName;
-    purchaseData.godown_name = godownName;
- 
+
+    let supplierName = purchaseData.supplier_name;
+    if (!supplierName && purchaseData.supplier) {
+      try {
+        const sRes = await db.query('SELECT name, print_name FROM supplier_master WHERE id = ?', [purchaseData.supplier]);
+        if (sRes.rows.length > 0) {
+          supplierName = sRes.rows[0].print_name || sRes.rows[0].name;
+        }
+      } catch (e) {}
+    }
+
+    let godownName = purchaseData.godown_name;
+    if (!godownName && purchaseData.godown) {
+      try {
+        const gRes = await db.query('SELECT godown_name FROM godown_master WHERE id = ?', [purchaseData.godown]);
+        if (gRes.rows.length > 0) {
+          godownName = gRes.rows[0].godown_name;
+        }
+      } catch (e) {}
+    }
+
+    purchaseData.supplier_name = supplierName || purchaseData.supplier;
+    purchaseData.godown_name = godownName || purchaseData.godown;
+
     const purchase = {
       ...purchaseData,
-      items: itemsResult.rows,
+      items: itemsResult.rows || [],
       deductions: deductionsResult
-    }
- 
-    res.json(purchase)
- 
+    };
+
+    res.json(purchase);
+
   } catch (error) {
-    console.error('Error fetching purchase:', error)
-    res.status(500).json({ message: 'Error fetching purchase' })
+    console.error('Error fetching purchase:', error);
+    res.status(500).json({ message: 'Error fetching purchase: ' + error.message });
   }
-})
+});
  
 // POST create new purchase
 router.post('/', async (req, res) => {

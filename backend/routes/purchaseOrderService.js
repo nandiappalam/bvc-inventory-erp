@@ -272,7 +272,9 @@ exports.getAllPurchaseOrders = async () => {
     try {
         await ensurePurchaseOrderSchema();
         const purchaseOrdersRes = await db.query(`
-            SELECT po.*, COALESCE(s.name, po.supplier_name) as supplier_name, g.godown_name,
+            SELECT po.*, 
+                   COALESCE(s.print_name, s.name, po.supplier_name) as supplier_name, 
+                   g.godown_name,
                    COALESCE(po.pr_no, pr.pr_no) as pr_no
             FROM purchase_orders po
             LEFT JOIN supplier_master s ON CAST(po.supplier_id AS TEXT) = CAST(s.id AS TEXT)
@@ -281,8 +283,18 @@ exports.getAllPurchaseOrders = async () => {
             ORDER BY po.date DESC, po.s_no DESC
         `);
 
-        const rows = purchaseOrdersRes.rows || [];
-        if (rows.length === 0) return [];
+        const rawRows = purchaseOrdersRes.rows || [];
+        if (rawRows.length === 0) return [];
+
+        // Deduplicate PO rows by po.id in case joins produced multi-matches
+        const seenPoIds = new Set();
+        const rows = [];
+        for (const r of rawRows) {
+            if (!seenPoIds.has(r.id)) {
+                seenPoIds.add(r.id);
+                rows.push(r);
+            }
+        }
 
         let allItems = [];
         try {
@@ -290,25 +302,36 @@ exports.getAllPurchaseOrders = async () => {
                 SELECT poi.*, COALESCE(i.item_name, poi.item_name) as item_name
                 FROM purchase_order_items poi
                 LEFT JOIN item_master i ON CAST(poi.item_id AS TEXT) = CAST(i.id AS TEXT)
+                ORDER BY poi.id ASC
             `);
             allItems = itemsRes.rows || [];
         } catch (e) {}
 
         let allDeductions = [];
         try {
-            const dedRes = await db.query('SELECT * FROM purchase_order_deductions');
+            const dedRes = await db.query('SELECT * FROM purchase_order_deductions ORDER BY id ASC');
             allDeductions = dedRes.rows || [];
         } catch (e) {}
 
+        const seenItemIds = new Set();
         const itemsByPo = {};
         for (const item of allItems) {
+            const itemKey = `${item.purchase_order_id}-${item.id}`;
+            if (seenItemIds.has(itemKey)) continue;
+            seenItemIds.add(itemKey);
+
             const poId = item.purchase_order_id;
             if (!itemsByPo[poId]) itemsByPo[poId] = [];
             itemsByPo[poId].push(item);
         }
 
+        const seenDedIds = new Set();
         const dedsByPo = {};
         for (const ded of allDeductions) {
+            const dedKey = `${ded.purchase_order_id}-${ded.id}`;
+            if (seenDedIds.has(dedKey)) continue;
+            seenDedIds.add(dedKey);
+
             const poId = ded.purchase_order_id;
             if (!dedsByPo[poId]) dedsByPo[poId] = [];
             dedsByPo[poId].push(ded);
@@ -320,7 +343,10 @@ exports.getAllPurchaseOrders = async () => {
 
             const totalQty = items.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0);
             const totalAmount = items.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
-            const mainItemName = items.length > 0 ? items.map(i => i.item_name).filter(Boolean).join(', ') : (po.type || '');
+            const uniqueItemNames = [...new Set(items.map(i => i.item_name).filter(Boolean))];
+            const mainItemName = uniqueItemNames.length > 0 
+                ? (uniqueItemNames.length > 2 ? `${uniqueItemNames.slice(0, 2).join(', ')} (+${uniqueItemNames.length - 2} more)` : uniqueItemNames.join(', ')) 
+                : (po.type || '-');
             const mainRate = items.length > 0 ? (items[0].rate || 0) : 0;
             const taxPct = po.tax_percent || po.tax_rate || (items.length > 0 ? items[0].tax_percent : 0) || 0;
 
@@ -361,22 +387,26 @@ exports.getPurchaseOrderById = async (id) => {
 
         const purchaseOrder = purchaseOrderResult.rows[0];
         const actualPoId = purchaseOrder.id;
+        const sNo = purchaseOrder.s_no;
         let items = [];
         try {
             const itemsResult = await db.query(`
                 SELECT poi.*, COALESCE(i.item_name, poi.item_name) as item_name
                 FROM purchase_order_items poi
                 LEFT JOIN item_master i ON CAST(poi.item_id AS TEXT) = CAST(i.id AS TEXT)
-                WHERE poi.purchase_order_id = ?
-            `, [actualPoId]);
+                WHERE poi.purchase_order_id = ? OR poi.purchase_order_id = ?
+                ORDER BY poi.id ASC
+            `, [actualPoId, sNo]);
             items = itemsResult.rows || [];
         } catch (e) {}
 
         let deductions = [];
         try {
             const dedResult = await db.query(`
-                SELECT * FROM purchase_order_deductions WHERE purchase_order_id = ?
-            `, [actualPoId]);
+                SELECT * FROM purchase_order_deductions 
+                WHERE purchase_order_id = ? OR purchase_order_id = ?
+                ORDER BY id ASC
+            `, [actualPoId, sNo]);
             deductions = dedResult.rows || [];
         } catch (e) {}
 

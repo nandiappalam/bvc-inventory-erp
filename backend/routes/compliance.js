@@ -2074,6 +2074,64 @@ router.get('/traceability/:lotNo', async (req, res) => {
     const lotPlaceholders = lotList.length > 0 ? lotList.map(() => '?').join(',') : "''";
     const lotPlaceholdersUpper = lotListUpper.length > 0 ? lotListUpper.map(() => 'UPPER(?)').join(',') : "''";
 
+    // Purchase Returns Trace (Debit Notes / Supplier Rejections & RMA)
+    let purchaseReturnsList = [];
+    try {
+      const purIds = [];
+      if (purchaseInfo?.id) purIds.push(String(purchaseInfo.id));
+      if (purchaseInfo?.inv_no) purIds.push(String(purchaseInfo.inv_no));
+      if (purchaseInfo?.s_no) purIds.push(String(purchaseInfo.s_no));
+      if (purchaseInfo?.po_no) purIds.push(String(purchaseInfo.po_no));
+      const purPlaceholders = purIds.length > 0 ? purIds.map(() => '?').join(',') : "'-999'";
+
+      const purReturnsRes = await db.query(`
+        SELECT pr.*, pri.item_name, pri.qty as returned_qty, pri.weight as returned_weight, pri.total_wt as returned_total_weight,
+               pri.rate as return_rate, pri.amount as return_amount, pri.lot_no, pri.reason as return_reason,
+               COALESCE(s.name, s.print_name, pr.supplier) as supplier_name,
+               COALESCE(s.phone_off, s.mobile1, '') as supplier_phone,
+               COALESCE(s.gst_number, '') as supplier_gstin,
+               COALESCE(pr.return_inv_no, CAST(pr.s_no AS TEXT), CAST(pr.id AS TEXT)) as return_voucher_no,
+               COALESCE(gm.godown_name, pr.godown, 'Main Godown') as godown_name
+        FROM purchase_returns pr
+        JOIN purchase_return_items pri ON pr.id = pri.purchase_return_id
+        LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(pr.supplier AS TEXT) OR pr.supplier = s.name OR pr.supplier = s.print_name)
+        LEFT JOIN godown_master gm ON (CAST(gm.id AS TEXT) = CAST(pr.godown AS TEXT) OR pr.godown = gm.godown_name)
+        WHERE UPPER(pri.lot_no) IN (${lotPlaceholdersUpper})
+           OR UPPER(pri.lot_no) = UPPER(?)
+           OR UPPER(pri.lot_no) LIKE UPPER(?)
+           OR CAST(pr.purchase_id AS TEXT) IN (${purPlaceholders})
+           OR CAST(pri.purchase_id AS TEXT) IN (${purPlaceholders})
+           OR pr.purchase_inv_no IN (${purPlaceholders})
+        ORDER BY pr.id DESC
+      `, [...lotListUpper, canonicalLotNo, `%${canonicalLotNo}%`, ...purIds, ...purIds, ...purIds]);
+
+      const seenPRKeys = new Set();
+      purchaseReturnsList = (purReturnsRes.rows || []).filter(r => {
+        const key = `${r.id}:::${r.item_name}:::${r.lot_no}`;
+        if (seenPRKeys.has(key)) return false;
+        seenPRKeys.add(key);
+        return true;
+      }).map(r => ({
+        purchase_return_id: r.id,
+        return_voucher_no: r.return_voucher_no,
+        date: r.date,
+        supplier_name: r.supplier_name,
+        supplier_phone: r.supplier_phone,
+        supplier_gstin: r.supplier_gstin,
+        item_name: r.item_name,
+        lot_no: r.lot_no,
+        returned_qty: parseFloat(r.returned_qty) || 0,
+        returned_weight: parseFloat(r.returned_weight) || 50,
+        returned_total_weight_kg: parseFloat(r.returned_total_weight) || ((parseFloat(r.returned_qty) || 0) * (parseFloat(r.returned_weight) || 50)),
+        return_rate: parseFloat(r.return_rate) || 0,
+        return_amount: parseFloat(r.return_amount) || 0,
+        return_reason: r.return_reason || 'Quality Rejection / Supplier Return',
+        godown_name: r.godown_name
+      }));
+    } catch (e) {
+      console.warn('Notice querying purchase returns in traceability:', e.message);
+    }
+
     // Ensure compliance records table is populated
     try {
       const checkRecordsCount = await db.query(`SELECT COUNT(*) as cnt FROM compliance_production_records`);
@@ -2337,9 +2395,11 @@ router.get('/traceability/:lotNo', async (req, res) => {
       lotDetails: lot,
       parentLot: parentInputLot,
       activeLots: activeLotsRes.rows || [],
+      purchaseReturns: purchaseReturnsList,
       backwardTrace: {
         purchase: purchaseInfo,
         supplier: supplierDetails,
+        purchaseReturns: purchaseReturnsList,
         iqr: primaryIQR,
         allIQRs: iqrList
       },

@@ -406,6 +406,10 @@ const AppLayout = () => {
           <Route path="/entry/flour-out-return-display" element={<FlourOutReturnDisplay />} />
           <Route path="/entry/purchase-return-create" element={<PurchaseReturn />} />
           <Route path="/entry/purchase-return-display" element={<PurchaseReturnDisplay />} />
+          <Route path="/display/purchase-return-display" element={<PurchaseReturnDisplay />} />
+          <Route path="/display/purchase-return-create" element={<PurchaseReturn />} />
+          <Route path="/purchase-return-create" element={<PurchaseReturn />} />
+          <Route path="/purchase-return-display" element={<PurchaseReturnDisplay />} />
           <Route path="/entry/papad-in-create" element={<PapadInCreate />} />
           <Route path="/entry/papad-in-display" element={<PapadInDisplay />} />
           <Route path="/entry/papad-return-create" element={<PapadReturnCreate />} />
