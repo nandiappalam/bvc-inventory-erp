@@ -97,7 +97,12 @@ router.post('/', async (req, res) => {
       totalWages: body.totalWages || 0
     }
 
-    const sNo = fd.sNo || fd.s_no || fd.sno || 1
+    let sNo = fd.sNo || fd.s_no || fd.sno;
+    if (!sNo || sNo === '1' || sNo === 1 || sNo === '') {
+      const maxRes = await db.query(`SELECT COALESCE(MAX(CAST(s_no AS INTEGER)), 0) as max_sno FROM flour_out_returns`);
+      const nextNum = (parseInt(maxRes.rows[0]?.max_sno) || 0) + 1;
+      sNo = String(nextNum);
+    }
     const date = fd.date || new Date().toISOString().slice(0, 10)
     const papadCompany = fd.papadCompany || fd.papad_company || fd.company || ''
     const taxType = fd.taxType || fd.tax_type || ''

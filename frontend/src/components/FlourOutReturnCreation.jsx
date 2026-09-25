@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import './FlourOutReturnCreation.css';
 import api from '../utils/api';
 
@@ -8,11 +8,11 @@ import { EntryTopFrame, EntryItemsTable, EntryTotalsRow, EntryActions, EntrySect
 
 const FlourOutReturnCreation = () => {
   const navigate = useNavigate();
-  const searchParams = new URLSearchParams(window.location.search);
+  const [searchParams] = useSearchParams();
   const editId = searchParams.get('id');
 
   const [formData, setFormData] = useState({
-    sno: 1,
+    sno: '',
     date: new Date().toISOString().slice(0, 10),
     papadCompany: '',
     taxType: '',
@@ -41,7 +41,7 @@ const FlourOutReturnCreation = () => {
           const data = await api(`/flour-out-return/${editId}`);
           if (data) {
             setFormData({
-              sno: data.s_no || data.sno || editId,
+              sno: String(data.s_no || data.sno || editId),
               date: data.date ? data.date.substring(0, 10) : new Date().toISOString().slice(0, 10),
               papadCompany: String(data.papad_company || data.papadCompany || ''),
               taxType: data.tax_type || data.taxType || '',
@@ -81,12 +81,38 @@ const FlourOutReturnCreation = () => {
         }
       };
       fetchRecord();
+    } else {
+      const fetchNextSno = async () => {
+        try {
+          const res = await api('/flour-out-return/next-sno');
+          const sno = res?.next_s_no ?? res?.next_sno ?? res?.s_no ?? res?.data?.s_no;
+          if (sno) {
+            setFormData(prev => ({ ...prev, sno: String(sno) }));
+          }
+        } catch (err) {
+          console.error('Error fetching next flour out return S.No:', err);
+        }
+      };
+      fetchNextSno();
     }
   }, [editId]);
 
-  const handleFormChange = (e) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+  const handleFormChange = (e, val) => {
+    let name = '';
+    let value = '';
+    if (e && e.target) {
+      name = e.target.name;
+      value = e.target.value;
+    } else if (typeof e === 'string') {
+      name = e;
+      value = val !== undefined ? val : '';
+    } else if (e && typeof e === 'object') {
+      name = e.name || '';
+      value = e.value !== undefined ? e.value : (val !== undefined ? val : '');
+    }
+    if (name) {
+      setFormData(prev => ({ ...prev, [name]: value }));
+    }
   };
 
   const handleItemChange = (index, field, value) => {
@@ -227,7 +253,7 @@ const FlourOutReturnCreation = () => {
 
   return (
     <div className="window">
-      <div className="screen-title">Flour Out Return Creation</div>
+      <div className="screen-title">{editId ? 'Flour Out Return Update' : 'Flour Out Return Creation'}</div>
 
       {message && <div className={`message ${messageType}`}>{message}</div>}
 
@@ -235,6 +261,7 @@ const FlourOutReturnCreation = () => {
         fields={topFrameFields} 
         data={formData} 
         onChange={handleFormChange}
+        nextSnoEndpoint="/flour-out-return/next-sno"
       />
 
       <EntrySection title="Items">
@@ -254,7 +281,7 @@ const FlourOutReturnCreation = () => {
       <EntryActions 
         onSave={handleSave}
         saving={loading}
-        saveText="Save"
+        saveText={editId ? 'Update' : 'Save'}
       />
     </div>
   );

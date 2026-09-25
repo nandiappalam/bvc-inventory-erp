@@ -6,16 +6,16 @@ import { printHtml } from '../utils/printHelper';
 
 // Column definitions for Flour Out Display
 const columns = [
-  { key: 'sno', title: 'S.No', render: (_val, row, idx) => idx !== undefined ? idx + 1 : (row.sNo || '') },
-  { key: 'date', title: 'Date', render: (val) => val ? val.substring(0, 10) : '' },
-  { key: 'sNo', title: 'Flour Out No' },
-  { key: 'papadCompany', title: 'Papad Company' },
-  { key: 'itemName', title: 'Item Name' },
-  { key: 'lotNo', title: 'Lot No' },
-  { key: 'weight', title: 'Weight' },
-  { key: 'qty', title: 'Qty' },
-  { key: 'totalWt', title: 'Total Wt' },
-  { key: 'papadKg', title: 'Papad Kg' },
+  { key: 'sno', title: 'S.No', render: (_val, row, idx) => idx !== undefined ? idx + 1 : (row.sNo || row.s_no || '') },
+  { key: 'date', title: 'Date', render: (val, row) => (val || row.date) ? String(val || row.date).substring(0, 10) : '' },
+  { key: 'sNo', title: 'Flour Out No', render: (val, row) => val || row.s_no || row.sno || row.id || '' },
+  { key: 'papadCompany', title: 'Papad Company', render: (val, row) => val || row.papad_company || row.company || '' },
+  { key: 'itemName', title: 'Item Name', render: (val, row) => val || row.item_name || '' },
+  { key: 'lotNo', title: 'Lot No', render: (val, row) => val || row.lot_no || '' },
+  { key: 'weight', title: 'Weight', render: (val, row) => (val !== undefined && val !== null && val !== '') ? val : (row.weight !== undefined ? row.weight : 0) },
+  { key: 'qty', title: 'Qty', render: (val, row) => (val !== undefined && val !== null && val !== '') ? val : (row.qty !== undefined ? row.qty : 0) },
+  { key: 'totalWt', title: 'Total Wt', render: (val, row) => (val !== undefined && val !== null && val !== '') ? val : (row.total_wt !== undefined ? row.total_wt : 0) },
+  { key: 'papadKg', title: 'Papad Kg', render: (val, row) => (val !== undefined && val !== null && val !== '') ? val : (row.papad_kg !== undefined ? row.papad_kg : 0) },
 ];
 
 const FlourOutDisplay = () => {

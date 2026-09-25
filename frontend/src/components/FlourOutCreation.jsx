@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import './FlourOutCreation.css';
 import api from '../utils/api';
 
@@ -8,6 +8,9 @@ import { EntryTopFrame, EntryItemsTable, EntryTotalsRow, EntryActions, EntrySect
 
 const FlourOutCreation = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const editId = searchParams.get('id');
+
   const [formData, setFormData] = useState({
     sNo: '',
     date: new Date().toISOString().split('T')[0],
@@ -30,9 +33,6 @@ const FlourOutCreation = () => {
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState('success');
 
-  const queryParams = new URLSearchParams(window.location.search);
-  const editId = queryParams.get('id');
-
   useEffect(() => {
     if (editId) {
       const fetchRecord = async () => {
@@ -43,7 +43,7 @@ const FlourOutCreation = () => {
           const data = res?.data || res;
           if (data) {
             setFormData({
-              sNo: data.sNo || data.s_no || '',
+              sNo: String(data.sNo || data.s_no || editId),
               date: data.date ? data.date.substring(0, 10) : new Date().toISOString().split('T')[0],
               papad_company: data.papadCompany || data.papad_company || '',
               address: data.address || '',
@@ -83,13 +83,39 @@ const FlourOutCreation = () => {
         }
       };
       fetchRecord();
+    } else {
+      const fetchNextSno = async () => {
+        try {
+          const res = await api('/flour-out/next-sno');
+          const sno = res?.sNo || res?.next_s_no || res?.next_sno || res?.s_no || res?.data?.s_no;
+          if (sno) {
+            setFormData(prev => ({ ...prev, sNo: String(sno) }));
+          }
+        } catch (err) {
+          console.error('Error fetching next S.No:', err);
+        }
+      };
+      fetchNextSno();
     }
   }, [editId]);
 
-  const handleFormChange = (e) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
-  }
+  const handleFormChange = (e, val) => {
+    let name = '';
+    let value = '';
+    if (e && e.target) {
+      name = e.target.name;
+      value = e.target.value;
+    } else if (typeof e === 'string') {
+      name = e;
+      value = val !== undefined ? val : '';
+    } else if (e && typeof e === 'object') {
+      name = e.name || '';
+      value = e.value !== undefined ? e.value : (val !== undefined ? val : '');
+    }
+    if (name) {
+      setFormData(prev => ({ ...prev, [name]: value }));
+    }
+  };
 
   const handleItemChange = (index, field, value) => {
     setItems(prevItems => {

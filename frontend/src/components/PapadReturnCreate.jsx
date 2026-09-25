@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../utils/api';
 import { EntryTopFrame, EntryActions } from './entry';
 
 const PapadReturnCreate = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const editId = searchParams.get('id');
 
   const [formData, setFormData] = useState({
     sNo: '',
@@ -22,8 +24,21 @@ const PapadReturnCreate = () => {
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState('success');
 
-  const searchParams = new URLSearchParams(window.location.search);
-  const editId = searchParams.get('id');
+  const fetchCompanyBalance = async (company) => {
+    if (!company) return;
+    try {
+      const res = await api(`/papad-returns/company-balance?company=${encodeURIComponent(company)}`);
+      if (res && res.success) {
+        setFormData(prev => ({
+          ...prev,
+          papadBalance: res.papadBalance !== undefined ? String(res.papadBalance) : prev.papadBalance,
+          paymentBalance: res.paymentBalance !== undefined ? String(res.paymentBalance) : prev.paymentBalance
+        }));
+      }
+    } catch (err) {
+      console.error('Error fetching company balance:', err);
+    }
+  };
 
   useEffect(() => {
     const init = async () => {
@@ -35,11 +50,11 @@ const PapadReturnCreate = () => {
               sNo: String(res.s_no || res.sNo || editId),
               date: res.date ? res.date.substring(0, 10) : new Date().toISOString().slice(0, 10),
               papadCompany: String(res.papad_company || res.papadCompany || ''),
-              papadBalance: String(res.papad_balance || res.papadBalance || '0.00'),
-              paymentBalance: String(res.payment_balance || res.paymentBalance || '0.00'),
+              papadBalance: String(res.papad_balance !== undefined ? res.papad_balance : (res.papadBalance || '0.00')),
+              paymentBalance: String(res.payment_balance !== undefined ? res.payment_balance : (res.paymentBalance || '0.00')),
               type: res.type || 'Less',
-              papadLess: String(res.papad_less || res.papadLess || ''),
-              paymentLess: String(res.payment_less || res.paymentLess || ''),
+              papadLess: String(res.papad_less !== undefined ? res.papad_less : (res.papadLess || '')),
+              paymentLess: String(res.payment_less !== undefined ? res.payment_less : (res.paymentLess || '')),
               remarks: res.remarks || ''
             });
           }
@@ -65,9 +80,26 @@ const PapadReturnCreate = () => {
     init();
   }, [editId]);
 
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+  const handleChange = (e, val) => {
+    let name = '';
+    let value = '';
+    if (e && e.target) {
+      name = e.target.name;
+      value = e.target.value;
+    } else if (typeof e === 'string') {
+      name = e;
+      value = val !== undefined ? val : '';
+    } else if (e && typeof e === 'object') {
+      name = e.name || '';
+      value = e.value !== undefined ? e.value : (val !== undefined ? val : '');
+    }
+
+    if (name) {
+      setFormData(prev => ({ ...prev, [name]: value }));
+      if (name === 'papadCompany' && value && !editId) {
+        fetchCompanyBalance(value);
+      }
+    }
   };
 
   const handleSave = async (e) => {
@@ -110,11 +142,11 @@ const PapadReturnCreate = () => {
   };
 
   const topFields = [
-    { name: 'sNo', label: 'S.No.', type: 'text', readOnly: true, col: 1 },
+    { name: 'sNo', label: 'S.No.', type: 'text', col: 1 },
     { name: 'date', label: 'Date', type: 'date', col: 1 },
     { name: 'papadCompany', label: 'Papad Company', type: 'masterSelect', masterType: 'papad_companies', col: 1 },
-    { name: 'papadBalance', label: 'Papad Balance', type: 'number', readOnly: true, col: 2 },
-    { name: 'paymentBalance', label: 'Payment Balance', type: 'number', readOnly: true, col: 2 },
+    { name: 'papadBalance', label: 'Papad Balance', type: 'number', col: 2 },
+    { name: 'paymentBalance', label: 'Payment Balance', type: 'number', col: 2 },
     { name: 'type', label: 'Type', type: 'select', options: [{ value: 'Less', label: 'Less' }, { value: 'Add', label: 'Add' }], col: 2 },
     { name: 'papadLess', label: 'Papad Less', type: 'number', col: 3 },
     { name: 'paymentLess', label: 'Payment Less', type: 'number', col: 3 },
@@ -123,7 +155,7 @@ const PapadReturnCreate = () => {
 
   return (
     <div className="window">
-      <div className="screen-title">Papad Return Creation</div>
+      <div className="screen-title">{editId ? 'Papad Return Update' : 'Papad Return Creation'}</div>
 
       {message && <div className={`message ${messageType}`}>{message}</div>}
 
@@ -132,13 +164,14 @@ const PapadReturnCreate = () => {
           fields={topFields} 
           data={formData} 
           onChange={handleChange}
+          nextSnoEndpoint="/papad-returns/next-sno"
         />
 
         <div style={{ marginTop: '20px' }}>
           <EntryActions 
             onSave={handleSave}
             saving={loading}
-            saveText="Save"
+            saveText={editId ? 'Update' : 'Save'}
           />
         </div>
       </form>

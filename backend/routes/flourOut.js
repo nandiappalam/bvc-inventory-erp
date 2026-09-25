@@ -6,12 +6,36 @@ const { deductFlourOutStock, revertFlourOutStock } = require('../utils/stockSync
 // GET all flour out records
 router.get(['/', '/list'], async (req, res) => {
   try {
+    // Ensure entry_type and address columns exist
+    try {
+      await db.run('ALTER TABLE flour_out ADD COLUMN entry_type TEXT DEFAULT "Flour Out"');
+    } catch (e) {}
+    try {
+      await db.run('ALTER TABLE flour_out ADD COLUMN address TEXT');
+    } catch (e) {}
+
+    // Backfill any existing records where entry_type is null
+    try {
+      await db.run(`
+        UPDATE flour_out SET entry_type = 'Papad In'
+        WHERE (entry_type IS NULL OR entry_type = '' OR entry_type = 'Flour Out')
+        AND id IN (
+          SELECT DISTINCT flour_out_id FROM flour_out_items 
+          WHERE box_papad > 0 OR wt_papad > 0 OR papad_details IS NOT NULL OR item_name LIKE '%papad%'
+        )
+      `);
+      await db.run(`
+        UPDATE flour_out SET entry_type = 'Flour Out'
+        WHERE entry_type IS NULL OR entry_type = ''
+      `);
+    } catch (e) {}
+
     // Dynamic sequence auto-repair if any s_no is null or empty
     try {
-      const nullSnoCheck = await db.query('SELECT id FROM flour_out WHERE s_no IS NULL OR s_no = "" ORDER BY created_at ASC')
+      const nullSnoCheck = await db.query('SELECT id FROM flour_out WHERE (entry_type = "Flour Out" OR entry_type IS NULL) AND (s_no IS NULL OR s_no = "") ORDER BY created_at ASC')
       if (nullSnoCheck.rows.length > 0) {
         console.log(`🔧 Found ${nullSnoCheck.rows.length} flour_out records with null/empty s_no. Repairing...`)
-        const maxSnoRes = await db.query('SELECT COALESCE(MAX(CAST(s_no AS INTEGER)), 0) as maxSno FROM flour_out WHERE s_no IS NOT NULL AND s_no != ""')
+        const maxSnoRes = await db.query('SELECT COALESCE(MAX(CAST(s_no AS INTEGER)), 0) as maxSno FROM flour_out WHERE (entry_type = "Flour Out" OR entry_type IS NULL) AND s_no IS NOT NULL AND s_no != ""')
         let currentMax = maxSnoRes.rows[0]?.maxSno || 0
         for (const row of nullSnoCheck.rows) {
           currentMax++
@@ -22,49 +46,71 @@ router.get(['/', '/list'], async (req, res) => {
       console.error('Error auto-repairing flour_out s_no:', migErr)
     }
 
-    // Get all flour_out records with their items joined
+    // Get flour_out records with their items joined (excluding Papad In entries)
     const result = await db.query(`
       SELECT 
         fo.id,
         fo.s_no as sNo,
+        fo.s_no,
         fo.date,
         COALESCE(pcm.name, fo.papad_company) as papadCompany,
+        COALESCE(pcm.name, fo.papad_company) as papad_company,
+        COALESCE(pcm.name, fo.papad_company) as company_name,
+        fo.address,
         fo.remarks,
         fo.total_qty as totalQty,
+        fo.total_qty,
         fo.total_weight as totalWeight,
+        fo.total_weight,
         fo.total_wages as totalWages,
+        fo.total_wages,
         fo.created_at as createdAt,
         fo.updated_at as updatedAt,
         foi.id as itemId,
         foi.item_name as itemName,
+        foi.item_name,
         foi.lot_no as lotNo,
+        foi.lot_no,
         foi.weight,
         foi.qty,
         foi.total_wt as totalWt,
+        foi.total_wt,
         foi.papad_kg as papadKg,
+        foi.papad_kg,
         foi.wages_bag as wagesBag,
+        foi.wages_bag,
         foi.wages
       FROM flour_out fo
       LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(fo.papad_company AS TEXT) OR pcm.name = fo.papad_company)
       LEFT JOIN flour_out_items foi ON fo.id = foi.flour_out_id
+      WHERE (fo.entry_type = 'Flour Out' OR fo.entry_type IS NULL)
+        AND (foi.box_papad IS NULL OR foi.box_papad = 0)
+        AND (foi.wt_papad IS NULL OR foi.wt_papad = 0)
       ORDER BY fo.created_at DESC, foi.id ASC
     `)
     
     // Transform the flat rows into the format expected by frontend
-    // Group items by flour_out id
     const flourOutMap = new Map()
     
     for (const row of result.rows) {
       if (!flourOutMap.has(row.id)) {
         flourOutMap.set(row.id, {
           id: row.id,
-          sNo: row.sNo,
+          sNo: row.sNo || row.s_no || String(row.id),
+          s_no: row.s_no || row.sNo || String(row.id),
+          sno: row.sNo || row.s_no || String(row.id),
           date: row.date,
-          papadCompany: row.papadCompany,
-          remarks: row.remarks,
-          totalQty: row.totalQty,
-          totalWeight: row.totalWeight,
-          totalWages: row.totalWages,
+          papadCompany: row.papadCompany || row.papad_company || '',
+          papad_company: row.papad_company || row.papadCompany || '',
+          company: row.papadCompany || '',
+          address: row.address || '',
+          remarks: row.remarks || '',
+          totalQty: parseFloat(row.totalQty || row.total_qty || 0),
+          total_qty: parseFloat(row.totalQty || row.total_qty || 0),
+          totalWeight: parseFloat(row.totalWeight || row.total_weight || 0),
+          total_weight: parseFloat(row.totalWeight || row.total_weight || 0),
+          totalWages: parseFloat(row.totalWages || row.total_wages || 0),
+          total_wages: parseFloat(row.totalWages || row.total_wages || 0),
           createdAt: row.createdAt,
           updatedAt: row.updatedAt,
           items: []
@@ -72,17 +118,23 @@ router.get(['/', '/list'], async (req, res) => {
       }
       
       // Add item if it exists
-      if (row.itemId) {
+      if (row.itemId || row.itemName || row.item_name) {
         flourOutMap.get(row.id).items.push({
           itemId: row.itemId,
-          itemName: row.itemName,
-          lotNo: row.lotNo,
-          weight: row.weight,
-          qty: row.qty,
-          totalWt: row.totalWt,
-          papadKg: row.papadKg,
-          wagesBag: row.wagesBag,
-          wages: row.wages
+          id: row.itemId,
+          itemName: row.itemName || row.item_name || '',
+          item_name: row.item_name || row.itemName || '',
+          lotNo: row.lotNo || row.lot_no || '',
+          lot_no: row.lot_no || row.lotNo || '',
+          weight: parseFloat(row.weight || 0),
+          qty: parseFloat(row.qty || 0),
+          totalWt: parseFloat(row.totalWt || row.total_wt || 0),
+          total_wt: parseFloat(row.total_wt || row.totalWt || 0),
+          papadKg: parseFloat(row.papadKg || row.papad_kg || 0),
+          papad_kg: parseFloat(row.papad_kg || row.papadKg || 0),
+          wagesBag: parseFloat(row.wagesBag || row.wages_bag || 0),
+          wages_bag: parseFloat(row.wages_bag || row.wagesBag || 0),
+          wages: parseFloat(row.wages || 0)
         })
       }
     }
@@ -99,12 +151,17 @@ router.get(['/', '/list'], async (req, res) => {
           ...flourOut,
           itemId: null,
           itemName: '',
+          item_name: '',
           lotNo: '',
+          lot_no: '',
           weight: 0,
           qty: 0,
           totalWt: 0,
+          total_wt: 0,
           papadKg: 0,
+          papad_kg: 0,
           wagesBag: 0,
+          wages_bag: 0,
           wages: 0
         })
       } else {
@@ -114,12 +171,17 @@ router.get(['/', '/list'], async (req, res) => {
             ...flourOut,
             itemId: item.itemId,
             itemName: item.itemName,
+            item_name: item.item_name,
             lotNo: item.lotNo,
+            lot_no: item.lot_no,
             weight: item.weight,
             qty: item.qty,
             totalWt: item.totalWt,
+            total_wt: item.total_wt,
             papadKg: item.papadKg,
+            papad_kg: item.papad_kg,
             wagesBag: item.wagesBag,
+            wages_bag: item.wages_bag,
             wages: item.wages
           })
         }
@@ -142,6 +204,7 @@ router.get('/next-sno', async (req, res) => {
         MAX(id) as max_id,
         COUNT(*) as total_count 
       FROM flour_out
+      WHERE (entry_type = 'Flour Out' OR entry_type IS NULL)
     `);
     const maxVal = Math.max(
       parseInt(result.rows[0]?.max_sno) || 0,
@@ -170,9 +233,19 @@ router.get('/:id', async (req, res) => {
 
     const itemsResult = await db.query('SELECT * FROM flour_out_items WHERE flour_out_id = ?', [req.params.id])
 
+    const rec = flourOutResult.rows[0];
     const flourOut = {
-      ...flourOutResult.rows[0],
-      items: itemsResult.rows
+      ...rec,
+      sNo: rec.s_no || String(rec.id),
+      papadCompany: rec.papad_company || '',
+      items: (itemsResult.rows || []).map(it => ({
+        ...it,
+        itemName: it.item_name,
+        lotNo: it.lot_no,
+        totalWt: it.total_wt,
+        papadKg: it.papad_kg,
+        wagesBag: it.wages_bag
+      }))
     }
 
     res.json(flourOut)
@@ -221,15 +294,26 @@ router.post('/', async (req, res) => {
     // Safely try to add address column to flour_out table if it doesn't exist
     try {
       await db.run('ALTER TABLE flour_out ADD COLUMN IF NOT EXISTS address TEXT');
-    } catch (err) {
-      // Ignore if column already exists
-    }
+    } catch (err) {}
+    try {
+      await db.run('ALTER TABLE flour_out ADD COLUMN IF NOT EXISTS entry_type TEXT DEFAULT "Flour Out"');
+    } catch (err) {}
 
     // Insert flour out first
-    const sNoVal = formData.sNo || formData.s_no || '';
+    let sNoVal = formData.sNo || formData.s_no || formData.sno || '';
+    if (!sNoVal || sNoVal === '1' || sNoVal === '') {
+      const snoRes = await db.query(`
+        SELECT COALESCE(MAX(CAST(s_no AS INTEGER)), 0) as max_sno 
+        FROM flour_out 
+        WHERE (entry_type = 'Flour Out' OR entry_type IS NULL)
+      `);
+      const nextNum = (parseInt(snoRes.rows[0]?.max_sno) || 0) + 1;
+      sNoVal = String(nextNum);
+    }
+
     const flourOutResult = await db.run(`
-      INSERT INTO flour_out (s_no, date, papad_company, address, remarks, total_qty, total_weight, total_wages)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO flour_out (s_no, date, papad_company, address, remarks, total_qty, total_weight, total_wages, entry_type)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Flour Out')
     `, [sNoVal, formData.date, companyName, formData.address || '', formData.remarks, totalQty, totalWeight, totalWages])
 
     const flourOutId = flourOutResult.lastID
@@ -246,10 +330,12 @@ router.post('/', async (req, res) => {
         const wages_bag = item.wages_bag || item.wagesBag || 0;
         const wages = item.wages || 0;
 
-        // Check if item exists in item_master, if not, create it
-        const existingItem = await db.query('SELECT id FROM item_master WHERE item_name = ?', [item_name])
+        // Check if item exists in item_master, ensure item_group is 'Flour'
+        const existingItem = await db.query('SELECT id, item_group FROM item_master WHERE item_name = ?', [item_name])
         if (existingItem.rows.length === 0) {
-          await db.run('INSERT INTO item_master (item_name, status) VALUES (?, ?)', [item_name, 'Active'])
+          await db.run('INSERT INTO item_master (item_name, status, item_group, type) VALUES (?, ?, ?, ?)', [item_name, 'Active', 'Flour', 'Flour'])
+        } else if (!existingItem.rows[0].item_group || existingItem.rows[0].item_group === 'Raw Material' || existingItem.rows[0].item_group === 'RM') {
+          await db.run('UPDATE item_master SET item_group = "Flour", type = "Flour" WHERE id = ?', [existingItem.rows[0].id])
         }
 
         await db.run(`
@@ -264,7 +350,9 @@ router.post('/', async (req, res) => {
       res.status(201).json({
         success: true,
         message: 'Flour out record saved successfully!',
-        id: flourOutId
+        id: flourOutId,
+        s_no: sNoVal,
+        sNo: sNoVal
       })
     } catch (error) {
       // If items insert fails, delete the flour_out to clean up
@@ -298,9 +386,9 @@ router.put('/:id', async (req, res) => {
 
     // Update flour out
     await db.run(`
-      UPDATE flour_out SET s_no = ?, date = ?, papad_company = ?, remarks = ?, total_qty = ?, total_weight = ?, total_wages = ?, updated_at = CURRENT_TIMESTAMP
+      UPDATE flour_out SET s_no = ?, date = ?, papad_company = ?, address = ?, remarks = ?, total_qty = ?, total_weight = ?, total_wages = ?, entry_type = 'Flour Out', updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
-    `, [sNoVal, formData.date, compVal, formData.remarks, totalQty, totalWeight, totalWages, flourOutId])
+    `, [sNoVal, formData.date, compVal, formData.address || '', formData.remarks, totalQty, totalWeight, totalWages, flourOutId])
 
     // Delete existing items
     await db.run('DELETE FROM flour_out_items WHERE flour_out_id = ?', [flourOutId])
@@ -316,6 +404,14 @@ router.put('/:id', async (req, res) => {
       const wages_bag = item.wages_bag || item.wagesBag || 0;
       const wages = item.wages || 0;
 
+      // Ensure item_group is 'Flour'
+      const existingItem = await db.query('SELECT id, item_group FROM item_master WHERE item_name = ?', [item_name])
+      if (existingItem.rows.length === 0) {
+        await db.run('INSERT INTO item_master (item_name, status, item_group, type) VALUES (?, ?, ?, ?)', [item_name, 'Active', 'Flour', 'Flour'])
+      } else if (!existingItem.rows[0].item_group || existingItem.rows[0].item_group === 'Raw Material' || existingItem.rows[0].item_group === 'RM') {
+        await db.run('UPDATE item_master SET item_group = "Flour", type = "Flour" WHERE id = ?', [existingItem.rows[0].id])
+      }
+
       await db.run(`
         INSERT INTO flour_out_items (flour_out_id, item_name, lot_no, weight, qty, total_wt, papad_kg, wages_bag, wages)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -325,7 +421,7 @@ router.put('/:id', async (req, res) => {
     // Deduct stock for the new/updated items
     await deductFlourOutStock(flourOutId, formData.date, activeItems);
 
-    res.json({ message: 'Flour out record updated successfully!' })
+    res.json({ success: true, message: 'Flour out record updated successfully!' })
   } catch (error) {
     console.error('Error updating flour out:', error)
     res.status(500).json({ message: 'Error updating flour out' })
