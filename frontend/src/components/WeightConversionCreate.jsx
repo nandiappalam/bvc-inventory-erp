@@ -8,7 +8,7 @@ const WeightConversionCreate = () => {
   const [sNo, setSNo] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [remarks, setRemarks] = useState('');
-  const [type, setType] = useState('Standard');
+  const [type, setType] = useState('RM');
 
   const [availableItems, setAvailableItems] = useState([]);
   const [availableWeights, setAvailableWeights] = useState([]);
@@ -88,7 +88,7 @@ const WeightConversionCreate = () => {
             setSNo(String(data.s_no || ''));
             setDate(data.date || new Date().toISOString().split('T')[0]);
             setRemarks(data.remarks || '');
-            setType(data.type || 'Standard');
+            setType(data.type || 'RM');
 
             const items = data.items || [];
             const inputItems = items.filter(i => (i.type || 'input') === 'input');
@@ -246,7 +246,7 @@ const WeightConversionCreate = () => {
                   sl.created_at,
                   0 AS per_unit_weight
                 FROM stock_lots sl
-                WHERE (LOWER(TRIM(sl.item_name)) = LOWER(TRIM(?)) OR LOWER(sl.item_name) LIKE LOWER(?) OR sl.item_id IN (SELECT id FROM item_master WHERE LOWER(TRIM(item_name)) = LOWER(TRIM(?))))
+                WHERE (LOWER(TRIM(sl.item_name)) = LOWER(TRIM(?)) OR LOWER(sl.item_name) LIKE LOWER(?) OR CAST(sl.item_id AS TEXT) IN (SELECT CAST(id AS TEXT) FROM item_master WHERE LOWER(TRIM(item_name)) = LOWER(TRIM(?))))
                 ORDER BY sl.created_at DESC, sl.id DESC
                 LIMIT 50
               `,
@@ -262,12 +262,13 @@ const WeightConversionCreate = () => {
       }
 
       // Filter lots to strictly ensure they belong ONLY to the selected item name
-      const normItem = itemName.toLowerCase().trim();
+      const cleanStr = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const normItem = cleanStr(itemName);
       const itemSpecificLots = lots.filter(lot => {
         if (!lot || !lot.lot_no) return false;
         if (!lot.item_name) return true;
-        const normLotItem = String(lot.item_name).toLowerCase().trim();
-        return normLotItem === normItem || normLotItem.includes(normItem) || normItem.includes(normLotItem);
+        const normLot = cleanStr(lot.item_name);
+        return normLot === normItem || normLot.startsWith(normItem) || normItem.startsWith(normLot);
       });
 
       // Deduplicate lots by lot_no
@@ -504,7 +505,7 @@ const WeightConversionCreate = () => {
           }
         ]);
         setRemarks('');
-        setType('Standard');
+        setType('RM');
 
         // Fetch next S.No
         try {
@@ -553,7 +554,18 @@ const WeightConversionCreate = () => {
           </div>
           <div className="form-group" style={{ display: 'flex', alignItems: 'center' }}>
             <label style={{ width: '80px', fontWeight: 'bold' }}>Type :</label>
-            <input type="text" value={type} onChange={(e) => setType(e.target.value)} placeholder="e.g. Urad, Standard" style={{ flex: 1, height: '28px', padding: '4px', marginLeft: '10px' }} />
+            <select 
+              value={type} 
+              onChange={(e) => setType(e.target.value)} 
+              style={{ flex: 1, height: '28px', padding: '4px', marginLeft: '10px', border: '1px solid #9bb4e0', borderRadius: '4px', outline: 'none', background: '#fff' }}
+            >
+              <option value="RM">RM</option>
+              <option value="FG">FG</option>
+              <option value="Vacuum">Vacuum</option>
+              {type && !['RM', 'FG', 'Vacuum'].includes(type) && (
+                <option value={type}>{type}</option>
+              )}
+            </select>
           </div>
         </div>
       </div>

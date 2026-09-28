@@ -833,30 +833,30 @@ router.get('/available-lots', async (req, res) => {
         COALESCE(
           sm.name,
           sm.print_name,
-          (SELECT sm2.name FROM purchase_items pi2 JOIN purchases p2 ON p2.id = pi2.purchase_id LEFT JOIN supplier_master sm2 ON (CAST(sm2.id AS TEXT) = CAST(p2.supplier AS TEXT) OR sm2.name = p2.supplier) WHERE pi2.lot_no = sl.lot_no AND sm2.name IS NOT NULL LIMIT 1),
-          (SELECT p3.supplier FROM purchase_items pi3 JOIN purchases p3 ON p3.id = pi3.purchase_id WHERE pi3.lot_no = sl.lot_no AND p3.supplier IS NOT NULL LIMIT 1),
-          (SELECT sm3.name FROM supplier_master sm3 WHERE CAST(sm3.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm3.name = p.supplier LIMIT 1),
-          p.supplier,
+          (SELECT sm2.name FROM purchase_items pi2 JOIN purchases p2 ON CAST(p2.id AS TEXT) = CAST(pi2.purchase_id AS TEXT) LEFT JOIN supplier_master sm2 ON (CAST(sm2.id AS TEXT) = CAST(p2.supplier AS TEXT) OR sm2.name = CAST(p2.supplier AS TEXT)) WHERE pi2.lot_no = sl.lot_no AND sm2.name IS NOT NULL LIMIT 1),
+          (SELECT CAST(p3.supplier AS TEXT) FROM purchase_items pi3 JOIN purchases p3 ON CAST(p3.id AS TEXT) = CAST(pi3.purchase_id AS TEXT) WHERE pi3.lot_no = sl.lot_no AND p3.supplier IS NOT NULL LIMIT 1),
+          (SELECT sm3.name FROM supplier_master sm3 WHERE CAST(sm3.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm3.name = CAST(p.supplier AS TEXT) LIMIT 1),
+          CAST(p.supplier AS TEXT),
           '-'
         ) AS supplier_name,
         COALESCE(
           sm.name,
           sm.print_name,
-          (SELECT sm2.name FROM purchase_items pi2 JOIN purchases p2 ON p2.id = pi2.purchase_id LEFT JOIN supplier_master sm2 ON (CAST(sm2.id AS TEXT) = CAST(p2.supplier AS TEXT) OR sm2.name = p2.supplier) WHERE pi2.lot_no = sl.lot_no AND sm2.name IS NOT NULL LIMIT 1),
-          (SELECT p3.supplier FROM purchase_items pi3 JOIN purchases p3 ON p3.id = pi3.purchase_id WHERE pi3.lot_no = sl.lot_no AND p3.supplier IS NOT NULL LIMIT 1),
-          (SELECT sm3.name FROM supplier_master sm3 WHERE CAST(sm3.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm3.name = p.supplier LIMIT 1),
-          p.supplier,
+          (SELECT sm2.name FROM purchase_items pi2 JOIN purchases p2 ON CAST(p2.id AS TEXT) = CAST(pi2.purchase_id AS TEXT) LEFT JOIN supplier_master sm2 ON (CAST(sm2.id AS TEXT) = CAST(p2.supplier AS TEXT) OR sm2.name = CAST(p2.supplier AS TEXT)) WHERE pi2.lot_no = sl.lot_no AND sm2.name IS NOT NULL LIMIT 1),
+          (SELECT CAST(p3.supplier AS TEXT) FROM purchase_items pi3 JOIN purchases p3 ON CAST(p3.id AS TEXT) = CAST(pi3.purchase_id AS TEXT) WHERE pi3.lot_no = sl.lot_no AND p3.supplier IS NOT NULL LIMIT 1),
+          (SELECT sm3.name FROM supplier_master sm3 WHERE CAST(sm3.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm3.name = CAST(p.supplier AS TEXT) LIMIT 1),
+          CAST(p.supplier AS TEXT),
           '-'
         ) AS supplier,
         sl.created_at as purchase_date,
         sl.created_at,
         COALESCE(
-          (SELECT pi.per_unit_weight FROM purchase_items pi WHERE pi.lot_no = sl.lot_no AND (pi.item_id = sl.item_id OR LOWER(pi.item_name) = LOWER(sl.item_name)) AND pi.per_unit_weight > 0 LIMIT 1),
-          (SELECT pi.weight FROM purchase_items pi WHERE pi.lot_no = sl.lot_no AND (pi.item_id = sl.item_id OR LOWER(pi.item_name) = LOWER(sl.item_name)) AND pi.weight > 0 LIMIT 1),
+          (SELECT pi.per_unit_weight FROM purchase_items pi WHERE pi.lot_no = sl.lot_no AND (CAST(pi.item_id AS TEXT) = CAST(sl.item_id AS TEXT) OR LOWER(pi.item_name) = LOWER(sl.item_name)) AND pi.per_unit_weight > 0 LIMIT 1),
+          (SELECT pi.weight FROM purchase_items pi WHERE pi.lot_no = sl.lot_no AND (CAST(pi.item_id AS TEXT) = CAST(sl.item_id AS TEXT) OR LOWER(pi.item_name) = LOWER(sl.item_name)) AND pi.weight > 0 LIMIT 1),
           (SELECT go.weight FROM grain_output_items go WHERE go.lot_no = sl.lot_no AND LOWER(go.item_name) = LOWER(sl.item_name) AND go.weight > 0 LIMIT 1),
           (SELECT pk.weight FROM packing_items pk WHERE pk.lot_no = sl.lot_no AND LOWER(pk.item_name) = LOWER(sl.item_name) AND pk.weight > 0 LIMIT 1),
           (SELECT wc.weight FROM weight_conversion_items wc WHERE wc.lot_no = sl.lot_no AND LOWER(wc.item_name) = LOWER(sl.item_name) AND wc.weight > 0 LIMIT 1),
-          (SELECT ROUND(CAST(ABS(s.weight) / ABS(s.qty) AS NUMERIC), 2) FROM stock s WHERE s.lot_no = sl.lot_no AND (s.item_id = sl.item_id OR LOWER(s.item_name) = LOWER(sl.item_name)) AND s.qty > 0 AND s.weight > 0 LIMIT 1),
+          (SELECT ROUND(CAST(ABS(s.weight) / ABS(s.qty) AS NUMERIC), 2) FROM stock s WHERE s.lot_no = sl.lot_no AND (CAST(s.item_id AS TEXT) = CAST(sl.item_id AS TEXT) OR LOWER(s.item_name) = LOWER(sl.item_name)) AND s.qty > 0 AND s.weight > 0 LIMIT 1),
           0
         ) AS per_unit_weight
       FROM stock_lots sl
