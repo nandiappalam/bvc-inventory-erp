@@ -99,34 +99,13 @@ const WeightConversionCreate = () => {
                 let lots = [];
                 if (i.item_name) {
                   try {
-                    const lotsRes = await api('db/query', {
-                      method: 'POST',
-                      body: {
-                        sql: `
-                          SELECT 
-                            sl.id,
-                            sl.item_name,
-                            sl.lot_no,
-                            sl.remaining_quantity,
-                            sl.rate,
-                            sl.created_at,
-                            COALESCE(
-                              (SELECT ROUND(ABS(s.weight) / ABS(s.qty), 2) FROM stock s WHERE s.lot_no = sl.lot_no AND COALESCE(s.qty, 0) != 0 AND COALESCE(s.weight, 0) != 0 LIMIT 1),
-                              (SELECT ROUND(ABS(s.weight) / ABS(s.qty), 2) FROM stock s WHERE LOWER(s.item_name) = LOWER(sl.item_name) AND COALESCE(s.qty, 0) != 0 AND COALESCE(s.weight, 0) != 0 LIMIT 1),
-                              (SELECT CASE WHEN COALESCE(oi.qty, 0) != 0 AND COALESCE(oi.weight, 0) > 0 THEN ROUND(oi.weight / oi.qty, 2) ELSE COALESCE(oi.weight, 0) END FROM open_items oi WHERE oi.lot_no = sl.lot_no OR LOWER(oi.item_name) = LOWER(sl.item_name) LIMIT 1),
-                              (SELECT wci.weight FROM weight_conversion_items wci WHERE wci.lot_no = sl.lot_no AND wci.weight > 0 LIMIT 1),
-                              (SELECT wm.weight FROM weightmaster wm WHERE (LOWER(sl.item_name) LIKE '%' || LOWER(wm.name) || '%' OR LOWER(wm.name) LIKE '%' || LOWER(sl.item_name) || '%') AND wm.weight > 0 LIMIT 1),
-                              0
-                            ) AS per_unit_weight
-                          FROM stock_lots sl
-                          WHERE sl.item_name = ?
-                          GROUP BY sl.lot_no
-                          ORDER BY sl.created_at ASC
-                        `,
-                        params: [i.item_name]
-                      }
-                    });
-                    if (Array.isArray(lotsRes)) lots = lotsRes;
+                    const lotsRes = await api(`/weight-conversion/available-lots?item_name=${encodeURIComponent(i.item_name)}`);
+                    if (Array.isArray(lotsRes) && lotsRes.length > 0) {
+                      lots = lotsRes;
+                    } else {
+                      const stLots = await api(`/stock/available-lots?item_name=${encodeURIComponent(i.item_name)}`);
+                      if (Array.isArray(stLots)) lots = stLots;
+                    }
                   } catch (e) {
                     console.error('Error fetching lots for edit row:', e);
                   }
@@ -154,15 +133,13 @@ const WeightConversionCreate = () => {
             }
           }
         } else {
-          const result = await api('db/query', {
-            method: 'POST',
-            body: {
-              sql: 'SELECT MAX(CAST(s_no AS INTEGER)) as max_sno FROM weight_conversion',
-              params: []
-            }
-          });
-          const maxSNo = (result && result[0] && result[0].max_sno) || 0;
-          setSNo(String(parseInt(maxSNo) + 1));
+          try {
+            const snoRes = await api('/weight-conversion/next-sno');
+            const nextSno = snoRes?.next_sno || snoRes?.next_s_no || snoRes?.s_no || 1;
+            setSNo(String(nextSno));
+          } catch (e) {
+            setSNo('1');
+          }
         }
 
         const itemsRes = await api('db/query', {
@@ -173,7 +150,7 @@ const WeightConversionCreate = () => {
                 SELECT item_name FROM item_master WHERE status = 'Active' OR status = 'active'
                 UNION
                 SELECT item_name FROM stock_lots WHERE remaining_quantity > 0
-              ) ORDER BY item_name ASC
+              ) AS active_items ORDER BY item_name ASC
             `,
             params: []
           }
@@ -220,64 +197,112 @@ const WeightConversionCreate = () => {
     setRows(updatedRows);
 
     try {
-      let result = await api('db/query', {
-        method: 'POST',
-        body: {
-          sql: `
-            SELECT 
-              sl.id,
-              sl.item_name,
-              sl.lot_no,
-              sl.remaining_quantity,
-              sl.rate,
-              sl.created_at,
-              COALESCE(
-                (SELECT ROUND(ABS(s.weight) / ABS(s.qty), 2) FROM stock s WHERE s.lot_no = sl.lot_no AND COALESCE(s.qty, 0) != 0 AND COALESCE(s.weight, 0) != 0 LIMIT 1),
-                (SELECT ROUND(ABS(s.weight) / ABS(s.qty), 2) FROM stock s WHERE LOWER(s.item_name) = LOWER(sl.item_name) AND COALESCE(s.qty, 0) != 0 AND COALESCE(s.weight, 0) != 0 LIMIT 1),
-                (SELECT CASE WHEN COALESCE(oi.qty, 0) != 0 AND COALESCE(oi.weight, 0) > 0 THEN ROUND(oi.weight / oi.qty, 2) ELSE COALESCE(oi.weight, 0) END FROM open_items oi WHERE oi.lot_no = sl.lot_no OR LOWER(oi.item_name) = LOWER(sl.item_name) LIMIT 1),
-                (SELECT wci.weight FROM weight_conversion_items wci WHERE wci.lot_no = sl.lot_no AND wci.weight > 0 LIMIT 1),
-                (SELECT wm.weight FROM weightmaster wm WHERE (LOWER(sl.item_name) LIKE '%' || LOWER(wm.name) || '%' OR LOWER(wm.name) LIKE '%' || LOWER(sl.item_name) || '%') AND wm.weight > 0 LIMIT 1),
-                0
-              ) AS per_unit_weight
-            FROM stock_lots sl
-            WHERE (sl.item_name = ? OR sl.item_name LIKE ? OR LOWER(sl.item_name) = LOWER(?))
-            GROUP BY sl.lot_no
-            ORDER BY sl.created_at DESC
-          `,
-          params: [itemName, `%${itemName}%`, itemName]
-        }
-      });
+      let lots = [];
 
-      if (!result || !Array.isArray(result) || result.length === 0) {
-        result = await api('db/query', {
-          method: 'POST',
-          body: {
-            sql: `
-              SELECT 
-                sl.id,
-                sl.item_name,
-                sl.lot_no,
-                sl.remaining_quantity,
-                sl.rate,
-                sl.created_at,
-                0 AS per_unit_weight
-              FROM stock_lots sl
-              WHERE sl.lot_no IS NOT NULL AND sl.lot_no != ''
-              GROUP BY sl.lot_no
-              ORDER BY sl.created_at DESC
-              LIMIT 50
-            `,
-            params: []
+      // 1. Primary: Dedicated endpoint /api/weight-conversion/available-lots
+      try {
+        const res = await api(`/weight-conversion/available-lots?item_name=${encodeURIComponent(itemName)}`);
+        if (Array.isArray(res) && res.length > 0) {
+          lots = res;
+        }
+      } catch (e) {
+        console.warn('Dedicated endpoint /weight-conversion/available-lots notice:', e.message);
+      }
+
+      // 2. Secondary: Standard /api/stock/available-lots
+      if (lots.length === 0) {
+        try {
+          const stockLots = await api(`/stock/available-lots?item_name=${encodeURIComponent(itemName)}`);
+          if (Array.isArray(stockLots) && stockLots.length > 0) {
+            lots = stockLots.map(l => ({
+              id: l.id,
+              item_id: l.item_id,
+              item_name: l.item_name,
+              lot_no: l.lot_no,
+              remaining_quantity: parseFloat(l.remaining_quantity || l.available_qty || l.stock || 0) || 0,
+              rate: parseFloat(l.rate || l.purchase_rate || 0) || 0,
+              created_at: l.created_at || l.purchase_date,
+              per_unit_weight: parseFloat(l.per_unit_weight || l.weight || 0) || 0
+            }));
           }
-        });
+        } catch (e) {
+          console.warn('/stock/available-lots query notice:', e.message);
+        }
+      }
+
+      // 3. Fallback: Direct DB query (safe for BOTH PostgreSQL/Neon and SQLite)
+      if (lots.length === 0) {
+        try {
+          const directRes = await api('db/query', {
+            method: 'POST',
+            body: {
+              sql: `
+                SELECT 
+                  sl.id,
+                  sl.item_name,
+                  sl.lot_no,
+                  COALESCE(sl.remaining_quantity, sl.quantity, 0) AS remaining_quantity,
+                  COALESCE(sl.rate, 0) AS rate,
+                  sl.created_at,
+                  0 AS per_unit_weight
+                FROM stock_lots sl
+                WHERE (LOWER(sl.item_name) = LOWER(?) OR LOWER(sl.item_name) LIKE LOWER(?))
+                ORDER BY sl.created_at DESC, sl.id DESC
+                LIMIT 50
+              `,
+              params: [itemName, `%${itemName}%`]
+            }
+          });
+          if (Array.isArray(directRes) && directRes.length > 0) {
+            lots = directRes;
+          }
+        } catch (e) {
+          console.warn('Direct fallback lot query notice:', e.message);
+        }
+      }
+
+      // Final fallback if item-specific yielded 0 lots: Get all recent lots
+      if (lots.length === 0) {
+        try {
+          const allLotsRes = await api('db/query', {
+            method: 'POST',
+            body: {
+              sql: `
+                SELECT 
+                  sl.id,
+                  sl.item_name,
+                  sl.lot_no,
+                  COALESCE(sl.remaining_quantity, sl.quantity, 0) AS remaining_quantity,
+                  COALESCE(sl.rate, 0) AS rate,
+                  sl.created_at,
+                  0 AS per_unit_weight
+                FROM stock_lots sl
+                WHERE sl.lot_no IS NOT NULL AND sl.lot_no != ''
+                ORDER BY sl.created_at DESC, sl.id DESC
+                LIMIT 50
+              `,
+              params: []
+            }
+          });
+          if (Array.isArray(allLotsRes)) {
+            lots = allLotsRes;
+          }
+        } catch (e) {
+          console.warn('All lots query notice:', e.message);
+        }
+      }
+
+      // Deduplicate lots by lot_no
+      const seen = new Set();
+      const uniqueLots = [];
+      for (const lot of lots) {
+        if (!lot.lot_no || seen.has(lot.lot_no)) continue;
+        seen.add(lot.lot_no);
+        uniqueLots.push(lot);
       }
 
       const freshRows = [...rows];
-      if (Array.isArray(result)) {
-        freshRows[index].available_lots = result;
-      } else {
-        freshRows[index].available_lots = [];
-      }
+      freshRows[index].available_lots = uniqueLots;
       freshRows[index].loadingLots = false;
       setRows(freshRows);
     } catch (error) {
@@ -503,15 +528,11 @@ const WeightConversionCreate = () => {
         setType('Standard');
 
         // Fetch next S.No
-        const nextResult = await api('db/query', {
-          method: 'POST',
-          body: {
-            sql: 'SELECT MAX(CAST(s_no AS INTEGER)) as max_sno FROM weight_conversion',
-            params: []
-          }
-        });
-        const maxSNo = (nextResult && nextResult[0] && nextResult[0].max_sno) || 0;
-        setSNo(String(parseInt(maxSNo) + 1));
+        try {
+          const nextSnoRes = await api('/weight-conversion/next-sno');
+          const maxSNo = nextSnoRes?.next_sno || nextSnoRes?.next_s_no || nextSnoRes?.s_no || 1;
+          setSNo(String(maxSNo));
+        } catch (_) {}
 
         setTimeout(() => {
           setMessage('');

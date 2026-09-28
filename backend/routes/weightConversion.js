@@ -155,6 +155,119 @@ router.get('/next-sno', async (req, res) => {
   }
 })
 
+// GET available lots for weight conversion (MUST be before /:id)
+router.get('/available-lots', async (req, res) => {
+  try {
+    const itemName = req.query.item_name || req.query.itemName || '';
+    const lotNo = req.query.lot_no || req.query.lotNo || '';
+
+    let query = `
+      SELECT 
+        sl.id,
+        sl.item_id,
+        sl.item_name,
+        sl.lot_no,
+        COALESCE(sl.remaining_quantity, sl.quantity, 0) AS remaining_quantity,
+        COALESCE(sl.rate, 0) AS rate,
+        sl.created_at,
+        COALESCE(
+          (SELECT pi.per_unit_weight FROM purchase_items pi WHERE pi.lot_no = sl.lot_no AND (LOWER(pi.item_name) = LOWER(sl.item_name) OR CAST(pi.item_id AS TEXT) = CAST(sl.item_id AS TEXT)) AND pi.per_unit_weight > 0 LIMIT 1),
+          (SELECT pi.weight FROM purchase_items pi WHERE pi.lot_no = sl.lot_no AND (LOWER(pi.item_name) = LOWER(sl.item_name) OR CAST(pi.item_id AS TEXT) = CAST(sl.item_id AS TEXT)) AND pi.weight > 0 LIMIT 1),
+          (SELECT wc.weight FROM weight_conversion_items wc WHERE wc.lot_no = sl.lot_no AND LOWER(wc.item_name) = LOWER(sl.item_name) AND wc.weight > 0 LIMIT 1),
+          (SELECT wm.weight FROM weightmaster wm WHERE LOWER(wm.name) = LOWER(sl.item_name) AND wm.weight > 0 LIMIT 1),
+          (SELECT ROUND(CAST(ABS(s.weight) / ABS(s.qty) AS NUMERIC), 2) FROM stock s WHERE s.lot_no = sl.lot_no AND LOWER(s.item_name) = LOWER(sl.item_name) AND s.qty > 0 AND s.weight > 0 LIMIT 1),
+          0
+        ) AS per_unit_weight
+      FROM stock_lots sl
+      WHERE COALESCE(sl.remaining_quantity, sl.quantity, 0) > 0
+    `;
+    const params = [];
+
+    if (itemName && itemName.trim()) {
+      const term = itemName.trim();
+      query += ` AND (LOWER(sl.item_name) = LOWER(?) OR LOWER(sl.item_name) LIKE LOWER(?))`;
+      params.push(term, `%${term}%`);
+    }
+
+    if (lotNo && lotNo.trim()) {
+      const lTerm = lotNo.trim();
+      query += ` AND (LOWER(sl.lot_no) = LOWER(?) OR LOWER(sl.lot_no) LIKE LOWER(?))`;
+      params.push(lTerm, `%${lTerm}%`);
+    }
+
+    query += ` ORDER BY sl.created_at DESC, sl.id DESC LIMIT 100`;
+
+    let result = await db.query(query, params);
+    let rows = result.rows || [];
+
+    // Fallback: If 0 rows found and itemName was provided, check if lots exist with remaining_quantity <= 0 or without filter
+    if (rows.length === 0 && itemName && itemName.trim()) {
+      const term = itemName.trim();
+      const fbResult = await db.query(`
+        SELECT 
+          sl.id,
+          sl.item_id,
+          sl.item_name,
+          sl.lot_no,
+          COALESCE(sl.remaining_quantity, sl.quantity, 0) AS remaining_quantity,
+          COALESCE(sl.rate, 0) AS rate,
+          sl.created_at,
+          0 AS per_unit_weight
+        FROM stock_lots sl
+        WHERE LOWER(sl.item_name) = LOWER(?) OR LOWER(sl.item_name) LIKE LOWER(?)
+        ORDER BY sl.created_at DESC, sl.id DESC
+        LIMIT 50
+      `, [term, `%${term}%`]);
+      rows = fbResult.rows || [];
+    }
+
+    // Secondary fallback: All non-empty lots in stock_lots
+    if (rows.length === 0) {
+      const allLotsQuery = `
+        SELECT 
+          sl.id,
+          sl.item_id,
+          sl.item_name,
+          sl.lot_no,
+          COALESCE(sl.remaining_quantity, sl.quantity, 0) AS remaining_quantity,
+          COALESCE(sl.rate, 0) AS rate,
+          sl.created_at,
+          0 AS per_unit_weight
+        FROM stock_lots sl
+        WHERE sl.lot_no IS NOT NULL AND sl.lot_no != ''
+        ORDER BY sl.created_at DESC, sl.id DESC
+        LIMIT 50
+      `;
+      const allResult = await db.query(allLotsQuery, []);
+      rows = allResult.rows || [];
+    }
+
+    // Deduplicate lots by lot_no while preserving highest remaining_quantity
+    const lotMap = new Map();
+    for (const r of rows) {
+      if (!r.lot_no) continue;
+      const rem = parseFloat(r.remaining_quantity) || 0;
+      if (!lotMap.has(r.lot_no) || rem > (parseFloat(lotMap.get(r.lot_no).remaining_quantity) || 0)) {
+        lotMap.set(r.lot_no, {
+          id: r.id,
+          item_id: r.item_id,
+          item_name: r.item_name,
+          lot_no: r.lot_no,
+          remaining_quantity: rem,
+          rate: parseFloat(r.rate) || 0,
+          created_at: r.created_at,
+          per_unit_weight: parseFloat(r.per_unit_weight) || 0
+        });
+      }
+    }
+
+    res.json(Array.from(lotMap.values()));
+  } catch (error) {
+    console.error('Error in /api/weight-conversion/available-lots:', error);
+    res.status(500).json({ success: false, message: 'Error fetching available lots', error: error.message });
+  }
+});
+
 // GET all weight conversion records
 router.get('/', async (req, res) => {
   try {
