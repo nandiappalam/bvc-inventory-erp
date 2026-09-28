@@ -748,9 +748,6 @@ function translateSqlForPostgres(sql, companyId = 1) {
   transformed = transformed.replace(/\bcurrent_date\s*=\s*excluded\.current_date\b/gi, '"current_date" = excluded."current_date"');
   transformed = transformed.replace(/\bcurrent_date\s*=\s*\?/gi, '"current_date" = ?');
 
-  // 4h. Fix PostgreSQL subqueries in FROM clause that lack an alias (prevents "subquery in FROM must have an alias")
-  transformed = transformed.replace(/\)\s*ORDER\s+BY/gi, ') AS subq_alias ORDER BY');
-
   // 4i. Fix GROUP BY sl.lot_no where sl.id, sl.item_name are selected (prevents "column sl.id must appear in GROUP BY")
   if (/FROM\s+stock_lots\s+sl\b/i.test(transformed) && /GROUP\s+BY\s+sl\.lot_no\b/i.test(transformed)) {
     transformed = transformed.replace(/GROUP\s+BY\s+sl\.lot_no\b/gi, 'GROUP BY sl.lot_no, sl.id, sl.item_name, sl.remaining_quantity, sl.rate, sl.created_at');

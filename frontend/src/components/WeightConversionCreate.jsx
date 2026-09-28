@@ -246,11 +246,11 @@ const WeightConversionCreate = () => {
                   sl.created_at,
                   0 AS per_unit_weight
                 FROM stock_lots sl
-                WHERE (LOWER(sl.item_name) = LOWER(?) OR LOWER(sl.item_name) LIKE LOWER(?))
+                WHERE (LOWER(TRIM(sl.item_name)) = LOWER(TRIM(?)) OR LOWER(sl.item_name) LIKE LOWER(?) OR sl.item_id IN (SELECT id FROM item_master WHERE LOWER(TRIM(item_name)) = LOWER(TRIM(?))))
                 ORDER BY sl.created_at DESC, sl.id DESC
                 LIMIT 50
               `,
-              params: [itemName, `%${itemName}%`]
+              params: [itemName, `%${itemName}%`, itemName]
             }
           });
           if (Array.isArray(directRes) && directRes.length > 0) {
@@ -261,41 +261,19 @@ const WeightConversionCreate = () => {
         }
       }
 
-      // Final fallback if item-specific yielded 0 lots: Get all recent lots
-      if (lots.length === 0) {
-        try {
-          const allLotsRes = await api('db/query', {
-            method: 'POST',
-            body: {
-              sql: `
-                SELECT 
-                  sl.id,
-                  sl.item_name,
-                  sl.lot_no,
-                  COALESCE(sl.remaining_quantity, sl.quantity, 0) AS remaining_quantity,
-                  COALESCE(sl.rate, 0) AS rate,
-                  sl.created_at,
-                  0 AS per_unit_weight
-                FROM stock_lots sl
-                WHERE sl.lot_no IS NOT NULL AND sl.lot_no != ''
-                ORDER BY sl.created_at DESC, sl.id DESC
-                LIMIT 50
-              `,
-              params: []
-            }
-          });
-          if (Array.isArray(allLotsRes)) {
-            lots = allLotsRes;
-          }
-        } catch (e) {
-          console.warn('All lots query notice:', e.message);
-        }
-      }
+      // Filter lots to strictly ensure they belong ONLY to the selected item name
+      const normItem = itemName.toLowerCase().trim();
+      const itemSpecificLots = lots.filter(lot => {
+        if (!lot || !lot.lot_no) return false;
+        if (!lot.item_name) return true;
+        const normLotItem = String(lot.item_name).toLowerCase().trim();
+        return normLotItem === normItem || normLotItem.includes(normItem) || normItem.includes(normLotItem);
+      });
 
       // Deduplicate lots by lot_no
       const seen = new Set();
       const uniqueLots = [];
-      for (const lot of lots) {
+      for (const lot of itemSpecificLots) {
         if (!lot.lot_no || seen.has(lot.lot_no)) continue;
         seen.add(lot.lot_no);
         uniqueLots.push(lot);
@@ -309,6 +287,7 @@ const WeightConversionCreate = () => {
       console.error('Error fetching available lots for row:', error);
       const freshRows = [...rows];
       freshRows[index].loadingLots = false;
+      freshRows[index].available_lots = [];
       setRows(freshRows);
     }
   };
@@ -624,7 +603,9 @@ const WeightConversionCreate = () => {
                         onChange={(e) => handleRowLotSelect(idx, e.target.value)}
                         style={{ width: '100%', height: '28px', padding: '2px', border: '1px solid #9bb4e0', borderRadius: '4px', outline: 'none' }}
                       >
-                        <option value="">-- Choose Lot (Available Lots) --</option>
+                        <option value="">
+                          {row.available_lots.length === 0 ? '-- No Lots Available for this Item --' : '-- Choose Lot (Available Lots) --'}
+                        </option>
                         {row.available_lots.map((lot, lotIdx) => {
                           let wt = parseFloat(lot.per_unit_weight) || extractWeightFromItemName(lot.item_name) || extractWeightFromItemName(row.item_name) || extractWeightFromItemName(lot.lot_no) || 0;
                           if (!wt || wt === 0) {

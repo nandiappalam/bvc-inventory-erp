@@ -185,13 +185,13 @@ router.get('/available-lots', async (req, res) => {
 
     if (itemName && itemName.trim()) {
       const term = itemName.trim();
-      query += ` AND (LOWER(sl.item_name) = LOWER(?) OR LOWER(sl.item_name) LIKE LOWER(?))`;
-      params.push(term, `%${term}%`);
+      query += ` AND (LOWER(TRIM(sl.item_name)) = LOWER(TRIM(?)) OR LOWER(sl.item_name) LIKE LOWER(?) OR sl.item_id IN (SELECT id FROM item_master WHERE LOWER(TRIM(item_name)) = LOWER(TRIM(?))))`;
+      params.push(term, `%${term}%`, term);
     }
 
     if (lotNo && lotNo.trim()) {
       const lTerm = lotNo.trim();
-      query += ` AND (LOWER(sl.lot_no) = LOWER(?) OR LOWER(sl.lot_no) LIKE LOWER(?))`;
+      query += ` AND (LOWER(TRIM(sl.lot_no)) = LOWER(TRIM(?)) OR LOWER(sl.lot_no) LIKE LOWER(?))`;
       params.push(lTerm, `%${lTerm}%`);
     }
 
@@ -200,7 +200,7 @@ router.get('/available-lots', async (req, res) => {
     let result = await db.query(query, params);
     let rows = result.rows || [];
 
-    // Fallback: If 0 rows found and itemName was provided, check if lots exist with remaining_quantity <= 0 or without filter
+    // Fallback: If 0 rows found and itemName was provided, check if lots exist with any positive or zero remaining_quantity for THIS item
     if (rows.length === 0 && itemName && itemName.trim()) {
       const term = itemName.trim();
       const fbResult = await db.query(`
@@ -214,15 +214,17 @@ router.get('/available-lots', async (req, res) => {
           sl.created_at,
           0 AS per_unit_weight
         FROM stock_lots sl
-        WHERE LOWER(sl.item_name) = LOWER(?) OR LOWER(sl.item_name) LIKE LOWER(?)
+        WHERE LOWER(TRIM(sl.item_name)) = LOWER(TRIM(?)) 
+           OR LOWER(sl.item_name) LIKE LOWER(?)
+           OR sl.item_id IN (SELECT id FROM item_master WHERE LOWER(TRIM(item_name)) = LOWER(TRIM(?)))
         ORDER BY sl.created_at DESC, sl.id DESC
         LIMIT 50
-      `, [term, `%${term}%`]);
+      `, [term, `%${term}%`, term]);
       rows = fbResult.rows || [];
     }
 
-    // Secondary fallback: All non-empty lots in stock_lots
-    if (rows.length === 0) {
+    // Only if NO itemName was provided at all, allow generic lots
+    if (rows.length === 0 && (!itemName || !itemName.trim())) {
       const allLotsQuery = `
         SELECT 
           sl.id,
