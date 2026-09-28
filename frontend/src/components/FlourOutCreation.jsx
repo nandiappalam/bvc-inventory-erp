@@ -1,45 +1,78 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import './FlourOutCreation.css';
 import api from '../utils/api';
-
-// Import modular entry components
-import { EntryTopFrame, EntryItemsTable, EntryTotalsRow, EntryActions, EntrySection } from './entry'
+import { EntryTopFrame, EntryItemsTable, EntryTotalsRow, EntryActions } from './entry';
 
 const FlourOutCreation = () => {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const editId = searchParams.get('id');
-
   const [formData, setFormData] = useState({
     sNo: '',
     date: new Date().toISOString().split('T')[0],
     papad_company: '',
     address: '',
     remarks: ''
-  })
+  });
 
   const [items, setItems] = useState([
-    { item_name: '', lot_no: '', weight: 0, qty: 0, total_wt: 0, papad_kg: 0, wages_bag: 0, wages: 0 }
-  ])
+    { item_name: '', lot_no: '', weight: '', qty: '', total_wt: '', papad_kg: '', wages_bag: '', wages: '' }
+  ]);
 
   const [totals, setTotals] = useState({
     totalQty: 0,
     totalWeight: 0,
     totalWages: 0
-  })
+  });
 
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState('success');
 
+  const queryParams = new URLSearchParams(window.location.search);
+  const editId = queryParams.get('id');
+
+  const calculateTotals = useCallback((currentItems) => {
+    let totalQty = 0, totalWeight = 0, totalWages = 0;
+    currentItems.forEach(item => {
+      totalQty += parseFloat(item.qty) || 0;
+      totalWeight += parseFloat(item.total_wt) || 0;
+      totalWages += parseFloat(item.wages) || 0;
+    });
+    setTotals({
+      totalQty,
+      totalWeight,
+      totalWages
+    });
+  }, []);
+
+  // Fetch next S.No when creating new entry
+  useEffect(() => {
+    if (!editId) {
+      const fetchNextSno = async () => {
+        try {
+          const res = await api('/flour-out/next-sno');
+          const sno = res?.sNo ?? res?.next_s_no ?? res?.next_sno ?? res?.s_no ?? res?.data?.s_no;
+          if (sno) {
+            setFormData(prev => ({ ...prev, sNo: String(sno) }));
+          } else {
+            const fallback = await api.getNextSNo('/flour-out');
+            setFormData(prev => ({ ...prev, sNo: String(fallback) }));
+          }
+        } catch (err) {
+          console.error('Error fetching next SNo for Flour Out:', err);
+        }
+      };
+      fetchNextSno();
+    }
+  }, [editId]);
+
+  // Load existing record for editing
   useEffect(() => {
     if (editId) {
       const fetchRecord = async () => {
         setLoading(true);
         try {
           const res = await api(`/flour-out/${editId}`);
-          console.log('Fetched edit record details:', res);
           const data = res?.data || res;
           if (data) {
             setFormData({
@@ -54,10 +87,10 @@ const FlourOutCreation = () => {
               const formattedItems = data.items.map(item => {
                 const weight = parseFloat(item.weight) || 0;
                 const qty = parseFloat(item.qty) || 0;
-                const totalWt = weight * qty;
+                const totalWt = parseFloat(item.totalWt || item.total_wt) || (weight * qty);
                 const papadKg = parseFloat(item.papadKg || item.papad_kg) || 0;
                 const wagesBag = parseFloat(item.wagesBag || item.wages_bag) || 0;
-                const wages = papadKg * wagesBag;
+                const wages = parseFloat(item.wages) || (papadKg * wagesBag);
 
                 return {
                   item_name: item.itemName || item.item_name || '',
@@ -83,38 +116,12 @@ const FlourOutCreation = () => {
         }
       };
       fetchRecord();
-    } else {
-      const fetchNextSno = async () => {
-        try {
-          const res = await api('/flour-out/next-sno');
-          const sno = res?.sNo || res?.next_s_no || res?.next_sno || res?.s_no || res?.data?.s_no;
-          if (sno) {
-            setFormData(prev => ({ ...prev, sNo: String(sno) }));
-          }
-        } catch (err) {
-          console.error('Error fetching next S.No:', err);
-        }
-      };
-      fetchNextSno();
     }
-  }, [editId]);
+  }, [editId, calculateTotals]);
 
-  const handleFormChange = (e, val) => {
-    let name = '';
-    let value = '';
-    if (e && e.target) {
-      name = e.target.name;
-      value = e.target.value;
-    } else if (typeof e === 'string') {
-      name = e;
-      value = val !== undefined ? val : '';
-    } else if (e && typeof e === 'object') {
-      name = e.name || '';
-      value = e.value !== undefined ? e.value : (val !== undefined ? val : '');
-    }
-    if (name) {
-      setFormData(prev => ({ ...prev, [name]: value }));
-    }
+  const handleFormChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
   };
 
   const handleItemChange = (index, field, value) => {
@@ -127,43 +134,41 @@ const FlourOutCreation = () => {
       }
 
       // Auto-calculate total weight
-      if (field === 'weight' || field === 'qty' || (field === '__batch__' && ('weight' in value || 'qty' in value))) {
-        const weight = parseFloat(newItems[index].weight) || 0;
-        const qty = parseFloat(newItems[index].qty) || 0;
-        newItems[index].total_wt = weight * qty;
+      const weight = parseFloat(newItems[index].weight) || 0;
+      const qty = parseFloat(newItems[index].qty) || 0;
+      if (weight > 0 && qty > 0) {
+        newItems[index].total_wt = parseFloat((weight * qty).toFixed(2));
       }
 
       // Auto-calculate wages
-      if (field === 'papad_kg' || field === 'wages_bag' || (field === '__batch__' && ('papad_kg' in value || 'wages_bag' in value))) {
-        const papadKg = parseFloat(newItems[index].papad_kg) || 0;
-        const wagesBag = parseFloat(newItems[index].wages_bag) || 0;
-        newItems[index].wages = papadKg * wagesBag;
+      const papadKg = parseFloat(newItems[index].papad_kg) || 0;
+      const wagesBag = parseFloat(newItems[index].wages_bag || newItems[index].wages_per_bag) || 0;
+      if (papadKg > 0 && wagesBag > 0) {
+        newItems[index].wages = parseFloat((papadKg * wagesBag).toFixed(2));
       }
 
       calculateTotals(newItems);
       return newItems;
     });
-  }
+  };
 
-  const calculateTotals = (currentItems) => {
-    let totalQty = 0, totalWeight = 0, totalWages = 0;
-
-    currentItems.forEach(item => {
-      totalQty += parseFloat(item.qty) || 0;
-      totalWeight += parseFloat(item.total_wt) || 0;
-      totalWages += parseFloat(item.wages) || 0;
-    });
-
-    setTotals({
-      totalQty,
-      totalWeight,
-      totalWages
-    });
-  }
-
-  const addItem = () => {
-    setItems(prev => [...prev, { item_name: '', lot_no: '', weight: 0, qty: 0, total_wt: 0, papad_kg: 0, wages_bag: 0, wages: 0 }]);
-  }
+  const addItem = (newRow) => {
+    setItems(prev => [
+      ...prev,
+      (newRow && typeof newRow === 'object' && (newRow.item_name !== undefined || newRow.sno !== undefined))
+        ? {
+            item_name: newRow.item_name || '',
+            lot_no: newRow.lot_no || '',
+            weight: newRow.weight || '',
+            qty: newRow.qty || '',
+            total_wt: newRow.total_wt || '',
+            papad_kg: newRow.papad_kg || '',
+            wages_bag: newRow.wages_bag || newRow.wages_per_bag || '',
+            wages: newRow.wages || ''
+          }
+        : { item_name: '', lot_no: '', weight: '', qty: '', total_wt: '', papad_kg: '', wages_bag: '', wages: '' }
+    ]);
+  };
 
   const removeItem = (index) => {
     setItems(prev => {
@@ -172,13 +177,19 @@ const FlourOutCreation = () => {
       calculateTotals(newItems);
       return newItems;
     });
-  }
+  };
 
   const handleSubmit = async (e) => {
-    e.preventDefault();
-
+    if (e) e.preventDefault();
     if (!formData.date || !formData.papad_company) {
-      setMessage('Date and papad company are required');
+      setMessage('Date and Papad Company are required');
+      setMessageType('error');
+      return;
+    }
+
+    const activeItems = items.filter(it => it.item_name && parseFloat(it.qty) > 0);
+    if (activeItems.length === 0) {
+      setMessage('Please enter at least one item with name and quantity');
       setMessageType('error');
       return;
     }
@@ -187,105 +198,106 @@ const FlourOutCreation = () => {
     setMessage('');
 
     try {
-      let result;
-      if (editId) {
-        result = await api.updateFlourOut(editId, formData, items);
-      } else {
-        result = await api.createFlourOut(formData, items);
-      }
+      const endpoint = editId ? `/flour-out/${editId}` : '/flour-out';
+      const method = editId ? 'PUT' : 'POST';
 
-      if (result && (result.success || result.success === undefined)) {
-        setMessage(editId ? 'Flour out updated successfully!' : 'Flour out saved successfully!');
-        setMessageType('success');
-        if (!editId) {
-          setFormData({
-            sNo: '',
-            date: new Date().toISOString().split('T')[0],
-            papad_company: '',
-            address: '',
-            remarks: ''
-          });
-          setItems([{ item_name: '', lot_no: '', weight: 0, qty: 0, total_wt: 0, papad_kg: 0, wages_bag: 0, wages: 0 }]);
-          setTotals({ totalQty: 0, totalWeight: 0, totalWages: 0 });
+      const res = await api(endpoint, {
+        method,
+        body: {
+          formData: {
+            ...formData,
+            papadCompany: formData.papad_company
+          },
+          items
         }
+      });
+
+      if (res && (res.success || res.id || res.message)) {
+        setMessage(editId ? 'Flour Out updated successfully!' : 'Flour Out saved successfully!');
+        setMessageType('success');
         setTimeout(() => {
-          setMessage('');
           navigate('/entry/flour-out-display');
-        }, 1500);
+        }, 1200);
       } else {
-        setMessage(result?.message || 'Error saving flour out');
+        setMessage(res?.message || 'Error saving Flour Out');
         setMessageType('error');
       }
-    } catch (error) {
-      console.error('Error saving flour out:', error);
-      setMessage('Error saving flour out: ' + error.message);
+    } catch (err) {
+      console.error('Error submitting Flour Out:', err);
+      setMessage(err.message || 'Error saving Flour Out');
       setMessageType('error');
     } finally {
       setLoading(false);
     }
   };
 
-  const topFrameFields = [
-    { name: 'sNo', label: 'S.No', value: formData.sNo, col: 1 },
-    { name: 'date', label: 'Date', type: 'date', value: formData.date, col: 1 },
-    { name: 'remarks', label: 'Remarks', value: formData.remarks, col: 2 },
-    { name: 'papad_company', label: 'Papad Company', masterType: 'papad_companies', value: formData.papad_company, col: 3 },
-    { name: 'address', label: 'Address', type: 'textarea', value: formData.address || '', col: 3 },
+  const topFields = [
+    { name: 'sNo', label: 'S.No.', type: 'text', readOnly: true, col: 1 },
+    { name: 'date', label: 'Date', type: 'date', col: 1 },
+    { name: 'papad_company', label: 'Papad Company', type: 'masterSelect', masterType: 'papad_companies', col: 2 },
+    { name: 'address', label: 'Address', type: 'text', col: 2 },
+    { name: 'remarks', label: 'Remarks', type: 'text', col: 3 }
   ];
 
   const itemColumns = [
     { key: 'item_name', title: 'Item Name', type: 'masterSelect', masterType: 'items' },
-    { key: 'lot_no', title: 'Lot No', type: 'lotSelect' },
-    { key: 'weight', title: 'Weight', type: 'masterSelect', masterType: 'weights' },
+    { key: 'lot_no', title: 'Lot No', type: 'text' },
+    { key: 'weight', title: 'Weight', type: 'number' },
     { key: 'qty', title: 'Qty', type: 'number' },
-    { key: 'total_wt', title: 'Total Wt', readOnly: true },
-    { key: 'papad_kg', title: 'Papad Kg', type: 'number' },
-    { key: 'wages_bag', title: 'Wages/Bag', type: 'number' },
-    { key: 'wages', title: 'Wages', readOnly: true },
+    { key: 'total_wt', title: 'Total Wt', type: 'number', readOnly: true },
+    { key: 'papad_kg', title: 'Papad (Kg)', type: 'number' },
+    { key: 'wages_bag', title: 'Wages / Bag', type: 'number' },
+    { key: 'wages', title: 'Wages', type: 'number', readOnly: true }
   ];
 
-  const totalsArr = [
-    { name: 'totalQty', label: 'Total Qty', value: totals.totalQty.toFixed(2) },
-    { name: 'totalWeight', label: 'Total Weight', value: totals.totalWeight.toFixed(2) },
-    { name: 'totalWages', label: 'Total Wages', value: totals.totalWages.toFixed(2) },
+  const totalFields = [
+    { label: 'Total Qty', value: totals.totalQty },
+    { label: 'Total Weight', value: totals.totalWeight },
+    { label: 'Total Wages', value: totals.totalWages.toFixed(2) }
   ];
-
-  const handleRowChange = (rowIndex, key, value) => {
-    handleItemChange(rowIndex, key, value);
-  };
 
   return (
-    <div className="window">
+    <div className="window flour-out-window">
       <div className="screen-title">{editId ? 'Flour Out Update' : 'Flour Out Creation'}</div>
-
       {message && <div className={`message ${messageType}`}>{message}</div>}
 
-      <EntryTopFrame 
-        fields={topFrameFields} 
-        data={formData} 
-        onChange={handleFormChange}
-        nextSnoEndpoint="/flour-out/next-sno"
-      />
-
-      <EntrySection title="Items">
-        <EntryItemsTable 
-          columns={itemColumns}
-          data={items}
-          onRowChange={handleRowChange}
-          onAddRow={addItem}
-          onDeleteRow={removeItem}
-          showActions={true}
-          lotMode="select"
+      <form onSubmit={handleSubmit}>
+        <EntryTopFrame
+          fields={topFields}
+          data={formData}
+          onChange={handleFormChange}
         />
-      </EntrySection>
 
-      <EntryTotalsRow totals={totalsArr} />
+        <div style={{ marginTop: '15px' }}>
+          <EntryItemsTable
+            columns={itemColumns}
+            data={items}
+            items={items}
+            onRowChange={handleItemChange}
+            onItemChange={handleItemChange}
+            onAddRow={addItem}
+            onAddItem={addItem}
+            onDeleteRow={removeItem}
+            onRemoveItem={removeItem}
+            showActions={true}
+            editable={true}
+            lotMode="select"
+          />
+        </div>
 
-      <EntryActions 
-        onSave={handleSubmit}
-        saving={loading}
-        saveText={editId ? 'Update' : 'Save'}
-      />
+        <div style={{ marginTop: '15px' }}>
+          <EntryTotalsRow totals={totalFields} />
+        </div>
+
+        <div style={{ marginTop: '20px' }}>
+          <EntryActions
+            onSave={handleSubmit}
+            onCancel={() => navigate('/entry/flour-out-display')}
+            saving={loading}
+            saveText={editId ? 'Update' : 'Save'}
+          />
+        </div>
+      </form>
     </div>
   );
 };

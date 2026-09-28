@@ -7,15 +7,15 @@ import { printHtml } from '../utils/printHelper';
 // Column definitions for Flour Out Display
 const columns = [
   { key: 'sno', title: 'S.No', render: (_val, row, idx) => idx !== undefined ? idx + 1 : (row.sNo || row.s_no || '') },
-  { key: 'date', title: 'Date', render: (val, row) => (val || row.date) ? String(val || row.date).substring(0, 10) : '' },
-  { key: 'sNo', title: 'Flour Out No', render: (val, row) => val || row.s_no || row.sno || row.id || '' },
-  { key: 'papadCompany', title: 'Papad Company', render: (val, row) => val || row.papad_company || row.company || '' },
-  { key: 'itemName', title: 'Item Name', render: (val, row) => val || row.item_name || '' },
-  { key: 'lotNo', title: 'Lot No', render: (val, row) => val || row.lot_no || '' },
-  { key: 'weight', title: 'Weight', render: (val, row) => (val !== undefined && val !== null && val !== '') ? val : (row.weight !== undefined ? row.weight : 0) },
-  { key: 'qty', title: 'Qty', render: (val, row) => (val !== undefined && val !== null && val !== '') ? val : (row.qty !== undefined ? row.qty : 0) },
-  { key: 'totalWt', title: 'Total Wt', render: (val, row) => (val !== undefined && val !== null && val !== '') ? val : (row.total_wt !== undefined ? row.total_wt : 0) },
-  { key: 'papadKg', title: 'Papad Kg', render: (val, row) => (val !== undefined && val !== null && val !== '') ? val : (row.papad_kg !== undefined ? row.papad_kg : 0) },
+  { key: 'date', title: 'Date', render: (val, row) => (val || row?.date) ? String(val || row?.date).substring(0, 10) : '' },
+  { key: 'sNo', title: 'Flour Out No', render: (val, row) => val || row?.sNo || row?.s_no || '' },
+  { key: 'papadCompany', title: 'Papad Company', render: (val, row) => val || row?.papadCompany || row?.papad_company || '' },
+  { key: 'itemName', title: 'Item Name', render: (val, row) => val || row?.itemName || row?.item_name || '-' },
+  { key: 'lotNo', title: 'Lot No', render: (val, row) => val || row?.lotNo || row?.lot_no || '-' },
+  { key: 'weight', title: 'Weight', render: (val, row) => parseFloat(val || row?.weight || 0) || 0 },
+  { key: 'qty', title: 'Qty', render: (val, row) => parseFloat(val || row?.qty || 0) || 0 },
+  { key: 'totalWt', title: 'Total Wt', render: (val, row) => parseFloat(val || row?.totalWt || row?.total_wt || 0) || 0 },
+  { key: 'papadKg', title: 'Papad Kg', render: (val, row) => parseFloat(val || row?.papadKg || row?.papad_kg || 0) || 0 },
 ];
 
 const FlourOutDisplay = () => {
@@ -28,11 +28,10 @@ const FlourOutDisplay = () => {
       else alert('Cannot delete: missing record id');
       return;
     }
-
     const doDelete = async () => {
       try {
         const res = await api(`/flour-out/${id}`, { method: 'DELETE' });
-        if (res && (res.success || res.success === undefined)) {
+        if (res && (res.success || res.success === undefined || res.message)) {
           if (showAlert) {
             showAlert('Success', 'Record deleted successfully', refresh);
           } else {
@@ -76,19 +75,19 @@ const FlourOutDisplay = () => {
           </tr>
           <tr>
             <th style="border: 1px solid #ccc; padding: 10px; text-align: left; background-color: #f5f5f5;">S.No</th>
-            <td style="border: 1px solid #ccc; padding: 10px;">${row.sNo || ''}</td>
+            <td style="border: 1px solid #ccc; padding: 10px;">${row.sNo || row.s_no || ''}</td>
           </tr>
           <tr>
             <th style="border: 1px solid #ccc; padding: 10px; text-align: left; background-color: #f5f5f5;">Papad Company</th>
-            <td style="border: 1px solid #ccc; padding: 10px;">${row.papadCompany || ''}</td>
+            <td style="border: 1px solid #ccc; padding: 10px;">${row.papadCompany || row.papad_company || ''}</td>
           </tr>
           <tr>
             <th style="border: 1px solid #ccc; padding: 10px; text-align: left; background-color: #f5f5f5;">Item Name</th>
-            <td style="border: 1px solid #ccc; padding: 10px;">${row.itemName || ''}</td>
+            <td style="border: 1px solid #ccc; padding: 10px;">${row.itemName || row.item_name || ''}</td>
           </tr>
           <tr>
             <th style="border: 1px solid #ccc; padding: 10px; text-align: left; background-color: #f5f5f5;">Lot No</th>
-            <td style="border: 1px solid #ccc; padding: 10px;">${row.lotNo || ''}</td>
+            <td style="border: 1px solid #ccc; padding: 10px;">${row.lotNo || row.lot_no || ''}</td>
           </tr>
           <tr>
             <th style="border: 1px solid #ccc; padding: 10px; text-align: left; background-color: #f5f5f5;">Weight</th>
@@ -100,11 +99,11 @@ const FlourOutDisplay = () => {
           </tr>
           <tr>
             <th style="border: 1px solid #ccc; padding: 10px; text-align: left; background-color: #f5f5f5;">Total Wt</th>
-            <td style="border: 1px solid #ccc; padding: 10px;">${row.totalWt || 0}</td>
+            <td style="border: 1px solid #ccc; padding: 10px;">${row.totalWt || row.total_wt || 0}</td>
           </tr>
           <tr>
             <th style="border: 1px solid #ccc; padding: 10px; text-align: left; background-color: #f5f5f5;">Papad Kg</th>
-            <td style="border: 1px solid #ccc; padding: 10px;">${row.papadKg || 0}</td>
+            <td style="border: 1px solid #ccc; padding: 10px;">${row.papadKg || row.papad_kg || 0}</td>
           </tr>
           <tr>
             <th style="border: 1px solid #ccc; padding: 10px; text-align: left; background-color: #f5f5f5;">Remarks</th>
@@ -120,11 +119,13 @@ const FlourOutDisplay = () => {
         ${tableHtml}
       </div>
     `;
-    printHtml(html, `Flour_Out_${row.sNo || row.id}`);
+
+    printHtml(html, `Flour_Out_${row.sNo || row.s_no || row.id}`);
   };
 
   const handleEdit = (row) => {
-    navigate(`/entry/flour-out-create?id=${row.id}`);
+    const editId = row.id || row.flour_out_id;
+    navigate(`/entry/flour-out-create?id=${editId}`);
   };
 
   return (

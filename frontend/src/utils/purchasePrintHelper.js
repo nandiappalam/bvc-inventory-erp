@@ -337,7 +337,7 @@ export function generatePurchasePrintHtml(purchase = {}, company = {}) {
                   <td style="padding: 6px 10px; border-bottom: 1px solid #e2e8f0; text-align: right; font-weight: 600; color: #dc2626;">-₹${formatCurrency(totalDeductionAmt)}</td>
                 </tr>
               ` : ''}
-              <tr style="background: #a9afbf; color: #ffffff; font-size: 14px; font-weight: 800;">
+              <tr style="background: #979eb4; color: #ffffff; font-size: 14px; font-weight: 800;">
                 <td style="padding: 8px 10px;">GRAND TOTAL:</td>
                 <td style="padding: 8px 10px; text-align: right;">₹${formatCurrency(finalPayable)}</td>
               </tr>

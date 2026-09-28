@@ -392,10 +392,14 @@ const MasterSelectCell = ({
 
 const EntryItemsTable = ({
   columns = [],
-  data = [],
-  onRowChange = () => {},
-  onAddRow = () => {},
-  onDeleteRow = () => {},
+  data,
+  items,
+  onRowChange,
+  onItemChange,
+  onAddRow,
+  onAddItem,
+  onDeleteRow,
+  onRemoveItem,
   showActions = true,
   sectionTitle = '',
   editable = true,
@@ -403,11 +407,18 @@ const EntryItemsTable = ({
   taxType = 'Exclusive',
   taxRate = 18,
 }) => {
-  // Keep legacy button visibility: + Add Row should respect `showActions` + `editable`.
+  // Support both 'data' and 'items' seamlessly
+  const activeData = (Array.isArray(items) && items.length > 0)
+    ? items
+    : (Array.isArray(data) && data.length > 0
+        ? data
+        : (Array.isArray(items) ? items : (Array.isArray(data) ? data : [])));
+
+  const activeRowChange = onRowChange || onItemChange || (() => {});
+  const activeAddRow = onAddRow || onAddItem || (() => {});
+  const activeDeleteRow = onDeleteRow || onRemoveItem || (() => {});
 
   const [weights, setWeights] = useState([]);
-
-
 
   useEffect(() => {
     const loadWeights = async () => {
@@ -425,7 +436,7 @@ const EntryItemsTable = ({
 
   useEffect(() => {
     if (lotMode !== 'select') return;
-    data.forEach((row, rowIndex) => {
+    activeData.forEach((row, rowIndex) => {
       const queryKey = row.item_id || row.item_name;
       if (queryKey && !row.available_lots_loaded) {
         (async () => {
@@ -464,10 +475,10 @@ const EntryItemsTable = ({
               batchUpdates.amount = base + taxAmt;
             }
 
-            onRowChange(rowIndex, '__batch__', batchUpdates);
+            activeRowChange(rowIndex, '__batch__', batchUpdates);
           } catch (err) {
             console.error(`LOT LOAD ERROR for ${row.item_name}`, err);
-            onRowChange(rowIndex, '__batch__', {
+            activeRowChange(rowIndex, '__batch__', {
               available_lots: [],
               available_lots_loaded: true
             });
@@ -475,26 +486,15 @@ const EntryItemsTable = ({
         })();
       }
     });
-  }, [data, onRowChange, lotMode, taxRate]);
+  }, [activeData, activeRowChange, lotMode, taxRate]);
 
   useEffect(() => {
     // Reset preview lot cursors on mount to ensure unused lot numbers are not skipped/wasted
     MasterSelectCell._previewStart = null;
     MasterSelectCell._previewCursor = null;
 
-    if (data.length === 0) {
-      onAddRow({
-        item_name: '',
-        item_id: '',
-        lot_no: '',
-        weight: '',
-        qty: '',
-        total_wt: '',
-        rate: '',
-        disc: '',
-        tax: '',
-        amount: '',
-      });
+    if (activeData.length === 0) {
+      handleAddRow();
     }
   }, []);
 
@@ -509,8 +509,10 @@ const EntryItemsTable = ({
   validateEntryConfig([], cleanedColumns);
 
   const handleAddRow = () => {
-    onAddRow({
-      sno: (Array.isArray(data) ? data.length : 0) + 1,
+    const newRow = {
+      sno: (Array.isArray(activeData) ? activeData.length : 0) + 1,
+      s_no: (Array.isArray(activeData) ? activeData.length : 0) + 1,
+      no: (Array.isArray(activeData) ? activeData.length : 0) + 1,
       item_id: '',
       item_name: '',
       item_label: '',
@@ -521,8 +523,31 @@ const EntryItemsTable = ({
       disc: '',
       tax_rate: (taxType === 'Without Tax' ? 0 : (taxRate || 5)),
       total_weight: '',
+      total_wt: '',
       amount: '',
-    });
+      papad_kg: '',
+      cost: '',
+      wages_bag: '',
+      wages_per_bag: '',
+      wages: ''
+    };
+    if (typeof onAddRow === 'function') {
+      onAddRow(newRow);
+    } else if (typeof onAddItem === 'function') {
+      onAddItem(newRow);
+    } else if (typeof activeAddRow === 'function') {
+      activeAddRow(newRow);
+    }
+  };
+
+  const handleDeleteRow = (rowIndex) => {
+    if (typeof onDeleteRow === 'function') {
+      onDeleteRow(rowIndex);
+    } else if (typeof onRemoveItem === 'function') {
+      onRemoveItem(rowIndex);
+    } else if (typeof activeDeleteRow === 'function') {
+      activeDeleteRow(rowIndex);
+    }
   };
 
   const handleCellChange = useCallback(
@@ -549,7 +574,7 @@ const EntryItemsTable = ({
       }
 
       if (key === 'lot_no' && value) {
-        const availableLots = data[rowIndex]?.available_lots || [];
+        const availableLots = activeData[rowIndex]?.available_lots || [];
         const selectedLot = availableLots.find(l => l.lot_no === value);
         if (selectedLot) {
           updates.rate = selectedLot.rate || 0;
@@ -561,7 +586,17 @@ const EntryItemsTable = ({
         }
       }
 
-      const currentRow = { ...data[rowIndex], ...updates };
+      // Also compute wages for papad_kg, wages_bag, wages_per_bag if present
+      if (key === 'papad_kg' || key === 'wages_bag' || key === 'wages_per_bag') {
+        const currentRow = { ...activeData[rowIndex], ...updates };
+        const pKg = parseFloat(currentRow.papad_kg) || 0;
+        const wBag = parseFloat(currentRow.wages_bag || currentRow.wages_per_bag) || 0;
+        if (pKg > 0 && wBag > 0) {
+          updates.wages = (pKg * wBag).toFixed(2);
+        }
+      }
+
+      const currentRow = { ...activeData[rowIndex], ...updates };
 
       const parseNumber = (v) => {
         if (v === null || v === undefined || v === '') return 0;
@@ -600,15 +635,21 @@ const EntryItemsTable = ({
         base_amount: Number(base.toFixed(2)),
         disc_amount: Number(discAmt.toFixed(2)),
         tax_amount: Number(taxAmt.toFixed(2)),
-        tot_wt: totalWt > 0 ? totalWt.toFixed(2) : (totalWt === 0 && safeQty > 0 ? '0.00' : ''),
-        total_wt: totalWt,
-        total_weight: totalWt,
+        tot_wt: totalWt > 0 ? totalWt.toFixed(2) : (totalWt === 0 && safeQty > 0 ? '0.00' : (currentRow.tot_wt || '')),
+        total_wt: totalWt > 0 ? totalWt : (currentRow.total_wt || totalWt),
+        total_weight: totalWt > 0 ? totalWt : (currentRow.total_weight || totalWt),
         amount: (taxable + taxAmt).toFixed(2),
       });
 
-      onRowChange(rowIndex, '__batch__', updates);
+      if (typeof onRowChange === 'function') {
+        onRowChange(rowIndex, '__batch__', updates);
+      } else if (typeof onItemChange === 'function') {
+        onItemChange(rowIndex, '__batch__', updates);
+      } else if (typeof activeRowChange === 'function') {
+        activeRowChange(rowIndex, '__batch__', updates);
+      }
     },
-    [data, onRowChange, taxRate, taxType]
+    [activeData, activeRowChange, onRowChange, onItemChange, taxRate, taxType]
   );
 
 
@@ -627,10 +668,10 @@ const EntryItemsTable = ({
         </thead>
 
         <tbody>
-          {data.map((row, rowIndex) => (
+          {activeData.map((row, rowIndex) => (
             <tr key={rowIndex}>
               {cleanedColumns.map((col) => {
-                if (col.key === 'sno' || col.key === 's_no') {
+                if (col.key === 'sno' || col.key === 's_no' || col.key === 'no') {
                   return <td key={col.key}>{rowIndex + 1}</td>;
                 }
 
@@ -703,7 +744,7 @@ const EntryItemsTable = ({
                         row={row}
                         lotMode={lotMode}
                         taxRate={taxRate}
-                        data={data}
+                        data={activeData}
                         readOnly={col.readOnly}
                       />
                     ) : col.type === 'masterSelect' ? (
@@ -721,7 +762,7 @@ const EntryItemsTable = ({
                         cellKey={col.key}
                         lotMode={lotMode}
                         taxRate={taxRate}
-                        data={data}
+                        data={activeData}
                       />
                     ) : (
                       <input
@@ -748,7 +789,23 @@ const EntryItemsTable = ({
 
               {showActions && (
                 <td>
-                  <button onClick={() => onDeleteRow(rowIndex)}>✕</button>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteRow(rowIndex)}
+                    style={{
+                      background: '#ff4d4f',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: 4,
+                      padding: '4px 8px',
+                      cursor: 'pointer',
+                      fontWeight: 'bold',
+                      fontSize: '12px',
+                    }}
+                    title="Delete row"
+                  >
+                    ✕
+                  </button>
                 </td>
               )}
             </tr>

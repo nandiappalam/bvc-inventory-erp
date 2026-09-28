@@ -47,8 +47,8 @@ const PapadInCreate = () => {
       box_empty: '', 
       wt_empty: '', 
       tot_wt: '',
-      papad_details: [], // Sub-rows for Box (Papad) & Wt (Papad)
-      empty_details: []  // Sub-rows for Box (Empty) & Wt (Empty)
+      papad_details: [],
+      empty_details: []
     }
   ]);
 
@@ -61,7 +61,6 @@ const PapadInCreate = () => {
   const [itemOptions, setItemOptions] = useState([]);
   
   // Modal State for multi-row Pop Up window entry
-  // activeModal: null OR { rowIndex: number, type: 'papad' | 'empty', tempRows: Array<{ box: '', wt: '' }> }
   const [activeModal, setActiveModal] = useState(null);
 
   const [message, setMessage] = useState('');
@@ -90,16 +89,18 @@ const PapadInCreate = () => {
           let nextSno = 1;
           try {
             const snoRes = await api('/papad-in/next-sno');
-            const sno = snoRes?.next_s_no ?? snoRes?.next_sno ?? snoRes?.s_no ?? snoRes?.data?.s_no;
+            const sno = snoRes?.next_s_no ?? snoRes?.next_sno ?? snoRes?.s_no ?? snoRes?.sNo ?? snoRes?.data?.s_no;
             if (sno) nextSno = parseInt(sno, 10);
             else nextSno = await api.getNextSNo('/papad-in');
           } catch (e) {
             nextSno = await api.getNextSNo('/papad-in');
           }
+
           setFormData(prev => ({ ...prev, sNo: String(nextSno) }));
 
           const lotRes = await api('/stock/next-lot-no').catch(() => null);
           const startLot = (lotRes && lotRes.lot_no) ? lotRes.lot_no : 'LOT0001';
+
           setPapadRows([
             { 
               s_no: 1, 
@@ -132,8 +133,8 @@ const PapadInCreate = () => {
           const data = await api(`/papad-in/${editId}`);
           if (data) {
             setFormData({
-              sNo: data.s_no || data.sNo || '',
-              date: data.date || '',
+              sNo: String(data.s_no || data.sNo || editId),
+              date: data.date ? data.date.substring(0, 10) : '',
               wt_scale: data.wt_scale || 'No',
               remarks: data.remarks || '',
               papadCompany: data.papad_company || data.papadCompany || '',
@@ -155,7 +156,6 @@ const PapadInCreate = () => {
                 } else if (Array.isArray(it.papad_details)) {
                   pDetails = it.papad_details;
                 }
-
                 if (typeof it.empty_details === 'string') {
                   try { eDetails = JSON.parse(it.empty_details); } catch(e) {}
                 } else if (Array.isArray(it.empty_details)) {
@@ -171,7 +171,7 @@ const PapadInCreate = () => {
                   wt_papad: it.wt_papad || it.wtPapad || it.weight || '',
                   box_empty: it.box_empty || it.boxEmpty || '',
                   wt_empty: it.wt_empty || it.wtEmpty || '',
-                  tot_wt: it.tot_wt || it.totWt || it.totalWt || '',
+                  tot_wt: it.tot_wt || it.totWt || it.total_wt || it.totalWt || '',
                   papad_details: pDetails,
                   empty_details: eDetails
                 };
@@ -180,12 +180,14 @@ const PapadInCreate = () => {
               setFlourRows(items.map((it, idx) => ({
                 s_no: idx + 1,
                 item_name: it.itemName || it.item_name || '',
-                kg: it.papadKg || it.kg || ''
+                kg: it.papadKg || it.papad_kg || it.kg || ''
               })));
             }
           }
         } catch (err) {
           console.error('Error loading papad-in record:', err);
+          setMessage('Error loading record');
+          setMessageType('error');
         } finally {
           setLoading(false);
         }
@@ -218,44 +220,40 @@ const PapadInCreate = () => {
   };
 
   // Open Pop Up Window for Papad Box/Wt
-  const openPapadModal = (rowIndex) => {
-    const row = papadRows[rowIndex];
-    const existingDetails = Array.isArray(row.papad_details) && row.papad_details.length > 0 
-      ? row.papad_details 
-      : [{ box: row.box_papad || '', wt: row.wt_papad || '' }, { box: '', wt: '' }];
-
+  const openPapadModal = (index) => {
+    const currRow = papadRows[index];
+    const initialList = (currRow.papad_details && currRow.papad_details.length > 0) 
+      ? [...currRow.papad_details] 
+      : [{ box: currRow.box_papad || '', wt: currRow.wt_papad || '' }];
+    
     setActiveModal({
-      rowIndex,
+      rowIndex: index,
       type: 'papad',
-      tempRows: JSON.parse(JSON.stringify(existingDetails))
+      title: `Papad Details - Row #${index + 1}`,
+      tempRows: initialList
     });
   };
 
   // Open Pop Up Window for Empty Box/Wt
-  const openEmptyModal = (rowIndex) => {
-    const row = papadRows[rowIndex];
-    const existingDetails = Array.isArray(row.empty_details) && row.empty_details.length > 0 
-      ? row.empty_details 
-      : [{ box: row.box_empty || '', wt: row.wt_empty || '' }];
-
+  const openEmptyModal = (index) => {
+    const currRow = papadRows[index];
+    const initialList = (currRow.empty_details && currRow.empty_details.length > 0) 
+      ? [...currRow.empty_details] 
+      : [{ box: currRow.box_empty || '', wt: currRow.wt_empty || '' }];
+    
     setActiveModal({
-      rowIndex,
+      rowIndex: index,
       type: 'empty',
-      tempRows: JSON.parse(JSON.stringify(existingDetails))
+      title: `Empty Details - Row #${index + 1}`,
+      tempRows: initialList
     });
   };
 
-  // Close Modal
-  const closeModal = () => {
-    setActiveModal(null);
-  };
-
-  // Modal handlers
-  const handleModalRowChange = (index, field, value) => {
+  const handleModalRowChange = (mIdx, field, val) => {
     if (!activeModal) return;
-    const newTempRows = [...activeModal.tempRows];
-    newTempRows[index] = { ...newTempRows[index], [field]: value };
-    setActiveModal({ ...activeModal, tempRows: newTempRows });
+    const updated = [...activeModal.tempRows];
+    updated[mIdx] = { ...updated[mIdx], [field]: val };
+    setActiveModal({ ...activeModal, tempRows: updated });
   };
 
   const addModalRow = () => {
@@ -266,157 +264,89 @@ const PapadInCreate = () => {
     });
   };
 
-  const deleteModalRow = (index) => {
-    if (!activeModal) return;
-    if (activeModal.tempRows.length <= 1) return;
-    const newTempRows = activeModal.tempRows.filter((_, i) => i !== index);
-    setActiveModal({ ...activeModal, tempRows: newTempRows });
+  const removeModalRow = (mIdx) => {
+    if (!activeModal || activeModal.tempRows.length <= 1) return;
+    const updated = activeModal.tempRows.filter((_, i) => i !== mIdx);
+    setActiveModal({ ...activeModal, tempRows: updated });
   };
 
-  // Save Modal Entries back to main Papad Details row
-  const saveModalEntries = () => {
+  const applyModalSave = () => {
     if (!activeModal) return;
     const { rowIndex, type, tempRows } = activeModal;
+    
+    let totalBoxes = 0;
+    let totalWt = 0;
 
-    // Filter valid non-empty rows
-    const validRows = tempRows.filter(r => (parseFloat(r.box) > 0 || parseFloat(r.wt) > 0));
-
-    setPapadRows(prevRows => {
-      const newRows = [...prevRows];
-      const targetRow = { ...newRows[rowIndex] };
-
-      let totalBoxes = 0;
-      let totalWt = 0;
-
-      validRows.forEach(r => {
-        const b = parseFloat(r.box) || 0;
-        const w = parseFloat(r.wt) || 0;
-        totalBoxes += b;
-        totalWt += (b > 0 ? (b * w) : w);
-      });
-
-      if (type === 'papad') {
-        targetRow.box_papad = totalBoxes || (validRows.length > 0 ? validRows[0].box : '');
-        targetRow.wt_papad = totalWt || (validRows.length > 0 ? validRows[0].wt : '');
-        targetRow.papad_details = validRows;
-      } else {
-        targetRow.box_empty = totalBoxes || (validRows.length > 0 ? validRows[0].box : '');
-        targetRow.wt_empty = totalWt || (validRows.length > 0 ? validRows[0].wt : '');
-        targetRow.empty_details = validRows;
-      }
-
-      // Re-calculate Net Tot Wt
-      let papadTotalWt = 0;
-      if (targetRow.papad_details && targetRow.papad_details.length > 0) {
-        papadTotalWt = targetRow.papad_details.reduce((acc, r) => {
-          const b = parseFloat(r.box) || 0;
-          const w = parseFloat(r.wt) || 0;
-          return acc + (b > 0 ? b * w : w);
-        }, 0);
-      } else {
-        const b = parseFloat(targetRow.box_papad) || 0;
-        const w = parseFloat(targetRow.wt_papad) || 0;
-        papadTotalWt = b > 0 ? b * w : w;
-      }
-
-      let emptyTotalWt = 0;
-      if (targetRow.empty_details && targetRow.empty_details.length > 0) {
-        emptyTotalWt = targetRow.empty_details.reduce((acc, r) => {
-          const b = parseFloat(r.box) || 0;
-          const w = parseFloat(r.wt) || 0;
-          return acc + (b > 0 ? b * w : w);
-        }, 0);
-      } else {
-        const b = parseFloat(targetRow.box_empty) || 0;
-        const w = parseFloat(targetRow.wt_empty) || 0;
-        emptyTotalWt = b > 0 ? b * w : w;
-      }
-
-      const calculatedTot = papadTotalWt - emptyTotalWt;
-      targetRow.tot_wt = calculatedTot > 0 ? calculatedTot.toFixed(3) : (papadTotalWt > 0 ? papadTotalWt.toFixed(3) : '0.000');
-
-      newRows[rowIndex] = targetRow;
-      return newRows;
+    tempRows.forEach(r => {
+      const b = parseFloat(r.box) || 0;
+      const w = parseFloat(r.wt) || 0;
+      totalBoxes += b;
+      totalWt += w;
     });
 
-    // If saving papad details and empty details not entered yet, prompt / auto-open Empty Modal
-    const rowToUpdate = papadRows[rowIndex];
-    if (type === 'papad' && (!rowToUpdate.empty_details || rowToUpdate.empty_details.length === 0)) {
-      setActiveModal(null);
-      setTimeout(() => {
-        openEmptyModal(rowIndex);
-      }, 150);
-    } else {
-      setActiveModal(null);
-    }
-  };
+    setPapadRows(prev => {
+      const copy = [...prev];
+      const target = { ...copy[rowIndex] };
 
-  // Handle direct row change in main Papad Details table
-  const handlePapadRowChange = (index, field, value) => {
-    setPapadRows(prevRows => {
-      const newRows = [...prevRows];
-      const targetRow = { ...newRows[index] };
-
-      if (field === 'item_name') {
-        const selectedOpt = itemOptions.find(opt => 
-          String(opt.id) === String(value) || 
-          (opt.item_name || opt.name || '').toLowerCase() === String(value).toLowerCase()
-        );
-        targetRow.item_name = selectedOpt?.item_name || selectedOpt?.name || value;
-        targetRow.item_id = selectedOpt?.id || value;
-
-        if (!targetRow.lot_no) {
-          const prevLot = index > 0 ? newRows[index - 1].lot_no : '';
-          targetRow.lot_no = getNextLotString(prevLot);
-        }
-
-        // Auto trigger Papad Box / Wt Pop Up Modal on new Item selection if sub-details empty
-        if (!targetRow.papad_details || targetRow.papad_details.length === 0) {
-          setTimeout(() => {
-            openPapadModal(index);
-          }, 100);
-        }
+      if (type === 'papad') {
+        target.box_papad = totalBoxes ? String(totalBoxes) : '';
+        target.wt_papad = totalWt ? String(totalWt.toFixed(2)) : '';
+        target.papad_details = tempRows.filter(r => r.box || r.wt);
       } else {
-        targetRow[field] = value;
+        target.box_empty = totalBoxes ? String(totalBoxes) : '';
+        target.wt_empty = totalWt ? String(totalWt.toFixed(2)) : '';
+        target.empty_details = tempRows.filter(r => r.box || r.wt);
       }
 
-      // Auto calculate tot_wt if numbers typed directly
-      const boxP = parseFloat(targetRow.box_papad) || 0;
-      const wtP = parseFloat(targetRow.wt_papad) || 0;
-      const boxE = parseFloat(targetRow.box_empty) || 0;
-      const wtE = parseFloat(targetRow.wt_empty) || 0;
+      // Recompute Net Tot Wt
+      const wtPapadVal = parseFloat(target.wt_papad) || 0;
+      const wtEmptyVal = parseFloat(target.wt_empty) || 0;
+      const net = Math.max(0, wtPapadVal - wtEmptyVal);
+      target.tot_wt = net ? String(net.toFixed(2)) : '';
 
-      const papadWt = targetRow.papad_details?.length > 0
-        ? targetRow.papad_details.reduce((a, r) => a + ((parseFloat(r.box)||0) > 0 ? (parseFloat(r.box)||0)*(parseFloat(r.wt)||0) : (parseFloat(r.wt)||0)), 0)
-        : (boxP > 0 ? boxP * wtP : wtP);
+      copy[rowIndex] = target;
+      return copy;
+    });
 
-      const emptyWt = targetRow.empty_details?.length > 0
-        ? targetRow.empty_details.reduce((a, r) => a + ((parseFloat(r.box)||0) > 0 ? (parseFloat(r.box)||0)*(parseFloat(r.wt)||0) : (parseFloat(r.wt)||0)), 0)
-        : (boxE > 0 ? boxE * wtE : wtE);
+    setActiveModal(null);
+  };
 
-      const calculatedTot = papadWt - emptyWt;
-      targetRow.tot_wt = calculatedTot > 0 ? calculatedTot.toFixed(3) : (papadWt > 0 ? papadWt.toFixed(3) : '0.000');
+  const handlePapadRowChange = (index, field, value) => {
+    setPapadRows(prev => {
+      const updated = [...prev];
+      const row = { ...updated[index] };
 
-      newRows[index] = targetRow;
-      return newRows;
+      if (field === '__batch__' && typeof value === 'object') {
+        Object.assign(row, value);
+      } else {
+        row[field] = value;
+      }
+
+      const wtPapad = parseFloat(row.wt_papad) || 0;
+      const wtEmpty = parseFloat(row.wt_empty) || 0;
+      const net = Math.max(0, wtPapad - wtEmpty);
+      row.tot_wt = net > 0 ? String(net.toFixed(2)) : '';
+
+      updated[index] = row;
+      return updated;
     });
   };
 
   const addPapadRow = () => {
     setPapadRows(prev => {
-      const lastLot = prev.length > 0 ? prev[prev.length - 1].lot_no : '';
+      const lastLot = prev[prev.length - 1]?.lot_no || '';
       const nextLot = getNextLotString(lastLot);
       return [
         ...prev,
-        { 
-          s_no: prev.length + 1, 
-          item_name: '', 
+        {
+          s_no: prev.length + 1,
+          item_name: '',
           item_id: '',
-          lot_no: nextLot, 
-          box_papad: '', 
-          wt_papad: '', 
-          box_empty: '', 
-          wt_empty: '', 
+          lot_no: nextLot,
+          box_papad: '',
+          wt_papad: '',
+          box_empty: '',
+          wt_empty: '',
           tot_wt: '',
           papad_details: [],
           empty_details: []
@@ -425,522 +355,393 @@ const PapadInCreate = () => {
     });
   };
 
-  const deletePapadRow = (index) => {
-    setPapadRows(prev => {
-      if (prev.length <= 1) return prev;
-      const filtered = prev.filter((_, i) => i !== index);
-      let currentLot = filtered[0]?.lot_no || 'LOT0001';
-      return filtered.map((it, idx) => {
-        const lot = idx === 0 ? currentLot : getNextLotString(currentLot);
-        currentLot = lot;
-        return { ...it, s_no: idx + 1, lot_no: lot };
-      });
+  const removePapadRow = (index) => {
+    if (papadRows.length <= 1) return;
+    const filtered = papadRows.filter((_, i) => i !== index);
+    setPapadRows(filtered.map((r, i) => ({ ...r, s_no: i + 1 })));
+  };
+
+  const handleFlourRowChange = (index, field, value) => {
+    setFlourRows(prev => {
+      const updated = [...prev];
+      if (field === '__batch__' && typeof value === 'object') {
+        updated[index] = { ...updated[index], ...value };
+      } else {
+        updated[index] = { ...updated[index], [field]: value };
+      }
+      return updated;
     });
   };
 
-  const handleFlourRowChange = useCallback((index, field, value) => {
-    setFlourRows(prevRows => {
-      const newRows = [...prevRows];
-      if (field === '__batch__' && typeof value === 'object') {
-        newRows[index] = { ...newRows[index], ...value };
-      } else {
-        newRows[index] = { ...newRows[index], [field]: value };
-      }
-      return newRows;
-    });
-  }, []);
-
-  const addFlourRow = useCallback(() => {
+  const addFlourRow = () => {
     setFlourRows(prev => [
       ...prev,
       { s_no: prev.length + 1, item_name: '', kg: '' }
     ]);
-  }, []);
+  };
 
-  const deleteFlourRow = useCallback((index) => {
-    setFlourRows(prev => {
-      if (prev.length <= 1) return prev;
-      const filtered = prev.filter((_, i) => i !== index);
-      return filtered.map((it, idx) => ({ ...it, s_no: idx + 1 }));
-    });
-  }, []);
+  const removeFlourRow = (index) => {
+    if (flourRows.length <= 1) return;
+    const filtered = flourRows.filter((_, i) => i !== index);
+    setFlourRows(filtered.map((r, i) => ({ ...r, s_no: i + 1 })));
+  };
 
-  const handleSubmit = async (e) => {
+  // Totals calculations
+  const totalBoxPapad = papadRows.reduce((acc, r) => acc + (parseFloat(r.box_papad) || 0), 0);
+  const totalWtPapad = papadRows.reduce((acc, r) => acc + (parseFloat(r.wt_papad) || 0), 0);
+  const totalBoxEmpty = papadRows.reduce((acc, r) => acc + (parseFloat(r.box_empty) || 0), 0);
+  const totalWtEmpty = papadRows.reduce((acc, r) => acc + (parseFloat(r.wt_empty) || 0), 0);
+  const totalNetWt = papadRows.reduce((acc, r) => acc + (parseFloat(r.tot_wt) || 0), 0);
+  const totalFlourKg = flourRows.reduce((acc, r) => acc + (parseFloat(r.kg) || 0), 0);
+
+  const handleSave = async (e) => {
     if (e) e.preventDefault();
+    if (!formData.papadCompany) {
+      setMessage('Papad Company is required');
+      setMessageType('error');
+      return;
+    }
+
+    const validPapadItems = papadRows.filter(r => r.item_name);
+    if (validPapadItems.length === 0) {
+      setMessage('Please enter at least one Papad item');
+      setMessageType('error');
+      return;
+    }
+
     setLoading(true);
     setMessage('');
 
     try {
-      if (!formData.date || !formData.papadCompany) {
-        setMessage('Date and Papad Company are required');
-        setMessageType('error');
-        setLoading(false);
-        return;
-      }
-
-      const validPapadItems = papadRows.filter(r => r.item_name);
-      if (validPapadItems.length === 0) {
-        setMessage('Please add at least one item in Papad Details');
-        setMessageType('error');
-        setLoading(false);
-        return;
-      }
-
-      // Combine papad items and flour items
-      const itemsPayload = validPapadItems.map((papadItem, idx) => {
-        const flourItem = flourRows[idx] || {};
-        const generatedLot = papadItem.lot_no || papadItem.lotNo || `LOT${String(idx + 1).padStart(4, '0')}`;
-        return {
-          itemName: papadItem.item_name,
-          item_id: papadItem.item_id,
-          lotNo: generatedLot,
-          lot_no: generatedLot,
-          box_papad: parseFloat(papadItem.box_papad) || 0,
-          wt_papad: parseFloat(papadItem.wt_papad) || 0,
-          box_empty: parseFloat(papadItem.box_empty) || 0,
-          wt_empty: parseFloat(papadItem.wt_empty) || 0,
-          totalWt: parseFloat(papadItem.tot_wt) || 0,
-          papadKg: parseFloat(flourItem.kg) || parseFloat(papadItem.tot_wt) || 0,
-          qty: parseFloat(papadItem.box_papad) || 0,
-          weight: parseFloat(papadItem.wt_papad) || 0,
-          papad_details: papadItem.papad_details || [],
-          empty_details: papadItem.empty_details || []
-        };
-      });
-
-      const totalQty = itemsPayload.reduce((acc, r) => acc + (parseFloat(r.qty) || 0), 0);
-      const totalWeight = itemsPayload.reduce((acc, r) => acc + (parseFloat(r.totalWt) || 0), 0);
-
       const payload = {
         formData,
-        items: itemsPayload,
+        items: papadRows.map(r => ({
+          itemName: r.item_name,
+          item_name: r.item_name,
+          lotNo: r.lot_no,
+          lot_no: r.lot_no,
+          box_papad: parseFloat(r.box_papad) || 0,
+          wt_papad: parseFloat(r.wt_papad) || 0,
+          box_empty: parseFloat(r.box_empty) || 0,
+          wt_empty: parseFloat(r.wt_empty) || 0,
+          tot_wt: parseFloat(r.tot_wt) || 0,
+          totalWt: parseFloat(r.tot_wt) || 0,
+          total_wt: parseFloat(r.tot_wt) || 0,
+          qty: parseFloat(r.box_papad) || 1,
+          weight: parseFloat(r.tot_wt) || parseFloat(r.wt_papad) || 0,
+          papad_details: r.papad_details,
+          empty_details: r.empty_details
+        })),
+        flourItems: flourRows.map(r => ({
+          itemName: r.item_name,
+          item_name: r.item_name,
+          kg: parseFloat(r.kg) || 0,
+          papadKg: parseFloat(r.kg) || 0
+        })),
         totals: {
-          totalQty,
-          totalWeight,
+          totalQty: totalBoxPapad,
+          totalWeight: totalNetWt,
           totalWages: 0
         }
       };
 
       const endpoint = editId ? `/papad-in/${editId}` : '/papad-in';
       const method = editId ? 'PUT' : 'POST';
+      const res = await api(endpoint, { method, body: payload });
 
-      const result = await api(endpoint, {
-        method,
-        body: payload
-      });
-
-      if (result && (result.success || result.id || result.message?.includes('successfully'))) {
+      if (res && (res.success || res.id || res.message)) {
         setMessage(editId ? 'Papad In updated successfully!' : 'Papad In saved successfully!');
         setMessageType('success');
         setTimeout(() => {
-          setMessage('');
           navigate('/entry/papad-in-display');
-        }, 1500);
+        }, 1200);
       } else {
-        setMessage(result?.message || 'Error saving Papad In');
+        setMessage(res?.message || 'Error saving Papad In record');
         setMessageType('error');
       }
     } catch (err) {
-      console.error(err);
-      setMessage('Error saving Papad In: ' + err.message);
+      console.error('Error saving papad in record:', err);
+      setMessage(err.message || 'Error saving Papad In');
       setMessageType('error');
     } finally {
       setLoading(false);
     }
   };
 
-  const totalTotWt = papadRows.reduce((acc, r) => acc + (parseFloat(r.tot_wt) || 0), 0);
-
-  // Active modal calculations
-  let modalTotalBoxes = 0;
-  let modalTotalWt = 0;
-  if (activeModal) {
-    activeModal.tempRows.forEach(r => {
-      const b = parseFloat(r.box) || 0;
-      const w = parseFloat(r.wt) || 0;
-      modalTotalBoxes += b;
-      modalTotalWt += (b > 0 ? b * w : w);
-    });
-  }
-
-  const activeRow = activeModal ? papadRows[activeModal.rowIndex] : null;
-
   return (
-    <div className="window">
-      <div className="screen-title">{editId ? 'Papad In Modification' : 'Papad In Creation'}</div>
+    <div className="window papad-in-window">
+      <div className="screen-title">{editId ? 'Papad In Update' : 'Papad In Creation'}</div>
 
-      {message && (
-        <div className={`message ${messageType}`} style={{ margin: '15px' }}>
-          {message}
-        </div>
-      )}
+      {message && <div className={`message ${messageType}`}>{message}</div>}
 
-      {loading && !editId ? (
-        <div style={{ padding: '20px', textAlign: 'center' }}>Saving...</div>
-      ) : (
-        <form onSubmit={handleSubmit}>
-          <EntryTopFrame 
-            fields={topFrameFields}
-            data={formData}
-            onChange={handleFieldChange}
-          />
+      <form onSubmit={handleSave}>
+        {/* Top Header Section */}
+        <EntryTopFrame
+          fields={topFrameFields}
+          data={formData}
+          onChange={handleFieldChange}
+        />
 
-          <EntrySection title="Papad Details :">
-            <div style={{ overflowX: 'auto', padding: '10px' }}>
-              <table className="data-grid" style={{ width: '100%', marginBottom: '15px' }}>
+        {/* 1. Papad Details Table */}
+        <div style={{ marginTop: '16px' }}>
+          <EntrySection title="Papad Details">
+            <div className="entry-items-table-container">
+              <table className="entry-items-table">
                 <thead>
                   <tr>
-                    <th style={{ width: '40px', textAlign: 'center' }}>S.No</th>
-                    <th style={{ minWidth: '170px' }}>Item Name</th>
-                    <th style={{ width: '110px' }}>Lot No (Auto)</th>
-                    <th style={{ width: '145px' }}>Box (Papad)</th>
-                    <th style={{ width: '145px' }}>Wt (Papad) Kg</th>
-                    <th style={{ width: '145px' }}>Box (Empty)</th>
-                    <th style={{ width: '145px' }}>Wt (Empty) Kg</th>
-                    <th style={{ width: '120px' }}>Tot Wt (Kg)</th>
-                    <th style={{ width: '110px', textAlign: 'center' }}>Pop Up Action</th>
-                    <th style={{ width: '50px', textAlign: 'center' }}>Action</th>
+                    <th style={{ width: '50px' }}>S.No</th>
+                    <th>Item Name</th>
+                    <th>Lot No</th>
+                    <th>Box (Papad)</th>
+                    <th>Wt (Papad)</th>
+                    <th>Box (Empty)</th>
+                    <th>Wt (Empty)</th>
+                    <th>Tot Wt (Net)</th>
+                    <th style={{ width: '80px' }}>Action</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {papadRows.map((row, index) => {
-                    const hasPapadDetails = Array.isArray(row.papad_details) && row.papad_details.length > 0;
-                    const hasEmptyDetails = Array.isArray(row.empty_details) && row.empty_details.length > 0;
-
-                    return (
-                      <React.Fragment key={index}>
-                        <tr>
-                          <td align="center" style={{ fontWeight: 'bold' }}>{index + 1}</td>
-                          
-                          {/* Item Name Master Select */}
-                          <td style={{ padding: '4px' }}>
-                            <select
-                              value={row.item_id || row.item_name || ''}
-                              onChange={(e) => handlePapadRowChange(index, 'item_name', e.target.value)}
-                              style={{ width: '100%', padding: '5px', border: '1px solid #ccc', borderRadius: '4px' }}
-                            >
-                              <option value="">-- Select Item --</option>
-                              {itemOptions.map((opt, i) => (
-                                <option key={i} value={opt.id || opt.item_name || opt.name}>
-                                  {opt.item_name || opt.name}
-                                </option>
-                              ))}
-                            </select>
-                          </td>
-
-                          {/* Lot No (Auto) */}
-                          <td style={{ padding: '4px' }}>
-                            <input
-                              type="text"
-                              value={row.lot_no || ''}
-                              readOnly
-                              style={{ background: '#f0f8ff', fontWeight: 'bold', textAlign: 'center' }}
-                            />
-                          </td>
-
-                          {/* Box (Papad) */}
-                          <td style={{ padding: '4px', position: 'relative' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '3px', width: '100%' }}>
-                              <input
-                                type="number"
-                                value={row.box_papad !== undefined && row.box_papad !== null ? row.box_papad : ''}
-                                onChange={(e) => handlePapadRowChange(index, 'box_papad', e.target.value)}
-                                placeholder="Qty"
-                                style={{ flex: 1, minWidth: '55px', width: '100%', padding: '5px 6px', fontSize: '13px', fontWeight: 'bold', boxSizing: 'border-box' }}
-                              />
-                              <button
-                                type="button"
-                                onClick={() => openPapadModal(index)}
-                                title="Open Multi-Row Box (Papad) & Wt Pop Up Window"
-                                className="btn-popup-trigger"
-                                style={{ padding: '3px 5px', fontSize: '12px', flexShrink: 0 }}
-                              >
-                                📝
-                              </button>
-                            </div>
-                          </td>
-
-                          {/* Wt (Papad) */}
-                          <td style={{ padding: '4px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '3px', width: '100%' }}>
-                              <input
-                                type="number"
-                                step="0.001"
-                                value={row.wt_papad !== undefined && row.wt_papad !== null ? row.wt_papad : ''}
-                                onChange={(e) => handlePapadRowChange(index, 'wt_papad', e.target.value)}
-                                placeholder="Kg"
-                                style={{ flex: 1, minWidth: '55px', width: '100%', padding: '5px 6px', fontSize: '13px', fontWeight: 'bold', boxSizing: 'border-box' }}
-                              />
-                              <button
-                                type="button"
-                                onClick={() => openPapadModal(index)}
-                                title="Open Multi-Row Box (Papad) & Wt Pop Up Window"
-                                className="btn-popup-trigger"
-                                style={{ padding: '3px 5px', fontSize: '12px', flexShrink: 0 }}
-                              >
-                                📝
-                              </button>
-                            </div>
-                          </td>
-
-                          {/* Box (Empty) */}
-                          <td style={{ padding: '4px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '3px', width: '100%' }}>
-                              <input
-                                type="number"
-                                value={row.box_empty !== undefined && row.box_empty !== null ? row.box_empty : ''}
-                                onChange={(e) => handlePapadRowChange(index, 'box_empty', e.target.value)}
-                                placeholder="Qty"
-                                style={{ flex: 1, minWidth: '55px', width: '100%', padding: '5px 6px', fontSize: '13px', fontWeight: 'bold', boxSizing: 'border-box' }}
-                              />
-                              <button
-                                type="button"
-                                onClick={() => openEmptyModal(index)}
-                                title="Open Multi-Row Box (Empty) & Wt Pop Up Window"
-                                className="btn-popup-trigger"
-                                style={{ padding: '3px 5px', fontSize: '12px', flexShrink: 0 }}
-                              >
-                                📝
-                              </button>
-                            </div>
-                          </td>
-
-                          {/* Wt (Empty) */}
-                          <td style={{ padding: '4px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '3px', width: '100%' }}>
-                              <input
-                                type="number"
-                                step="0.001"
-                                value={row.wt_empty !== undefined && row.wt_empty !== null ? row.wt_empty : ''}
-                                onChange={(e) => handlePapadRowChange(index, 'wt_empty', e.target.value)}
-                                placeholder="Kg"
-                                style={{ flex: 1, minWidth: '55px', width: '100%', padding: '5px 6px', fontSize: '13px', fontWeight: 'bold', boxSizing: 'border-box' }}
-                              />
-                              <button
-                                type="button"
-                                onClick={() => openEmptyModal(index)}
-                                title="Open Multi-Row Box (Empty) & Wt Pop Up Window"
-                                className="btn-popup-trigger"
-                                style={{ padding: '3px 5px', fontSize: '12px', flexShrink: 0 }}
-                              >
-                                📝
-                              </button>
-                            </div>
-                          </td>
-
-                          {/* Tot Wt */}
-                          <td style={{ padding: '4px' }}>
-                            <input
-                              type="text"
-                              value={row.tot_wt || '0.000'}
-                              readOnly
-                              style={{ background: '#e2e8f0', fontWeight: 'bold', color: '#1e3a8a', textAlign: 'right' }}
-                            />
-                          </td>
-
-                          {/* Pop Up Action */}
-                          <td align="center" style={{ padding: '4px' }}>
-                            <button
-                              type="button"
-                              onClick={() => openPapadModal(index)}
-                              className="btn-popup-trigger"
-                              style={{ padding: '4px 8px', fontSize: '11px', background: '#3b82f6', color: '#fff' }}
-                            >
-                              📋 Enter Pop Up
-                            </button>
-                          </td>
-
-                          {/* Delete Row */}
-                          <td align="center">
-                            <button 
-                              type="button"
-                              onClick={() => deletePapadRow(index)}
-                              style={{ background: '#ef4444', color: 'white', border: 'none', borderRadius: '4px', padding: '4px 8px', cursor: 'pointer', fontWeight: 'bold' }}
-                            >
-                              ✕
-                            </button>
-                          </td>
-                        </tr>
-
-                        {/* Row-wise breakdown display under single Item Name */}
-                        {(hasPapadDetails || hasEmptyDetails) && (
-                          <tr key={`breakdown-${index}`} style={{ background: '#f8fafc' }}>
-                            <td colSpan="10" style={{ padding: '6px 12px', borderBottom: '2px solid #cbd5e1' }}>
-                              <div className="sub-row-panel">
-                                {hasPapadDetails && (
-                                  <div className="sub-row-group">
-                                    <span className="sub-row-group-title">📦 Box (Papad) Sub-Entries: </span>
-                                    {row.papad_details.map((sub, sIdx) => {
-                                      const boxCount = parseFloat(sub.box) || 0;
-                                      const boxWt = parseFloat(sub.wt) || 0;
-                                      const tot = boxCount > 0 ? boxCount * boxWt : boxWt;
-                                      return (
-                                        <span key={sIdx} className="sub-row-item">
-                                          Row {sIdx + 1}: <strong>{boxCount} Box</strong> × {boxWt.toFixed(3)} Kg = <strong>{tot.toFixed(3)} Kg</strong>
-                                        </span>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-
-                                {hasEmptyDetails && (
-                                  <div className="sub-row-group" style={{ marginTop: '4px' }}>
-                                    <span className="sub-row-group-title" style={{ color: '#92400e' }}>🗑️ Box (Empty) Sub-Entries: </span>
-                                    {row.empty_details.map((sub, sIdx) => {
-                                      const boxCount = parseFloat(sub.box) || 0;
-                                      const boxWt = parseFloat(sub.wt) || 0;
-                                      const tot = boxCount > 0 ? boxCount * boxWt : boxWt;
-                                      return (
-                                        <span key={sIdx} className="sub-row-item sub-row-item-empty">
-                                          Row {sIdx + 1}: <strong>{boxCount} Empty Box</strong> × {boxWt.toFixed(3)} Kg = <strong>{tot.toFixed(3)} Kg</strong>
-                                        </span>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </React.Fragment>
-                    );
-                  })}
+                  {papadRows.map((row, idx) => (
+                    <tr key={idx}>
+                      <td style={{ textAlign: 'center' }}>{row.s_no}</td>
+                      <td>
+                        <select
+                          className="uniform-input"
+                          value={row.item_name}
+                          onChange={(e) => handlePapadRowChange(idx, 'item_name', e.target.value)}
+                        >
+                          <option value="">-- Select Papad Item --</option>
+                          {itemOptions.map((opt, i) => (
+                            <option key={opt.id || i} value={opt.item_name || opt.name}>
+                              {opt.item_name || opt.name}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <input
+                          type="text"
+                          className="uniform-input"
+                          value={row.lot_no}
+                          onChange={(e) => handlePapadRowChange(idx, 'lot_no', e.target.value)}
+                        />
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', gap: '4px' }}>
+                          <input
+                            type="number"
+                            className="uniform-input"
+                            value={row.box_papad}
+                            onChange={(e) => handlePapadRowChange(idx, 'box_papad', e.target.value)}
+                            placeholder="0"
+                          />
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            style={{ padding: '2px 6px', fontSize: '11px' }}
+                            title="Multiple Box Popup"
+                            onClick={() => openPapadModal(idx)}
+                          >
+                            ...
+                          </button>
+                        </div>
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          step="0.01"
+                          className="uniform-input"
+                          value={row.wt_papad}
+                          onChange={(e) => handlePapadRowChange(idx, 'wt_papad', e.target.value)}
+                          placeholder="0.00"
+                        />
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', gap: '4px' }}>
+                          <input
+                            type="number"
+                            className="uniform-input"
+                            value={row.box_empty}
+                            onChange={(e) => handlePapadRowChange(idx, 'box_empty', e.target.value)}
+                            placeholder="0"
+                          />
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            style={{ padding: '2px 6px', fontSize: '11px' }}
+                            title="Multiple Empty Box Popup"
+                            onClick={() => openEmptyModal(idx)}
+                          >
+                            ...
+                          </button>
+                        </div>
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          step="0.01"
+                          className="uniform-input"
+                          value={row.wt_empty}
+                          onChange={(e) => handlePapadRowChange(idx, 'wt_empty', e.target.value)}
+                          placeholder="0.00"
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          step="0.01"
+                          className="uniform-input font-bold"
+                          value={row.tot_wt}
+                          readOnly
+                          style={{ background: '#f8fafc', fontWeight: 'bold', color: '#1f4fb2' }}
+                          placeholder="0.00"
+                        />
+                      </td>
+                      <td style={{ textAlign: 'center' }}>
+                        <button
+                          type="button"
+                          className="btn-danger-icon"
+                          onClick={() => removePapadRow(idx)}
+                          disabled={papadRows.length <= 1}
+                        >
+                          ✕
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
-
-              <button
-                type="button"
-                onClick={addPapadRow}
-                style={{
-                  padding: '8px 16px',
-                  background: '#1976d2',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  fontWeight: 'bold',
-                }}
-              >
-                + Add Item Row
-              </button>
+              <div style={{ padding: '8px' }}>
+                <button type="button" className="btn btn-secondary btn-sm" onClick={addPapadRow}>
+                  + Add Papad Row
+                </button>
+              </div>
             </div>
           </EntrySection>
+        </div>
 
-          <EntrySection title="Flour Details :">
+        {/* Papad Details Totals */}
+        <div style={{ marginTop: '10px' }}>
+          <EntryTotalsRow totals={[
+            { label: 'Total Box (Papad)', value: totalBoxPapad },
+            { label: 'Total Wt (Papad)', value: totalWtPapad.toFixed(2) },
+            { label: 'Total Box (Empty)', value: totalBoxEmpty },
+            { label: 'Total Wt (Empty)', value: totalWtEmpty.toFixed(2) },
+            { label: 'Net Total Wt', value: `${totalNetWt.toFixed(2)} Kg` }
+          ]} />
+        </div>
+
+        {/* 2. Flour Details Section */}
+        <div style={{ marginTop: '16px' }}>
+          <EntrySection title="Flour Details">
             <EntryItemsTable
               columns={flourColumns}
               data={flourRows}
+              items={flourRows}
               onRowChange={handleFlourRowChange}
+              onItemChange={handleFlourRowChange}
               onAddRow={addFlourRow}
-              onDeleteRow={deleteFlourRow}
-              showActions={true}
+              onAddItem={addFlourRow}
+              onDeleteRow={removeFlourRow}
+              onRemoveItem={removeFlourRow}
             />
           </EntrySection>
+        </div>
 
+        {/* Flour Details Totals */}
+        <div style={{ marginTop: '10px' }}>
           <EntryTotalsRow totals={[
-            { label: 'Total Weight (Kg)', value: totalTotWt.toFixed(3) }
+            { label: 'Total Flour (Kg)', value: `${totalFlourKg.toFixed(2)} Kg` }
           ]} />
+        </div>
 
-          <EntryActions 
-            onSave={handleSubmit}
-            showSave={true}
+        {/* Actions Bar */}
+        <div style={{ marginTop: '20px' }}>
+          <EntryActions
+            onSave={handleSave}
+            onCancel={() => navigate('/entry/papad-in-display')}
             saving={loading}
             saveText={editId ? 'Update' : 'Save'}
           />
-        </form>
-      )}
+        </div>
+      </form>
 
-      {/* POP UP WINDOW MODAL for Box & Wt Multi-Row Entry */}
+      {/* Multi-Row Modal Pop Up for Detailed Entries */}
       {activeModal && (
-        <div className="papad-modal-overlay">
-          <div className="papad-modal-content">
-            <div className="papad-modal-header">
-              <h3>
-                {activeModal.type === 'papad' ? '📦 Papad Box & Weight Entries (Pop Up)' : '🗑️ Empty Box & Weight Entries (Pop Up)'}
-                {activeRow ? ` — Item: ${activeRow.item_name || 'Select Item'} (Lot: ${activeRow.lot_no})` : ''}
-              </h3>
-              <button type="button" onClick={closeModal} className="papad-modal-close-btn">✕</button>
-            </div>
+        <div className="modal-overlay" style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex', justifyContent: 'center', alignItems: 'center',
+          zIndex: 10000
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: '8px',
+            padding: '20px',
+            minWidth: '380px',
+            maxWidth: '500px',
+            boxShadow: '0 4px 15px rgba(0,0,0,0.2)'
+          }}>
+            <h3 style={{ margin: '0 0 15px 0', color: '#1f4fb2', borderBottom: '2px solid #1f4fb2', paddingBottom: '6px' }}>
+              {activeModal.title}
+            </h3>
 
-            <div className="papad-modal-body">
-              <div className="papad-modal-info">
-                <strong>Multi-Row Field Entry:</strong> Enter two or more rows of box quantity and per-box weight below. Total boxes and total weight will calculate automatically.
-              </div>
-
-              <table className="papad-modal-table">
-                <thead>
-                  <tr>
-                    <th style={{ width: '50px', textAlign: 'center' }}>S.No</th>
-                    <th>{activeModal.type === 'papad' ? 'Box (Papad) Qty' : 'Box (Empty) Qty'}</th>
-                    <th>{activeModal.type === 'papad' ? 'Wt per Box (Kg)' : 'Wt per Empty Box (Kg)'}</th>
-                    <th>Total Weight (Kg)</th>
-                    <th style={{ width: '60px', textAlign: 'center' }}>Action</th>
+            <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '15px' }}>
+              <thead>
+                <tr style={{ background: '#f1f5f9' }}>
+                  <th style={{ padding: '6px', border: '1px solid #cbd5e1' }}>Box</th>
+                  <th style={{ padding: '6px', border: '1px solid #cbd5e1' }}>Wt (Kg)</th>
+                  <th style={{ width: '40px', padding: '6px', border: '1px solid #cbd5e1' }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {activeModal.tempRows.map((r, mIdx) => (
+                  <tr key={mIdx}>
+                    <td style={{ padding: '4px', border: '1px solid #cbd5e1' }}>
+                      <input
+                        type="number"
+                        className="uniform-input"
+                        value={r.box}
+                        onChange={(e) => handleModalRowChange(mIdx, 'box', e.target.value)}
+                        placeholder="Box qty"
+                      />
+                    </td>
+                    <td style={{ padding: '4px', border: '1px solid #cbd5e1' }}>
+                      <input
+                        type="number"
+                        step="0.01"
+                        className="uniform-input"
+                        value={r.wt}
+                        onChange={(e) => handleModalRowChange(mIdx, 'wt', e.target.value)}
+                        placeholder="Weight in kg"
+                      />
+                    </td>
+                    <td style={{ textAlign: 'center', border: '1px solid #cbd5e1' }}>
+                      <button
+                        type="button"
+                        className="btn-danger-icon"
+                        onClick={() => removeModalRow(mIdx)}
+                        disabled={activeModal.tempRows.length <= 1}
+                      >
+                        ✕
+                      </button>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {activeModal.tempRows.map((mRow, mIdx) => {
-                    const bCount = parseFloat(mRow.box) || 0;
-                    const bWt = parseFloat(mRow.wt) || 0;
-                    const rowTot = bCount > 0 ? bCount * bWt : bWt;
+                ))}
+              </tbody>
+            </table>
 
-                    return (
-                      <tr key={mIdx}>
-                        <td align="center" style={{ fontWeight: 'bold' }}>{mIdx + 1}</td>
-                        <td>
-                          <input
-                            type="number"
-                            value={mRow.box !== undefined && mRow.box !== null ? mRow.box : ''}
-                            onChange={(e) => handleModalRowChange(mIdx, 'box', e.target.value)}
-                            placeholder="Enter Box Qty"
-                            autoFocus={mIdx === 0}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            type="number"
-                            step="0.001"
-                            value={mRow.wt !== undefined && mRow.wt !== null ? mRow.wt : ''}
-                            onChange={(e) => handleModalRowChange(mIdx, 'wt', e.target.value)}
-                            placeholder="Enter Wt (Kg)"
-                          />
-                        </td>
-                        <td style={{ fontWeight: 'bold', color: '#1e3a8a', textAlign: 'right' }}>
-                          {rowTot.toFixed(3)} Kg
-                        </td>
-                        <td align="center">
-                          <button
-                            type="button"
-                            onClick={() => deleteModalRow(mIdx)}
-                            style={{ background: '#ef4444', color: 'white', border: 'none', borderRadius: '4px', padding: '3px 7px', cursor: 'pointer' }}
-                          >
-                            ✕
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-
-              <button
-                type="button"
-                onClick={addModalRow}
-                className="papad-modal-add-btn"
-              >
-                + Add Entry Row
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={addModalRow}>
+                + Add Sub Row
               </button>
-            </div>
-
-            <div className="papad-modal-footer">
-              <div className="papad-modal-totals">
-                Total Boxes: <span style={{ color: '#2563eb' }}>{modalTotalBoxes}</span> | Total Wt: <span style={{ color: '#16a34a' }}>{modalTotalWt.toFixed(3)} Kg</span>
-              </div>
-              <div className="papad-modal-actions">
-                <button type="button" onClick={closeModal} className="papad-modal-cancel-btn">
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setActiveModal(null)}>
                   Cancel
                 </button>
-                <button type="button" onClick={saveModalEntries} className="papad-modal-save-btn">
-                  Save & Apply Entries
+                <button type="button" className="btn btn-primary" onClick={applyModalSave}>
+                  Apply Totals
                 </button>
               </div>
             </div>

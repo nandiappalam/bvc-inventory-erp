@@ -3,13 +3,11 @@ const db = require('../config/database');
 // Helper to deduct stock for Flour Out items (Flour issue to papad makers -> Usage)
 const deductFlourOutStock = async (flourOutId, date, items) => {
   if (!Array.isArray(items)) return;
-
   for (const item of items) {
     const itemName = item.item_name || item.itemName;
     const lotNo = item.lot_no || item.lotNo || '';
     const qty = parseFloat(item.qty) || 0;
-    const totalWt = parseFloat(item.total_wt || item.totalWt || item.weight) || 0;
-
+    const totalWt = parseFloat(item.total_wt || item.totalWt || item.weight) || (qty * (parseFloat(item.weight) || 50));
     if (!itemName || (qty <= 0 && totalWt <= 0)) continue;
 
     let remainingToDeduct = qty > 0 ? qty : totalWt;
@@ -57,11 +55,17 @@ const deductFlourOutStock = async (flourOutId, date, items) => {
       }
     }
 
-    // Get item_id from item_master
+    // Get or create item_id from item_master with item_group = 'Flour'
     let itemId = null;
-    const itemMaster = await db.query(`SELECT id FROM item_master WHERE item_name = ?`, [itemName]);
+    const itemMaster = await db.query(`SELECT id, item_group FROM item_master WHERE item_name = ?`, [itemName]);
     if (itemMaster.rows.length > 0) {
       itemId = itemMaster.rows[0].id;
+      if (!itemMaster.rows[0].item_group) {
+        await db.run(`UPDATE item_master SET item_group = 'Flour' WHERE id = ?`, [itemId]);
+      }
+    } else {
+      const newMaster = await db.run(`INSERT INTO item_master (item_name, status, item_group) VALUES (?, 'Active', 'Flour')`, [itemName]);
+      itemId = newMaster.lastID;
     }
 
     // Insert negative stock entry for tracking
@@ -94,22 +98,23 @@ const revertFlourOutStock = async (flourOutId) => {
 // Helper to add stock for Papad In items (Receiving Finished Papad into Inventory -> Entry)
 const addPapadInStock = async (papadInId, date, items) => {
   if (!Array.isArray(items)) return;
-
   for (const item of items) {
     const itemName = item.itemName || item.item_name;
     const lotNo = item.lotNo || item.lot_no || `LOT-PAP-${papadInId}`;
     const qty = parseFloat(item.qty || item.box_papad) || 0;
     const weight = parseFloat(item.totalWt || item.tot_wt || item.wt_papad || item.weight) || 0;
-
     if (!itemName || (qty <= 0 && weight <= 0)) continue;
 
-    // 1. Get or create item in item_master
+    // 1. Get or create item in item_master with item_group = 'Papad'
     let itemId = null;
-    const itemMaster = await db.query(`SELECT id FROM item_master WHERE item_name = ?`, [itemName]);
+    const itemMaster = await db.query(`SELECT id, item_group FROM item_master WHERE item_name = ?`, [itemName]);
     if (itemMaster.rows.length > 0) {
       itemId = itemMaster.rows[0].id;
+      if (!itemMaster.rows[0].item_group || itemMaster.rows[0].item_group === 'General') {
+        await db.run(`UPDATE item_master SET item_group = 'Papad' WHERE id = ?`, [itemId]);
+      }
     } else {
-      const newMaster = await db.run(`INSERT INTO item_master (item_name, status, item_group) VALUES (?, 'Active', 'FG')`, [itemName]);
+      const newMaster = await db.run(`INSERT INTO item_master (item_name, status, item_group) VALUES (?, 'Active', 'Papad')`, [itemName]);
       itemId = newMaster.lastID;
     }
 
@@ -126,8 +131,8 @@ const addPapadInStock = async (papadInId, date, items) => {
       `, [qty, qty, existingLot.rows[0].id]);
     } else {
       await db.run(`
-        INSERT INTO stock_lots (item_id, item_name, lot_no, purchase_id, quantity, remaining_quantity, rate)
-        VALUES (?, ?, ?, ?, ?, ?, 0)
+        INSERT INTO stock_lots (item_id, item_name, lot_no, purchase_id, quantity, remaining_quantity, rate, usable_for_production, approval_status)
+        VALUES (?, ?, ?, ?, ?, ?, 0, 1, 'Approved')
       `, [itemId, itemName, lotNo, papadInId, qty, qty]);
     }
 
@@ -165,45 +170,9 @@ const revertPapadInStock = async (papadInId) => {
   }
 };
 
-// Sync method to ensure historical records in flour_out table exist in stock & stock_lots
-const syncFlourOutAndPapadInStock = async () => {
-  try {
-    const foRecords = await db.query(`SELECT * FROM flour_out`);
-    for (const fo of foRecords.rows) {
-      const items = await db.query(`SELECT * FROM flour_out_items WHERE flour_out_id = ?`, [fo.id]);
-      if (items.rows.length === 0) continue;
-
-      // Determine if this is a Papad In record vs a Flour Out record
-      const isPapadIn = items.rows.some(i => 
-        (i.item_name && i.item_name.toLowerCase().includes('papad')) ||
-        (i.box_papad && i.box_papad > 0) ||
-        (i.wt_papad && i.wt_papad > 0)
-      );
-
-      if (isPapadIn) {
-        const stockCheck = await db.query(`SELECT id FROM stock WHERE reference_id = ? AND type = 'Papad In'`, [fo.id]);
-        if (stockCheck.rows.length === 0) {
-          console.log(`Syncing missing Papad In stock for flour_out ID ${fo.id}`);
-          await addPapadInStock(fo.id, fo.date, items.rows);
-        }
-      } else {
-        const stockCheck = await db.query(`SELECT id FROM stock WHERE reference_id = ? AND type = 'Flour Out'`, [fo.id]);
-        if (stockCheck.rows.length === 0) {
-          console.log(`Syncing missing Flour Out stock for flour_out ID ${fo.id}`);
-          await deductFlourOutStock(fo.id, fo.date, items.rows);
-        }
-      }
-    }
-    console.log('✓ Flour Out & Papad In stock sync completed');
-  } catch (err) {
-    console.error('Error syncing flour out / papad in stock:', err);
-  }
-};
-
 module.exports = {
   deductFlourOutStock,
   revertFlourOutStock,
   addPapadInStock,
-  revertPapadInStock,
-  syncFlourOutAndPapadInStock
+  revertPapadInStock
 };
