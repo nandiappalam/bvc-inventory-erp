@@ -561,6 +561,7 @@ const WeightConversionCreate = () => {
         
         try {
           window.dispatchEvent(new CustomEvent('erp_stock_updated'));
+          window.dispatchEvent(new CustomEvent('erp_data_updated'));
         } catch (_) {}
 
         // Reset state

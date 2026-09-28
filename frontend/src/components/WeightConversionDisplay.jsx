@@ -171,6 +171,7 @@ const WeightConversionDisplay = () => {
         setSnackbar({ open: true, message: 'Weight conversion deleted successfully!', severity: 'success' })
         try {
           window.dispatchEvent(new CustomEvent('erp_stock_updated'));
+          window.dispatchEvent(new CustomEvent('erp_data_updated'));
         } catch (_) {}
         loadWeightConversions()
       } else {

@@ -202,8 +202,8 @@ const processWeightConversionStock = async (conversionId, date, items, companyId
       );
       if (existing.rows && existing.rows.length > 0) {
         await db.run(
-          `UPDATE stock_lots SET quantity = quantity + ?, remaining_quantity = remaining_quantity + ? WHERE id = ?`,
-          [qty, qty, existing.rows[0].id],
+          `UPDATE stock_lots SET quantity = quantity + ?, remaining_quantity = remaining_quantity + ?, godown_id = ?, godown_name = ? WHERE id = ?`,
+          [qty, qty, outGodownId, outGodownName, existing.rows[0].id],
           cId
         );
       } else {
@@ -212,6 +212,27 @@ const processWeightConversionStock = async (conversionId, date, items, companyId
           [itemId, itemName, lotNo, conversionId, qty, qty, outGodownId, outGodownName, date ? `${date} 12:00:00` : new Date().toISOString().replace('T', ' ').substring(0, 19)],
           cId
         );
+      }
+
+      // Link input lots to this output lot in lot_genealogy
+      const inputItems = items.filter(i => (i.type || 'input') === 'input' && i.lot_no);
+      for (const inItem of inputItems) {
+        try {
+          const genExists = await db.query(
+            `SELECT id FROM lot_genealogy WHERE parent_lot_no = ? AND child_lot_no = ? AND transaction_type = 'WEIGHT_CONVERSION' AND transaction_id = ?`,
+            [inItem.lot_no, lotNo, conversionId],
+            cId
+          );
+          if (!genExists.rows || genExists.rows.length === 0) {
+            await db.run(
+              `INSERT INTO lot_genealogy (parent_lot_no, child_lot_no, quantity, uom, transaction_type, transaction_id, transaction_no, remarks) VALUES (?, ?, ?, 'KG', 'WEIGHT_CONVERSION', ?, ?, ?)`,
+              [inItem.lot_no, lotNo, qty, conversionId, `WC-${conversionId}`, `Weight Conversion from ${inItem.item_name} (${inItem.lot_no}) to ${itemName}`],
+              cId
+            );
+          }
+        } catch (genErr) {
+          console.warn('Notice inserting into lot_genealogy:', genErr.message);
+        }
       }
 
       await db.run(
@@ -244,16 +265,36 @@ const syncExistingWeightConversions = async () => {
       WHERE godown_id IS NULL AND godown_name IS NOT NULL AND TRIM(godown_name) != ''
     `);
 
-    // 3. Process any unsynced conversions
+    // 3. Process any unsynced conversions & lot genealogy links
     const wcResult = await db.query(`SELECT * FROM weight_conversion`);
     const conversions = wcResult.rows || [];
     for (const wc of conversions) {
+      const itemsResult = await db.query(`SELECT * FROM weight_conversion_items WHERE CAST(weight_conversion_id AS TEXT) = CAST(? AS TEXT)`, [wc.id]);
+      const items = itemsResult.rows || [];
       const stockCheck = await db.query(`SELECT id FROM stock WHERE CAST(reference_id AS TEXT) = CAST(? AS TEXT) AND type LIKE 'Weight Conversion%'`, [wc.id]);
       if ((stockCheck.rows || []).length === 0) {
-        const itemsResult = await db.query(`SELECT * FROM weight_conversion_items WHERE CAST(weight_conversion_id AS TEXT) = CAST(? AS TEXT)`, [wc.id]);
-        const items = itemsResult.rows || [];
         await processWeightConversionStock(wc.id, wc.date, items, 1);
         console.log(`Synced Weight Conversion ID ${wc.id} into stock table`);
+      } else {
+        // Ensure lot_genealogy links exist for already processed conversions
+        const inItems = items.filter(i => (i.type || 'input') === 'input' && i.lot_no);
+        const outItems = items.filter(i => i.type === 'output' && i.lot_no);
+        for (const outItem of outItems) {
+          for (const inItem of inItems) {
+            try {
+              const genCheck = await db.query(
+                `SELECT id FROM lot_genealogy WHERE parent_lot_no = ? AND child_lot_no = ? AND transaction_type = 'WEIGHT_CONVERSION' AND transaction_id = ?`,
+                [inItem.lot_no, outItem.lot_no, wc.id]
+              );
+              if (!genCheck.rows || genCheck.rows.length === 0) {
+                await db.run(
+                  `INSERT INTO lot_genealogy (parent_lot_no, child_lot_no, quantity, uom, transaction_type, transaction_id, transaction_no, remarks) VALUES (?, ?, ?, 'KG', 'WEIGHT_CONVERSION', ?, ?, ?)`,
+                  [inItem.lot_no, outItem.lot_no, outItem.qty || 0, wc.id, `WC-${wc.s_no || wc.id}`, `Weight Conversion from ${inItem.item_name} (${inItem.lot_no}) to ${outItem.item_name}`]
+                );
+              }
+            } catch (_) {}
+          }
+        }
       }
     }
 

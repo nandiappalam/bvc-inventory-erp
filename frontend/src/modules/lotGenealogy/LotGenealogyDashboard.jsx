@@ -65,25 +65,6 @@ const LotGenealogyDashboard = () => {
     { targetLotNo: '', quantity: '', godownName: 'Main Godown' }
   ]);
 
-  // Fetch lot suggestions from database
-  const fetchLotOptions = useCallback(async (q = '') => {
-    try {
-      const res = await manufacturingService.searchLots(q);
-      if (res.success && res.data) {
-        setLotOptions(res.data);
-        if (!selectedLotNo && res.data.length > 0) {
-          setSelectedLotNo(res.data[0].lotNo);
-        }
-      }
-    } catch (e) {
-      console.error('Error fetching lot options:', e);
-    }
-  }, [selectedLotNo]);
-
-  useEffect(() => {
-    fetchLotOptions();
-  }, [fetchLotOptions]);
-
   // Load Lot Genealogy Details
   const loadLotData = useCallback(async (lotNo) => {
     if (!lotNo) return;
@@ -108,6 +89,42 @@ const LotGenealogyDashboard = () => {
       setDetailsLoading(false);
     }
   }, []);
+
+  // Fetch lot suggestions from database
+  const fetchLotOptions = useCallback(async (q = '') => {
+    try {
+      const res = await manufacturingService.searchLots(q);
+      if (res.success && res.data) {
+        setLotOptions(res.data);
+        if (!selectedLotNo && res.data.length > 0) {
+          setSelectedLotNo(res.data[0].lotNo);
+        }
+      }
+    } catch (e) {
+      console.error('Error fetching lot options:', e);
+    }
+  }, [selectedLotNo]);
+
+  useEffect(() => {
+    fetchLotOptions();
+
+    const handleUpdate = () => {
+      fetchLotOptions();
+      if (selectedLotNo) {
+        loadLotData(selectedLotNo);
+      }
+    };
+
+    window.addEventListener('erp_stock_updated', handleUpdate);
+    window.addEventListener('erp_company_changed', handleUpdate);
+    window.addEventListener('erp_data_updated', handleUpdate);
+
+    return () => {
+      window.removeEventListener('erp_stock_updated', handleUpdate);
+      window.removeEventListener('erp_company_changed', handleUpdate);
+      window.removeEventListener('erp_data_updated', handleUpdate);
+    };
+  }, [fetchLotOptions, selectedLotNo, loadLotData]);
 
   useEffect(() => {
     if (selectedLotNo) {
@@ -384,12 +401,70 @@ const LotGenealogyDashboard = () => {
                           <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>
                             <FactoryIcon sx={{ color: '#8b5cf6' }} />
                             <Typography variant="subtitle1" sx={{ fontWeight: 700, color: '#0f172a' }}>
-                              2. Milling & Production
+                              2. Milling, Repacking & Weight Conversion
                             </Typography>
                           </Stack>
                           <Divider sx={{ mb: 1.5 }} />
-                          {lotDetails?.millingConsumptions?.length > 0 || lotDetails?.millingOutputs?.length > 0 ? (
+                          {(lotDetails?.millingConsumptions?.length > 0 || lotDetails?.millingOutputs?.length > 0 || lotDetails?.weightConversionConsumptions?.length > 0 || lotDetails?.weightConversionOutputs?.length > 0) ? (
                             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                              {/* Weight Conversion Consumptions */}
+                              {lotDetails.weightConversionConsumptions?.map((wc, i) => (
+                                <Box key={`wc-con-${i}`} sx={{ p: 1.5, bgcolor: '#eff6ff', borderRadius: '6px', border: '1px solid #bfdbfe' }}>
+                                  <Stack direction="row" justifyContent="space-between" alignItems="center">
+                                    <Typography variant="body2" sx={{ fontWeight: 700, color: '#1e3a8a' }}>
+                                      Weight Conversion #{wc.conversion_s_no || wc.conversion_id}
+                                    </Typography>
+                                    <Chip label="CONVERTED" size="small" sx={{ fontSize: '10px', height: '20px', fontWeight: 700, bgcolor: '#dbeafe', color: '#1e40af' }} />
+                                  </Stack>
+                                  <Typography variant="caption" sx={{ color: '#1e40af', display: 'block', mt: 0.5 }}>
+                                    Type: <strong>{wc.conversion_type || 'Conversion'}</strong> | Date: <strong>{wc.conversion_date}</strong>
+                                  </Typography>
+                                  <Typography variant="caption" sx={{ color: '#1e3a8a', display: 'block' }}>
+                                    Input: <strong>{wc.input_qty} Bags ({wc.input_weight} KG)</strong> {wc.input_item}
+                                  </Typography>
+                                  {wc.output_lot_no && (
+                                    <Button
+                                      size="small"
+                                      variant="outlined"
+                                      color="primary"
+                                      onClick={() => setSelectedLotNo(wc.output_lot_no)}
+                                      sx={{ mt: 0.8, textTransform: 'none', fontWeight: 700, fontSize: '11px', py: 0.2 }}
+                                    >
+                                      → Produced Output Lot #{wc.output_lot_no} ({wc.output_weight || wc.output_qty} KG {wc.output_item}) [Inspect]
+                                    </Button>
+                                  )}
+                                </Box>
+                              ))}
+
+                              {/* Weight Conversion Outputs */}
+                              {lotDetails.weightConversionOutputs?.map((wc, i) => (
+                                <Box key={`wc-out-${i}`} sx={{ p: 1.5, bgcolor: '#f0fdf4', borderRadius: '6px', border: '1px solid #bbf7d0' }}>
+                                  <Stack direction="row" justifyContent="space-between" alignItems="center">
+                                    <Typography variant="body2" sx={{ fontWeight: 700, color: '#14532d' }}>
+                                      Weight Conversion #{wc.conversion_s_no || wc.conversion_id}
+                                    </Typography>
+                                    <Chip label="OUTPUT LOT" size="small" color="success" sx={{ fontSize: '10px', height: '20px', fontWeight: 700 }} />
+                                  </Stack>
+                                  <Typography variant="caption" sx={{ color: '#15803d', display: 'block', mt: 0.5 }}>
+                                    Type: <strong>{wc.conversion_type || 'Conversion'}</strong> | Date: <strong>{wc.conversion_date}</strong>
+                                  </Typography>
+                                  <Typography variant="caption" sx={{ color: '#166534', display: 'block' }}>
+                                    Produced: <strong>{wc.output_qty} Bags ({wc.output_weight} KG)</strong> {wc.output_item}
+                                  </Typography>
+                                  {wc.input_lot_no && (
+                                    <Button
+                                      size="small"
+                                      variant="outlined"
+                                      color="secondary"
+                                      onClick={() => setSelectedLotNo(wc.input_lot_no)}
+                                      sx={{ mt: 0.8, textTransform: 'none', fontWeight: 700, fontSize: '11px', py: 0.2 }}
+                                    >
+                                      ← Converted from Parent Lot #{wc.input_lot_no} ({wc.input_item}) [Inspect]
+                                    </Button>
+                                  )}
+                                </Box>
+                              ))}
+
                               {/* Milling consumptions */}
                               {lotDetails.millingConsumptions?.map((wo, i) => (
                                 <Box key={`mc-${i}`} sx={{ p: 1.5, bgcolor: '#f8fafc', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
@@ -444,7 +519,7 @@ const LotGenealogyDashboard = () => {
                           ) : (
                             <Box sx={{ p: 1, bgcolor: '#f8fafc', borderRadius: '6px' }}>
                               <Typography variant="body2" sx={{ fontWeight: 600 }}>Direct Godown Allocation</Typography>
-                              <Typography variant="caption" sx={{ color: '#64748b' }}>Ready for Milling or Work Order processing.</Typography>
+                              <Typography variant="caption" sx={{ color: '#64748b' }}>Ready for Milling, Repacking, or Weight Conversion.</Typography>
                             </Box>
                           )}
                         </CardContent>
@@ -530,6 +605,24 @@ const LotGenealogyDashboard = () => {
                         </TableRow>
                       </TableHead>
                       <TableBody>
+                        {/* 0. If generated by Weight Conversion / Repacking */}
+                        {lotDetails?.weightConversionOutputs?.map((wc, idx) => (
+                          <TableRow key={`back-wc-${idx}`} sx={{ bgcolor: '#f0fdf4' }}>
+                            <TableCell>
+                              <Chip label="Weight Conversion" size="small" color="success" sx={{ fontWeight: 700 }} />
+                            </TableCell>
+                            <TableCell sx={{ fontWeight: 600 }}>
+                              Conversion #{wc.conversion_s_no || wc.conversion_id} ({wc.conversion_type || 'Conversion'}) {wc.input_lot_no ? `← Parent Lot #${wc.input_lot_no}` : ''}
+                            </TableCell>
+                            <TableCell>{wc.output_item || lotDetails?.itemName}</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>{wc.output_weight || wc.output_qty} KG</TableCell>
+                            <TableCell>
+                              <Chip label="CONVERTED FG" size="small" color="success" sx={{ fontWeight: 600 }} />
+                            </TableCell>
+                            <TableCell>{wc.conversion_date || 'N/A'}</TableCell>
+                          </TableRow>
+                        ))}
+
                         {/* 1. If generated by Milling / Work Orders */}
                         {lotDetails?.millingOutputs?.map((mo, idx) => (
                           <TableRow key={`back-mo-${idx}`}>
@@ -693,21 +786,39 @@ const LotGenealogyDashboard = () => {
                       <Card variant="outlined" sx={{ borderRadius: '10px' }}>
                         <CardContent>
                           <Typography variant="subtitle1" sx={{ fontWeight: 700, color: '#0f172a', mb: 1.5 }}>
-                            Affected Milling & Production Batches
+                            Affected Milling, Production & Weight Conversion Batches
                           </Typography>
-                          {lotDetails?.millingConsumptions?.length > 0 || lotDetails?.millingOutputs?.length > 0 ? (
+                          {(lotDetails?.millingConsumptions?.length > 0 || lotDetails?.millingOutputs?.length > 0 || lotDetails?.weightConversionConsumptions?.length > 0 || lotDetails?.weightConversionOutputs?.length > 0) ? (
                             <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: '6px' }}>
                               <Table size="small">
                                 <TableHead sx={{ bgcolor: '#f8fafc' }}>
                                   <TableRow>
-                                    <TableCell sx={{ fontWeight: 700 }}>Work Order / Batch #</TableCell>
-                                    <TableCell sx={{ fontWeight: 700 }}>Flour Mill</TableCell>
+                                    <TableCell sx={{ fontWeight: 700 }}>Work Order / Conversion #</TableCell>
+                                    <TableCell sx={{ fontWeight: 700 }}>Operation / Location</TableCell>
                                     <TableCell sx={{ fontWeight: 700 }}>Date</TableCell>
                                     <TableCell sx={{ fontWeight: 700 }}>Quantity (KG)</TableCell>
-                                    <TableCell sx={{ fontWeight: 700 }}>Type</TableCell>
+                                    <TableCell sx={{ fontWeight: 700 }}>Type / Role</TableCell>
                                   </TableRow>
                                 </TableHead>
                                 <TableBody>
+                                  {lotDetails.weightConversionConsumptions?.map((wc, idx) => (
+                                    <TableRow key={`aff-wc-con-${idx}`} sx={{ bgcolor: '#eff6ff' }}>
+                                      <TableCell sx={{ fontWeight: 600, color: '#1e40af' }}>WC #{wc.conversion_s_no || wc.conversion_id}</TableCell>
+                                      <TableCell>Weight Conversion ({wc.conversion_type || 'Conversion'})</TableCell>
+                                      <TableCell>{wc.conversion_date}</TableCell>
+                                      <TableCell sx={{ fontWeight: 600 }}>{wc.input_weight || wc.input_qty} KG</TableCell>
+                                      <TableCell><Chip label="WC INPUT CONSUMED" size="small" sx={{ fontSize: '10px', height: '22px', bgcolor: '#dbeafe', color: '#1e40af', fontWeight: 700 }} /></TableCell>
+                                    </TableRow>
+                                  ))}
+                                  {lotDetails.weightConversionOutputs?.map((wc, idx) => (
+                                    <TableRow key={`aff-wc-out-${idx}`} sx={{ bgcolor: '#f0fdf4' }}>
+                                      <TableCell sx={{ fontWeight: 600, color: '#15803d' }}>WC #{wc.conversion_s_no || wc.conversion_id}</TableCell>
+                                      <TableCell>Weight Conversion ({wc.conversion_type || 'Conversion'})</TableCell>
+                                      <TableCell>{wc.conversion_date}</TableCell>
+                                      <TableCell sx={{ fontWeight: 600 }}>{wc.output_weight || wc.output_qty} KG</TableCell>
+                                      <TableCell><Chip label="WC OUTPUT FG" size="small" color="success" sx={{ fontSize: '10px', height: '22px', fontWeight: 700 }} /></TableCell>
+                                    </TableRow>
+                                  ))}
                                   {lotDetails.millingConsumptions?.map((mc, idx) => (
                                     <TableRow key={`aff-mc-${idx}`}>
                                       <TableCell sx={{ fontWeight: 600, color: '#0284c7' }}>{mc.work_order_no}</TableCell>
@@ -731,7 +842,7 @@ const LotGenealogyDashboard = () => {
                             </TableContainer>
                           ) : (
                             <Typography variant="body2" sx={{ color: '#64748b' }}>
-                              No production batches have processed this lot yet.
+                              No production batches or weight conversions have processed this lot yet.
                             </Typography>
                           )}
                         </CardContent>

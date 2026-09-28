@@ -2077,13 +2077,6 @@ router.get('/traceability/:lotNo', async (req, res) => {
     // Purchase Returns Trace (Debit Notes / Supplier Rejections & RMA)
     let purchaseReturnsList = [];
     try {
-      const purIds = [];
-      if (purchaseInfo?.id) purIds.push(String(purchaseInfo.id));
-      if (purchaseInfo?.inv_no) purIds.push(String(purchaseInfo.inv_no));
-      if (purchaseInfo?.s_no) purIds.push(String(purchaseInfo.s_no));
-      if (purchaseInfo?.po_no) purIds.push(String(purchaseInfo.po_no));
-      const purPlaceholders = purIds.length > 0 ? purIds.map(() => '?').join(',') : "'-999'";
-
       const purReturnsRes = await db.query(`
         SELECT pr.*, pri.item_name, pri.qty as returned_qty, pri.weight as returned_weight, pri.total_wt as returned_total_weight,
                pri.rate as return_rate, pri.amount as return_amount, pri.lot_no, pri.reason as return_reason,
@@ -2096,14 +2089,17 @@ router.get('/traceability/:lotNo', async (req, res) => {
         JOIN purchase_return_items pri ON pr.id = pri.purchase_return_id
         LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(pr.supplier AS TEXT) OR pr.supplier = s.name OR pr.supplier = s.print_name)
         LEFT JOIN godown_master gm ON (CAST(gm.id AS TEXT) = CAST(pr.godown AS TEXT) OR pr.godown = gm.godown_name)
-        WHERE UPPER(pri.lot_no) IN (${lotPlaceholdersUpper})
-           OR UPPER(pri.lot_no) = UPPER(?)
-           OR UPPER(pri.lot_no) LIKE UPPER(?)
-           OR CAST(pr.purchase_id AS TEXT) IN (${purPlaceholders})
-           OR CAST(pri.purchase_id AS TEXT) IN (${purPlaceholders})
-           OR pr.purchase_inv_no IN (${purPlaceholders})
+        WHERE (
+          UPPER(TRIM(pri.lot_no)) IN (${lotPlaceholdersUpper})
+          OR UPPER(TRIM(pri.lot_no)) = UPPER(TRIM(?))
+          OR (
+            (pri.lot_no IS NULL OR TRIM(pri.lot_no) = '')
+            AND UPPER(TRIM(pri.item_name)) = UPPER(TRIM(?))
+            AND (CAST(pr.purchase_id AS TEXT) = ? OR pr.purchase_inv_no = ?)
+          )
+        )
         ORDER BY pr.id DESC
-      `, [...lotListUpper, canonicalLotNo, `%${canonicalLotNo}%`, ...purIds, ...purIds, ...purIds]);
+      `, [...lotListUpper, canonicalLotNo, lot?.item_name || '', purchaseInfo?.id ? String(purchaseInfo.id) : '-999', purchaseInfo?.inv_no ? String(purchaseInfo.inv_no) : '-999']);
 
       const seenPRKeys = new Set();
       purchaseReturnsList = (purReturnsRes.rows || []).filter(r => {
@@ -2357,6 +2353,15 @@ router.get('/traceability/:lotNo', async (req, res) => {
         FROM grain_output_items go
         LEFT JOIN stock_lots sl ON sl.lot_no = go.lot_no
         WHERE go.lot_no IS NOT NULL AND TRIM(go.lot_no) != ''
+        UNION ALL
+        SELECT wci.lot_no, wci.item_name, wci.qty as initial_qty, COALESCE(sl.remaining_quantity, wci.qty) as remaining_quantity, COALESCE(sl.godown_name, 'Finished Goods Godown') as godown_name
+        FROM weight_conversion_items wci
+        LEFT JOIN stock_lots sl ON sl.lot_no = wci.lot_no
+        WHERE wci.lot_no IS NOT NULL AND TRIM(wci.lot_no) != ''
+        UNION ALL
+        SELECT sl.lot_no, sl.item_name, sl.quantity as initial_qty, sl.remaining_quantity, COALESCE(sl.godown_name, 'Main Godown') as godown_name
+        FROM stock_lots sl
+        WHERE sl.lot_no IS NOT NULL AND TRIM(sl.lot_no) != ''
       ) combined_lots
       GROUP BY lot_no
       ORDER BY lot_no ASC
