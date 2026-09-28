@@ -50,59 +50,34 @@ const processWeightConversionStock = async (conversionId, date, items, companyId
 
   const cId = companyId || 1;
 
-  // 1. Identify primary input lot's godown
-  let defaultGodownId = null;
-  let defaultGodownName = null;
+  // 1. Identify default godowns for FG and RM
+  let defaultFgGodownId = null;
+  let defaultFgGodownName = null;
+  let defaultRmGodownId = null;
+  let defaultRmGodownName = null;
+  let fallbackGodownId = null;
+  let fallbackGodownName = null;
 
-  for (const item of items) {
-    const type = item.type || 'input';
-    const itemName = (item.item_name || '').trim();
-    const lotNo = item.lot_no ? String(item.lot_no).trim() : '';
-
-    if (type === 'input' && lotNo) {
-      try {
-        const lRes = await db.query(
-          `SELECT godown_id, godown_name FROM stock_lots WHERE lot_no = ? OR (LOWER(TRIM(item_name)) = LOWER(TRIM(?)) AND lot_no = ?) LIMIT 1`,
-          [lotNo, itemName, lotNo],
-          cId
-        );
-        if (lRes && lRes.rows && lRes.rows.length > 0 && (lRes.rows[0].godown_id || lRes.rows[0].godown_name)) {
-          defaultGodownId = lRes.rows[0].godown_id;
-          defaultGodownName = lRes.rows[0].godown_name;
-        }
-        if (!defaultGodownName && !defaultGodownId) {
-          const sRes = await db.query(
-            `SELECT godown, godown_id FROM stock WHERE lot_no = ? AND LOWER(TRIM(item_name)) = LOWER(TRIM(?)) AND qty > 0 ORDER BY id DESC LIMIT 1`,
-            [lotNo, itemName],
-            cId
-          );
-          if (sRes && sRes.rows && sRes.rows.length > 0) {
-            defaultGodownName = sRes.rows[0].godown;
-            defaultGodownId = sRes.rows[0].godown_id;
-          }
-        }
-        if (defaultGodownId || defaultGodownName) break;
-      } catch (e) {}
-    }
-  }
-
-  // Resolve godown name if only id exists
-  if (defaultGodownId && !defaultGodownName) {
-    try {
-      const gm = await db.query(`SELECT godown_name FROM godown_master WHERE CAST(id AS TEXT) = CAST(? AS TEXT) LIMIT 1`, [defaultGodownId], cId);
-      if (gm && gm.rows && gm.rows.length > 0) defaultGodownName = gm.rows[0].godown_name;
-    } catch (e) {}
-  }
-
-  // If no godown found, search first active godown in godown_master
-  if (!defaultGodownName) {
-    try {
-      const gmAll = await db.query(`SELECT id, godown_name FROM godown_master ORDER BY id ASC LIMIT 1`, [], cId);
-      if (gmAll && gmAll.rows && gmAll.rows.length > 0) {
-        defaultGodownId = gmAll.rows[0].id;
-        defaultGodownName = gmAll.rows[0].godown_name;
+  try {
+    const gmAll = await db.query(`SELECT id, godown_name FROM godown_master ORDER BY id ASC`, [], cId);
+    const godowns = gmAll.rows || [];
+    for (const g of godowns) {
+      const gNameLower = (g.godown_name || '').toLowerCase();
+      if (!defaultFgGodownName && (gNameLower.includes('finish') || gNameLower.includes('fg'))) {
+        defaultFgGodownId = g.id;
+        defaultFgGodownName = g.godown_name;
       }
-    } catch (e) {}
+      if (!defaultRmGodownName && (gNameLower.includes('raw') || gNameLower.includes('rm'))) {
+        defaultRmGodownId = g.id;
+        defaultRmGodownName = g.godown_name;
+      }
+    }
+    if (godowns.length > 0) {
+      fallbackGodownId = godowns[0].id;
+      fallbackGodownName = godowns[0].godown_name;
+    }
+  } catch (e) {
+    console.warn('Notice querying godown_master in weightConversion:', e.message);
   }
 
   for (const item of items) {
@@ -116,15 +91,15 @@ const processWeightConversionStock = async (conversionId, date, items, companyId
     if (!itemName || qty <= 0) continue;
 
     let itemId = null;
+    let itemGroup = (type === 'output' ? 'Finished Goods' : 'Raw Material');
     try {
-      const im = await db.query(`SELECT id, item_name FROM item_master WHERE LOWER(TRIM(item_name)) = LOWER(TRIM(?)) LIMIT 1`, [itemName], cId);
+      const im = await db.query(`SELECT id, item_name, item_group FROM item_master WHERE LOWER(TRIM(item_name)) = LOWER(TRIM(?)) LIMIT 1`, [itemName], cId);
       if (im.rows && im.rows.length > 0) {
         itemId = im.rows[0].id;
         itemName = im.rows[0].item_name; // Use master exact item_name
+        if (im.rows[0].item_group) itemGroup = im.rows[0].item_group;
       } else {
-        const isOutput = (type === 'output');
-        const grp = isOutput ? 'Finished Goods' : 'Raw Material';
-        const newIm = await db.run(`INSERT INTO item_master (item_name, item_group, status) VALUES (?, ?, 'Active')`, [itemName, grp], cId);
+        const newIm = await db.run(`INSERT INTO item_master (item_name, item_group, status) VALUES (?, ?, 'Active')`, [itemName, itemGroup], cId);
         itemId = newIm.lastID;
       }
     } catch (e) {
@@ -133,8 +108,9 @@ const processWeightConversionStock = async (conversionId, date, items, companyId
 
     if (type === 'input') {
       // Find specific input lot godown
-      let itemGodownId = defaultGodownId;
-      let itemGodownName = defaultGodownName;
+      let itemGodownId = null;
+      let itemGodownName = null;
+
       if (lotNo) {
         try {
           const lRes = await db.query(
@@ -142,10 +118,21 @@ const processWeightConversionStock = async (conversionId, date, items, companyId
             [lotNo, itemName, lotNo],
             cId
           );
-          if (lRes && lRes.rows && lRes.rows.length > 0 && (lRes.rows[0].godown_id || lRes.rows[0].godown_name)) {
+          if (lRes && lRes.rows && lRes.rows.length > 0) {
             itemGodownId = lRes.rows[0].godown_id || itemGodownId;
             itemGodownName = lRes.rows[0].godown_name || itemGodownName;
-          } else {
+          }
+        } catch (e) {}
+
+        if (itemGodownId && !itemGodownName) {
+          try {
+            const gm = await db.query(`SELECT godown_name FROM godown_master WHERE CAST(id AS TEXT) = CAST(? AS TEXT) LIMIT 1`, [itemGodownId], cId);
+            if (gm && gm.rows && gm.rows.length > 0) itemGodownName = gm.rows[0].godown_name;
+          } catch (e) {}
+        }
+
+        if (!itemGodownName && !itemGodownId) {
+          try {
             const sRes = await db.query(
               `SELECT godown, godown_id FROM stock WHERE lot_no = ? AND LOWER(TRIM(item_name)) = LOWER(TRIM(?)) AND qty > 0 ORDER BY id DESC LIMIT 1`,
               [lotNo, itemName],
@@ -155,14 +142,19 @@ const processWeightConversionStock = async (conversionId, date, items, companyId
               itemGodownName = sRes.rows[0].godown || itemGodownName;
               itemGodownId = sRes.rows[0].godown_id || itemGodownId;
             }
-          }
-        } catch (e) {}
+          } catch (e) {}
+        }
       }
-      if (itemGodownId && !itemGodownName) {
-        try {
-          const gm = await db.query(`SELECT godown_name FROM godown_master WHERE CAST(id AS TEXT) = CAST(? AS TEXT) LIMIT 1`, [itemGodownId], cId);
-          if (gm && gm.rows && gm.rows.length > 0) itemGodownName = gm.rows[0].godown_name;
-        } catch (e) {}
+
+      // Fallback based on item group or default
+      if (!itemGodownName) {
+        if (itemGroup.toLowerCase().includes('finish') || itemGroup.toLowerCase().includes('fg')) {
+          itemGodownName = defaultFgGodownName || fallbackGodownName || 'Finished Goods Godown';
+          itemGodownId = defaultFgGodownId || fallbackGodownId;
+        } else {
+          itemGodownName = defaultRmGodownName || fallbackGodownName || 'Raw Material Godown';
+          itemGodownId = defaultRmGodownId || fallbackGodownId;
+        }
       }
 
       // Deduct from stock_lots
@@ -193,17 +185,14 @@ const processWeightConversionStock = async (conversionId, date, items, companyId
         } catch (e) {}
       }
 
-      // Determine output godown:
-      // If Finished Goods, prefer Finished Goods Godown if available, else defaultGodown
-      let outGodownId = defaultGodownId;
-      let outGodownName = defaultGodownName;
-      try {
-        const fgRes = await db.query(`SELECT id, godown_name FROM godown_master WHERE LOWER(godown_name) LIKE '%finished%' LIMIT 1`, [], cId);
-        if (fgRes && fgRes.rows && fgRes.rows.length > 0) {
-          outGodownId = fgRes.rows[0].id;
-          outGodownName = fgRes.rows[0].godown_name;
-        }
-      } catch (e) {}
+      // Determine output godown
+      let outGodownId = defaultFgGodownId || fallbackGodownId;
+      let outGodownName = defaultFgGodownName || fallbackGodownName || 'Finished Goods Godown';
+
+      if (itemGroup.toLowerCase().includes('raw') || itemGroup.toLowerCase().includes('rm')) {
+        outGodownId = defaultRmGodownId || fallbackGodownId;
+        outGodownName = defaultRmGodownName || fallbackGodownName || 'Raw Material Godown';
+      }
 
       // Check existing stock_lots
       const existing = await db.query(
@@ -237,6 +226,25 @@ const processWeightConversionStock = async (conversionId, date, items, companyId
 // Sync existing weight conversion records into stock if missing, and heal godowns
 const syncExistingWeightConversions = async () => {
   try {
+    // 1. Populate missing godown_name in stock_lots
+    await db.run(`
+      UPDATE stock_lots
+      SET godown_name = (
+        SELECT gm.godown_name FROM godown_master gm WHERE CAST(gm.id AS TEXT) = CAST(stock_lots.godown_id AS TEXT) LIMIT 1
+      )
+      WHERE (godown_name IS NULL OR TRIM(godown_name) = '') AND godown_id IS NOT NULL
+    `);
+
+    // 2. Populate missing godown_id in stock_lots
+    await db.run(`
+      UPDATE stock_lots
+      SET godown_id = (
+        SELECT gm.id FROM godown_master gm WHERE LOWER(TRIM(gm.godown_name)) = LOWER(TRIM(stock_lots.godown_name)) LIMIT 1
+      )
+      WHERE godown_id IS NULL AND godown_name IS NOT NULL AND TRIM(godown_name) != ''
+    `);
+
+    // 3. Process any unsynced conversions
     const wcResult = await db.query(`SELECT * FROM weight_conversion`);
     const conversions = wcResult.rows || [];
     for (const wc of conversions) {
@@ -249,29 +257,23 @@ const syncExistingWeightConversions = async () => {
       }
     }
 
-    // Auto-heal godowns of existing Weight Conversion Input stock rows
+    // 4. Auto-heal godowns of existing Weight Conversion Input stock rows
     await db.run(`
       UPDATE stock
       SET 
-        godown = (
-          SELECT COALESCE(sl.godown_name, g.godown_name, s_orig.godown)
-          FROM stock s_orig
-          LEFT JOIN stock_lots sl ON sl.lot_no = s_orig.lot_no
-          LEFT JOIN godown_master g ON CAST(sl.godown_id AS TEXT) = CAST(g.id AS TEXT)
-          WHERE s_orig.lot_no = stock.lot_no AND s_orig.qty > 0 AND s_orig.type NOT LIKE 'Weight Conversion%'
-          LIMIT 1
+        godown = COALESCE(
+          (SELECT g_sl.godown_name FROM stock_lots sl JOIN godown_master g_sl ON CAST(sl.godown_id AS TEXT) = CAST(g_sl.id AS TEXT) WHERE sl.lot_no = stock.lot_no AND g_sl.godown_name IS NOT NULL LIMIT 1),
+          (SELECT sl.godown_name FROM stock_lots sl WHERE sl.lot_no = stock.lot_no AND sl.godown_name IS NOT NULL AND TRIM(sl.godown_name) != '' LIMIT 1),
+          (SELECT s_orig.godown FROM stock s_orig WHERE s_orig.lot_no = stock.lot_no AND s_orig.qty > 0 AND s_orig.type NOT LIKE 'Weight Conversion%' AND s_orig.godown IS NOT NULL LIMIT 1),
+          stock.godown
         ),
-        godown_id = (
-          SELECT COALESCE(sl.godown_id, s_orig.godown_id)
-          FROM stock s_orig
-          LEFT JOIN stock_lots sl ON sl.lot_no = s_orig.lot_no
-          WHERE s_orig.lot_no = stock.lot_no AND s_orig.qty > 0 AND s_orig.type NOT LIKE 'Weight Conversion%'
-          LIMIT 1
+        godown_id = COALESCE(
+          (SELECT sl.godown_id FROM stock_lots sl WHERE sl.lot_no = stock.lot_no AND sl.godown_id IS NOT NULL LIMIT 1),
+          (SELECT s_orig.godown_id FROM stock s_orig WHERE s_orig.lot_no = stock.lot_no AND s_orig.qty > 0 AND s_orig.type NOT LIKE 'Weight Conversion%' AND s_orig.godown_id IS NOT NULL LIMIT 1),
+          (SELECT g_id.id FROM godown_master g_id WHERE LOWER(TRIM(g_id.godown_name)) = LOWER(TRIM(stock.godown)) LIMIT 1),
+          stock.godown_id
         )
       WHERE type = 'Weight Conversion Input'
-        AND EXISTS (
-          SELECT 1 FROM stock s_orig2 WHERE s_orig2.lot_no = stock.lot_no AND s_orig2.qty > 0 AND s_orig2.type NOT LIKE 'Weight Conversion%'
-        )
     `);
   } catch (err) {
     console.error('Error syncing weight conversions into stock:', err);
