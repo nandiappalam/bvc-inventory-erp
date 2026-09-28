@@ -33,11 +33,32 @@ const WeightConversionCreate = () => {
   const [outputRows, setOutputRows] = useState([
     {
       item_name: '',
+      lot_no: '',
       weight: '',
       qty: '',
       total_wt: '0.00'
     }
   ]);
+
+  // Helper to fetch next sequential lot number from backend
+  const fetchNextLotNo = async (offset = 0) => {
+    try {
+      let baseLot = 'LOT0001';
+      const lotRes = await api('/weight-conversion/next-lot-no').catch(() => null) 
+                  || await api('/stock/next-lot-no').catch(() => null);
+      if (lotRes && (lotRes.lot_no || lotRes.next_lot_no)) {
+        baseLot = lotRes.lot_no || lotRes.next_lot_no;
+      }
+      const match = String(baseLot).match(/^LOT[-_]?(\d+)$/i) || String(baseLot).match(/(\d+)/);
+      if (match) {
+        const num = parseInt(match[1], 10) + offset;
+        return `LOT${String(num).padStart(4, '0')}`;
+      }
+      return baseLot;
+    } catch (e) {
+      return `LOT${String(1 + offset).padStart(4, '0')}`;
+    }
+  };
 
   // Extract weight from item name string if present (e.g. "Urad Dhall 25 KG" -> 25)
   const extractWeightFromItemName = (name) => {
@@ -126,6 +147,7 @@ const WeightConversionCreate = () => {
             if (outputItems.length > 0) {
               setOutputRows(outputItems.map(i => ({
                 item_name: i.item_name || '',
+                lot_no: i.lot_no || '',
                 weight: String(i.weight || ''),
                 qty: String(i.qty || ''),
                 total_wt: parseFloat(i.total_wt || 0).toFixed(2)
@@ -139,6 +161,21 @@ const WeightConversionCreate = () => {
             setSNo(String(nextSno));
           } catch (e) {
             setSNo('1');
+          }
+
+          try {
+            const startLot = await fetchNextLotNo(0);
+            setOutputRows([
+              {
+                item_name: '',
+                lot_no: startLot,
+                weight: '',
+                qty: '',
+                total_wt: '0.00'
+              }
+            ]);
+          } catch (e) {
+            console.error('Error fetching initial lot no:', e);
           }
         }
 
@@ -374,11 +411,28 @@ const WeightConversionCreate = () => {
     }
   };
 
-  const addOutputRow = () => {
+  const addOutputRow = async () => {
+    let nextLot = '';
+    const currentLots = outputRows.map(r => r.lot_no).filter(Boolean);
+    let maxNum = 0;
+    for (const lot of currentLots) {
+      const match = String(lot).match(/LOT[-_]?(\d+)/i) || String(lot).match(/^(\d+)$/);
+      if (match) {
+        const n = parseInt(match[1], 10);
+        if (n > maxNum) maxNum = n;
+      }
+    }
+    if (maxNum > 0) {
+      nextLot = `LOT${String(maxNum + 1).padStart(4, '0')}`;
+    } else {
+      nextLot = await fetchNextLotNo(outputRows.length);
+    }
+
     setOutputRows([
       ...outputRows,
       {
         item_name: '',
+        lot_no: nextLot,
         weight: '',
         qty: '',
         total_wt: '0.00'
@@ -386,13 +440,15 @@ const WeightConversionCreate = () => {
     ]);
   };
 
-  const deleteOutputRow = (index) => {
+  const deleteOutputRow = async (index) => {
     if (outputRows.length > 1) {
       setOutputRows(outputRows.filter((_, idx) => idx !== index));
     } else {
+      const resetLot = await fetchNextLotNo(0);
       setOutputRows([
         {
           item_name: '',
+          lot_no: resetLot,
           weight: '',
           qty: '',
           total_wt: '0.00'
@@ -404,6 +460,19 @@ const WeightConversionCreate = () => {
   const handleOutputRowChange = (index, field, value) => {
     const updatedOutputRows = [...outputRows];
     updatedOutputRows[index][field] = value;
+
+    // If item_name changed and lot_no is empty, auto-populate lot_no
+    if (field === 'item_name' && value && !updatedOutputRows[index].lot_no) {
+      fetchNextLotNo(index).then(lot => {
+        setOutputRows(prev => {
+          const fresh = [...prev];
+          if (fresh[index] && !fresh[index].lot_no) {
+            fresh[index].lot_no = lot;
+          }
+          return fresh;
+        });
+      });
+    }
 
     // Recalculate total weight
     const qty = parseFloat(updatedOutputRows[index].qty) || 0;
@@ -442,7 +511,7 @@ const WeightConversionCreate = () => {
       const weightNum = parseWeightValue(row.weight);
       return {
         item_name: row.item_name,
-        lot_no: '',
+        lot_no: row.lot_no || '',
         weight: weightNum,
         qty: parseFloat(row.qty) || 0,
         total_wt: parseFloat(row.total_wt) || 0,
@@ -496,14 +565,28 @@ const WeightConversionCreate = () => {
             loadingLots: false
           }
         ]);
-        setOutputRows([
-          {
-            item_name: '',
-            weight: '',
-            qty: '',
-            total_wt: '0.00'
-          }
-        ]);
+        try {
+          const nextLotAfterSave = await fetchNextLotNo(0);
+          setOutputRows([
+            {
+              item_name: '',
+              lot_no: nextLotAfterSave,
+              weight: '',
+              qty: '',
+              total_wt: '0.00'
+            }
+          ]);
+        } catch (_) {
+          setOutputRows([
+            {
+              item_name: '',
+              lot_no: 'LOT0001',
+              weight: '',
+              qty: '',
+              total_wt: '0.00'
+            }
+          ]);
+        }
         setRemarks('');
         setType('RM');
 
@@ -716,9 +799,10 @@ const WeightConversionCreate = () => {
             <tr style={{ background: '#16a34a', color: '#fff' }}>
               <th style={{ border: '1px solid #9bb4e0', padding: '10px', width: '50px', textAlign: 'center' }}>S.No</th>
               <th style={{ border: '1px solid #9bb4e0', padding: '10px', textAlign: 'left', minWidth: '180px' }}>Item Name</th>
+              <th style={{ border: '1px solid #9bb4e0', padding: '10px', width: '150px', textAlign: 'center' }}>Lot No</th>
               <th style={{ border: '1px solid #9bb4e0', padding: '10px', width: '180px', textAlign: 'center' }}>Weight Dropdown</th>
-              <th style={{ border: '1px solid #9bb4e0', padding: '10px', width: '150px', textAlign: 'center' }}>Qty (Bags)</th>
-              <th style={{ border: '1px solid #9bb4e0', padding: '10px', width: '180px', textAlign: 'center' }}>Tot Wt (KG)</th>
+              <th style={{ border: '1px solid #9bb4e0', padding: '10px', width: '130px', textAlign: 'center' }}>Qty (Bags)</th>
+              <th style={{ border: '1px solid #9bb4e0', padding: '10px', width: '150px', textAlign: 'center' }}>Tot Wt (KG)</th>
               <th style={{ border: '1px solid #9bb4e0', padding: '10px', width: '80px', textAlign: 'center' }}>Actions</th>
             </tr>
           </thead>
@@ -739,6 +823,30 @@ const WeightConversionCreate = () => {
                       <option key={itemIdx} value={item}>{item}</option>
                     ))}
                   </select>
+                </td>
+
+                {/* Auto Lot No Field beside Item Name */}
+                <td style={{ border: '1px solid #9bb4e0', padding: '8px', textAlign: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', justifyContent: 'center' }}>
+                    <input 
+                      type="text" 
+                      value={row.lot_no || ''} 
+                      onChange={(e) => handleOutputRowChange(idx, 'lot_no', e.target.value)} 
+                      placeholder="Auto Lot No" 
+                      style={{ width: '95px', height: '28px', padding: '2px 4px', textAlign: 'center', border: '1px solid #9bb4e0', borderRadius: '4px', fontSize: '13px', fontWeight: 'bold', color: '#166534', background: '#f0fdf4', outline: 'none' }} 
+                    />
+                    <button
+                      type="button"
+                      title="Generate Auto Lot No"
+                      onClick={async () => {
+                        const generated = await fetchNextLotNo(idx);
+                        handleOutputRowChange(idx, 'lot_no', generated);
+                      }}
+                      style={{ background: '#e2e8f0', border: '1px solid #94a3b8', borderRadius: '4px', padding: '2px 6px', height: '28px', fontSize: '11px', cursor: 'pointer', color: '#1e293b' }}
+                    >
+                      ⚡
+                    </button>
+                  </div>
                 </td>
 
                 {/* Weight Dropdown */}

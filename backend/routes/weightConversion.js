@@ -15,14 +15,14 @@ const revertWeightConversionStock = async (conversionId) => {
 
       if (type === 'input' && lotNo && qty > 0) {
         await db.run(
-          `UPDATE stock_lots SET remaining_quantity = remaining_quantity + ? WHERE lot_no = ? AND LOWER(item_name) = LOWER(?)`,
+          `UPDATE stock_lots SET remaining_quantity = remaining_quantity + ? WHERE lot_no = ? AND LOWER(TRIM(item_name)) = LOWER(TRIM(?))`,
           [qty, lotNo, itemName]
         );
       } else if (type === 'output' && qty > 0) {
         if (lotNo) {
           await db.run(
-            `UPDATE stock_lots SET remaining_quantity = MAX(0, remaining_quantity - ?), quantity = MAX(0, quantity - ?) WHERE lot_no = ? AND LOWER(item_name) = LOWER(?)`,
-            [qty, qty, lotNo, itemName]
+            `UPDATE stock_lots SET remaining_quantity = CASE WHEN remaining_quantity >= ? THEN remaining_quantity - ? ELSE 0 END, quantity = CASE WHEN quantity >= ? THEN quantity - ? ELSE 0 END WHERE lot_no = ? AND LOWER(TRIM(item_name)) = LOWER(TRIM(?))`,
+            [qty, qty, qty, qty, lotNo, itemName]
           );
         }
       }
@@ -34,12 +34,14 @@ const revertWeightConversionStock = async (conversionId) => {
 };
 
 // Process stock changes for a weight conversion record
-const processWeightConversionStock = async (conversionId, date, items) => {
+const processWeightConversionStock = async (conversionId, date, items, companyId = 1) => {
   if (!Array.isArray(items)) return;
+
+  const cId = companyId || 1;
 
   for (const item of items) {
     const itemName = item.item_name || '';
-    let lotNo = item.lot_no || '';
+    let lotNo = item.lot_no ? String(item.lot_no).trim() : '';
     const qty = parseFloat(item.qty) || 0;
     const weightPerUnit = parseFloat(item.weight) || 0;
     const totalWt = parseFloat(item.total_wt) || (qty * weightPerUnit);
@@ -49,7 +51,7 @@ const processWeightConversionStock = async (conversionId, date, items) => {
 
     let itemId = null;
     try {
-      const im = await db.query(`SELECT id FROM item_master WHERE LOWER(item_name) = LOWER(?)`, [itemName]);
+      const im = await db.query(`SELECT id FROM item_master WHERE LOWER(TRIM(item_name)) = LOWER(TRIM(?))`, [itemName]);
       if (im.rows && im.rows.length > 0) {
         itemId = im.rows[0].id;
       } else {
@@ -66,8 +68,8 @@ const processWeightConversionStock = async (conversionId, date, items) => {
       // Consumed item - reduce stock
       if (lotNo) {
         await db.run(
-          `UPDATE stock_lots SET remaining_quantity = MAX(0, remaining_quantity - ?) WHERE lot_no = ? AND LOWER(item_name) = LOWER(?)`,
-          [qty, lotNo, itemName]
+          `UPDATE stock_lots SET remaining_quantity = CASE WHEN remaining_quantity >= ? THEN remaining_quantity - ? ELSE 0 END WHERE lot_no = ? AND LOWER(TRIM(item_name)) = LOWER(TRIM(?))`,
+          [qty, qty, lotNo, itemName]
         );
       }
 
@@ -79,7 +81,6 @@ const processWeightConversionStock = async (conversionId, date, items) => {
       // Produced item - increase stock
       if (!lotNo) {
         try {
-          const cId = req.companyId || (req.headers && req.headers['x-company-id']) || 1;
           lotNo = await reserveNextLotNumber(cId);
           // Update lot_no in weight_conversion_items so UI & lot audit display it
           await db.run(`UPDATE weight_conversion_items SET lot_no = ? WHERE weight_conversion_id = ? AND item_name = ? AND type = 'output'`, [lotNo, conversionId, itemName]);
@@ -87,13 +88,14 @@ const processWeightConversionStock = async (conversionId, date, items) => {
           lotNo = `LOT_WC_${conversionId}`;
         }
       } else {
-        const cId = req.companyId || (req.headers && req.headers['x-company-id']) || 1;
-        await recordLotNumber(lotNo, cId);
+        try {
+          await recordLotNumber(lotNo, cId);
+        } catch (e) {}
       }
 
       // Check existing stock_lots
       const existing = await db.query(
-        `SELECT id FROM stock_lots WHERE lot_no = ? AND LOWER(item_name) = LOWER(?)`,
+        `SELECT id FROM stock_lots WHERE lot_no = ? AND LOWER(TRIM(item_name)) = LOWER(TRIM(?))`,
         [lotNo, itemName]
       );
       if (existing.rows && existing.rows.length > 0) {
@@ -103,7 +105,7 @@ const processWeightConversionStock = async (conversionId, date, items) => {
         );
       } else {
         await db.run(
-          `INSERT INTO stock_lots (item_id, item_name, lot_no, purchase_id, quantity, remaining_quantity, rate, usable_for_production) VALUES (?, ?, ?, ?, ?, ?, 0, 1)`,
+          `INSERT INTO stock_lots (item_id, item_name, lot_no, purchase_id, quantity, remaining_quantity, rate, usable_for_production, approval_status, qc_status) VALUES (?, ?, ?, ?, ?, ?, 0, 1, 'APPROVED', 'ACCEPTED')`,
           [itemId, itemName, lotNo, conversionId, qty, qty]
         );
       }
@@ -126,7 +128,7 @@ const syncExistingWeightConversions = async () => {
       if ((stockCheck.rows || []).length === 0) {
         const itemsResult = await db.query(`SELECT * FROM weight_conversion_items WHERE weight_conversion_id = ?`, [wc.id]);
         const items = itemsResult.rows || [];
-        await processWeightConversionStock(wc.id, wc.date, items);
+        await processWeightConversionStock(wc.id, wc.date, items, 1);
         console.log(`Synced Weight Conversion ID ${wc.id} into stock table`);
       }
     }
@@ -152,6 +154,19 @@ router.get('/next-sno', async (req, res) => {
   } catch (error) {
     console.error('Error fetching next S.No for weight conversion:', error)
     res.status(500).json({ success: false, message: 'Failed to fetch next S.No' })
+  }
+})
+
+// GET next auto Lot No for weight conversion
+router.get('/next-lot-no', async (req, res) => {
+  try {
+    const cId = req.companyId || req.headers?.['x-company-id'] || req.query?.company_id || 1;
+    const { previewNextLotNumber } = require('../utils/lotHelper');
+    const nextLotNo = await previewNextLotNumber(cId);
+    res.json({ success: true, lot_no: nextLotNo, next_lot_no: nextLotNo, data: { lot_no: nextLotNo } });
+  } catch (error) {
+    console.error('Error fetching next lot no for weight conversion:', error);
+    res.json({ success: true, lot_no: 'LOT0001', next_lot_no: 'LOT0001', data: { lot_no: 'LOT0001' } });
   }
 })
 
@@ -354,7 +369,8 @@ router.post('/', async (req, res) => {
     }
 
     // Process stock update
-    await processWeightConversionStock(weightConversionId, formData.date, items);
+    const companyId = req.companyId || req.headers?.['x-company-id'] || 1;
+    await processWeightConversionStock(weightConversionId, formData.date, items, companyId);
 
     res.status(201).json({
       message: 'Weight conversion record saved successfully!',
@@ -394,7 +410,8 @@ router.put('/:id', async (req, res) => {
     }
 
     // Process updated stock
-    await processWeightConversionStock(weightConversionId, formData.date, items);
+    const companyId = req.companyId || req.headers?.['x-company-id'] || 1;
+    await processWeightConversionStock(weightConversionId, formData.date, items, companyId);
 
     res.json({ message: 'Weight conversion record updated successfully!' })
   } catch (error) {
