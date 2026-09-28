@@ -15,11 +15,28 @@ const WeightConversionDisplay = () => {
 
   useEffect(() => {
     loadWeightConversions()
+
+    const handleStockUpdate = () => {
+      loadWeightConversions()
+    }
+    window.addEventListener('erp_stock_updated', handleStockUpdate)
+    return () => {
+      window.removeEventListener('erp_stock_updated', handleStockUpdate)
+    }
   }, [])
 
   const loadWeightConversions = async () => {
     try {
       setLoading(true)
+      // First try dedicated API endpoint with flat=true
+      const flatRes = await api('/weight-conversion?flat=true')
+      if (Array.isArray(flatRes)) {
+        setRecords(flatRes)
+        setLoading(false)
+        return
+      }
+
+      // Fallback to db/query
       const result = await api('db/query', {
         method: 'POST',
         body: {
@@ -114,6 +131,7 @@ const WeightConversionDisplay = () => {
             <tr style="background: #1e4fa8; color: white;">
               <th style="border: 1px solid #ccc; padding: 8px; text-align: left;">S.No</th>
               <th style="border: 1px solid #ccc; padding: 8px; text-align: left;">Item Name</th>
+              <th style="border: 1px solid #ccc; padding: 8px; text-align: left;">Lot No</th>
               <th style="border: 1px solid #ccc; padding: 8px; text-align: left;">Weight</th>
               <th style="border: 1px solid #ccc; padding: 8px; text-align: left;">Qty</th>
               <th style="border: 1px solid #ccc; padding: 8px; text-align: left;">Total Wt</th>
@@ -124,6 +142,7 @@ const WeightConversionDisplay = () => {
               <tr>
                 <td style="border: 1px solid #ccc; padding: 8px;">${i + 1}</td>
                 <td style="border: 1px solid #ccc; padding: 8px;">${item.item_name || ''}</td>
+                <td style="border: 1px solid #ccc; padding: 8px;">${item.lot_no || ''}</td>
                 <td style="border: 1px solid #ccc; padding: 8px;">${item.weight || ''}</td>
                 <td style="border: 1px solid #ccc; padding: 8px;">${item.qty || 0}</td>
                 <td style="border: 1px solid #ccc; padding: 8px;">${parseFloat(item.total_wt || 0).toFixed(2)}</td>
@@ -150,6 +169,9 @@ const WeightConversionDisplay = () => {
       const data = await res.json()
       if (res.ok && (data.success !== false)) {
         setSnackbar({ open: true, message: 'Weight conversion deleted successfully!', severity: 'success' })
+        try {
+          window.dispatchEvent(new CustomEvent('erp_stock_updated'));
+        } catch (_) {}
         loadWeightConversions()
       } else {
         setSnackbar({ open: true, message: 'Error deleting weight conversion: ' + (data.message || 'Unknown error'), severity: 'error' })
@@ -239,9 +261,9 @@ const WeightConversionDisplay = () => {
                     <td>
                       {isFirstInGroup && (
                         <div style={{ display: 'flex', gap: '4px' }}>
-                          <button onClick={() => handlePrintRow(record)} style={{ padding: '2px 8px', fontSize: '12px', background: '#0284c7', borderColor: '#0284c7', color: '#fff' }}>Print</button>
-                          <button onClick={() => handleEdit(record)} style={{ padding: '2px 8px', fontSize: '12px' }}>Edit</button>
-                          <button onClick={() => setDeleteConfirmId(record.id)} style={{ padding: '2px 8px', fontSize: '12px', background: '#d9534f', borderColor: '#d43f3a' }}>Delete</button>
+                          <button onClick={() => handlePrintRow(record)} style={{ padding: '2px 8px', fontSize: '12px', background: '#0284c7', borderColor: '#0284c7', color: '#fff', borderRadius: '3px', cursor: 'pointer' }}>Print</button>
+                          <button onClick={() => handleEdit(record)} style={{ padding: '2px 10px', fontSize: '12px', background: '#2563eb', borderColor: '#1d4ed8', color: '#fff', fontWeight: 'bold', borderRadius: '3px', cursor: 'pointer' }} title="Update / Modify weight conversion record">Update</button>
+                          <button onClick={() => setDeleteConfirmId(record.id)} style={{ padding: '2px 8px', fontSize: '12px', background: '#d9534f', borderColor: '#d43f3a', borderRadius: '3px', cursor: 'pointer' }}>Delete</button>
                         </div>
                       )}
                     </td>

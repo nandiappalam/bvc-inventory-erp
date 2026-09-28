@@ -81,6 +81,16 @@ const determineLotCategory = async (dbInstance, itemName, itemGroup, lotNo) => {
       const foCheck = await dbInstance.query(`SELECT id FROM flour_out_items WHERE LOWER(lot_no) = LOWER(?) AND (remarks = 'section:to' OR section = 'to') LIMIT 1`, [lotNo]);
       if (foCheck.rows && foCheck.rows.length > 0) return 'FG';
     } catch (e) {}
+
+    try {
+      const wcInCheck = await dbInstance.query('SELECT id FROM weight_conversion_items WHERE LOWER(lot_no) = LOWER(?) AND type = ? LIMIT 1', [lotNo, 'input']);
+      if (wcInCheck.rows && wcInCheck.rows.length > 0) return 'RM';
+    } catch (e) {}
+
+    try {
+      const wcOutCheck = await dbInstance.query('SELECT id FROM weight_conversion_items WHERE LOWER(lot_no) = LOWER(?) AND type = ? LIMIT 1', [lotNo, 'output']);
+      if (wcOutCheck.rows && wcOutCheck.rows.length > 0) return 'FG';
+    } catch (e) {}
   }
 
   // 2. Check item name & group keywords
@@ -4087,7 +4097,10 @@ const categoryReportHandler = async (req, res) => {
       if (categoryKey === 'papad-ins') categoryKey = 'papad-in';
       if (categoryKey === 'papad-returns') categoryKey = 'papad-return';
     }
-    const sub_type = req.query.sub_type || req.params.subReport || req.query.subType || req.query.type || 'register';
+    let sub_type = req.query.sub_type || req.params.subReport || req.query.subType || req.query.type;
+    if (!sub_type || (categoryKey === 'stock' && sub_type === 'register')) {
+      sub_type = categoryKey === 'stock' ? 'group-wise' : 'register';
+    }
     const from_date = req.query.from_date || req.query.fromDate || req.query.startDate;
     const to_date = req.query.to_date || req.query.toDate || req.query.endDate;
     const { item, godown, lot_no, item_group, search } = req.query;
@@ -4141,7 +4154,13 @@ const categoryReportHandler = async (req, res) => {
         sql = `
           SELECT 
             MAX(s.id) as id,
-            COALESCE(g.godown_name, s.godown, 'Main Godown') as godown_name,
+            COALESCE(
+              CASE WHEN s.type = 'Weight Conversion Input' THEN (SELECT COALESCE(g2.godown_name, sl2.godown_name) FROM stock_lots sl2 LEFT JOIN godown_master g2 ON CAST(sl2.godown_id AS TEXT) = CAST(g2.id AS TEXT) WHERE sl2.lot_no = s.lot_no AND (g2.godown_name IS NOT NULL OR sl2.godown_name IS NOT NULL) LIMIT 1) END,
+              g.godown_name,
+              s.godown,
+              (SELECT COALESCE(g3.godown_name, sl3.godown_name) FROM stock_lots sl3 LEFT JOIN godown_master g3 ON CAST(sl3.godown_id AS TEXT) = CAST(g3.id AS TEXT) WHERE sl3.lot_no = s.lot_no AND (g3.godown_name IS NOT NULL OR sl3.godown_name IS NOT NULL) LIMIT 1),
+              'Main Godown'
+            ) as godown_name,
             s.item_name,
             COALESCE(MAX(NULLIF(TRIM(im.item_group), '')), MAX(NULLIF(TRIM(im.type), '')), 'General') as item_group,
             COALESCE(s.lot_no, 'LOT-GEN') as lot_no,
@@ -4157,7 +4176,13 @@ const categoryReportHandler = async (req, res) => {
           LEFT JOIN item_master im ON (CAST(s.item_id AS TEXT) = CAST(im.id AS TEXT) OR LOWER(TRIM(s.item_name)) = LOWER(TRIM(im.item_name)) OR s.item_name = im.item_code)
           LEFT JOIN godown_master g ON (CAST(s.godown_id AS TEXT) = CAST(g.id AS TEXT) OR LOWER(TRIM(s.godown)) = LOWER(TRIM(g.godown_name)))
           ${where}
-          GROUP BY COALESCE(g.godown_name, s.godown, 'Main Godown'), s.item_name, COALESCE(s.lot_no, 'LOT-GEN')
+          GROUP BY COALESCE(
+            CASE WHEN s.type = 'Weight Conversion Input' THEN (SELECT COALESCE(g2.godown_name, sl2.godown_name) FROM stock_lots sl2 LEFT JOIN godown_master g2 ON CAST(sl2.godown_id AS TEXT) = CAST(g2.id AS TEXT) WHERE sl2.lot_no = s.lot_no AND (g2.godown_name IS NOT NULL OR sl2.godown_name IS NOT NULL) LIMIT 1) END,
+            g.godown_name,
+            s.godown,
+            (SELECT COALESCE(g3.godown_name, sl3.godown_name) FROM stock_lots sl3 LEFT JOIN godown_master g3 ON CAST(sl3.godown_id AS TEXT) = CAST(g3.id AS TEXT) WHERE sl3.lot_no = s.lot_no AND (g3.godown_name IS NOT NULL OR sl3.godown_name IS NOT NULL) LIMIT 1),
+            'Main Godown'
+          ), s.item_name, COALESCE(s.lot_no, 'LOT-GEN')
           ORDER BY godown_name ASC, s.item_name ASC
         `;
       } else {
@@ -4169,7 +4194,13 @@ const categoryReportHandler = async (req, res) => {
             COALESCE(MAX(NULLIF(TRIM(im.item_group), '')), MAX(NULLIF(TRIM(im.type), '')), 'General') as item_group,
             MAX(COALESCE(im.type, '')) as item_type,
             COALESCE(s.lot_no, 'LOT-GEN') as lot_no,
-            COALESCE(g.godown_name, s.godown, 'Main Godown') as godown_name,
+            COALESCE(
+              CASE WHEN s.type = 'Weight Conversion Input' THEN (SELECT COALESCE(g2.godown_name, sl2.godown_name) FROM stock_lots sl2 LEFT JOIN godown_master g2 ON CAST(sl2.godown_id AS TEXT) = CAST(g2.id AS TEXT) WHERE sl2.lot_no = s.lot_no AND (g2.godown_name IS NOT NULL OR sl2.godown_name IS NOT NULL) LIMIT 1) END,
+              g.godown_name,
+              s.godown,
+              (SELECT COALESCE(g3.godown_name, sl3.godown_name) FROM stock_lots sl3 LEFT JOIN godown_master g3 ON CAST(sl3.godown_id AS TEXT) = CAST(g3.id AS TEXT) WHERE sl3.lot_no = s.lot_no AND (g3.godown_name IS NOT NULL OR sl3.godown_name IS NOT NULL) LIMIT 1),
+              'Main Godown'
+            ) as godown_name,
             SUM(CASE WHEN s.type IN ('Opening Stock', 'Open Stock', 'Opening') THEN COALESCE(s.qty, 0) ELSE 0 END) as opening_qty,
             SUM(CASE WHEN s.type NOT IN ('Opening Stock', 'Open Stock', 'Opening') AND s.qty > 0 THEN COALESCE(s.qty, 0) ELSE 0 END) as total_purchased,
             SUM(CASE WHEN LOWER(COALESCE(s.type, '')) = 'purchase return' THEN COALESCE(ABS(s.qty), 0) ELSE 0 END) as total_returned,
@@ -4182,7 +4213,13 @@ const categoryReportHandler = async (req, res) => {
           LEFT JOIN item_master im ON (CAST(s.item_id AS TEXT) = CAST(im.id AS TEXT) OR LOWER(TRIM(s.item_name)) = LOWER(TRIM(im.item_name)) OR s.item_name = im.item_code)
           LEFT JOIN godown_master g ON (CAST(s.godown_id AS TEXT) = CAST(g.id AS TEXT) OR LOWER(TRIM(s.godown)) = LOWER(TRIM(g.godown_name)))
           ${where}
-          GROUP BY s.item_name, COALESCE(s.lot_no, 'LOT-GEN'), COALESCE(g.godown_name, s.godown, 'Main Godown')
+          GROUP BY s.item_name, COALESCE(s.lot_no, 'LOT-GEN'), COALESCE(
+            CASE WHEN s.type = 'Weight Conversion Input' THEN (SELECT COALESCE(g2.godown_name, sl2.godown_name) FROM stock_lots sl2 LEFT JOIN godown_master g2 ON CAST(sl2.godown_id AS TEXT) = CAST(g2.id AS TEXT) WHERE sl2.lot_no = s.lot_no AND (g2.godown_name IS NOT NULL OR sl2.godown_name IS NOT NULL) LIMIT 1) END,
+            g.godown_name,
+            s.godown,
+            (SELECT COALESCE(g3.godown_name, sl3.godown_name) FROM stock_lots sl3 LEFT JOIN godown_master g3 ON CAST(sl3.godown_id AS TEXT) = CAST(g3.id AS TEXT) WHERE sl3.lot_no = s.lot_no AND (g3.godown_name IS NOT NULL OR sl3.godown_name IS NOT NULL) LIMIT 1),
+            'Main Godown'
+          )
           ORDER BY s.item_name ASC
         `;
       }

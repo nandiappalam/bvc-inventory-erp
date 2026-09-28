@@ -142,6 +142,16 @@ const determineLotCategory = async (dbInstance, itemName, itemGroup, lotNo) => {
       const foCheck = await dbInstance.query(`SELECT id FROM flour_out_items WHERE LOWER(lot_no) = LOWER(?) AND (remarks = 'section:to' OR section = 'to') LIMIT 1`, [lotNo]);
       if (foCheck.rows && foCheck.rows.length > 0) return 'FG';
     } catch (e) {}
+
+    try {
+      const wcInCheck = await dbInstance.query('SELECT id FROM weight_conversion_items WHERE LOWER(lot_no) = LOWER(?) AND type = ? LIMIT 1', [lotNo, 'input']);
+      if (wcInCheck.rows && wcInCheck.rows.length > 0) return 'RM';
+    } catch (e) {}
+
+    try {
+      const wcOutCheck = await dbInstance.query('SELECT id FROM weight_conversion_items WHERE LOWER(lot_no) = LOWER(?) AND type = ? LIMIT 1', [lotNo, 'output']);
+      if (wcOutCheck.rows && wcOutCheck.rows.length > 0) return 'FG';
+    } catch (e) {}
   }
 
   // 2. Check item name & group keywords
@@ -328,17 +338,17 @@ router.get('/report', async (req, res) => {
     
     let query = `
       SELECT 
-        s.item_name,
-        (SELECT id FROM item_master WHERE LOWER(item_name) = LOWER(s.item_name) LIMIT 1) as item_id,
-        (SELECT item_group FROM item_master WHERE LOWER(item_name) = LOWER(s.item_name) LIMIT 1) as item_group,
+        TRIM(s.item_name) as item_name,
+        (SELECT id FROM item_master WHERE LOWER(TRIM(item_name)) = LOWER(TRIM(s.item_name)) LIMIT 1) as item_id,
+        (SELECT item_group FROM item_master WHERE LOWER(TRIM(item_name)) = LOWER(TRIM(s.item_name)) LIMIT 1) as item_group,
         SUM(CASE WHEN s.type IN ('Opening Stock', 'Open Stock') THEN COALESCE(s.qty, 0) ELSE 0 END) as opening_qty,
         SUM(CASE WHEN s.type NOT IN ('Opening Stock', 'Open Stock') AND s.qty > 0 THEN COALESCE(s.qty, 0) ELSE 0 END) as total_purchased,
         SUM(CASE WHEN LOWER(s.type) = 'purchase return' THEN COALESCE(ABS(s.qty), 0) ELSE 0 END) as total_returned,
         SUM(CASE WHEN s.qty < 0 AND LOWER(s.type) != 'purchase return' THEN COALESCE(ABS(s.qty), 0) ELSE 0 END) as total_sold,
         SUM(COALESCE(s.qty, 0)) as balance,
         COALESCE(
-          (SELECT CASE WHEN COALESCE(qty, 0) != 0 THEN ROUND(CAST(ABS(weight) / ABS(qty) AS NUMERIC), 2) ELSE 0 END FROM stock WHERE item_name = s.item_name AND qty != 0 LIMIT 1),
-          (SELECT COALESCE(per_unit_weight, weight) FROM purchase_items WHERE item_name = s.item_name AND COALESCE(per_unit_weight, weight) > 0 LIMIT 1),
+          (SELECT CASE WHEN COALESCE(qty, 0) != 0 THEN ROUND(CAST(ABS(weight) / ABS(qty) AS NUMERIC), 2) ELSE 0 END FROM stock WHERE LOWER(TRIM(item_name)) = LOWER(TRIM(s.item_name)) AND qty != 0 LIMIT 1),
+          (SELECT COALESCE(per_unit_weight, weight) FROM purchase_items WHERE LOWER(TRIM(item_name)) = LOWER(TRIM(s.item_name)) AND COALESCE(per_unit_weight, weight) > 0 LIMIT 1),
           50
         ) as weight
       FROM stock s
@@ -347,7 +357,7 @@ router.get('/report', async (req, res) => {
     const params = []
     
     if (item_id) {
-      query += ` AND (s.item_name = (SELECT item_name FROM item_master WHERE CAST(id AS TEXT) = CAST(? AS TEXT) LIMIT 1) OR s.item_name = ?)`
+      query += ` AND (LOWER(TRIM(s.item_name)) = (SELECT LOWER(TRIM(item_name)) FROM item_master WHERE CAST(id AS TEXT) = CAST(? AS TEXT) LIMIT 1) OR LOWER(TRIM(s.item_name)) = LOWER(TRIM(?)))`
       params.push(item_id, item_id)
     }
     
@@ -361,7 +371,7 @@ router.get('/report', async (req, res) => {
       params.push(to_date)
     }
     
-    query += ` GROUP BY s.item_name ORDER BY s.item_name ASC`
+    query += ` GROUP BY TRIM(s.item_name) ORDER BY TRIM(s.item_name) ASC`
     
     const result = await db.query(query, params)
 
@@ -722,6 +732,35 @@ router.get('/lots', async (req, res) => {
             };
           }
         } catch (e) {}
+
+        // Also check if RM was processed in Weight Conversion
+        try {
+          const wcIn = await db.query(`
+            SELECT DISTINCT wc.id, wc.s_no, wc.date, wc.remarks 
+            FROM weight_conversion_items wci 
+            JOIN weight_conversion wc ON CAST(wci.weight_conversion_id AS TEXT) = CAST(wc.id AS TEXT)
+            WHERE wci.lot_no = ? AND wci.type = 'input'
+          `, [row.lot_no]);
+          if (wcIn.rows && wcIn.rows.length > 0) {
+            const wcIds = wcIn.rows.map(r => r.id);
+            const placeholders = wcIds.map(() => '?').join(',');
+            const wcOutRes = await db.query(`
+              SELECT item_name, lot_no, qty, total_wt FROM weight_conversion_items WHERE weight_conversion_id IN (${placeholders}) AND type = 'output'
+            `, wcIds);
+            
+            const wcOutputs = wcOutRes.rows.map(o => ({ item_name: o.item_name, lot_no: o.lot_no, qty: o.qty, weight: o.total_wt }));
+            if (!processingDetails) {
+              processingDetails = {
+                processed_runs: wcIds.length,
+                outputs: wcOutputs,
+                wastages: []
+              };
+            } else {
+              processingDetails.processed_runs += wcIds.length;
+              processingDetails.outputs = [...(processingDetails.outputs || []), ...wcOutputs];
+            }
+          }
+        } catch (e) {}
       }
 
       // Source details for FG (which raw material lots it was created from)
@@ -768,6 +807,43 @@ router.get('/lots', async (req, res) => {
         } catch (e) {
           console.error('Error generating source details:', e);
         }
+
+        // Also check if FG lot was created from Weight Conversion
+        try {
+          const wcOut = await db.query(`
+            SELECT DISTINCT wc.id, wc.s_no, wc.date, wc.remarks 
+            FROM weight_conversion_items wci 
+            JOIN weight_conversion wc ON CAST(wci.weight_conversion_id AS TEXT) = CAST(wc.id AS TEXT)
+            WHERE wci.lot_no = ? AND wci.type = 'output'
+          `, [row.lot_no]);
+          if (wcOut.rows && wcOut.rows.length > 0) {
+            const wcIds = wcOut.rows.map(r => r.id);
+            const placeholders = wcIds.map(() => '?').join(',');
+            const wcInRes = await db.query(`
+              SELECT item_name, lot_no, qty, total_wt FROM weight_conversion_items WHERE weight_conversion_id IN (${placeholders}) AND type = 'input'
+            `, wcIds);
+            const wcAllOutRes = await db.query(`
+              SELECT item_name, lot_no, qty, total_wt FROM weight_conversion_items WHERE weight_conversion_id IN (${placeholders}) AND type = 'output'
+            `, wcIds);
+
+            const wcProcess = wcOut.rows.map(p => ({ date: p.date, reference_no: p.s_no, mill: 'Weight Conversion' }));
+            const wcInputs = wcInRes.rows.map(i => ({ item_name: i.item_name, lot_no: i.lot_no, qty: i.qty, weight: i.total_wt }));
+            const wcOutputs = wcAllOutRes.rows.map(o => ({ item_name: o.item_name, lot_no: o.lot_no, qty: o.qty, weight: o.total_wt }));
+
+            if (!sourceDetails) {
+              sourceDetails = {
+                process_info: wcProcess,
+                rm_inputs: wcInputs,
+                outputs: wcOutputs,
+                wastages: []
+              };
+            } else {
+              sourceDetails.process_info = [...(sourceDetails.process_info || []), ...wcProcess];
+              sourceDetails.rm_inputs = [...(sourceDetails.rm_inputs || []), ...wcInputs];
+              sourceDetails.outputs = [...(sourceDetails.outputs || []), ...wcOutputs];
+            }
+          }
+        } catch (e) {}
       }
 
       return {

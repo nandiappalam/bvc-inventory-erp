@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import './WeightConversionCreate.css';
 import { api } from "../utils/api.js";
 
 const WeightConversionCreate = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const editId = searchParams.get('id');
+
   const [sNo, setSNo] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [remarks, setRemarks] = useState('');
@@ -95,17 +98,12 @@ const WeightConversionCreate = () => {
     return num; // Default assumes KG
   };
 
-  // Fetch next sequential S.No or load record if editing
-  const queryParams = new URLSearchParams(window.location.search);
-  const editId = queryParams.get('id');
-
   useEffect(() => {
     const initData = async () => {
       try {
         if (editId) {
-          const res = await fetch(`/api/weight-conversion/${editId}`);
-          if (res.ok) {
-            const data = await res.json();
+          const data = await api(`/weight-conversion/${editId}`);
+          if (data && (data.id || data.s_no)) {
             setSNo(String(data.s_no || ''));
             setDate(data.date || new Date().toISOString().split('T')[0]);
             setRemarks(data.remarks || '');
@@ -120,7 +118,7 @@ const WeightConversionCreate = () => {
                 let lots = [];
                 if (i.item_name) {
                   try {
-                    const lotsRes = await api(`/weight-conversion/available-lots?item_name=${encodeURIComponent(i.item_name)}`);
+                    const lotsRes = await api(`/weight-conversion/available-lots?item_name=${encodeURIComponent(i.item_name)}&lot_no=${encodeURIComponent(i.lot_no || '')}`);
                     if (Array.isArray(lotsRes) && lotsRes.length > 0) {
                       lots = lotsRes;
                     } else {
@@ -130,6 +128,14 @@ const WeightConversionCreate = () => {
                   } catch (e) {
                     console.error('Error fetching lots for edit row:', e);
                   }
+                }
+                if (i.lot_no && !lots.some(l => l.lot_no === i.lot_no)) {
+                  lots.unshift({
+                    lot_no: i.lot_no,
+                    item_name: i.item_name,
+                    remaining_quantity: i.qty || 0,
+                    per_unit_weight: i.weight || 0
+                  });
                 }
                 return {
                   item_name: i.item_name || '',
@@ -553,6 +559,10 @@ const WeightConversionCreate = () => {
         setMessage(editId ? 'Weight conversion updated successfully!' : 'Weight conversion saved successfully!');
         setMessageType('success');
         
+        try {
+          window.dispatchEvent(new CustomEvent('erp_stock_updated'));
+        } catch (_) {}
+
         // Reset state
         setRows([
           {
@@ -613,7 +623,7 @@ const WeightConversionCreate = () => {
   return (
     <div className="window" id="weight-conversion-window">
       <div className="title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span>Weight Conversion Creation</span>
+        <span>{editId ? 'Weight Conversion Modification (Update)' : 'Weight Conversion Creation'}</span>
         <button id="close-conversion-btn" style={{ background: 'none', border: 'none', color: '#fff', fontSize: '18px', cursor: 'pointer', padding: 0 }} onClick={() => navigate('/entry/weight-conversion-display')}>X</button>
       </div>
 
@@ -930,9 +940,18 @@ const WeightConversionCreate = () => {
         <button 
           onClick={handleSubmit} 
           disabled={loading}
-          style={{ padding: '8px 25px', background: '#3f6fc0', color: '#fff', border: '1px solid #1f4fa3', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+          style={{ 
+            padding: '8px 25px', 
+            background: editId ? '#16a34a' : '#3f6fc0', 
+            color: '#fff', 
+            border: editId ? '1px solid #15803d' : '1px solid #1f4fa3', 
+            borderRadius: '4px', 
+            cursor: 'pointer', 
+            fontWeight: 'bold',
+            fontSize: '14px'
+          }}
         >
-          {loading ? 'Saving...' : 'Save'}
+          {loading ? (editId ? 'Updating...' : 'Saving...') : (editId ? 'Update' : 'Save')}
         </button>
       </div>
     </div>
