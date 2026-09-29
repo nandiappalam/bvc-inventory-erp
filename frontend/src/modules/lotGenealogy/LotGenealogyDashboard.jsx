@@ -61,8 +61,8 @@ const LotGenealogyDashboard = () => {
   // Modals
   const [splitDialogOpen, setSplitDialogOpen] = useState(false);
   const [splitRows, setSplitRows] = useState([
-    { targetLotNo: '', quantity: '', godownName: 'Main Godown' },
-    { targetLotNo: '', quantity: '', godownName: 'Main Godown' }
+    { targetLotNo: '', quantity: '', godownName: '' },
+    { targetLotNo: '', quantity: '', godownName: '' }
   ]);
 
   // Load Lot Genealogy Details
@@ -265,7 +265,7 @@ const LotGenealogyDashboard = () => {
           <Paper elevation={0} sx={{ p: 2, borderRadius: '10px', border: '1px solid #e2e8f0', bgcolor: '#f8fafc' }}>
             <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600 }}>STORAGE GODOWN</Typography>
             <Typography variant="body1" sx={{ fontWeight: 700, color: '#0f172a', mt: 0.5 }}>
-              {lotDetails?.godown || 'Main Godown'}
+              {lotDetails?.godown || '-'}
             </Typography>
             <Typography variant="caption" sx={{ color: '#64748b' }}>
               Unit: {lotDetails?.unit || 'KG'}
@@ -575,7 +575,7 @@ const LotGenealogyDashboard = () => {
                             </Box>
                           ) : (
                             <Typography variant="body2" sx={{ color: '#64748b' }}>
-                              Material currently in stock in <strong>{lotDetails?.godown || 'Main Godown'}</strong>. No downstream customer dispatches, contractor transfers, or vendor returns.
+                              Material currently in stock in <strong>{lotDetails?.godown || 'Warehouse'}</strong>. No downstream customer dispatches, contractor transfers, or vendor returns.
                             </Typography>
                           )}
                         </CardContent>
@@ -769,7 +769,7 @@ const LotGenealogyDashboard = () => {
                             Current Warehouse Exposure
                           </Typography>
                           <Typography variant="body2">
-                            <strong>Godown Location:</strong> {lotDetails?.godown || 'Main Godown'}
+                            <strong>Godown Location:</strong> {lotDetails?.godown || '-'}
                           </Typography>
                           <Typography variant="body2">
                             <strong>On-Hand Stock to Quarantine:</strong> {lotDetails?.remainingQuantity ?? 0} KG
@@ -872,7 +872,7 @@ const LotGenealogyDashboard = () => {
                           <TableCell sx={{ fontWeight: 700, color: '#0284c7' }}>{lot.lotNo}</TableCell>
                           <TableCell>{lot.itemName}</TableCell>
                           <TableCell>{lot.currentQuantity || lot.quantity || 0} KG</TableCell>
-                          <TableCell>{lot.location || 'Main Godown'}</TableCell>
+                          <TableCell>{lot.location || '-'}</TableCell>
                           <TableCell>
                             <Chip label={lot.qcStatus || 'ACCEPTED'} size="small" color={lot.qcStatus === 'REJECTED' ? 'error' : 'success'} sx={{ fontWeight: 600 }} />
                           </TableCell>

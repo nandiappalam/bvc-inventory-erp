@@ -222,7 +222,7 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
                   <th>Inward Quantity</th>
                   <td><strong>${supplier.inward_qty_bags || 0} Bags (${supplier.total_weight_kg || (supplier.inward_qty_bags * 50)} Kg)</strong></td>
                   <th>Godown Location</th>
-                  <td>${supplier.godown_name || 'Main Factory Godown'}</td>
+                  <td>${supplier.godown_name || ''}</td>
                 </tr>
                 <tr>
                   <th>Vehicle Number</th>
@@ -1062,7 +1062,7 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
                         <TableBody>
                           {currentStock.map((s, idx) => (
                             <TableRow key={idx}>
-                              <TableCell sx={{ fontWeight: 700 }}>{s.godown_name || s.godown || 'Main Godown'}</TableCell>
+                              <TableCell sx={{ fontWeight: 700 }}>{s.godown_name || s.godown || '-'}</TableCell>
                               <TableCell>{s.item_name}</TableCell>
                               <TableCell>
                                 <Chip

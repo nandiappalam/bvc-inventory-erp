@@ -1,6 +1,7 @@
 const express = require('express')
 const router = express.Router()
 const db = require('../config/database')
+const { rebuildStockLedger } = require('../utils/stockRebuilder')
 
 // GET next S.No for stock adjustments
 router.get('/next-sno', async (req, res) => {
@@ -117,6 +118,7 @@ router.post('/', async (req, res) => {
 
     // Apply the inventory changes
     await applyStockAdjustments(adjustmentId, formData.date, items)
+    await rebuildStockLedger();
 
     res.status(201).json({
       success: true,
@@ -167,6 +169,7 @@ router.put('/:id', async (req, res) => {
 
     // Apply the new inventory changes
     await applyStockAdjustments(adjustmentId, formData.date, items)
+    await rebuildStockLedger();
 
     res.json({ success: true, message: 'Stock adjustment record updated successfully!' })
   } catch (error) {
@@ -185,6 +188,7 @@ router.delete('/:id', async (req, res) => {
 
     await db.run('DELETE FROM stock_adjustment_items WHERE stock_adjustment_id = ?', [adjustmentId])
     await db.run('DELETE FROM stock_adjustments WHERE id = ?', [adjustmentId])
+    await rebuildStockLedger();
 
     res.json({ success: true, message: 'Stock adjustment record deleted successfully' })
   } catch (error) {

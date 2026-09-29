@@ -1303,6 +1303,21 @@ const CategoryReportPage = () => {
 
   useEffect(() => {
     fetchFilterMasters();
+
+    const handleUpdate = () => {
+      fetchFilterMasters();
+      fetchReportRows();
+    };
+
+    window.addEventListener('erp_stock_updated', handleUpdate);
+    window.addEventListener('erp_company_changed', handleUpdate);
+    window.addEventListener('erp_data_updated', handleUpdate);
+
+    return () => {
+      window.removeEventListener('erp_stock_updated', handleUpdate);
+      window.removeEventListener('erp_company_changed', handleUpdate);
+      window.removeEventListener('erp_data_updated', handleUpdate);
+    };
   }, []);
 
   useEffect(() => {
@@ -1378,18 +1393,17 @@ const CategoryReportPage = () => {
   const effectiveSubReports = getSubReports();
 
   const generateSampleRows = () => {
+    const primaryG = godownsList[0]?.godown_name || godownsList[0]?.name || 'PJ';
     if (categoryKey === 'stock') {
       if (currentSubReport === 'godown-wise') {
         return [
-          { godown_name: 'Main RM Warehouse', item_name: 'Urad Dal Special', item_group: 'Raw Material', lot_no: 'LOT-2026-001', available_qty: 450, weight: 22500 },
-          { godown_name: 'Flour Storage', item_name: 'Wheat Flour (Atta)', item_group: 'Flour', lot_no: 'LOT-2026-004', available_qty: 820, weight: 41000 },
-          { godown_name: 'Finished Goods Store', item_name: 'Moong Papad 200g', item_group: 'Finished Goods', lot_no: 'LOT-2026-009', available_qty: 1200, weight: 6000 }
+          { godown_name: primaryG, item_name: 'Urad Dal Special', item_group: 'Raw Material', lot_no: 'LOT-2026-001', available_qty: 450, weight: 22500 },
+          { godown_name: primaryG, item_name: 'Wheat Flour (Atta)', item_group: 'Flour', lot_no: 'LOT-2026-004', available_qty: 820, weight: 41000 }
         ];
       }
       return [
-        { item_name: 'Urad Dal Special', item_group: 'Raw Material', lot_no: 'LOT-2026-001', godown_name: 'Main RM Warehouse', opening_qty: 500, total_purchased: 200, total_sold: 250, wastage_qty: 0, available_qty: 450, weight: 22500, category: 'RM' },
-        { item_name: 'Wheat Flour (Atta)', item_group: 'Flour', lot_no: 'LOT-2026-004', godown_name: 'Flour Storage', opening_qty: 1000, total_purchased: 300, total_sold: 480, wastage_qty: 0, available_qty: 820, weight: 41000, category: 'FG' },
-        { item_name: 'Moong Papad 200g', item_group: 'Finished Goods', lot_no: 'LOT-2026-009', godown_name: 'Finished Goods Store', opening_qty: 1500, total_purchased: 0, total_sold: 300, wastage_qty: 0, available_qty: 1200, weight: 6000, category: 'FG' }
+        { item_name: 'Urad Dal Special', item_group: 'Raw Material', lot_no: 'LOT-2026-001', godown_name: primaryG, opening_qty: 500, total_purchased: 200, total_sold: 250, wastage_qty: 0, available_qty: 450, weight: 22500, category: 'RM' },
+        { item_name: 'Wheat Flour (Atta)', item_group: 'Flour', lot_no: 'LOT-2026-004', godown_name: primaryG, opening_qty: 1000, total_purchased: 300, total_sold: 480, wastage_qty: 0, available_qty: 820, weight: 41000, category: 'FG' }
       ];
     }
     if (categoryKey === 'purchase') {

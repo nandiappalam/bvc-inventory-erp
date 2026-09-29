@@ -258,12 +258,7 @@ router.get(['/history', '/purchase-lab-testing'], asyncHandler(async (req, res) 
 // GET /api/quality/registers or /api/qc/registers
 router.get(['/registers', '/all-registers', '/register-list'], asyncHandler(async (req, res) => {
   // Load godown master map to guarantee accurate godown name resolution
-  const godownDict = {
-    '1': 'Main Godown',
-    '2': 'Godown 1',
-    '3': 'Raw Material Godown',
-    '4': 'Finished Goods Godown'
-  };
+  const godownDict = {};
   try {
     const gRows = await db.query("SELECT id, godown_name, print_name FROM godown_master");
     (gRows.rows || []).forEach(g => {
@@ -1363,22 +1358,21 @@ router.post('/confirm-disposal', asyncHandler(async (req, res) => {
   // 2. Re-create stock_lots records for each godown allocation
   await db.run('DELETE FROM stock_lots WHERE lot_no = ?', [lotNo]);
 
-  const godownFallbackMap = {
-    '1': 'Main Godown',
-    '2': 'Godown 1',
-    '3': 'Raw Material Godown',
-    '4': 'Finished Goods Godown'
-  };
-
   const todayStr = new Date().toISOString().split('T')[0];
   for (const alloc of finalAllocations) {
-    let godownName = godownFallbackMap[String(alloc.godownId)] || '';
+    let godownName = '';
     try {
       const gRes = await db.query('SELECT godown_name, print_name, name FROM godown_master WHERE id = ? OR godown_name = ? OR name = ? LIMIT 1', [alloc.godownId, alloc.godownId, alloc.godownId]);
       if (gRes.rows && gRes.rows.length > 0) {
-        godownName = gRes.rows[0].godown_name || gRes.rows[0].print_name || gRes.rows[0].name || godownName;
+        godownName = gRes.rows[0].godown_name || gRes.rows[0].print_name || gRes.rows[0].name || '';
       }
     } catch (e) {}
+    if (!godownName) {
+      try {
+        const defG = await db.query('SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1');
+        godownName = defG.rows?.[0]?.godown_name || '';
+      } catch (_) {}
+    }
     if (!godownName) {
       godownName = `Godown ${alloc.godownId}`;
     }

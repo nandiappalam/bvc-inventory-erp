@@ -1853,7 +1853,7 @@ router.get('/traceability/:lotNo', async (req, res) => {
 
     // 1. Find Lot in stock_lots with godown info
     const lotRes = await db.query(`
-      SELECT sl.*, COALESCE(gm.godown_name, 'KNJ Godown') as godown_name
+      SELECT sl.*, COALESCE(gm.godown_name, sl.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name
       FROM stock_lots sl
       LEFT JOIN godown_master gm ON sl.godown_id = gm.id
       WHERE UPPER(sl.lot_no) = UPPER(?) OR UPPER(sl.lot_no) LIKE UPPER(?)
@@ -1865,7 +1865,7 @@ router.get('/traceability/:lotNo', async (req, res) => {
     if (!lot) {
       const piFallback = await db.query(`
         SELECT pi.lot_no, pi.item_name, pi.qty as quantity, pi.rate, 'Raw Material' as type,
-               pi.purchase_id, COALESCE(gm.godown_name, 'KNJ Godown') as godown_name
+               pi.purchase_id, COALESCE(gm.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name
         FROM purchase_items pi
         LEFT JOIN purchases p ON p.id = pi.purchase_id
         LEFT JOIN godown_master gm ON (CAST(gm.id AS TEXT) = CAST(p.godown AS TEXT) OR p.godown = gm.godown_name)
@@ -1880,7 +1880,7 @@ router.get('/traceability/:lotNo', async (req, res) => {
     if (!lot) {
       const goFallback = await db.query(`
         SELECT go.lot_no, go.item_name, go.qty as quantity, go.weight as per_unit_weight, go.total_wt as total_weight, 'Finished Goods' as type,
-               'KNJ Godown' as godown_name
+               COALESCE((SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1), 'PJ') as godown_name
         FROM grain_output_items go
         WHERE UPPER(go.lot_no) = UPPER(?) OR UPPER(go.lot_no) LIKE UPPER(?)
         ORDER BY CASE WHEN UPPER(go.lot_no) = UPPER(?) THEN 0 ELSE 1 END, go.id DESC LIMIT 1
@@ -1893,7 +1893,7 @@ router.get('/traceability/:lotNo', async (req, res) => {
     if (!lot) {
       const stFallback = await db.query(`
         SELECT s.lot_no, s.item_name, s.qty as quantity, s.rate, 'Stock' as type,
-               COALESCE(gm.godown_name, 'KNJ Godown') as godown_name
+               COALESCE(gm.godown_name, s.godown, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name
         FROM stock s
         LEFT JOIN godown_master gm ON (CAST(gm.id AS TEXT) = CAST(s.godown AS TEXT) OR s.godown = gm.godown_name)
         WHERE UPPER(s.lot_no) = UPPER(?) OR UPPER(s.lot_no) LIKE UPPER(?)
@@ -1921,7 +1921,7 @@ router.get('/traceability/:lotNo', async (req, res) => {
              COALESCE(s.gst_number, p.gst_no, '') as supplier_gstin,
              COALESCE(s.area, p.area, '') as supplier_area,
              COALESCE(p.inv_no, CAST(p.s_no AS TEXT), CAST(p.id AS TEXT)) as invoice_no,
-             COALESCE(gm.godown_name, 'KNJ Godown') as godown_name
+             COALESCE(gm.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name
       FROM purchases p
       JOIN purchase_items pi ON p.id = pi.purchase_id
       LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(p.supplier AS TEXT) OR p.supplier = s.name OR p.supplier = s.print_name)
@@ -1932,24 +1932,6 @@ router.get('/traceability/:lotNo', async (req, res) => {
 
     if (purByItemRes.rows && purByItemRes.rows[0]) {
       purchaseInfo = purByItemRes.rows[0];
-    } else if (lot && lot.purchase_id) {
-      const purRes = await db.query(`
-        SELECT p.*, 
-               COALESCE(s.name, s.print_name, p.supplier) as supplier_name, 
-               COALESCE(s.phone_off, s.mobile1, p.phone, '') as supplier_phone, 
-               COALESCE(s.address1, p.address, '') as supplier_address, 
-               COALESCE(s.gst_number, p.gst_no, '') as supplier_gstin, 
-               COALESCE(s.area, p.area, '') as supplier_area, 
-               COALESCE(p.inv_no, CAST(p.s_no AS TEXT), CAST(p.id AS TEXT)) as invoice_no, 
-               COALESCE(gm.godown_name, 'KNJ Godown') as godown_name
-        FROM purchases p
-        LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(p.supplier AS TEXT) OR p.supplier = s.name OR p.supplier = s.print_name)
-        LEFT JOIN godown_master gm ON (CAST(gm.id AS TEXT) = CAST(p.godown AS TEXT) OR p.godown = gm.godown_name)
-        WHERE p.id = ?
-      `, [lot.purchase_id]);
-      if (purRes.rows && purRes.rows[0]) {
-        purchaseInfo = purRes.rows[0];
-      }
     }
 
     // 3. In-Process & Production Transformation (Grains / Milling Batches)
@@ -1986,7 +1968,7 @@ router.get('/traceability/:lotNo', async (req, res) => {
                  COALESCE(s.gst_number, p.gst_no, '') as supplier_gstin,
                  COALESCE(s.area, p.area, '') as supplier_area,
                  COALESCE(p.inv_no, CAST(p.s_no AS TEXT), CAST(p.id AS TEXT)) as invoice_no,
-                 COALESCE(gm.godown_name, 'KNJ Godown') as godown_name
+                 COALESCE(gm.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name
           FROM purchases p
           JOIN purchase_items pi ON p.id = pi.purchase_id
           LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(p.supplier AS TEXT) OR p.supplier = s.name OR p.supplier = s.print_name)
@@ -1996,6 +1978,24 @@ router.get('/traceability/:lotNo', async (req, res) => {
         if (parentPurRes.rows && parentPurRes.rows[0]) {
           purchaseInfo = parentPurRes.rows[0];
         }
+      }
+    } else if (!purchaseInfo && lot && lot.purchase_id) {
+      const purRes = await db.query(`
+        SELECT p.*, 
+               COALESCE(s.name, s.print_name, p.supplier) as supplier_name, 
+               COALESCE(s.phone_off, s.mobile1, p.phone, '') as supplier_phone, 
+               COALESCE(s.address1, p.address, '') as supplier_address, 
+               COALESCE(s.gst_number, p.gst_no, '') as supplier_gstin, 
+               COALESCE(s.area, p.area, '') as supplier_area, 
+               COALESCE(p.inv_no, CAST(p.s_no AS TEXT), CAST(p.id AS TEXT)) as invoice_no, 
+               COALESCE(gm.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name
+        FROM purchases p
+        LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(p.supplier AS TEXT) OR p.supplier = s.name OR p.supplier = s.print_name)
+        LEFT JOIN godown_master gm ON (CAST(gm.id AS TEXT) = CAST(p.godown AS TEXT) OR p.godown = gm.godown_name)
+        WHERE p.id = ?
+      `, [lot.purchase_id]);
+      if (purRes.rows && purRes.rows[0]) {
+        purchaseInfo = purRes.rows[0];
       }
     }
 
@@ -2089,17 +2089,9 @@ router.get('/traceability/:lotNo', async (req, res) => {
         JOIN purchase_return_items pri ON pr.id = pri.purchase_return_id
         LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(pr.supplier AS TEXT) OR pr.supplier = s.name OR pr.supplier = s.print_name)
         LEFT JOIN godown_master gm ON (CAST(gm.id AS TEXT) = CAST(pr.godown AS TEXT) OR pr.godown = gm.godown_name)
-        WHERE (
-          UPPER(TRIM(pri.lot_no)) IN (${lotPlaceholdersUpper})
-          OR UPPER(TRIM(pri.lot_no)) = UPPER(TRIM(?))
-          OR (
-            (pri.lot_no IS NULL OR TRIM(pri.lot_no) = '')
-            AND UPPER(TRIM(pri.item_name)) = UPPER(TRIM(?))
-            AND (CAST(pr.purchase_id AS TEXT) = ? OR pr.purchase_inv_no = ?)
-          )
-        )
+        WHERE UPPER(TRIM(pri.lot_no)) = UPPER(TRIM(?))
         ORDER BY pr.id DESC
-      `, [...lotListUpper, canonicalLotNo, lot?.item_name || '', purchaseInfo?.id ? String(purchaseInfo.id) : '-999', purchaseInfo?.inv_no ? String(purchaseInfo.inv_no) : '-999']);
+      `, [canonicalLotNo]);
 
       const seenPRKeys = new Set();
       purchaseReturnsList = (purReturnsRes.rows || []).filter(r => {
@@ -2292,7 +2284,7 @@ router.get('/traceability/:lotNo', async (req, res) => {
 
     // 6. Current Inventory Balances for this lot and related lots
     const stockLotsRes = await db.query(`
-      SELECT sl.*, COALESCE(gm.godown_name, 'KNJ Godown (Godown 2)') as godown_name
+      SELECT sl.*, COALESCE(gm.godown_name, sl.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name
       FROM stock_lots sl
       LEFT JOIN godown_master gm ON sl.godown_id = gm.id
       WHERE sl.lot_no IN (${lotPlaceholders})
@@ -2342,25 +2334,26 @@ router.get('/traceability/:lotNo', async (req, res) => {
     const activeLotsRes = await db.query(`
       SELECT lot_no, MAX(item_name) as item_name, SUM(initial_qty) as initial_qty, SUM(remaining_quantity) as remaining_quantity, MAX(godown_name) as godown_name
       FROM (
-        SELECT pi.lot_no, pi.item_name, pi.qty as initial_qty, COALESCE(sl.remaining_quantity, pi.qty) as remaining_quantity, COALESCE(gm.godown_name, 'KNJ Godown') as godown_name
+        SELECT pi.lot_no, pi.item_name, pi.qty as initial_qty, COALESCE(sl.remaining_quantity, pi.qty) as remaining_quantity, COALESCE(gm.godown_name, sl.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name
         FROM purchase_items pi
         JOIN purchases p ON p.id = pi.purchase_id
         LEFT JOIN stock_lots sl ON sl.lot_no = pi.lot_no
-        LEFT JOIN godown_master gm ON (CAST(gm.id AS TEXT) = CAST(p.godown AS TEXT) OR p.godown = gm.godown_name)
+        LEFT JOIN godown_master gm ON (CAST(gm.id AS TEXT) = CAST(p.godown AS TEXT) OR p.godown = gm.godown_name OR CAST(gm.id AS TEXT) = CAST(sl.godown_id AS TEXT))
         WHERE pi.lot_no IS NOT NULL AND TRIM(pi.lot_no) != ''
         UNION ALL
-        SELECT go.lot_no, go.item_name, go.qty as initial_qty, COALESCE(sl.remaining_quantity, go.qty) as remaining_quantity, 'KNJ Godown' as godown_name
+        SELECT go.lot_no, go.item_name, go.qty as initial_qty, COALESCE(sl.remaining_quantity, go.qty) as remaining_quantity, COALESCE(sl.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name
         FROM grain_output_items go
         LEFT JOIN stock_lots sl ON sl.lot_no = go.lot_no
         WHERE go.lot_no IS NOT NULL AND TRIM(go.lot_no) != ''
         UNION ALL
-        SELECT wci.lot_no, wci.item_name, wci.qty as initial_qty, COALESCE(sl.remaining_quantity, wci.qty) as remaining_quantity, COALESCE(sl.godown_name, 'Finished Goods Godown') as godown_name
+        SELECT wci.lot_no, wci.item_name, wci.qty as initial_qty, COALESCE(sl.remaining_quantity, wci.qty) as remaining_quantity, COALESCE(sl.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name
         FROM weight_conversion_items wci
         LEFT JOIN stock_lots sl ON sl.lot_no = wci.lot_no
         WHERE wci.lot_no IS NOT NULL AND TRIM(wci.lot_no) != ''
         UNION ALL
-        SELECT sl.lot_no, sl.item_name, sl.quantity as initial_qty, sl.remaining_quantity, COALESCE(sl.godown_name, 'Main Godown') as godown_name
+        SELECT sl.lot_no, sl.item_name, sl.quantity as initial_qty, sl.remaining_quantity, COALESCE(sl.godown_name, gm.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name
         FROM stock_lots sl
+        LEFT JOIN godown_master gm ON CAST(gm.id AS TEXT) = CAST(sl.godown_id AS TEXT)
         WHERE sl.lot_no IS NOT NULL AND TRIM(sl.lot_no) != ''
       ) combined_lots
       GROUP BY lot_no
@@ -2374,6 +2367,9 @@ router.get('/traceability/:lotNo', async (req, res) => {
       const inwardBags = purchaseInfo.inward_qty || purchaseInfo.total_qty || (lot ? lot.quantity : 100);
       const perBagWt = purchaseInfo.per_unit_weight || 50;
       const inwardWeightKg = purchaseInfo.total_weight || (inwardBags * perBagWt);
+
+      const primaryGodownRes = await db.query(`SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1`);
+      const defaultGodownName = primaryGodownRes.rows?.[0]?.godown_name || 'PJ';
 
       supplierDetails = {
         name: purchaseInfo.supplier_name || 'Direct Supplier',
@@ -2389,7 +2385,7 @@ router.get('/traceability/:lotNo', async (req, res) => {
         total_weight_kg: inwardWeightKg,
         rate_per_unit: purchaseInfo.rate || (lot ? lot.rate : 0),
         pay_type: purchaseInfo.pay_type || 'Cash',
-        godown_name: purchaseInfo.godown_name || 'KNJ Godown',
+        godown_name: purchaseInfo.godown_name || lot?.godown_name || defaultGodownName,
         vehicle_no: purchaseInfo.lorry_no || purchaseInfo.transport || ''
       };
     }

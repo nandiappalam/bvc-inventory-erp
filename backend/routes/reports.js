@@ -246,42 +246,15 @@ router.get('/godown-stock', async (req, res) => {
     const itemQuery = item || search;
     const lotQuery = lotNo || lot_no;
 
-    // 1. Fetch godowns
+    // 1. Fetch godowns directly from godown_master (Source of Truth)
     let godowns = [];
     const godownsRes = await db.query('SELECT * FROM godown_master ORDER BY id ASC');
     godowns = godownsRes.rows || [];
 
-    // Query distinct godowns from stock ledger and stock_lots to catch all active locations
-    try {
-      const distinctStockG = await db.query("SELECT DISTINCT godown_id, godown FROM stock WHERE godown IS NOT NULL AND TRIM(godown) != ''");
-      (distinctStockG.rows || []).forEach(sg => {
-        const sgName = sg.godown || 'Main Godown';
-        const sgId = sg.godown_id || (sgName.toLowerCase().includes('raw') ? 3 : sgName.toLowerCase().includes('finished') ? 4 : 100);
-        const exists = godowns.some(g => String(g.id) === String(sgId) || norm(g.godown_name) === norm(sgName));
-        if (!exists) {
-          godowns.push({ id: sgId, godown_name: sgName, area: 'Factory Storage' });
-        }
-      });
-    } catch(e) {}
-
-    try {
-      const distinctLotG = await db.query("SELECT DISTINCT godown_id, godown_name FROM stock_lots WHERE godown_name IS NOT NULL AND TRIM(godown_name) != ''");
-      (distinctLotG.rows || []).forEach(lg => {
-        const lgName = lg.godown_name;
-        const lgId = lg.godown_id || 101;
-        const exists = godowns.some(g => String(g.id) === String(lgId) || norm(g.godown_name) === norm(lgName));
-        if (!exists) {
-          godowns.push({ id: lgId, godown_name: lgName, area: 'Storage Bay' });
-        }
-      });
-    } catch(e) {}
-
     if (godowns.length === 0) {
       godowns = [
-        { id: 1, godown_name: 'Main Godown', area: 'Factory Premises' },
-        { id: 2, godown_name: 'Finished Goods', area: 'Unit 1 Storage' },
-        { id: 3, godown_name: 'Raw Materials', area: 'RM Warehouse' },
-        { id: 4, godown_name: 'Packing Store', area: 'Store Room' }
+        { id: 1, godown_name: 'PJ', area: 'Factory Storage' },
+        { id: 2, godown_name: 'BTS Cold Storage', area: 'Cold Storage' }
       ];
     }
 
@@ -312,7 +285,7 @@ router.get('/godown-stock', async (req, res) => {
           (SELECT sl_g.godown_name FROM stock_lots sl_g WHERE sl_g.lot_no = s.lot_no AND sl_g.godown_name IS NOT NULL AND TRIM(sl_g.godown_name) != '' LIMIT 1),
           (SELECT s_orig.godown FROM stock s_orig WHERE s_orig.lot_no = s.lot_no AND s_orig.qty > 0 AND s_orig.godown IS NOT NULL LIMIT 1),
           s.godown,
-          'Main Godown'
+          (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)
         ) as godown_name,
         s.godown_id,
         im.id as item_id,
@@ -348,7 +321,7 @@ router.get('/godown-stock', async (req, res) => {
       (SELECT sl_g.godown_name FROM stock_lots sl_g WHERE sl_g.lot_no = s.lot_no AND sl_g.godown_name IS NOT NULL AND TRIM(sl_g.godown_name) != '' LIMIT 1),
       (SELECT s_orig.godown FROM stock s_orig WHERE s_orig.lot_no = s.lot_no AND s_orig.qty > 0 AND s_orig.godown IS NOT NULL LIMIT 1),
       s.godown,
-      'Main Godown'
+      (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)
     ), s.godown_id`;
 
     let stockTxnRows = [];
@@ -366,7 +339,7 @@ router.get('/godown-stock', async (req, res) => {
         sl.item_name,
         sl.lot_no,
         COALESCE(sl.godown_id, g.id) as godown_id,
-        COALESCE(g.godown_name, 'Main Godown') as godown_name,
+        COALESCE(g.godown_name, sl.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name,
         sl.quantity as opening_qty,
         sl.remaining_quantity as available_qty,
         sl.rate,
@@ -432,7 +405,14 @@ router.get('/godown-stock', async (req, res) => {
         if (s.godown_id && String(s.godown_id) === String(targetGId)) return true;
         if (sNorm && sNorm === normGName) return true;
         if (sNorm && normGName && (sNorm.includes(normGName) || normGName.includes(sNorm))) return true;
-        if (normGName.includes('main') && (!s.godown_name || sNorm === 'maingodown')) return true;
+        if (godowns[0] && String(godowns[0].id) === String(targetGId)) {
+          // If this is the primary godown, also catch any item not matching any other known godown
+          const matchesOther = godowns.slice(1).some(otherG => {
+            const oNorm = norm(otherG.godown_name);
+            return (s.godown_id && String(s.godown_id) === String(otherG.id)) || (sNorm && (sNorm === oNorm || sNorm.includes(oNorm) || oNorm.includes(sNorm)));
+          });
+          if (!matchesOther) return true;
+        }
         return false;
       });
 
@@ -477,7 +457,14 @@ router.get('/godown-stock', async (req, res) => {
         if (l.godown_id && String(l.godown_id) === String(targetGId)) return true;
         if (lNorm && lNorm === normGName) return true;
         if (lNorm && normGName && (lNorm.includes(normGName) || normGName.includes(lNorm))) return true;
-        if (normGName.includes('main') && (!l.godown_name || lNorm === 'maingodown')) return true;
+        if (godowns[0] && String(godowns[0].id) === String(targetGId)) {
+          // If this is the primary godown, also catch any item not matching any other known godown
+          const matchesOther = godowns.slice(1).some(otherG => {
+            const oNorm = norm(otherG.godown_name);
+            return (l.godown_id && String(l.godown_id) === String(otherG.id)) || (lNorm && (lNorm === oNorm || lNorm.includes(oNorm) || oNorm.includes(lNorm)));
+          });
+          if (!matchesOther) return true;
+        }
         return false;
       });
 
@@ -4166,14 +4153,7 @@ const categoryReportHandler = async (req, res) => {
         sql = `
           SELECT 
             MAX(s.id) as id,
-            COALESCE(
-              (SELECT g_sl.godown_name FROM stock_lots sl_g JOIN godown_master g_sl ON CAST(sl_g.godown_id AS TEXT) = CAST(g_sl.id AS TEXT) WHERE sl_g.lot_no = s.lot_no AND g_sl.godown_name IS NOT NULL LIMIT 1),
-              (SELECT sl_g.godown_name FROM stock_lots sl_g WHERE sl_g.lot_no = s.lot_no AND sl_g.godown_name IS NOT NULL AND TRIM(sl_g.godown_name) != '' LIMIT 1),
-              (SELECT s_orig.godown FROM stock s_orig WHERE s_orig.lot_no = s.lot_no AND s_orig.qty > 0 AND s_orig.godown IS NOT NULL LIMIT 1),
-              g.godown_name,
-              s.godown,
-              'Main Godown'
-            ) as godown_name,
+            COALESCE(g.godown_name, s.godown, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name,
             s.item_name,
             COALESCE(MAX(NULLIF(TRIM(im.item_group), '')), MAX(NULLIF(TRIM(im.type), '')), 'General') as item_group,
             COALESCE(s.lot_no, 'LOT-GEN') as lot_no,
@@ -4189,14 +4169,8 @@ const categoryReportHandler = async (req, res) => {
           LEFT JOIN item_master im ON (CAST(s.item_id AS TEXT) = CAST(im.id AS TEXT) OR LOWER(TRIM(s.item_name)) = LOWER(TRIM(im.item_name)) OR s.item_name = im.item_code)
           LEFT JOIN godown_master g ON (CAST(s.godown_id AS TEXT) = CAST(g.id AS TEXT) OR LOWER(TRIM(s.godown)) = LOWER(TRIM(g.godown_name)))
           ${where}
-          GROUP BY COALESCE(
-            (SELECT g_sl.godown_name FROM stock_lots sl_g JOIN godown_master g_sl ON CAST(sl_g.godown_id AS TEXT) = CAST(g_sl.id AS TEXT) WHERE sl_g.lot_no = s.lot_no AND g_sl.godown_name IS NOT NULL LIMIT 1),
-            (SELECT sl_g.godown_name FROM stock_lots sl_g WHERE sl_g.lot_no = s.lot_no AND sl_g.godown_name IS NOT NULL AND TRIM(sl_g.godown_name) != '' LIMIT 1),
-            (SELECT s_orig.godown FROM stock s_orig WHERE s_orig.lot_no = s.lot_no AND s_orig.qty > 0 AND s_orig.godown IS NOT NULL LIMIT 1),
-            g.godown_name,
-            s.godown,
-            'Main Godown'
-          ), s.item_name, COALESCE(s.lot_no, 'LOT-GEN')
+          GROUP BY COALESCE(g.godown_name, s.godown, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)), s.item_name, COALESCE(s.lot_no, 'LOT-GEN')
+          HAVING SUM(COALESCE(s.qty, 0)) != 0
           ORDER BY godown_name ASC, s.item_name ASC
         `;
       } else {
@@ -4208,14 +4182,7 @@ const categoryReportHandler = async (req, res) => {
             COALESCE(MAX(NULLIF(TRIM(im.item_group), '')), MAX(NULLIF(TRIM(im.type), '')), 'General') as item_group,
             MAX(COALESCE(im.type, '')) as item_type,
             COALESCE(s.lot_no, 'LOT-GEN') as lot_no,
-            COALESCE(
-              (SELECT g_sl.godown_name FROM stock_lots sl_g JOIN godown_master g_sl ON CAST(sl_g.godown_id AS TEXT) = CAST(g_sl.id AS TEXT) WHERE sl_g.lot_no = s.lot_no AND g_sl.godown_name IS NOT NULL LIMIT 1),
-              (SELECT sl_g.godown_name FROM stock_lots sl_g WHERE sl_g.lot_no = s.lot_no AND sl_g.godown_name IS NOT NULL AND TRIM(sl_g.godown_name) != '' LIMIT 1),
-              (SELECT s_orig.godown FROM stock s_orig WHERE s_orig.lot_no = s.lot_no AND s_orig.qty > 0 AND s_orig.godown IS NOT NULL LIMIT 1),
-              g.godown_name,
-              s.godown,
-              'Main Godown'
-            ) as godown_name,
+            COALESCE(g.godown_name, s.godown, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name,
             SUM(CASE WHEN s.type IN ('Opening Stock', 'Open Stock', 'Opening') THEN COALESCE(s.qty, 0) ELSE 0 END) as opening_qty,
             SUM(CASE WHEN s.type NOT IN ('Opening Stock', 'Open Stock', 'Opening') AND s.qty > 0 THEN COALESCE(s.qty, 0) ELSE 0 END) as total_purchased,
             SUM(CASE WHEN LOWER(COALESCE(s.type, '')) = 'purchase return' THEN COALESCE(ABS(s.qty), 0) ELSE 0 END) as total_returned,
@@ -4228,23 +4195,20 @@ const categoryReportHandler = async (req, res) => {
           LEFT JOIN item_master im ON (CAST(s.item_id AS TEXT) = CAST(im.id AS TEXT) OR LOWER(TRIM(s.item_name)) = LOWER(TRIM(im.item_name)) OR s.item_name = im.item_code)
           LEFT JOIN godown_master g ON (CAST(s.godown_id AS TEXT) = CAST(g.id AS TEXT) OR LOWER(TRIM(s.godown)) = LOWER(TRIM(g.godown_name)))
           ${where}
-          GROUP BY s.item_name, COALESCE(s.lot_no, 'LOT-GEN'), COALESCE(
-            (SELECT g_sl.godown_name FROM stock_lots sl_g JOIN godown_master g_sl ON CAST(sl_g.godown_id AS TEXT) = CAST(g_sl.id AS TEXT) WHERE sl_g.lot_no = s.lot_no AND g_sl.godown_name IS NOT NULL LIMIT 1),
-            (SELECT sl_g.godown_name FROM stock_lots sl_g WHERE sl_g.lot_no = s.lot_no AND sl_g.godown_name IS NOT NULL AND TRIM(sl_g.godown_name) != '' LIMIT 1),
-            (SELECT s_orig.godown FROM stock s_orig WHERE s_orig.lot_no = s.lot_no AND s_orig.qty > 0 AND s_orig.godown IS NOT NULL LIMIT 1),
-            g.godown_name,
-            s.godown,
-            'Main Godown'
-          )
+          GROUP BY s.item_name, COALESCE(s.lot_no, 'LOT-GEN'), COALESCE(g.godown_name, s.godown, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1))
+          HAVING SUM(COALESCE(s.qty, 0)) != 0
           ORDER BY s.item_name ASC
         `;
       }
       const result = await db.query(sql, params);
       const rawRows = result.rows || [];
 
+      const primaryGodownRes = await db.query(`SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1`);
+      const defaultGodownName = primaryGodownRes.rows?.[0]?.godown_name || 'PJ';
+
       rows = await Promise.all(rawRows.map(async r => {
         let category = await determineLotCategory(db, r.item_name, r.item_group, r.lot_no);
-        let godownName = r.godown_name || 'Main Godown';
+        let godownName = r.godown_name || defaultGodownName;
         let itemGroup = r.item_group || 'General';
 
         return {

@@ -64,19 +64,9 @@ const completedColumns = [
   { key: 'actions', label: 'Actions', sx: { width: '10%', textAlign: 'right' } }
 ];
 
-const DEFAULT_GODOWNS = [
-  { id: 1, godown_name: 'Main Godown', name: 'Main Godown' },
-  { id: 2, godown_name: 'Godown 1', name: 'Godown 1' },
-  { id: 3, godown_name: 'Raw Material Godown', name: 'Raw Material Godown' },
-  { id: 4, godown_name: 'Finished Goods Godown', name: 'Finished Goods Godown' }
-];
+const DEFAULT_GODOWNS = [];
 
-const STATIC_GODOWN_MAP = {
-  '1': 'Main Godown',
-  '2': 'Godown 1',
-  '3': 'Raw Material Godown',
-  '4': 'Finished Goods Godown'
-};
+const STATIC_GODOWN_MAP = {};
 
 export default function QualityControlList() {
   const navigate = useNavigate();
@@ -110,7 +100,7 @@ export default function QualityControlList() {
   const [searchQuery, setSearchQuery] = useState('');
 
   const getGodownDisplayName = (alloc) => {
-    if (!alloc) return 'Main Godown';
+    if (!alloc) return godowns[0]?.godown_name || godowns[0]?.name || '';
     const gId = String(alloc.godown_id || alloc.godownId || '').trim();
     let rawName = String(alloc.godown_name || alloc.name || '').trim();
 
@@ -135,12 +125,7 @@ export default function QualityControlList() {
       }
     }
 
-    // Static fallback dictionary for known master records
-    if (resolvedId && STATIC_GODOWN_MAP[resolvedId]) {
-      return STATIC_GODOWN_MAP[resolvedId];
-    }
-
-    return rawName || (resolvedId ? `Godown ${resolvedId}` : 'Main Godown');
+    return rawName || (godowns[0]?.godown_name || godowns[0]?.name || (resolvedId ? `Godown ${resolvedId}` : ''));
   };
 
   const loadData = async (isManual = false) => {

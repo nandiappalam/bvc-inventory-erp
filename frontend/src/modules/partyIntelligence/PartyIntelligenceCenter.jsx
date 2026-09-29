@@ -75,6 +75,20 @@ export default function PartyIntelligenceCenter() {
 
   useEffect(() => {
     fetchIntelligenceData();
+
+    const handleUpdate = () => {
+      fetchIntelligenceData();
+    };
+
+    window.addEventListener('erp_stock_updated', handleUpdate);
+    window.addEventListener('erp_company_changed', handleUpdate);
+    window.addEventListener('erp_data_updated', handleUpdate);
+
+    return () => {
+      window.removeEventListener('erp_stock_updated', handleUpdate);
+      window.removeEventListener('erp_company_changed', handleUpdate);
+      window.removeEventListener('erp_data_updated', handleUpdate);
+    };
   }, []);
 
   const fetchIntelligenceData = async () => {

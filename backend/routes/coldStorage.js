@@ -54,134 +54,7 @@ initTables();
 // Ensure all cold storage transfers reflect in the stock table for reports and ledgers
 const syncColdStorageStock = async (dbInstance = db) => {
   try {
-    const vouchersRes = await dbInstance.query(`SELECT * FROM cold_storage_vouchers ORDER BY voucher_date ASC, id ASC`);
-    const vouchers = vouchersRes.rows || [];
-    if (vouchers.length === 0) return;
-
-    for (const v of vouchers) {
-      // Check if stock has entries for this voucher
-      const existingStock = await dbInstance.query(`
-        SELECT COUNT(*) as count FROM stock 
-        WHERE reference_id = ? AND (type LIKE 'Cold Storage%' OR type LIKE 'CS %')
-      `, [v.id]);
-
-      const count = parseInt(existingStock.rows?.[0]?.count || 0, 10);
-      if (count > 0) continue; // already recorded
-
-      const itemsRes = await dbInstance.query(`
-        SELECT * FROM cold_storage_items WHERE voucher_id = ?
-      `, [v.id]);
-      const items = itemsRes.rows || [];
-
-      for (const itm of items) {
-        const qty = parseFloat(itm.quantity || 0);
-        const wt = parseFloat(itm.weight || 1);
-        const totWt = parseFloat(itm.total_wt || (qty * wt));
-        const lotNo = itm.purchase_lot_no && itm.purchase_lot_no !== 'N/A' ? itm.purchase_lot_no : itm.cold_storage_lot_no;
-
-        if (v.voucher_type === 'IN') {
-          let srcGodownName = v.source_godown_name;
-          let srcGodownId = v.source_godown_id;
-
-          if (!srcGodownName || srcGodownName === 'Main Godown') {
-            try {
-              const pLookup = await dbInstance.query(`
-                SELECT COALESCE(g.godown_name, p.godown) as godown_name, COALESCE(g.id, 3) as godown_id
-                FROM purchases p
-                JOIN purchase_items pi ON pi.purchase_id = p.id
-                LEFT JOIN godown_master g ON (CAST(p.godown AS TEXT) = CAST(g.id AS TEXT) OR LOWER(TRIM(p.godown)) = LOWER(TRIM(g.godown_name)))
-                WHERE pi.lot_no = ?
-                ORDER BY p.id DESC LIMIT 1
-              `, [itm.purchase_lot_no]);
-              if (pLookup.rows && pLookup.rows.length > 0 && pLookup.rows[0].godown_name) {
-                srcGodownName = pLookup.rows[0].godown_name;
-                srcGodownId = pLookup.rows[0].godown_id;
-              }
-            } catch (e) {}
-          }
-          if (!srcGodownName) srcGodownName = 'Raw Material Godown';
-
-          // 1. Outward from source godown
-          await dbInstance.run(`
-            INSERT INTO stock (date, item_id, item_name, lot_no, type, qty, weight, rate, amount, godown, godown_id, reference_id, remarks)
-            VALUES (?, ?, ?, ?, 'Cold Storage Transfer Out', ?, ?, 0, 0, ?, ?, ?, ?)
-          `, [
-            v.voucher_date,
-            itm.item_id || null,
-            itm.item_name,
-            lotNo,
-            -Math.abs(qty),
-            -Math.abs(totWt),
-            srcGodownName,
-            srcGodownId || null,
-            v.id,
-            `[${v.voucher_no}] Transferred to Cold Storage: ${v.cold_storage_name || 'Cold Storage'} (CS Lot: ${itm.cold_storage_lot_no || ''})`
-          ]);
-
-          // 2. Inward to Cold Storage godown
-          await dbInstance.run(`
-            INSERT INTO stock (date, item_id, item_name, lot_no, type, qty, weight, rate, amount, godown, godown_id, reference_id, remarks)
-            VALUES (?, ?, ?, ?, 'Cold Storage In', ?, ?, 0, 0, ?, ?, ?, ?)
-          `, [
-            v.voucher_date,
-            itm.item_id || null,
-            itm.item_name,
-            lotNo,
-            Math.abs(qty),
-            Math.abs(totWt),
-            v.cold_storage_name || 'Cold Storage',
-            v.cold_storage_id || null,
-            v.id,
-            `[${v.voucher_no}] Received in Cold Storage from ${srcGodownName} (CS Lot: ${itm.cold_storage_lot_no || ''})`
-          ]);
-        } else if (v.voucher_type === 'OUT') {
-          let destGodownName = v.destination_godown_name || 'Main Godown';
-          let destGodownId = v.destination_godown_id;
-          if (!destGodownId) {
-            try {
-              const gLookup = await dbInstance.query(`SELECT id FROM godown_master WHERE LOWER(TRIM(godown_name)) = LOWER(TRIM(?)) LIMIT 1`, [destGodownName]);
-              if (gLookup.rows && gLookup.rows.length > 0) {
-                destGodownId = gLookup.rows[0].id;
-              }
-            } catch (e) {}
-          }
-
-          // 1. Outward from Cold Storage godown
-          await dbInstance.run(`
-            INSERT INTO stock (date, item_id, item_name, lot_no, type, qty, weight, rate, amount, godown, godown_id, reference_id, remarks)
-            VALUES (?, ?, ?, ?, 'Cold Storage Transfer Out', ?, ?, 0, 0, ?, ?, ?, ?)
-          `, [
-            v.voucher_date,
-            itm.item_id || null,
-            itm.item_name,
-            lotNo,
-            -Math.abs(qty),
-            -Math.abs(totWt),
-            v.cold_storage_name || 'Cold Storage',
-            v.cold_storage_id || null,
-            v.id,
-            `[${v.voucher_no}] Transferred from Cold Storage to ${destGodownName} (CS Lot: ${itm.cold_storage_lot_no || ''})`
-          ]);
-
-          // 2. Inward to Destination godown
-          await dbInstance.run(`
-            INSERT INTO stock (date, item_id, item_name, lot_no, type, qty, weight, rate, amount, godown, godown_id, reference_id, remarks)
-            VALUES (?, ?, ?, ?, 'Cold Storage Transfer In', ?, ?, 0, 0, ?, ?, ?, ?)
-          `, [
-            v.voucher_date,
-            itm.item_id || null,
-            itm.item_name,
-            lotNo,
-            Math.abs(qty),
-            Math.abs(totWt),
-            destGodownName,
-            destGodownId || null,
-            v.id,
-            `[${v.voucher_no}] Received from Cold Storage: ${v.cold_storage_name || 'Cold Storage'} (CS Lot: ${itm.cold_storage_lot_no || ''})`
-          ]);
-        }
-      }
-    }
+    await rebuildStockLedger();
   } catch (err) {
     console.warn('Notice in syncColdStorageStock:', err.message);
   }
@@ -267,8 +140,8 @@ router.get('/available-lots', async (req, res) => {
         SELECT 
           pi.item_name,
           pi.lot_no AS purchase_lot_no,
-          COALESCE(g.godown_name, p.godown, 'Raw Material Godown') AS current_godown,
-          COALESCE(g.id, p.godown_id, 3) AS current_godown_id,
+          COALESCE(g.godown_name, p.godown, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) AS current_godown,
+          COALESCE(g.id, p.godown_id, (SELECT id FROM godown_master ORDER BY id ASC LIMIT 1)) AS current_godown_id,
           SUM(pi.qty) AS purchased_qty,
           SUM(COALESCE(pi.total_wt, pi.qty * COALESCE(pi.weight, 0), pi.qty)) AS total_weight,
           COALESCE(NULLIF(MAX(pi.weight), 0), NULLIF(MAX(pi.per_unit_weight), 0), 1) AS weight,
@@ -288,8 +161,8 @@ router.get('/available-lots', async (req, res) => {
           SELECT 
             pi.item_name,
             pi.lot_no AS purchase_lot_no,
-            'Raw Material Godown' AS current_godown,
-            3 AS current_godown_id,
+            (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1) AS current_godown,
+            (SELECT id FROM godown_master ORDER BY id ASC LIMIT 1) AS current_godown_id,
             SUM(pi.qty) AS purchased_qty,
             SUM(pi.qty) AS total_weight,
             1 AS weight,
@@ -611,7 +484,16 @@ router.post('/in', async (req, res) => {
           }
         } catch (e) {}
       }
-      if (!actualSrcGodownName) actualSrcGodownName = 'Raw Material Godown';
+      if (!actualSrcGodownName) {
+        try {
+          const defG = await db.query('SELECT id, godown_name FROM godown_master ORDER BY id ASC LIMIT 1');
+          if (defG.rows && defG.rows[0]) {
+            actualSrcGodownName = defG.rows[0].godown_name;
+            actualSrcGodownId = defG.rows[0].id;
+          }
+        } catch (_) {}
+      }
+      if (!actualSrcGodownName) actualSrcGodownName = 'PJ';
 
       const lotNo = item.purchase_lot_no && item.purchase_lot_no !== 'N/A' ? item.purchase_lot_no : csLotNo;
 

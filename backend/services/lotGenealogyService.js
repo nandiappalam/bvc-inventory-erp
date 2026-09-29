@@ -10,11 +10,25 @@ const db = require('../config/database');
 const norm = (s) => (s || '').trim().toLowerCase();
 
 /**
+ * Helper to fetch primary master godown from user-configured godown_master
+ */
+async function getDefaultGodownInfo() {
+  try {
+    const res = await db.query('SELECT id, godown_name FROM godown_master ORDER BY id ASC LIMIT 1');
+    if (res.rows && res.rows[0]) {
+      return { id: res.rows[0].id, name: res.rows[0].godown_name };
+    }
+  } catch (_) {}
+  return { id: 1, name: 'PJ' };
+}
+
+/**
  * Searches lots across stock_lots, purchases, grains, work_orders, flour_out, sales
  */
 async function searchLots(query = '', filters = {}) {
   const q = (query || '').trim().toLowerCase();
   const lotsMap = new Map();
+  const defGodown = await getDefaultGodownInfo();
 
   // 1. Fetch from stock_lots
   let sql = `
@@ -24,7 +38,7 @@ async function searchLots(query = '', filters = {}) {
       sl.item_name as itemName,
       sl.quantity,
       sl.remaining_quantity as remainingQuantity,
-      COALESCE(gm.godown_name, sl.godown_name, 'Main Godown') as godownName,
+      COALESCE(gm.godown_name, sl.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godownName,
       sl.qc_status as qcStatus,
       sl.approval_status as approvalStatus,
       sl.unloading_status as unloadingStatus,
@@ -50,7 +64,7 @@ async function searchLots(query = '', filters = {}) {
         itemName: row.itemName || 'Raw Material',
         currentQuantity: row.remainingQuantity ?? row.quantity ?? 0,
         originalQuantity: row.quantity ?? 0,
-        location: row.godownName || 'Main Godown',
+        location: row.godownName || defGodown.name,
         qcStatus: row.qcStatus || 'ACCEPTED',
         createdAt: row.createdAt
       });
@@ -136,7 +150,49 @@ async function searchLots(query = '', filters = {}) {
     }
   }
 
-  // 5. Search Purchase Returns / Vendor Return records
+  // 5. Search Weight Conversions (Input & Output items & lots)
+  try {
+    const wcLots = await db.query(`
+      SELECT DISTINCT 
+        wci.lot_no as lotNo,
+        wci.item_name as itemName,
+        wc.s_no as conversionSNo,
+        SUBSTR(CAST(wc.date AS TEXT), 1, 10) as conversionDate,
+        wc.type as conversionType,
+        wc.remarks,
+        wci.type as itemType,
+        wci.qty,
+        wci.weight,
+        wci.total_wt
+      FROM weight_conversion_items wci
+      JOIN weight_conversion wc ON CAST(wci.weight_conversion_id AS TEXT) = CAST(wc.id AS TEXT)
+      WHERE wci.lot_no IS NOT NULL AND wci.lot_no != '' ${q ? 'AND (LOWER(wci.lot_no) LIKE ? OR LOWER(wci.item_name) LIKE ? OR LOWER(COALESCE(wc.remarks, \'\')) LIKE ?)' : ''}
+      LIMIT 50
+    `, q ? [`%${q}%`, `%${q}%`, `%${q}%`] : []);
+
+    for (const row of (wcLots.rows || [])) {
+      if (row.lotNo && !lotsMap.has(row.lotNo)) {
+        let wcGodown = defGodown.name;
+        try {
+          const slCheck = await db.query('SELECT godown_name FROM stock_lots WHERE lot_no = ? LIMIT 1', [row.lotNo]);
+          if (slCheck.rows && slCheck.rows[0]?.godown_name) {
+            wcGodown = slCheck.rows[0].godown_name;
+          }
+        } catch (_) {}
+
+        lotsMap.set(row.lotNo, {
+          lotNo: row.lotNo,
+          itemName: row.itemName,
+          voucherNo: `WC-${row.conversionSNo || 1}`,
+          date: row.conversionDate,
+          location: wcGodown,
+          qcStatus: 'ACCEPTED'
+        });
+      }
+    }
+  } catch (e) {}
+
+  // 6. Search Purchase Returns / Vendor Return records
   try {
     const prLots = await db.query(`
       SELECT DISTINCT
@@ -183,8 +239,9 @@ async function getLotDetails(lotNo) {
   const cleanLotNo = lotNo.trim();
 
   // 1. Stock Lots record
+  const defGodown = await getDefaultGodownInfo();
   const stockLotRes = await db.query(`
-    SELECT sl.*, COALESCE(gm.godown_name, sl.godown_name, 'Main Godown') as current_godown
+    SELECT sl.*, COALESCE(gm.godown_name, sl.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as current_godown
     FROM stock_lots sl
     LEFT JOIN godown_master gm ON sl.godown_id = gm.id
     WHERE LOWER(sl.lot_no) = LOWER(?)
@@ -319,7 +376,91 @@ async function getLotDetails(lotNo) {
     });
   }
 
-  // 6. Explicit lot genealogy records
+  // 6. Weight Conversions (Input & Output movements)
+  const weightConversionConsumptions = [];
+  const weightConversionOutputs = [];
+  let parentLotFromWeightConversion = null;
+
+  try {
+    const wcRes = await db.query(`
+      SELECT 
+        wc.id as conversion_id,
+        wc.s_no as conversion_s_no,
+        SUBSTR(CAST(wc.date AS TEXT), 1, 10) as conversion_date,
+        wc.type as conversion_type,
+        wc.remarks,
+        wci.id as item_id,
+        wci.lot_no as target_lot_no,
+        wci.item_name as target_item,
+        wci.qty as target_qty,
+        wci.weight as target_weight,
+        wci.total_wt as target_total_wt,
+        wci.type as item_role
+      FROM weight_conversion_items wci
+      JOIN weight_conversion wc ON CAST(wci.weight_conversion_id AS TEXT) = CAST(wc.id AS TEXT)
+      WHERE LOWER(wci.lot_no) = LOWER(?)
+    `, [cleanLotNo]);
+
+    for (const wcRow of (wcRes.rows || [])) {
+      const convId = wcRow.conversion_id;
+      const allItemsRes = await db.query(`
+        SELECT * FROM weight_conversion_items 
+        WHERE CAST(weight_conversion_id AS TEXT) = CAST(? AS TEXT)
+      `, [convId]);
+      const convItems = allItemsRes.rows || [];
+      const inputs = convItems.filter(i => (i.type || 'input') === 'input');
+      const outputs = convItems.filter(i => i.type === 'output');
+
+      if (wcRow.item_role === 'input') {
+        for (const outItem of outputs) {
+          weightConversionConsumptions.push({
+            conversion_id: convId,
+            conversion_s_no: wcRow.conversion_s_no,
+            voucher_no: `WC-${wcRow.conversion_s_no || convId}`,
+            conversion_date: wcRow.conversion_date,
+            conversion_type: wcRow.conversion_type,
+            remarks: wcRow.remarks,
+            input_item: wcRow.target_item,
+            input_lot_no: cleanLotNo,
+            input_qty: wcRow.target_qty,
+            input_weight: wcRow.target_total_wt || (wcRow.target_qty * wcRow.target_weight),
+            output_item: outItem.item_name,
+            output_lot_no: outItem.lot_no,
+            output_qty: outItem.qty,
+            output_weight: outItem.total_wt || (outItem.qty * outItem.weight),
+            source: 'WEIGHT_CONVERSION'
+          });
+        }
+      } else if (wcRow.item_role === 'output') {
+        for (const inItem of inputs) {
+          if (!parentLotFromWeightConversion && inItem.lot_no) {
+            parentLotFromWeightConversion = inItem.lot_no;
+          }
+          weightConversionOutputs.push({
+            conversion_id: convId,
+            conversion_s_no: wcRow.conversion_s_no,
+            voucher_no: `WC-${wcRow.conversion_s_no || convId}`,
+            conversion_date: wcRow.conversion_date,
+            conversion_type: wcRow.conversion_type,
+            remarks: wcRow.remarks,
+            output_item: wcRow.target_item,
+            output_lot_no: cleanLotNo,
+            output_qty: wcRow.target_qty,
+            output_weight: wcRow.target_total_wt || (wcRow.target_qty * wcRow.target_weight),
+            input_item: inItem.item_name,
+            input_lot_no: inItem.lot_no,
+            input_qty: inItem.qty,
+            input_weight: inItem.total_wt || (inItem.qty * inItem.weight),
+            source: 'WEIGHT_CONVERSION'
+          });
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('Notice querying weight conversion in lotGenealogy:', e.message);
+  }
+
+  // 7. Explicit lot genealogy records
   const genealogyParents = await db.query(`
     SELECT * FROM lot_genealogy WHERE LOWER(child_lot_no) = LOWER(?)
   `, [cleanLotNo]);
@@ -329,7 +470,7 @@ async function getLotDetails(lotNo) {
   `, [cleanLotNo]);
 
   // Determine parent lot if not a direct purchase
-  const effectiveParentLot = parentLotFromMilling || genealogyParents.rows?.[0]?.parent_lot_no || null;
+  const effectiveParentLot = parentLotFromWeightConversion || parentLotFromMilling || genealogyParents.rows?.[0]?.parent_lot_no || null;
 
   // If this lot was produced (e.g. LOT0005) and has no direct purchase inward,
   // resolve inward details from parent lot (e.g. LOT0001)
@@ -444,9 +585,9 @@ async function getLotDetails(lotNo) {
       FROM purchase_return_items pri
       JOIN purchase_returns pr ON pri.purchase_return_id = pr.id
       LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(pr.supplier AS TEXT) OR sm.name = pr.supplier)
-      WHERE LOWER(pri.lot_no) = LOWER(?) OR (CAST(? AS TEXT) != '' AND LOWER(pri.lot_no) = LOWER(CAST(? AS TEXT)))
+      WHERE LOWER(TRIM(pri.lot_no)) = LOWER(TRIM(?))
       ORDER BY pr.id DESC
-    `, [cleanLotNo, effectiveParentLot || '', effectiveParentLot || '']);
+    `, [cleanLotNo]);
     purchaseReturns = prRes.rows || [];
   } catch (prErr) {
     console.warn('Notice: Error querying purchase returns for lot:', prErr.message);
@@ -480,7 +621,7 @@ async function getLotDetails(lotNo) {
     totalReturnedQty,
     totalReturnedWeight,
     unit: purchase?.unit || 'KG',
-    godown: stockLot.current_godown || stockLot.godown_name || 'Main Godown',
+    godown: stockLot.current_godown || stockLot.godown_name || defGodown.name,
     qcStatus: determinedQcStatus,
     purchase,
     vehicle,
@@ -492,6 +633,8 @@ async function getLotDetails(lotNo) {
     workOrderOutputs: millingOutputs,
     jobworkMovements: jobworkOutRes.rows || [],
     salesDispatches: salesRes.rows || [],
+    weightConversionConsumptions,
+    weightConversionOutputs,
     purchaseReturns,
     parents: genealogyParents.rows || [],
     children: genealogyChildren.rows || []
@@ -515,7 +658,7 @@ async function buildForwardTrace(lotNo) {
     quantity: details.quantity,
     remainingQuantity: details.remainingQuantity,
     totalReturnedQty: details.totalReturnedQty || 0,
-    stage: details.purchase?.isDerivedFromParent ? 'Milled Output' : 'Raw Inward Material',
+    stage: details.purchase?.isDerivedFromParent ? 'Milled / Converted Output' : 'Raw Inward Material',
     children: []
   };
 
@@ -546,7 +689,7 @@ async function buildForwardTrace(lotNo) {
   // Node 3: Godown Storage
   const storageNode = {
     id: `GODOWN-${details.lotNo}`,
-    name: details.godown || 'Main Godown',
+    name: details.godown || (await getDefaultGodownInfo()).name,
     type: 'STORAGE',
     remainingQuantity: details.remainingQuantity,
     children: []
@@ -621,6 +764,57 @@ async function buildForwardTrace(lotNo) {
     }
   }
 
+  // Node 4.1: Weight Conversion / Repacking (Output Lots produced)
+  if (details.weightConversionConsumptions && details.weightConversionConsumptions.length > 0) {
+    for (const wc of details.weightConversionConsumptions) {
+      const wcNode = {
+        id: `WC-${wc.conversion_s_no || wc.conversion_id}`,
+        name: `Weight Conversion #${wc.conversion_s_no || wc.conversion_id} (${wc.conversion_type || 'Conversion'})`,
+        type: 'WEIGHT_CONVERSION',
+        consumedQty: wc.input_qty,
+        consumedWeight: wc.input_weight,
+        date: wc.conversion_date,
+        remarks: wc.remarks || '-',
+        children: []
+      };
+
+      if (wc.output_lot_no) {
+        const outLotNode = {
+          id: `WC-OUT-${wc.output_lot_no}`,
+          name: wc.output_lot_no,
+          type: 'OUTPUT_LOT',
+          item: wc.output_item || 'Converted Product',
+          quantity: wc.output_qty,
+          weight: wc.output_weight,
+          children: []
+        };
+
+        // Check if converted output lot went to sales
+        const childSales = await db.query(`
+          SELECT si.*, s.s_no as bill_no, s.customer as customer_name, SUBSTR(CAST(s.date AS TEXT), 1, 10) as invoice_date
+          FROM sales_items si
+          JOIN sales s ON si.sales_id = s.id
+          WHERE LOWER(si.lot_no) = LOWER(?)
+        `, [wc.output_lot_no]);
+
+        for (const cs of (childSales.rows || [])) {
+          outLotNode.children.push({
+            id: `SALE-${cs.bill_no}`,
+            name: `Invoice #${cs.bill_no} → ${cs.customer_name}`,
+            type: 'SALES_CUSTOMER',
+            customer: cs.customer_name,
+            qty: cs.qty,
+            date: cs.invoice_date
+          });
+        }
+
+        wcNode.children.push(outLotNode);
+      }
+
+      storageNode.children.push(wcNode);
+    }
+  }
+
   // Node 5: Jobwork Direct Issue
   if (details.jobworkMovements.length > 0) {
     for (const jw of details.jobworkMovements) {
@@ -657,7 +851,7 @@ async function buildForwardTrace(lotNo) {
 
 /**
  * Builds Full Backward Traceability Tree (Where did this finished product come from?)
- * Finished Lot / Papad -> Jobwork / Work Order Batch -> Intermediate Lots -> Inward Raw Lots -> Purchase -> Supplier -> QC
+ * Finished Lot / Papad -> Jobwork / Work Order Batch / Weight Conversion -> Intermediate Lots -> Inward Raw Lots -> Purchase -> Supplier -> QC
  */
 async function buildBackwardTrace(lotNo) {
   const details = await getLotDetails(lotNo);
@@ -670,7 +864,7 @@ async function buildBackwardTrace(lotNo) {
     item: details.itemName,
     quantity: details.quantity,
     totalReturnedQty: details.totalReturnedQty || 0,
-    stage: details.purchase?.isDerivedFromParent ? 'Milled Product' : (details.purchaseReturns?.length > 0 ? 'Returned / Raw Material' : 'Raw Inward Stock'),
+    stage: details.purchase?.isDerivedFromParent ? 'Converted / Milled Product' : (details.purchaseReturns?.length > 0 ? 'Returned / Raw Material' : 'Raw Inward Stock'),
     parents: []
   };
 
@@ -703,6 +897,39 @@ async function buildBackwardTrace(lotNo) {
       }
 
       backwardTree.parents.push(woNode);
+    }
+  }
+
+  // 1.1 Check if generated by Weight Conversion
+  if (details.weightConversionOutputs && details.weightConversionOutputs.length > 0) {
+    for (const wco of details.weightConversionOutputs) {
+      const wcNode = {
+        id: `BACK-WC-${wco.conversion_s_no || wco.conversion_id}`,
+        name: `Weight Conversion #${wco.conversion_s_no || wco.conversion_id} (${wco.conversion_type || 'Conversion'})`,
+        type: 'WEIGHT_CONVERSION',
+        date: wco.conversion_date,
+        remarks: wco.remarks || '-',
+        inputs: []
+      };
+
+      if (wco.input_lot_no) {
+        const rawLotDetails = await getLotDetails(wco.input_lot_no);
+        wcNode.inputs.push({
+          id: `BACK-WC-RAW-${wco.input_lot_no}`,
+          name: wco.input_lot_no,
+          item: wco.input_item || rawLotDetails?.itemName,
+          consumedQty: wco.input_qty,
+          consumedWeight: wco.input_weight,
+          supplier: rawLotDetails?.purchase?.supplierName || 'Primary Supplier',
+          purchaseVoucher: rawLotDetails?.purchase?.voucherNo || 'N/A',
+          purchaseDate: rawLotDetails?.purchase?.purchaseDate || 'N/A',
+          qcResult: rawLotDetails?.qc?.overall_result || rawLotDetails?.qcStatus || 'ACCEPTED',
+          vehicleNo: rawLotDetails?.purchase?.vehicleNo || 'N/A',
+          hasReturn: (rawLotDetails?.purchaseReturns?.length > 0)
+        });
+      }
+
+      backwardTree.parents.push(wcNode);
     }
   }
 
@@ -758,7 +985,7 @@ async function generateRecallReport(lotNo) {
   const affectedCustomers = [];
   const affectedSuppliers = [];
   const affectedBatches = [];
-  const affectedGodowns = [details.godown || 'Main Godown'];
+  const affectedGodowns = [details.godown || (await getDefaultGodownInfo()).name];
   const returnedToSuppliers = [];
 
   if (details.purchase?.supplierName) {
@@ -813,6 +1040,26 @@ async function generateRecallReport(lotNo) {
     }
   }
 
+  // Flatten weight conversion batches
+  for (const wc of (details.weightConversionConsumptions || [])) {
+    affectedBatches.push({
+      batchNo: `WC-${wc.conversion_s_no || wc.conversion_id}`,
+      unit: 'Weight Conversion',
+      date: wc.conversion_date,
+      type: wc.conversion_type
+    });
+  }
+  for (const wco of (details.weightConversionOutputs || [])) {
+    if (!affectedBatches.some(b => b.batchNo === `WC-${wco.conversion_s_no || wco.conversion_id}`)) {
+      affectedBatches.push({
+        batchNo: `WC-${wco.conversion_s_no || wco.conversion_id}`,
+        unit: 'Weight Conversion',
+        date: wco.conversion_date,
+        type: wco.conversion_type
+      });
+    }
+  }
+
   return {
     lotNo: details.lotNo,
     itemName: details.itemName,
@@ -855,7 +1102,8 @@ async function performLotSplit({ sourceLotNo, splitQuantities = [], reason = '',
     const item = splitQuantities[i];
     const newLotNo = item.targetLotNo || `${sourceLotNo}-S${i + 1}`;
     const qty = parseFloat(item.quantity) || 0;
-    const godown = item.godownName || srcLot.godown || 'Main Godown';
+    const defGodown = await getDefaultGodownInfo();
+    const godown = item.godownName || srcLot.godown || defGodown.name;
 
     // 1. Insert new stock lot
     await db.run(`
@@ -921,10 +1169,11 @@ async function performLotMerge({ sourceLots = [], targetLotNo, targetItemName, r
   }
 
   // Create target lot
+  const defGodown = await getDefaultGodownInfo();
   await db.run(`
     INSERT INTO stock_lots (item_name, lot_no, godown_name, quantity, remaining_quantity, qc_status, approval_status, usable_for_production)
-    VALUES (?, ?, 'Main Godown', ?, ?, 'ACCEPTED', 'APPROVED', 1)
-  `, [itemName, targetLotNo, totalMergedQty, totalMergedQty]);
+    VALUES (?, ?, ?, ?, ?, 'ACCEPTED', 'APPROVED', 1)
+  `, [itemName, targetLotNo, defGodown.name, totalMergedQty, totalMergedQty]);
 
   return {
     success: true,

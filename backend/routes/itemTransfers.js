@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
+const { rebuildStockLedger } = require('../utils/stockRebuilder');
 
 // Initialize item_transfers table
 const initTable = async () => {
@@ -564,6 +565,8 @@ router.post('/', async (req, res) => {
       }
     }
 
+    await rebuildStockLedger();
+
     res.status(201).json({
       success: true,
       message: 'Item Transfer recorded successfully',
@@ -649,6 +652,7 @@ router.delete('/:id', async (req, res) => {
 
     await db.run('DELETE FROM item_transfers WHERE id = ?', [id]);
     await db.run('DELETE FROM godown_transfers WHERE id = ?', [id]);
+    await rebuildStockLedger();
 
     res.json({ success: true, message: 'Item transfer deleted successfully' });
   } catch (err) {

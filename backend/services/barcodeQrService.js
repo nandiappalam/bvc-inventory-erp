@@ -61,7 +61,7 @@ class BarcodeQrService {
     const stockLotRes = await db.query(`
       SELECT 
         sl.*,
-        COALESCE(g.godown_name, 'Main Godown') as godown_name,
+        COALESCE(g.godown_name, sl.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name,
         COALESCE(i.item_name, 'Raw Grain') as item_name
       FROM stock_lots sl
       LEFT JOIN godown_master g ON sl.godown_id = g.id
@@ -136,13 +136,19 @@ class BarcodeQrService {
     `, [lotNo]);
 
     // 5. Cold Storage Inward & Outward Movements
-    const csInwardRes = await db.query(`
-      SELECT * FROM cs_inward_records WHERE inward_lot_no = ? OR original_purchase_lot_no = ?
-    `, [lotNo, lotNo]);
+    let csInwardRes = { rows: [] };
+    let csOutwardRes = { rows: [] };
+    try {
+      csInwardRes = await db.query(`
+        SELECT * FROM cs_inward_records WHERE inward_lot_no = ? OR original_purchase_lot_no = ?
+      `, [lotNo, lotNo]);
+    } catch (_) {}
 
-    const csOutwardRes = await db.query(`
-      SELECT * FROM cs_outward_records WHERE lot_no = ?
-    `, [lotNo]);
+    try {
+      csOutwardRes = await db.query(`
+        SELECT * FROM cs_outward_records WHERE lot_no = ?
+      `, [lotNo]);
+    } catch (_) {}
 
     // 6. Sales dispatches
     const salesRes = await db.query(`
@@ -218,7 +224,7 @@ class BarcodeQrService {
       totalReturnedQty,
       totalReturnedWeight,
       unit: stockInfo?.unit || 'KG',
-      currentGodown: stockInfo?.godown_name || 'Central Godown',
+      currentGodown: stockInfo?.godown_name || ((await db.query('SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1')).rows?.[0]?.godown_name) || '-',
       qcStatus: effectiveQcStatus,
       purchase: purchaseInfo ? {
         voucherNo: `PUR-${purchaseInfo.s_no || purchaseInfo.purchase_id}`,

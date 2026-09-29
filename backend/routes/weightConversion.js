@@ -2,6 +2,7 @@ const express = require('express')
 const router = express.Router()
 const db = require('../config/database')
 const { reserveNextLotNumber, recordLotNumber } = require('../utils/lotHelper')
+const { rebuildStockLedger } = require('../utils/stockRebuilder')
 
 // Revert stock changes for a weight conversion record
 const revertWeightConversionStock = async (conversionId, companyId = 1) => {
@@ -149,11 +150,11 @@ const processWeightConversionStock = async (conversionId, date, items, companyId
       // Fallback based on item group or default
       if (!itemGodownName) {
         if (itemGroup.toLowerCase().includes('finish') || itemGroup.toLowerCase().includes('fg')) {
-          itemGodownName = defaultFgGodownName || fallbackGodownName || 'Finished Goods Godown';
-          itemGodownId = defaultFgGodownId || fallbackGodownId;
+          itemGodownName = defaultFgGodownName || fallbackGodownName || 'PJ';
+          itemGodownId = defaultFgGodownId || fallbackGodownId || 1;
         } else {
-          itemGodownName = defaultRmGodownName || fallbackGodownName || 'Raw Material Godown';
-          itemGodownId = defaultRmGodownId || fallbackGodownId;
+          itemGodownName = defaultRmGodownName || fallbackGodownName || 'PJ';
+          itemGodownId = defaultRmGodownId || fallbackGodownId || 1;
         }
       }
 
@@ -186,12 +187,12 @@ const processWeightConversionStock = async (conversionId, date, items, companyId
       }
 
       // Determine output godown
-      let outGodownId = defaultFgGodownId || fallbackGodownId;
-      let outGodownName = defaultFgGodownName || fallbackGodownName || 'Finished Goods Godown';
+      let outGodownId = defaultFgGodownId || fallbackGodownId || 1;
+      let outGodownName = defaultFgGodownName || fallbackGodownName || 'PJ';
 
       if (itemGroup.toLowerCase().includes('raw') || itemGroup.toLowerCase().includes('rm')) {
-        outGodownId = defaultRmGodownId || fallbackGodownId;
-        outGodownName = defaultRmGodownName || fallbackGodownName || 'Raw Material Godown';
+        outGodownId = defaultRmGodownId || fallbackGodownId || 1;
+        outGodownName = defaultRmGodownName || fallbackGodownName || 'PJ';
       }
 
       // Check existing stock_lots
@@ -579,6 +580,7 @@ router.post('/', async (req, res) => {
     // Process stock update
     const companyId = req.companyId || req.headers?.['x-company-id'] || 1;
     await processWeightConversionStock(weightConversionId, formData.date, items, companyId);
+    await rebuildStockLedger();
 
     res.status(201).json({
       message: 'Weight conversion record saved successfully!',
@@ -621,6 +623,7 @@ router.put('/:id', async (req, res) => {
 
     // Process updated stock
     await processWeightConversionStock(weightConversionId, formData.date, items, companyId);
+    await rebuildStockLedger();
 
     res.json({ success: true, message: 'Weight conversion record updated successfully!' });
   } catch (error) {
@@ -636,6 +639,7 @@ router.delete('/:id', async (req, res) => {
     await revertWeightConversionStock(req.params.id, companyId);
     await db.run('DELETE FROM weight_conversion_items WHERE CAST(weight_conversion_id AS TEXT) = CAST(? AS TEXT)', [req.params.id], companyId);
     await db.run('DELETE FROM weight_conversion WHERE CAST(id AS TEXT) = CAST(? AS TEXT)', [req.params.id], companyId);
+    await rebuildStockLedger();
     res.json({ success: true, message: 'Weight conversion record deleted successfully' });
   } catch (error) {
     console.error('Error deleting weight conversion:', error);

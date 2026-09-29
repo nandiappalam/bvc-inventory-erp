@@ -94,7 +94,7 @@ const isWastageItem = (itemName, itemGroup) => {
   return false;
 };
 
-const determineLotCategory = async (dbInstance, itemName, itemGroup, lotNo) => {
+const determineLotCategory = async (dbInstance, itemName, itemGroup, lotNo, companyId = null) => {
   if (isWastageItem(itemName, itemGroup)) return 'Wastage';
 
   const grp = (itemGroup || '').toLowerCase().trim();
@@ -107,49 +107,49 @@ const determineLotCategory = async (dbInstance, itemName, itemGroup, lotNo) => {
     if (lot.startsWith('fg') || lot.includes('fg-')) return 'FG';
 
     try {
-      const slCheck = await dbInstance.query('SELECT category FROM stock_lots WHERE LOWER(lot_no) = LOWER(?) LIMIT 1', [lotNo]);
+      const slCheck = await dbInstance.query('SELECT category FROM stock_lots WHERE LOWER(lot_no) = LOWER(?) LIMIT 1', [lotNo], companyId);
       if (slCheck.rows && slCheck.rows.length > 0 && slCheck.rows[0].category) {
         return slCheck.rows[0].category;
       }
     } catch (e) {}
 
     try {
-      const piCheck = await dbInstance.query('SELECT id FROM purchase_items WHERE LOWER(lot_no) = LOWER(?) LIMIT 1', [lotNo]);
+      const piCheck = await dbInstance.query('SELECT id FROM purchase_items WHERE LOWER(lot_no) = LOWER(?) LIMIT 1', [lotNo], companyId);
       if (piCheck.rows && piCheck.rows.length > 0) return 'RM';
     } catch (e) {}
 
     try {
-      const giCheck = await dbInstance.query('SELECT id FROM grain_input_items WHERE LOWER(lot_no) = LOWER(?) LIMIT 1', [lotNo]);
+      const giCheck = await dbInstance.query('SELECT id FROM grain_input_items WHERE LOWER(lot_no) = LOWER(?) LIMIT 1', [lotNo], companyId);
       if (giCheck.rows && giCheck.rows.length > 0) return 'RM';
     } catch (e) {}
 
     try {
-      const goCheck = await dbInstance.query('SELECT id FROM grain_output_items WHERE LOWER(lot_no) = LOWER(?) LIMIT 1', [lotNo]);
+      const goCheck = await dbInstance.query('SELECT id FROM grain_output_items WHERE LOWER(lot_no) = LOWER(?) LIMIT 1', [lotNo], companyId);
       if (goCheck.rows && goCheck.rows.length > 0) return 'FG';
     } catch (e) {}
 
     try {
-      const pkCheck = await dbInstance.query(`SELECT id FROM packing_items WHERE LOWER(lot_no) = LOWER(?) AND (remarks = 'section:to' OR remarks IS NULL OR remarks = '' OR section = 'to') LIMIT 1`, [lotNo]);
+      const pkCheck = await dbInstance.query(`SELECT id FROM packing_items WHERE LOWER(lot_no) = LOWER(?) AND (remarks = 'section:to' OR remarks IS NULL OR remarks = '' OR section = 'to') LIMIT 1`, [lotNo], companyId);
       if (pkCheck.rows && pkCheck.rows.length > 0) return 'FG';
     } catch (e) {}
 
     try {
-      const papCheck = await dbInstance.query('SELECT id FROM papad_in_items WHERE LOWER(lot_no) = LOWER(?) LIMIT 1', [lotNo]);
+      const papCheck = await dbInstance.query('SELECT id FROM papad_in_items WHERE LOWER(lot_no) = LOWER(?) LIMIT 1', [lotNo], companyId);
       if (papCheck.rows && papCheck.rows.length > 0) return 'FG';
     } catch (e) {}
 
     try {
-      const foCheck = await dbInstance.query(`SELECT id FROM flour_out_items WHERE LOWER(lot_no) = LOWER(?) AND (remarks = 'section:to' OR section = 'to') LIMIT 1`, [lotNo]);
+      const foCheck = await dbInstance.query(`SELECT id FROM flour_out_items WHERE LOWER(lot_no) = LOWER(?) AND (remarks = 'section:to' OR section = 'to') LIMIT 1`, [lotNo], companyId);
       if (foCheck.rows && foCheck.rows.length > 0) return 'FG';
     } catch (e) {}
 
     try {
-      const wcInCheck = await dbInstance.query('SELECT id FROM weight_conversion_items WHERE LOWER(lot_no) = LOWER(?) AND type = ? LIMIT 1', [lotNo, 'input']);
+      const wcInCheck = await dbInstance.query('SELECT id FROM weight_conversion_items WHERE LOWER(lot_no) = LOWER(?) AND type = ? LIMIT 1', [lotNo, 'input'], companyId);
       if (wcInCheck.rows && wcInCheck.rows.length > 0) return 'RM';
     } catch (e) {}
 
     try {
-      const wcOutCheck = await dbInstance.query('SELECT id FROM weight_conversion_items WHERE LOWER(lot_no) = LOWER(?) AND type = ? LIMIT 1', [lotNo, 'output']);
+      const wcOutCheck = await dbInstance.query('SELECT id FROM weight_conversion_items WHERE LOWER(lot_no) = LOWER(?) AND type = ? LIMIT 1', [lotNo, 'output'], companyId);
       if (wcOutCheck.rows && wcOutCheck.rows.length > 0) return 'FG';
     } catch (e) {}
   }
@@ -334,61 +334,87 @@ router.get('/lot-history/:lotNo', async (req, res) => {
 // ============================================================================
 router.get('/report', async (req, res) => {
   try {
-    const { item_id, from_date, to_date } = req.query
+    const { item_id, from_date, to_date } = req.query;
+    const cId = req.companyId || req.headers?.['x-company-id'] || req.query?.company_id;
     
-    let query = `
-      SELECT 
-        TRIM(s.item_name) as item_name,
-        (SELECT id FROM item_master WHERE LOWER(TRIM(item_name)) = LOWER(TRIM(s.item_name)) LIMIT 1) as item_id,
-        (SELECT item_group FROM item_master WHERE LOWER(TRIM(item_name)) = LOWER(TRIM(s.item_name)) LIMIT 1) as item_group,
-        SUM(CASE WHEN s.type IN ('Opening Stock', 'Open Stock') THEN COALESCE(s.qty, 0) ELSE 0 END) as opening_qty,
-        SUM(CASE WHEN s.type NOT IN ('Opening Stock', 'Open Stock') AND s.qty > 0 THEN COALESCE(s.qty, 0) ELSE 0 END) as total_purchased,
-        SUM(CASE WHEN LOWER(s.type) = 'purchase return' THEN COALESCE(ABS(s.qty), 0) ELSE 0 END) as total_returned,
-        SUM(CASE WHEN s.qty < 0 AND LOWER(s.type) != 'purchase return' THEN COALESCE(ABS(s.qty), 0) ELSE 0 END) as total_sold,
-        SUM(COALESCE(s.qty, 0)) as balance,
-        COALESCE(
-          (SELECT CASE WHEN COALESCE(qty, 0) != 0 THEN ROUND(CAST(ABS(weight) / ABS(qty) AS NUMERIC), 2) ELSE 0 END FROM stock WHERE LOWER(TRIM(item_name)) = LOWER(TRIM(s.item_name)) AND qty != 0 LIMIT 1),
-          (SELECT COALESCE(per_unit_weight, weight) FROM purchase_items WHERE LOWER(TRIM(item_name)) = LOWER(TRIM(s.item_name)) AND COALESCE(per_unit_weight, weight) > 0 LIMIT 1),
-          50
-        ) as weight
-      FROM stock s
-      WHERE 1=1
-    `
-    const params = []
+    let dateFilter = '';
+    const params = [];
     
     if (item_id) {
-      query += ` AND (LOWER(TRIM(s.item_name)) = (SELECT LOWER(TRIM(item_name)) FROM item_master WHERE CAST(id AS TEXT) = CAST(? AS TEXT) LIMIT 1) OR LOWER(TRIM(s.item_name)) = LOWER(TRIM(?)))`
-      params.push(item_id, item_id)
+      dateFilter += ` AND (LOWER(TRIM(s.item_name)) = (SELECT LOWER(TRIM(item_name)) FROM item_master WHERE CAST(id AS TEXT) = CAST(? AS TEXT) LIMIT 1) OR LOWER(TRIM(s.item_name)) = LOWER(TRIM(?)))`;
+      params.push(item_id, item_id);
     }
     
     if (from_date) {
-      query += ` AND s.date >= ?`
-      params.push(from_date)
+      dateFilter += ` AND s.date >= ?`;
+      params.push(from_date);
     }
     
     if (to_date) {
-      query += ` AND s.date <= ?`
-      params.push(to_date)
+      dateFilter += ` AND s.date <= ?`;
+      params.push(to_date);
     }
+
+    const query = `
+      SELECT 
+        sub.item_name,
+        im.id as item_id,
+        im.item_group,
+        sub.opening_qty,
+        sub.total_purchased,
+        sub.total_returned,
+        sub.total_sold,
+        sub.balance,
+        COALESCE(
+          (SELECT CASE WHEN COALESCE(s2.qty, 0) != 0 THEN ROUND(CAST(ABS(s2.weight) / ABS(s2.qty) AS NUMERIC), 2) ELSE 0 END FROM stock s2 WHERE LOWER(TRIM(s2.item_name)) = LOWER(TRIM(sub.item_name)) AND s2.qty != 0 LIMIT 1),
+          (SELECT COALESCE(pi.per_unit_weight, pi.weight) FROM purchase_items pi WHERE LOWER(TRIM(pi.item_name)) = LOWER(TRIM(sub.item_name)) AND COALESCE(pi.per_unit_weight, pi.weight) > 0 LIMIT 1),
+          50
+        ) as weight
+      FROM (
+        SELECT 
+          TRIM(s.item_name) as item_name,
+          SUM(CASE WHEN s.type IN ('Opening Stock', 'Open Stock') THEN COALESCE(s.qty, 0) ELSE 0 END) as opening_qty,
+          SUM(CASE WHEN s.type NOT IN ('Opening Stock', 'Open Stock') AND s.qty > 0 THEN COALESCE(s.qty, 0) ELSE 0 END) as total_purchased,
+          SUM(CASE WHEN LOWER(s.type) = 'purchase return' THEN COALESCE(ABS(s.qty), 0) ELSE 0 END) as total_returned,
+          SUM(CASE WHEN s.qty < 0 AND LOWER(s.type) != 'purchase return' THEN COALESCE(ABS(s.qty), 0) ELSE 0 END) as total_sold,
+          SUM(COALESCE(s.qty, 0)) as balance
+        FROM stock s
+        WHERE 1=1 ${dateFilter}
+        GROUP BY TRIM(s.item_name)
+      ) sub
+      LEFT JOIN item_master im ON LOWER(TRIM(im.item_name)) = LOWER(TRIM(sub.item_name))
+      ORDER BY sub.item_name ASC
+    `;
     
-    query += ` GROUP BY TRIM(s.item_name) ORDER BY TRIM(s.item_name) ASC`
-    
-    const result = await db.query(query, params)
+    const result = await db.query(query, params, cId);
+
+    const primaryGodownRes = await db.query(`SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1`, [], cId).catch(() => ({ rows: [] }));
+    const defaultGodownName = primaryGodownRes.rows?.[0]?.godown_name || 'PJ';
 
     const formattedRows = await Promise.all((result.rows || []).map(async (row) => {
-      const category = await determineLotCategory(db, row.item_name, row.item_group, null);
+      const category = await determineLotCategory(db, row.item_name, row.item_group, null, cId);
+      let gRes = await db.query(`
+        SELECT COALESCE(gm.godown_name, s.godown, ?) as godown_name
+        FROM stock s
+        LEFT JOIN godown_master gm ON (CAST(s.godown_id AS TEXT) = CAST(gm.id AS TEXT) OR LOWER(TRIM(s.godown)) = LOWER(TRIM(gm.godown_name)))
+        WHERE LOWER(TRIM(s.item_name)) = LOWER(TRIM(?)) AND s.godown IS NOT NULL AND TRIM(s.godown) != ''
+        LIMIT 1
+      `, [defaultGodownName, row.item_name], cId).catch(() => ({ rows: [] }));
+
+      const godown_name = gRes.rows?.[0]?.godown_name || defaultGodownName;
       return {
         ...row,
+        godown_name,
         category
       };
-    }))
+    }));
 
-    res.json(formattedRows)
+    res.json(formattedRows);
   } catch (error) {
-    console.error('Error fetching stock report:', error)
-    res.status(500).json({ message: 'Error fetching stock report', error: error.message })
+    console.error('Error fetching stock report:', error);
+    res.status(500).json({ message: 'Error fetching stock report', error: error.message });
   }
-})
+});
 
 // ============================================================================
 // GET STOCK REPORT - Lot Breakdown Mode
@@ -396,13 +422,20 @@ router.get('/report', async (req, res) => {
 // ============================================================================
 router.get('/lots', async (req, res) => {
   try {
-    const { item_id } = req.query
+    const { item_id } = req.query;
+    const cId = req.companyId || req.headers?.['x-company-id'] || req.query?.company_id;
     
     let query = `
       SELECT 
         sl.id,
         sl.item_name,
         sl.lot_no,
+        COALESCE(
+          (SELECT gm.godown_name FROM godown_master gm WHERE gm.id = sl.godown_id OR CAST(gm.id AS TEXT) = CAST(sl.godown_id AS TEXT) LIMIT 1),
+          sl.godown_name,
+          (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)
+        ) as godown_name,
+        sl.godown_id,
         sl.quantity as purchased_qty,
         sl.remaining_quantity,
         sl.rate,
@@ -431,20 +464,20 @@ router.get('/lots', async (req, res) => {
       FROM stock_lots sl
       LEFT JOIN item_master im ON (sl.item_id = im.id OR LOWER(sl.item_name) = LOWER(im.item_name))
       WHERE 1=1
-    `
-    const params = []
+    `;
+    const params = [];
     
     if (item_id) {
-      query += ` AND (CAST(sl.item_id AS TEXT) = CAST(? AS TEXT) OR sl.item_name = (SELECT item_name FROM item_master WHERE CAST(id AS TEXT) = CAST(? AS TEXT) LIMIT 1) OR sl.item_name = ?)`
-      params.push(item_id, item_id, item_id)
+      query += ` AND (CAST(sl.item_id AS TEXT) = CAST(? AS TEXT) OR sl.item_name = (SELECT item_name FROM item_master WHERE CAST(id AS TEXT) = CAST(? AS TEXT) LIMIT 1) OR sl.item_name = ?)`;
+      params.push(item_id, item_id, item_id);
     }
     
-    query += ` ORDER BY sl.item_name, sl.created_at ASC`
+    query += ` ORDER BY sl.item_name, sl.created_at ASC`;
     
-    const result = await db.query(query, params)
+    const result = await db.query(query, params, cId);
 
-    const enrichedRows = await Promise.all(result.rows.map(async (row) => {
-      const category = await determineLotCategory(db, row.item_name, row.item_group, row.lot_no);
+    const enrichedRows = await Promise.all((result.rows || []).map(async (row) => {
+      const category = await determineLotCategory(db, row.item_name, row.item_group, row.lot_no, cId);
 
       const lifecycle = [];
       
@@ -455,7 +488,7 @@ router.get('/lots', async (req, res) => {
           FROM purchase_items pi
           JOIN purchases p ON pi.purchase_id = p.id
           WHERE pi.lot_no = ?
-        `, [row.lot_no]);
+        `, [row.lot_no], cId);
         for (const pRow of purRes.rows) {
           lifecycle.push({
             module: 'Purchase',
@@ -479,7 +512,7 @@ router.get('/lots', async (req, res) => {
           FROM sales_items si
           JOIN sales s ON si.sales_id = s.id
           WHERE si.lot_no = ?
-        `, [row.lot_no]);
+        `, [row.lot_no], cId);
         for (const sRow of salRes.rows) {
           lifecycle.push({
             module: 'Sale',
@@ -504,7 +537,7 @@ router.get('/lots', async (req, res) => {
           JOIN grains g ON gi.grain_id = g.id
           LEFT JOIN flour_mill_master fmm ON (CAST(g.flour_mill AS TEXT) = CAST(fmm.id AS TEXT) OR g.flour_mill = fmm.flourmill)
           WHERE gi.lot_no = ?
-        `, [row.lot_no]);
+        `, [row.lot_no], cId);
         for (const giRow of grInRes.rows) {
           lifecycle.push({
             module: 'Grain Processing (Input)',
@@ -528,7 +561,7 @@ router.get('/lots', async (req, res) => {
           FROM grain_output_items go
           JOIN grains g ON go.grain_id = g.id
           WHERE go.lot_no = ?
-        `, [row.lot_no]);
+        `, [row.lot_no], cId);
         for (const goRow of grOutRes.rows) {
           lifecycle.push({
             module: 'Grain Processing (Output)',
@@ -552,7 +585,7 @@ router.get('/lots', async (req, res) => {
           FROM grain_wastage_items gw
           JOIN grains g ON gw.grain_id = g.id
           WHERE gw.lot_no = ?
-        `, [row.lot_no]);
+        `, [row.lot_no], cId);
         for (const gwRow of grWRes.rows) {
           lifecycle.push({
             module: 'Grain Processing (Wastage)',
@@ -576,7 +609,7 @@ router.get('/lots', async (req, res) => {
           FROM flour_out_items foi
           JOIN flour_out fo ON foi.flour_out_id = fo.id
           WHERE foi.lot_no = ?
-        `, [row.lot_no]);
+        `, [row.lot_no], cId);
         for (const foRow of foRes.rows) {
           lifecycle.push({
             module: 'Flour Out',
@@ -600,7 +633,7 @@ router.get('/lots', async (req, res) => {
           FROM stock_adjustment_items sai
           JOIN stock_adjustments sa ON sai.stock_adjustment_id = sa.id
           WHERE sai.lot_no = ?
-        `, [row.lot_no]);
+        `, [row.lot_no], cId);
         for (const saRow of saRes.rows) {
           const itemTypeStr = (saRow.item_adjust_type || saRow.adjust_type || '').toLowerCase();
           const isDeduction = itemTypeStr.includes('deduct') || itemTypeStr.includes('reduce') || itemTypeStr.includes('issue') || itemTypeStr.includes('damage') || itemTypeStr.includes('wastage') || itemTypeStr.includes('less');
@@ -632,7 +665,7 @@ router.get('/lots', async (req, res) => {
           FROM weight_conversion_items wci
           JOIN weight_conversion wc ON wci.weight_conversion_id = wc.id
           WHERE wci.lot_no = ?
-        `, [row.lot_no]);
+        `, [row.lot_no], cId);
         for (const wcRow of wcRes.rows) {
           const isInput = wcRow.item_type === 'input';
           lifecycle.push({
@@ -657,7 +690,7 @@ router.get('/lots', async (req, res) => {
           FROM packing_items pi
           JOIN packing p ON pi.packing_id = p.id
           WHERE pi.lot_no = ?
-        `, [row.lot_no]);
+        `, [row.lot_no], cId);
         for (const pkRow of packRes.rows) {
           const isFrom = pkRow.remarks === 'section:from' || pkRow.remarks === 'section:material';
           lifecycle.push({
@@ -684,7 +717,7 @@ router.get('/lots', async (req, res) => {
           FROM purchase_return_items pri
           JOIN purchase_returns pr ON pri.purchase_return_id = pr.id
           WHERE UPPER(pri.lot_no) = UPPER(?) OR UPPER(pri.lot_no) LIKE UPPER(?)
-        `, [row.lot_no, `%${row.lot_no}%`]);
+        `, [row.lot_no, `%${row.lot_no}%`], cId);
         for (const prRow of prRes.rows) {
           const pQty = parseFloat(prRow.qty) || 0;
           const pWt = parseFloat(prRow.total_wt) || (pQty * (parseFloat(prRow.weight) || 50));
@@ -714,16 +747,16 @@ router.get('/lots', async (req, res) => {
         try {
           const inputRes = await db.query(`
             SELECT DISTINCT grain_id FROM grain_input_items WHERE lot_no = ?
-          `, [row.lot_no]);
+          `, [row.lot_no], cId);
           if (inputRes.rows.length > 0) {
             const grainIds = inputRes.rows.map(r => r.grain_id);
             const placeholders = grainIds.map(() => '?').join(',');
             const outputRes = await db.query(`
               SELECT item_name, lot_no, qty, total_wt FROM grain_output_items WHERE grain_id IN (${placeholders})
-            `, grainIds);
+            `, grainIds, cId);
             const wastageRes = await db.query(`
               SELECT item_name, lot_no, qty, total_wt FROM grain_wastage_items WHERE grain_id IN (${placeholders})
-            `, grainIds);
+            `, grainIds, cId);
             
             processingDetails = {
               processed_runs: grainIds.length,
@@ -740,13 +773,13 @@ router.get('/lots', async (req, res) => {
             FROM weight_conversion_items wci 
             JOIN weight_conversion wc ON CAST(wci.weight_conversion_id AS TEXT) = CAST(wc.id AS TEXT)
             WHERE wci.lot_no = ? AND wci.type = 'input'
-          `, [row.lot_no]);
+          `, [row.lot_no], cId);
           if (wcIn.rows && wcIn.rows.length > 0) {
             const wcIds = wcIn.rows.map(r => r.id);
             const placeholders = wcIds.map(() => '?').join(',');
             const wcOutRes = await db.query(`
               SELECT item_name, lot_no, qty, total_wt FROM weight_conversion_items WHERE weight_conversion_id IN (${placeholders}) AND type = 'output'
-            `, wcIds);
+            `, wcIds, cId);
             
             const wcOutputs = wcOutRes.rows.map(o => ({ item_name: o.item_name, lot_no: o.lot_no, qty: o.qty, weight: o.total_wt }));
             if (!processingDetails) {
@@ -769,7 +802,7 @@ router.get('/lots', async (req, res) => {
         try {
           const outputRes = await db.query(`
             SELECT DISTINCT grain_id FROM grain_output_items WHERE lot_no = ?
-          `, [row.lot_no]);
+          `, [row.lot_no], cId);
           if (outputRes.rows.length > 0) {
             const grainIds = outputRes.rows.map(r => r.grain_id);
             const placeholders = grainIds.map(() => '?').join(',');
@@ -777,17 +810,17 @@ router.get('/lots', async (req, res) => {
             // Get all RM inputs for these runs
             const inputRes = await db.query(`
               SELECT item_name, lot_no, qty, total_wt FROM grain_input_items WHERE grain_id IN (${placeholders})
-            `, grainIds);
+            `, grainIds, cId);
 
             // Get all outputs for these runs (for tracing other outputs generated alongside)
             const allOutputsRes = await db.query(`
               SELECT item_name, lot_no, qty, total_wt FROM grain_output_items WHERE grain_id IN (${placeholders})
-            `, grainIds);
+            `, grainIds, cId);
 
             // Get all wastages for these runs
             const wastageRes = await db.query(`
               SELECT item_name, lot_no, qty, total_wt FROM grain_wastage_items WHERE grain_id IN (${placeholders})
-            `, grainIds);
+            `, grainIds, cId);
 
             // Get processing mill and date
             const processRes = await db.query(`
@@ -795,7 +828,7 @@ router.get('/lots', async (req, res) => {
               FROM grains g
               LEFT JOIN flour_mill_master fmm ON (CAST(g.flour_mill AS TEXT) = CAST(fmm.id AS TEXT) OR g.flour_mill = fmm.flourmill)
               WHERE g.id IN (${placeholders})
-            `, grainIds);
+            `, grainIds, cId);
             
             sourceDetails = {
               process_info: processRes.rows.map(p => ({ date: p.date, reference_no: p.s_no, mill: p.flour_mill_name || 'In-House Grinding' })),
@@ -815,16 +848,16 @@ router.get('/lots', async (req, res) => {
             FROM weight_conversion_items wci 
             JOIN weight_conversion wc ON CAST(wci.weight_conversion_id AS TEXT) = CAST(wc.id AS TEXT)
             WHERE wci.lot_no = ? AND wci.type = 'output'
-          `, [row.lot_no]);
+          `, [row.lot_no], cId);
           if (wcOut.rows && wcOut.rows.length > 0) {
             const wcIds = wcOut.rows.map(r => r.id);
             const placeholders = wcIds.map(() => '?').join(',');
             const wcInRes = await db.query(`
               SELECT item_name, lot_no, qty, total_wt FROM weight_conversion_items WHERE weight_conversion_id IN (${placeholders}) AND type = 'input'
-            `, wcIds);
+            `, wcIds, cId);
             const wcAllOutRes = await db.query(`
               SELECT item_name, lot_no, qty, total_wt FROM weight_conversion_items WHERE weight_conversion_id IN (${placeholders}) AND type = 'output'
-            `, wcIds);
+            `, wcIds, cId);
 
             const wcProcess = wcOut.rows.map(p => ({ date: p.date, reference_no: p.s_no, mill: 'Weight Conversion' }));
             const wcInputs = wcInRes.rows.map(i => ({ item_name: i.item_name, lot_no: i.lot_no, qty: i.qty, weight: i.total_wt }));

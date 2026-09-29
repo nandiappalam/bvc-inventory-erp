@@ -458,6 +458,7 @@ const StockReport = () => {
                 <tr>
                   <th style={styles.th}>Item Name</th>
                   <th style={styles.th}>Category</th>
+                  <th style={styles.th}>Godown</th>
                   <th style={{...styles.th, textAlign: 'right'}}>Weight (KG)</th>
                   <th style={{...styles.th, textAlign: 'right'}}>Opening Stock</th>
                   <th style={{...styles.th, textAlign: 'right'}}>Total Purchased/In</th>
@@ -472,6 +473,7 @@ const StockReport = () => {
                   <th style={styles.th}>Item Name</th>
                   <th style={styles.th}>Category</th>
                   <th style={styles.th}>Lot No</th>
+                  <th style={styles.th}>Godown</th>
                   <th style={styles.th}>Purchase/Mfg Date</th>
                   <th style={{...styles.th, textAlign: 'right'}}>Weight (KG)</th>
                   <th style={{...styles.th, textAlign: 'right'}}>Purchased/Yielded</th>
@@ -525,6 +527,9 @@ const StockReport = () => {
                               }}>
                                 {row.category === 'RM' ? '🌾 RM' : row.category === 'FG' ? '📦 FG' : '🗑️ Wastage'}
                               </span>
+                            </td>
+                            <td style={{...styles.td, fontWeight: '600', color: '#1e293b'}}>
+                              📍 {row.godown_name || 'PJ'}
                             </td>
                             <td style={{...styles.td, textAlign: 'right'}}>{getBagWeight(row).toFixed(2)}</td>
                             <td style={{...styles.td, textAlign: 'right'}}>{parseFloat(row.opening_qty || 0).toFixed(2)}</td>
@@ -593,6 +598,9 @@ const StockReport = () => {
                               </span>
                             </td>
                             <td style={{...styles.td, fontFamily: 'monospace', fontWeight: 'bold', color: '#1e293b'}}>{row.lot_no}</td>
+                            <td style={{...styles.td, fontWeight: '600', color: '#1e293b'}}>
+                              📍 {row.godown_name || 'PJ'}
+                            </td>
                             <td style={styles.td}>{row.created_at ? new Date(row.created_at).toLocaleDateString() : '-'}</td>
                             <td style={{...styles.td, textAlign: 'right'}}>{getBagWeight(row).toFixed(2)}</td>
                             <td style={{...styles.td, textAlign: 'right'}}>{parseFloat(row.purchased_qty || 0).toFixed(2)}</td>
