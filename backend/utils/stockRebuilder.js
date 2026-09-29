@@ -177,12 +177,16 @@ async function rebuildStockLedger() {
       `);
     } catch (e) {}
 
-    // M. Item Transfers
+    // M. Item Transfers & Godown Transfers
     let itemTransfers = { rows: [] };
     try {
-      itemTransfers = await db.query(`
-        SELECT * FROM item_transfers ORDER BY date ASC, id ASC
-      `);
+      const trf1 = await db.query(`SELECT id, transfer_no, date, from_godown_id, from_godown_name, to_godown_id, to_godown_name, item_name, lot_no, transfer_qty, weight, rate, amount FROM item_transfers ORDER BY date ASC, id ASC`);
+      if (trf1.rows && trf1.rows.length > 0) {
+        itemTransfers = trf1;
+      } else {
+        const trf2 = await db.query(`SELECT id, s_no as transfer_no, transfer_date as date, from_godown_id, from_godown_name, to_godown_id, to_godown_name, item_name, lot_no, qty as transfer_qty, weight, 0 as rate, 0 as amount FROM godown_transfers ORDER BY transfer_date ASC, id ASC`);
+        itemTransfers = trf2;
+      }
     } catch (e) {}
 
     // Map of lots: key = UPPER(itemName):::UPPER(lotNo):::godownId
