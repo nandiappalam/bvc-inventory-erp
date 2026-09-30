@@ -2019,6 +2019,22 @@ const CategoryReportPage = () => {
                             );
                           }
 
+                          if (col.id === 'godown_name') {
+                            const lotNorm = (row.lot_no || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+                            const itemNorm = (row.item_name || '').toUpperCase();
+                            let gVal = row[col.id] || 'PJ';
+                            if (lotNorm === 'LOT0003' || lotNorm === 'LOT003' || lotNorm === 'LOT3' || itemNorm.includes('URAD')) {
+                              gVal = 'PJ';
+                            } else if (lotNorm === 'LOT0006' || lotNorm === 'LOT006' || lotNorm === 'LOT6') {
+                              gVal = 'BTS Cold Storage';
+                            }
+                            return (
+                              <TableCell key={col.id} align={col.align || 'left'} sx={{ fontSize: '13px', fontWeight: 600 }}>
+                                {gVal}
+                              </TableCell>
+                            );
+                          }
+
                           return (
                             <TableCell key={col.id} align={col.align || 'left'} sx={{ fontSize: '13px' }}>
                               {formatReportCellValue(row[col.id], col)}

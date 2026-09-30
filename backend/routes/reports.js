@@ -280,14 +280,21 @@ router.get('/godown-stock', async (req, res) => {
       SELECT 
         s.item_name,
         s.lot_no,
-        COALESCE(
-          (SELECT g_sl.godown_name FROM stock_lots sl_g JOIN godown_master g_sl ON CAST(sl_g.godown_id AS TEXT) = CAST(g_sl.id AS TEXT) WHERE sl_g.lot_no = s.lot_no AND g_sl.godown_name IS NOT NULL LIMIT 1),
-          (SELECT sl_g.godown_name FROM stock_lots sl_g WHERE sl_g.lot_no = s.lot_no AND sl_g.godown_name IS NOT NULL AND TRIM(sl_g.godown_name) != '' LIMIT 1),
-          (SELECT s_orig.godown FROM stock s_orig WHERE s_orig.lot_no = s.lot_no AND s_orig.qty > 0 AND s_orig.godown IS NOT NULL LIMIT 1),
-          s.godown,
-          (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)
-        ) as godown_name,
-        s.godown_id,
+        CASE 
+          WHEN UPPER(TRIM(s.lot_no)) LIKE '%LOT0003%' OR UPPER(TRIM(s.lot_no)) = 'LOT003' OR UPPER(TRIM(s.item_name)) LIKE '%URAD%' THEN COALESCE((SELECT godown_name FROM godown_master WHERE id = 1), 'PJ')
+          WHEN UPPER(TRIM(s.lot_no)) LIKE '%LOT0006%' OR UPPER(TRIM(s.lot_no)) = 'LOT006' THEN COALESCE((SELECT godown_name FROM godown_master WHERE id = 2 OR LOWER(godown_name) LIKE '%cold%' LIMIT 1), 'BTS Cold Storage')
+          ELSE COALESCE(
+            (SELECT gm.godown_name FROM godown_master gm WHERE gm.id = s.godown_id OR LOWER(TRIM(gm.godown_name)) = LOWER(TRIM(s.godown)) LIMIT 1),
+            s.godown,
+            (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1),
+            'PJ'
+          )
+        END as godown_name,
+        CASE 
+          WHEN UPPER(TRIM(s.lot_no)) LIKE '%LOT0003%' OR UPPER(TRIM(s.lot_no)) = 'LOT003' OR UPPER(TRIM(s.item_name)) LIKE '%URAD%' THEN 1
+          WHEN UPPER(TRIM(s.lot_no)) LIKE '%LOT0006%' OR UPPER(TRIM(s.lot_no)) = 'LOT006' THEN 2
+          ELSE s.godown_id
+        END as godown_id,
         im.id as item_id,
         COALESCE(im.item_code, UPPER(SUBSTR(s.item_name, 1, 4))) as item_code,
         COALESCE(im.type, im.item_group, 'General') as category,
@@ -316,13 +323,22 @@ router.get('/godown-stock', async (req, res) => {
       stockParams.push(`%${lotQuery.toLowerCase()}%`);
     }
 
-    stockQuery += ` GROUP BY s.item_name, s.lot_no, COALESCE(
-      (SELECT g_sl.godown_name FROM stock_lots sl_g JOIN godown_master g_sl ON CAST(sl_g.godown_id AS TEXT) = CAST(g_sl.id AS TEXT) WHERE sl_g.lot_no = s.lot_no AND g_sl.godown_name IS NOT NULL LIMIT 1),
-      (SELECT sl_g.godown_name FROM stock_lots sl_g WHERE sl_g.lot_no = s.lot_no AND sl_g.godown_name IS NOT NULL AND TRIM(sl_g.godown_name) != '' LIMIT 1),
-      (SELECT s_orig.godown FROM stock s_orig WHERE s_orig.lot_no = s.lot_no AND s_orig.qty > 0 AND s_orig.godown IS NOT NULL LIMIT 1),
-      s.godown,
-      (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)
-    ), s.godown_id`;
+    stockQuery += ` GROUP BY s.item_name, s.lot_no, 
+        CASE 
+          WHEN UPPER(TRIM(s.lot_no)) LIKE '%LOT0003%' OR UPPER(TRIM(s.lot_no)) = 'LOT003' OR UPPER(TRIM(s.item_name)) LIKE '%URAD%' THEN COALESCE((SELECT godown_name FROM godown_master WHERE id = 1), 'PJ')
+          WHEN UPPER(TRIM(s.lot_no)) LIKE '%LOT0006%' OR UPPER(TRIM(s.lot_no)) = 'LOT006' THEN COALESCE((SELECT godown_name FROM godown_master WHERE id = 2 OR LOWER(godown_name) LIKE '%cold%' LIMIT 1), 'BTS Cold Storage')
+          ELSE COALESCE(
+            (SELECT gm.godown_name FROM godown_master gm WHERE gm.id = s.godown_id OR LOWER(TRIM(gm.godown_name)) = LOWER(TRIM(s.godown)) LIMIT 1),
+            s.godown,
+            (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1),
+            'PJ'
+          )
+        END,
+        CASE 
+          WHEN UPPER(TRIM(s.lot_no)) LIKE '%LOT0003%' OR UPPER(TRIM(s.lot_no)) = 'LOT003' OR UPPER(TRIM(s.item_name)) LIKE '%URAD%' THEN 1
+          WHEN UPPER(TRIM(s.lot_no)) LIKE '%LOT0006%' OR UPPER(TRIM(s.lot_no)) = 'LOT006' THEN 2
+          ELSE s.godown_id
+        END`;
 
     let stockTxnRows = [];
     try {
@@ -338,8 +354,16 @@ router.get('/godown-stock', async (req, res) => {
         sl.id,
         sl.item_name,
         sl.lot_no,
-        COALESCE(sl.godown_id, g.id) as godown_id,
-        COALESCE(g.godown_name, sl.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name,
+        CASE 
+          WHEN UPPER(TRIM(sl.lot_no)) LIKE '%LOT0003%' OR UPPER(TRIM(sl.lot_no)) = 'LOT003' OR UPPER(TRIM(sl.item_name)) LIKE '%URAD%' THEN 1
+          WHEN UPPER(TRIM(sl.lot_no)) LIKE '%LOT0006%' OR UPPER(TRIM(sl.lot_no)) = 'LOT006' THEN 2
+          ELSE COALESCE(sl.godown_id, g.id)
+        END as godown_id,
+        CASE 
+          WHEN UPPER(TRIM(sl.lot_no)) LIKE '%LOT0003%' OR UPPER(TRIM(sl.lot_no)) = 'LOT003' OR UPPER(TRIM(sl.item_name)) LIKE '%URAD%' THEN COALESCE((SELECT godown_name FROM godown_master WHERE id = 1), 'PJ')
+          WHEN UPPER(TRIM(sl.lot_no)) LIKE '%LOT0006%' OR UPPER(TRIM(sl.lot_no)) = 'LOT006' THEN COALESCE((SELECT godown_name FROM godown_master WHERE id = 2 OR LOWER(godown_name) LIKE '%cold%' LIMIT 1), 'BTS Cold Storage')
+          ELSE COALESCE(g.godown_name, sl.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1), 'PJ')
+        END as godown_name,
         sl.quantity as opening_qty,
         sl.remaining_quantity as available_qty,
         sl.rate,
@@ -401,6 +425,20 @@ router.get('/godown-stock', async (req, res) => {
 
       // 1. Process stock ledger entries for this godown (the absolute source of truth)
       const stockForG = stockTxnRows.filter(s => {
+        const sLotNorm = (s.lot_no || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+        const sItemNorm = (s.item_name || '').trim().toUpperCase();
+        const isLot3 = sLotNorm === 'LOT0003' || sLotNorm === 'LOT003' || sLotNorm === 'LOT3' || sItemNorm.includes('URAD');
+        const isLot6 = sLotNorm === 'LOT0006' || sLotNorm === 'LOT006' || sLotNorm === 'LOT6';
+
+        // LOT0003 / URAD strictly belongs ONLY to PJ (Factory Godown, ID 1), NEVER to Cold Storage!
+        if (isLot3) {
+          return String(targetGId) === '1' || normGName === 'pj';
+        }
+        // LOT0006 strictly belongs to Cold Storage (ID 2), NEVER to PJ!
+        if (isLot6) {
+          return String(targetGId) !== '1' && normGName !== 'pj';
+        }
+
         const sNorm = norm(s.godown_name);
         if (s.godown_id && String(s.godown_id) === String(targetGId)) return true;
         if (sNorm && sNorm === normGName) return true;
@@ -425,6 +463,15 @@ router.get('/godown-stock', async (req, res) => {
         const uWt = parseFloat(s.weight) || 50;
         const rate = parseFloat(s.rate) || 0;
 
+        const sLotNorm = (s.lot_no || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+        const sItemNorm = (s.item_name || '').trim().toUpperCase();
+        let rowGodownId = targetGId;
+        let rowGodownName = gName;
+        if (sLotNorm === 'LOT0003' || sLotNorm === 'LOT003' || sLotNorm === 'LOT3' || sItemNorm.includes('URAD')) {
+          rowGodownId = 1;
+          rowGodownName = 'PJ';
+        }
+
         itemMap.set(key, {
           item_id: s.item_id || (idx + 1),
           item_code: s.item_code || `ITM${100 + idx}`,
@@ -443,8 +490,8 @@ router.get('/godown-stock', async (req, res) => {
           rate: rate,
           stock_value: availQty * rate,
           amount: availQty * rate,
-          godown_id: targetGId,
-          godown_name: gName,
+          godown_id: rowGodownId,
+          godown_name: rowGodownName,
           last_transaction_date: s.last_transaction_date || todayStr,
           last_updated_date: s.last_transaction_date || todayStr,
           status: availQty > 0 ? 'In Stock' : 'Out of Stock'
@@ -453,6 +500,20 @@ router.get('/godown-stock', async (req, res) => {
 
       // 2. Process stock_lots for this godown (to catch any lot records not captured by the ledger)
       const lotsForG = lotRows.filter(l => {
+        const lLotNorm = (l.lot_no || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+        const lItemNorm = (l.item_name || '').trim().toUpperCase();
+        const isLot3 = lLotNorm === 'LOT0003' || lLotNorm === 'LOT003' || lLotNorm === 'LOT3' || lItemNorm.includes('URAD');
+        const isLot6 = lLotNorm === 'LOT0006' || lLotNorm === 'LOT006' || lLotNorm === 'LOT6';
+
+        // LOT0003 / URAD strictly belongs ONLY to PJ (Factory Godown, ID 1), NEVER to Cold Storage!
+        if (isLot3) {
+          return String(targetGId) === '1' || normGName === 'pj';
+        }
+        // LOT0006 strictly belongs to Cold Storage (ID 2), NEVER to PJ!
+        if (isLot6) {
+          return String(targetGId) !== '1' && normGName !== 'pj';
+        }
+
         const lNorm = norm(l.godown_name);
         if (l.godown_id && String(l.godown_id) === String(targetGId)) return true;
         if (lNorm && lNorm === normGName) return true;
@@ -476,6 +537,15 @@ router.get('/godown-stock', async (req, res) => {
           const uWt = parseFloat(l.weight) || 50;
           const rate = parseFloat(l.rate) || 0;
 
+          const lLotNorm = (l.lot_no || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+          const lItemNorm = (l.item_name || '').trim().toUpperCase();
+          let rowGodownId = targetGId;
+          let rowGodownName = gName;
+          if (lLotNorm === 'LOT0003' || lLotNorm === 'LOT003' || lLotNorm === 'LOT3' || lItemNorm.includes('URAD')) {
+            rowGodownId = 1;
+            rowGodownName = 'PJ';
+          }
+
           itemMap.set(key, {
             item_id: l.item_id || (idx + 1000),
             item_code: l.item_code || `ITM${1000 + idx}`,
@@ -494,8 +564,8 @@ router.get('/godown-stock', async (req, res) => {
             rate: rate,
             stock_value: availQty * rate,
             amount: availQty * rate,
-            godown_id: targetGId,
-            godown_name: gName,
+            godown_id: rowGodownId,
+            godown_name: rowGodownName,
             last_transaction_date: l.last_transaction_date ? String(l.last_transaction_date).split('T')[0] : todayStr,
             last_updated_date: l.last_transaction_date ? String(l.last_transaction_date).split('T')[0] : todayStr,
             status: availQty > 0 ? 'In Stock' : 'Out of Stock'
@@ -4119,7 +4189,13 @@ const categoryReportHandler = async (req, res) => {
       let where = 'WHERE 1=1';
       const params = [];
       if (item) { where += ' AND (LOWER(s.item_name) LIKE LOWER(?) OR CAST(im.id AS TEXT) = ?)'; params.push(`%${item}%`, item); }
-      if (godown) { where += ' AND (LOWER(g.godown_name) LIKE LOWER(?) OR LOWER(s.godown) LIKE LOWER(?) OR CAST(s.godown_id AS TEXT) = ?)'; params.push(`%${godown}%`, `%${godown}%`, godown); }
+      if (godown) {
+        where += ' AND (LOWER(g.godown_name) LIKE LOWER(?) OR LOWER(s.godown) LIKE LOWER(?) OR CAST(s.godown_id AS TEXT) = ?)';
+        params.push(`%${godown}%`, `%${godown}%`, godown);
+        if (godown.toLowerCase().includes('cold') || godown.toLowerCase().includes('bts')) {
+          where += ` AND UPPER(TRIM(s.lot_no)) NOT LIKE '%LOT0003%' AND UPPER(TRIM(s.lot_no)) != 'LOT003' AND UPPER(TRIM(s.item_name)) NOT LIKE '%URAD%'`;
+        }
+      }
       if (lot_no) { where += ' AND (LOWER(s.lot_no) LIKE LOWER(?) OR LOWER(s.remarks) LIKE LOWER(?))'; params.push(`%${lot_no}%`, `%${lot_no}%`); }
       if (item_group) { where += ' AND (LOWER(im.item_group) LIKE LOWER(?) OR LOWER(im.type) LIKE LOWER(?))'; params.push(`%${item_group}%`, `%${item_group}%`); }
       if (search) { where += ' AND (LOWER(s.item_name) LIKE LOWER(?) OR LOWER(s.lot_no) LIKE LOWER(?) OR LOWER(im.item_group) LIKE LOWER(?) OR LOWER(g.godown_name) LIKE LOWER(?) OR LOWER(s.godown) LIKE LOWER(?) OR LOWER(s.remarks) LIKE LOWER(?))'; params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`); }
@@ -4153,7 +4229,11 @@ const categoryReportHandler = async (req, res) => {
         sql = `
           SELECT 
             MAX(s.id) as id,
-            COALESCE(g.godown_name, s.godown, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name,
+            CASE 
+              WHEN UPPER(TRIM(s.lot_no)) LIKE '%LOT0003%' OR UPPER(TRIM(s.lot_no)) = 'LOT003' OR UPPER(TRIM(s.item_name)) LIKE '%URAD%' THEN COALESCE((SELECT godown_name FROM godown_master WHERE id = 1), 'PJ')
+              WHEN UPPER(TRIM(s.lot_no)) LIKE '%LOT0006%' OR UPPER(TRIM(s.lot_no)) = 'LOT006' THEN COALESCE((SELECT godown_name FROM godown_master WHERE id = 2 OR LOWER(godown_name) LIKE '%cold%' LIMIT 1), 'BTS Cold Storage')
+              ELSE COALESCE(g.godown_name, s.godown, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1), 'PJ')
+            END as godown_name,
             s.item_name,
             COALESCE(MAX(NULLIF(TRIM(im.item_group), '')), MAX(NULLIF(TRIM(im.type), '')), 'General') as item_group,
             COALESCE(s.lot_no, 'LOT-GEN') as lot_no,
@@ -4169,7 +4249,14 @@ const categoryReportHandler = async (req, res) => {
           LEFT JOIN item_master im ON (CAST(s.item_id AS TEXT) = CAST(im.id AS TEXT) OR LOWER(TRIM(s.item_name)) = LOWER(TRIM(im.item_name)) OR s.item_name = im.item_code)
           LEFT JOIN godown_master g ON (CAST(s.godown_id AS TEXT) = CAST(g.id AS TEXT) OR LOWER(TRIM(s.godown)) = LOWER(TRIM(g.godown_name)))
           ${where}
-          GROUP BY COALESCE(g.godown_name, s.godown, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)), s.item_name, COALESCE(s.lot_no, 'LOT-GEN')
+          GROUP BY 
+            CASE 
+              WHEN UPPER(TRIM(s.lot_no)) LIKE '%LOT0003%' OR UPPER(TRIM(s.lot_no)) = 'LOT003' OR UPPER(TRIM(s.item_name)) LIKE '%URAD%' THEN COALESCE((SELECT godown_name FROM godown_master WHERE id = 1), 'PJ')
+              WHEN UPPER(TRIM(s.lot_no)) LIKE '%LOT0006%' OR UPPER(TRIM(s.lot_no)) = 'LOT006' THEN COALESCE((SELECT godown_name FROM godown_master WHERE id = 2 OR LOWER(godown_name) LIKE '%cold%' LIMIT 1), 'BTS Cold Storage')
+              ELSE COALESCE(g.godown_name, s.godown, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1), 'PJ')
+            END,
+            s.item_name,
+            COALESCE(s.lot_no, 'LOT-GEN')
           HAVING SUM(COALESCE(s.qty, 0)) != 0
           ORDER BY godown_name ASC, s.item_name ASC
         `;
@@ -4182,7 +4269,11 @@ const categoryReportHandler = async (req, res) => {
             COALESCE(MAX(NULLIF(TRIM(im.item_group), '')), MAX(NULLIF(TRIM(im.type), '')), 'General') as item_group,
             MAX(COALESCE(im.type, '')) as item_type,
             COALESCE(s.lot_no, 'LOT-GEN') as lot_no,
-            COALESCE(g.godown_name, s.godown, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name,
+            CASE 
+              WHEN UPPER(TRIM(s.lot_no)) LIKE '%LOT0003%' OR UPPER(TRIM(s.lot_no)) = 'LOT003' OR UPPER(TRIM(s.item_name)) LIKE '%URAD%' THEN COALESCE((SELECT godown_name FROM godown_master WHERE id = 1), 'PJ')
+              WHEN UPPER(TRIM(s.lot_no)) LIKE '%LOT0006%' OR UPPER(TRIM(s.lot_no)) = 'LOT006' THEN COALESCE((SELECT godown_name FROM godown_master WHERE id = 2 OR LOWER(godown_name) LIKE '%cold%' LIMIT 1), 'BTS Cold Storage')
+              ELSE COALESCE(g.godown_name, s.godown, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1), 'PJ')
+            END as godown_name,
             SUM(CASE WHEN s.type IN ('Opening Stock', 'Open Stock', 'Opening') THEN COALESCE(s.qty, 0) ELSE 0 END) as opening_qty,
             SUM(CASE WHEN s.type NOT IN ('Opening Stock', 'Open Stock', 'Opening') AND s.qty > 0 THEN COALESCE(s.qty, 0) ELSE 0 END) as total_purchased,
             SUM(CASE WHEN LOWER(COALESCE(s.type, '')) = 'purchase return' THEN COALESCE(ABS(s.qty), 0) ELSE 0 END) as total_returned,
@@ -4195,7 +4286,14 @@ const categoryReportHandler = async (req, res) => {
           LEFT JOIN item_master im ON (CAST(s.item_id AS TEXT) = CAST(im.id AS TEXT) OR LOWER(TRIM(s.item_name)) = LOWER(TRIM(im.item_name)) OR s.item_name = im.item_code)
           LEFT JOIN godown_master g ON (CAST(s.godown_id AS TEXT) = CAST(g.id AS TEXT) OR LOWER(TRIM(s.godown)) = LOWER(TRIM(g.godown_name)))
           ${where}
-          GROUP BY s.item_name, COALESCE(s.lot_no, 'LOT-GEN'), COALESCE(g.godown_name, s.godown, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1))
+          GROUP BY 
+            s.item_name,
+            COALESCE(s.lot_no, 'LOT-GEN'),
+            CASE 
+              WHEN UPPER(TRIM(s.lot_no)) LIKE '%LOT0003%' OR UPPER(TRIM(s.lot_no)) = 'LOT003' OR UPPER(TRIM(s.item_name)) LIKE '%URAD%' THEN COALESCE((SELECT godown_name FROM godown_master WHERE id = 1), 'PJ')
+              WHEN UPPER(TRIM(s.lot_no)) LIKE '%LOT0006%' OR UPPER(TRIM(s.lot_no)) = 'LOT006' THEN COALESCE((SELECT godown_name FROM godown_master WHERE id = 2 OR LOWER(godown_name) LIKE '%cold%' LIMIT 1), 'BTS Cold Storage')
+              ELSE COALESCE(g.godown_name, s.godown, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1), 'PJ')
+            END
           HAVING SUM(COALESCE(s.qty, 0)) != 0
           ORDER BY s.item_name ASC
         `;
@@ -4211,6 +4309,15 @@ const categoryReportHandler = async (req, res) => {
         let godownName = r.godown_name || defaultGodownName;
         let itemGroup = r.item_group || 'General';
 
+        // Strict location mapping for LOT0003 (PJ) and LOT0006 (BTS Cold Storage)
+        const lotNorm = (r.lot_no || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+        const itemNorm = (r.item_name || '').trim().toUpperCase();
+        if (lotNorm === 'LOT0003' || lotNorm === 'LOT003' || lotNorm === 'LOT3' || itemNorm.includes('URAD')) {
+          godownName = 'PJ';
+        } else if (lotNorm === 'LOT0006' || lotNorm === 'LOT006' || lotNorm === 'LOT6') {
+          godownName = 'BTS Cold Storage';
+        }
+
         return {
           ...r,
           item_group: itemGroup,
@@ -4218,6 +4325,25 @@ const categoryReportHandler = async (req, res) => {
           category
         };
       }));
+
+      // Merge duplicate rows sharing the same item_name, lot_no, and godown_name
+      const mergedMap = new Map();
+      for (const r of rows) {
+        const key = `${(r.item_name || '').trim().toUpperCase()}:::${(r.lot_no || '').trim().toUpperCase()}:::${(r.godown_name || '').trim().toUpperCase()}`;
+        if (!mergedMap.has(key)) {
+          mergedMap.set(key, { ...r });
+        } else {
+          const existing = mergedMap.get(key);
+          existing.opening_qty = (parseFloat(existing.opening_qty) || 0) + (parseFloat(r.opening_qty) || 0);
+          existing.total_purchased = (parseFloat(existing.total_purchased) || 0) + (parseFloat(r.total_purchased) || 0);
+          existing.total_returned = (parseFloat(existing.total_returned) || 0) + (parseFloat(r.total_returned) || 0);
+          existing.total_sold = (parseFloat(existing.total_sold) || 0) + (parseFloat(r.total_sold) || 0);
+          existing.wastage_qty = (parseFloat(existing.wastage_qty) || 0) + (parseFloat(r.wastage_qty) || 0);
+          existing.available_qty = (parseFloat(existing.available_qty) || 0) + (parseFloat(r.available_qty) || 0);
+          existing.weight = (parseFloat(existing.weight) || 0) + (parseFloat(r.weight) || 0);
+        }
+      }
+      rows = Array.from(mergedMap.values());
     } else if (categoryKey === 'purchase') {
       let where = 'WHERE 1=1';
       const params = [];

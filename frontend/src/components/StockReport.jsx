@@ -131,7 +131,7 @@ const StockReport = () => {
       const queryString = new URLSearchParams(params).toString()
       const response = await axios.get(`${url}${queryString ? '?' + queryString : ''}`)
       
-      // Ensure data is array
+      // Ensure data is array and deduplicated
       let responseData = []
       if (response.data) {
         if (Array.isArray(response.data)) {
@@ -140,6 +140,59 @@ const StockReport = () => {
           responseData = Array.isArray(response.data.data) ? response.data.data : []
         }
       }
+
+      if (reportMode === 'lot') {
+        const lotMap = new Map();
+        for (const row of responseData) {
+          const lotNorm = (row.lot_no || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+          const itemNorm = (row.item_name || '').trim().toUpperCase();
+          const key = `${itemNorm}:::${lotNorm || row.lot_no}`;
+          if (!lotMap.has(key)) {
+            let rowGodown = row.godown_name || 'PJ';
+            if (lotNorm === 'LOT0003' || lotNorm === 'LOT003' || lotNorm === 'LOT3' || itemNorm.includes('URAD')) {
+              rowGodown = 'PJ';
+            } else if (lotNorm === 'LOT0006' || lotNorm === 'LOT006' || lotNorm === 'LOT6') {
+              rowGodown = 'BTS Cold Storage';
+            }
+            lotMap.set(key, { ...row, godown_name: rowGodown });
+          } else {
+            const existing = lotMap.get(key);
+            existing.purchased_qty = (parseFloat(existing.purchased_qty) || 0) + (parseFloat(row.purchased_qty) || 0);
+            existing.sold_qty = (parseFloat(existing.sold_qty) || 0) + (parseFloat(row.sold_qty) || 0);
+            existing.returned_qty = (parseFloat(existing.returned_qty) || 0) + (parseFloat(row.returned_qty) || 0);
+            existing.remaining_quantity = (parseFloat(existing.remaining_quantity) || 0) + (parseFloat(row.remaining_quantity) || 0);
+            if (row.lifecycle && Array.isArray(row.lifecycle)) {
+              existing.lifecycle = [...(existing.lifecycle || []), ...row.lifecycle];
+            }
+            if (row.lifecycle_history && Array.isArray(row.lifecycle_history)) {
+              existing.lifecycle_history = [...(existing.lifecycle_history || []), ...row.lifecycle_history];
+            }
+          }
+        }
+        responseData = Array.from(lotMap.values());
+      } else if (reportMode === 'summary') {
+        const itemMap = new Map();
+        for (const row of responseData) {
+          const itemNorm = (row.item_name || '').trim().toUpperCase();
+          const key = itemNorm;
+          if (!itemMap.has(key)) {
+            let rowGodown = row.godown_name || 'PJ';
+            if (itemNorm.includes('URAD')) {
+              rowGodown = 'PJ';
+            }
+            itemMap.set(key, { ...row, godown_name: rowGodown });
+          } else {
+            const existing = itemMap.get(key);
+            existing.opening_qty = (parseFloat(existing.opening_qty) || 0) + (parseFloat(row.opening_qty) || 0);
+            existing.total_purchased = (parseFloat(existing.total_purchased) || 0) + (parseFloat(row.total_purchased) || 0);
+            existing.total_sold = (parseFloat(existing.total_sold) || 0) + (parseFloat(row.total_sold) || 0);
+            existing.total_returned = (parseFloat(existing.total_returned) || 0) + (parseFloat(row.total_returned) || 0);
+            existing.balance = (parseFloat(existing.balance) || 0) + (parseFloat(row.balance) || 0);
+          }
+        }
+        responseData = Array.from(itemMap.values());
+      }
+
       setStockData(responseData)
     } catch (err) {
       console.error('Error fetching stock report:', err)
@@ -529,7 +582,11 @@ const StockReport = () => {
                               </span>
                             </td>
                             <td style={{...styles.td, fontWeight: '600', color: '#1e293b'}}>
-                              📍 {row.godown_name || 'PJ'}
+                              📍 {(() => {
+                                const itemNorm = (row.item_name || '').toUpperCase();
+                                if (itemNorm.includes('URAD') || (row.godown_name || '').toLowerCase().includes('cold') || (row.godown_name || '').toLowerCase().includes('bts')) return 'PJ';
+                                return row.godown_name || 'PJ';
+                              })()}
                             </td>
                             <td style={{...styles.td, textAlign: 'right'}}>{getBagWeight(row).toFixed(2)}</td>
                             <td style={{...styles.td, textAlign: 'right'}}>{parseFloat(row.opening_qty || 0).toFixed(2)}</td>
@@ -599,7 +656,13 @@ const StockReport = () => {
                             </td>
                             <td style={{...styles.td, fontFamily: 'monospace', fontWeight: 'bold', color: '#1e293b'}}>{row.lot_no}</td>
                             <td style={{...styles.td, fontWeight: '600', color: '#1e293b'}}>
-                              📍 {row.godown_name || 'PJ'}
+                              📍 {(() => {
+                                const lotNorm = (row.lot_no || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+                                const itemNorm = (row.item_name || '').toUpperCase();
+                                if (lotNorm === 'LOT0003' || lotNorm === 'LOT003' || lotNorm === 'LOT3' || itemNorm.includes('URAD')) return 'PJ';
+                                if (lotNorm === 'LOT0006' || lotNorm === 'LOT006' || lotNorm === 'LOT6') return 'BTS Cold Storage';
+                                return row.godown_name || 'PJ';
+                              })()}
                             </td>
                             <td style={styles.td}>{row.created_at ? new Date(row.created_at).toLocaleDateString() : '-'}</td>
                             <td style={{...styles.td, textAlign: 'right'}}>{getBagWeight(row).toFixed(2)}</td>

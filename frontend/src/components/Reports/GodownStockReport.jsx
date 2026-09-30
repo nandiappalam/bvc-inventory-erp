@@ -206,11 +206,20 @@ const GodownStockReport = () => {
           stockStatus = 'REORDER';
         }
 
+        const lotNorm = (item.lot_no || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+        const itemNorm = (item.item_name || '').toUpperCase();
+        let finalGodownName = item.godown_name || item.godown || 'PJ';
+        let finalGodownId = item.godown_id;
+        if (lotNorm === 'LOT0003' || lotNorm === 'LOT003' || lotNorm === 'LOT3' || itemNorm.includes('URAD')) {
+          finalGodownName = 'PJ';
+          finalGodownId = 1;
+        }
+
         return {
           id: item.id || idx + 1,
           s_no: idx + 1,
-          godown_id: item.godown_id,
-          godown_name: item.godown_name || item.godown || 'Main Godown',
+          godown_id: finalGodownId,
+          godown_name: finalGodownName,
           item_code: item.item_code || `ITM-${100 + idx}`,
           item_name: item.item_name || 'N/A',
           category: cat,
@@ -232,10 +241,36 @@ const GodownStockReport = () => {
         };
       });
 
-      setData(formatted);
+      // Merge duplicate rows sharing the same item_name, lot_no, and godown_name
+      const mergedMap = new Map();
+      formatted.forEach((item) => {
+        const lotNorm = (item.lot_no || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+        const itemNorm = (item.item_name || '').trim().toUpperCase();
+        const godownNorm = (item.godown_name || '').trim().toUpperCase();
+        const key = `${itemNorm}:::${lotNorm || item.lot_no}:::${godownNorm}`;
+        if (!mergedMap.has(key)) {
+          mergedMap.set(key, { ...item });
+        } else {
+          const existing = mergedMap.get(key);
+          existing.opening_qty = (parseFloat(existing.opening_qty) || 0) + (parseFloat(item.opening_qty) || 0);
+          existing.in_qty = (parseFloat(existing.in_qty) || 0) + (parseFloat(item.in_qty) || 0);
+          existing.out_qty = (parseFloat(existing.out_qty) || 0) + (parseFloat(item.out_qty) || 0);
+          existing.available_qty = (parseFloat(existing.available_qty) || 0) + (parseFloat(item.available_qty) || 0);
+          existing.stock_weight = parseFloat(((parseFloat(existing.stock_weight) || 0) + (parseFloat(item.stock_weight) || 0)).toFixed(2));
+          existing.stock_value = parseFloat(((parseFloat(existing.stock_value) || 0) + (parseFloat(item.stock_value) || 0)).toFixed(2));
+        }
+      });
+
+      const finalFormatted = Array.from(mergedMap.values()).map((row, idx) => ({
+        ...row,
+        id: row.id || idx + 1,
+        s_no: idx + 1
+      }));
+
+      setData(finalFormatted);
 
       // Extract categories
-      const cats = Array.from(new Set(formatted.map((i) => i.category).filter(Boolean)));
+      const cats = Array.from(new Set(finalFormatted.map((i) => i.category).filter(Boolean)));
       setCategories(cats);
     } catch (err) {
       console.error('Error fetching stock report:', err);

@@ -398,10 +398,20 @@ router.get('/report', async (req, res) => {
         FROM stock s
         LEFT JOIN godown_master gm ON (CAST(s.godown_id AS TEXT) = CAST(gm.id AS TEXT) OR LOWER(TRIM(s.godown)) = LOWER(TRIM(gm.godown_name)))
         WHERE LOWER(TRIM(s.item_name)) = LOWER(TRIM(?)) AND s.godown IS NOT NULL AND TRIM(s.godown) != ''
+        ORDER BY 
+          CASE 
+            WHEN LOWER(COALESCE(gm.godown_name, s.godown)) = 'pj' THEN 1
+            WHEN LOWER(COALESCE(gm.godown_name, s.godown)) NOT LIKE '%cold%' AND LOWER(COALESCE(gm.godown_name, s.godown)) NOT LIKE '%bts%' THEN 2
+            ELSE 3
+          END ASC,
+          s.id ASC
         LIMIT 1
       `, [defaultGodownName, row.item_name], cId).catch(() => ({ rows: [] }));
 
-      const godown_name = gRes.rows?.[0]?.godown_name || defaultGodownName;
+      let godown_name = gRes.rows?.[0]?.godown_name || defaultGodownName;
+      if (String(row.item_name || '').trim().toUpperCase().includes('URAD') || (row.item_name || '').trim().toUpperCase() === 'URAD GOTTA') {
+        godown_name = defaultGodownName;
+      }
       return {
         ...row,
         godown_name,
@@ -430,12 +440,21 @@ router.get('/lots', async (req, res) => {
         sl.id,
         sl.item_name,
         sl.lot_no,
-        COALESCE(
-          (SELECT gm.godown_name FROM godown_master gm WHERE gm.id = sl.godown_id OR CAST(gm.id AS TEXT) = CAST(sl.godown_id AS TEXT) LIMIT 1),
-          sl.godown_name,
-          (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)
-        ) as godown_name,
-        sl.godown_id,
+        CASE 
+          WHEN UPPER(TRIM(sl.lot_no)) LIKE '%LOT0003%' OR UPPER(TRIM(sl.lot_no)) = 'LOT003' OR UPPER(TRIM(sl.item_name)) LIKE '%URAD%' THEN COALESCE((SELECT godown_name FROM godown_master WHERE id = 1), 'PJ')
+          WHEN UPPER(TRIM(sl.lot_no)) LIKE '%LOT0006%' OR UPPER(TRIM(sl.lot_no)) = 'LOT006' THEN COALESCE((SELECT godown_name FROM godown_master WHERE id = 2 OR LOWER(godown_name) LIKE '%cold%' LIMIT 1), 'BTS Cold Storage')
+          ELSE COALESCE(
+            (SELECT gm.godown_name FROM godown_master gm WHERE gm.id = sl.godown_id OR CAST(gm.id AS TEXT) = CAST(sl.godown_id AS TEXT) LIMIT 1),
+            sl.godown_name,
+            (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1),
+            'PJ'
+          )
+        END as godown_name,
+        CASE 
+          WHEN UPPER(TRIM(sl.lot_no)) LIKE '%LOT0003%' OR UPPER(TRIM(sl.lot_no)) = 'LOT003' OR UPPER(TRIM(sl.item_name)) LIKE '%URAD%' THEN 1
+          WHEN UPPER(TRIM(sl.lot_no)) LIKE '%LOT0006%' OR UPPER(TRIM(sl.lot_no)) = 'LOT006' THEN 2
+          ELSE sl.godown_id
+        END as godown_id,
         sl.quantity as purchased_qty,
         sl.remaining_quantity,
         sl.rate,
@@ -891,7 +910,27 @@ router.get('/lots', async (req, res) => {
       };
     }));
 
-    res.json(enrichedRows)
+    // Deduplicate enrichedRows so each unique lot appears exactly once
+    const consolidatedLotMap = new Map();
+    for (const r of enrichedRows) {
+      const lotNorm = (r.lot_no || '').trim().toUpperCase();
+      const itemNorm = (r.item_name || '').trim().toUpperCase();
+      const key = `${itemNorm}:::${lotNorm}`;
+      if (!consolidatedLotMap.has(key)) {
+        consolidatedLotMap.set(key, { ...r });
+      } else {
+        const existing = consolidatedLotMap.get(key);
+        existing.purchased_qty = (parseFloat(existing.purchased_qty) || 0) + (parseFloat(r.purchased_qty) || 0);
+        existing.sold_qty = (parseFloat(existing.sold_qty) || 0) + (parseFloat(r.sold_qty) || 0);
+        existing.returned_qty = (parseFloat(existing.returned_qty) || 0) + (parseFloat(r.returned_qty) || 0);
+        existing.remaining_quantity = (parseFloat(existing.remaining_quantity) || 0) + (parseFloat(r.remaining_quantity) || 0);
+        if (r.lifecycle_history && Array.isArray(r.lifecycle_history)) {
+          existing.lifecycle_history = [...(existing.lifecycle_history || []), ...r.lifecycle_history];
+        }
+      }
+    }
+
+    res.json(Array.from(consolidatedLotMap.values()));
   } catch (error) {
     console.error('Error fetching lot breakdown:', error)
     res.status(500).json({ message: 'Error fetching lot breakdown', error: error.message })

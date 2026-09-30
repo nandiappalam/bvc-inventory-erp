@@ -1868,7 +1868,18 @@ module.exports = async function autoMigrate() {
   }
 
   // Sync Flour Out & Papad In stock
-  await syncFlourOutAndPapadInStock();
+  try {
+    if (typeof syncFlourOutAndPapadInStock === 'function') {
+      await syncFlourOutAndPapadInStock();
+    } else {
+      const stockSyncModule = require('./utils/stockSync');
+      if (typeof stockSyncModule?.syncFlourOutAndPapadInStock === 'function') {
+        await stockSyncModule.syncFlourOutAndPapadInStock();
+      }
+    }
+  } catch (syncErr) {
+    console.log('Notice in autoMigrate stock sync:', syncErr.message);
+  }
 
   // Sync Item Transfers Stock
   await syncItemTransfersStock();

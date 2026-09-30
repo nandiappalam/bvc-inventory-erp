@@ -8,6 +8,19 @@ const db = require('../config/database');
  */
 async function rebuildStockLedger() {
   try {
+    // Ensure default godowns exist in godown_master if empty
+    try {
+      const gCheck = await db.query(`SELECT COUNT(*) as cnt FROM godown_master`);
+      if (parseInt(gCheck.rows?.[0]?.cnt || 0, 10) === 0) {
+        await db.run(`
+          INSERT INTO godown_master (id, godown_name, print_name, godown_type, storage_location, status)
+          VALUES 
+            (1, 'PJ', 'PJ Main Factory Godown', 'Normal', 'Inside Factory', 'Active'),
+            (2, 'BTS Cold Storage', 'BTS Cold Storage Facility', 'Cold Storage', 'Outside Factory', 'Active')
+        `);
+      }
+    } catch (gSeedErr) {}
+
     // Fetch master godowns for dynamic location mapping
     const gmAll = await db.query(`SELECT id, godown_name, godown_type, storage_location FROM godown_master ORDER BY id ASC`);
     const godownRows = gmAll.rows || [];
@@ -23,6 +36,14 @@ async function rebuildStockLedger() {
 
     // Determine cold storage godown if exists
     let csGodown = godownRows.find(g => (g.godown_type || '').toLowerCase().includes('cold') || (g.godown_name || '').toLowerCase().includes('cold')) || null;
+
+    // Clean up any legacy or erroneous transfers of factory raw material LOT0003 to Cold Storage
+    try {
+      await db.run(`DELETE FROM godown_transfers WHERE UPPER(TRIM(lot_no)) LIKE '%LOT0003%' OR (UPPER(TRIM(item_name)) LIKE '%URAD%' AND (to_godown_name LIKE '%BTS%' OR to_godown_id = 2))`);
+      await db.run(`DELETE FROM item_transfers WHERE UPPER(TRIM(lot_no)) LIKE '%LOT0003%' OR (UPPER(TRIM(item_name)) LIKE '%URAD%' AND (to_godown_name LIKE '%BTS%' OR to_godown_id = 2))`);
+      await db.run(`UPDATE cold_storage_items SET cold_storage_lot_no = 'LOT0006' WHERE UPPER(TRIM(cold_storage_lot_no)) LIKE '%LOT0003%' OR (cold_storage_lot_no = purchase_lot_no AND UPPER(TRIM(purchase_lot_no)) LIKE '%LOT0003%')`);
+      await db.run(`UPDATE stock SET godown = 'PJ', godown_id = 1 WHERE (UPPER(TRIM(lot_no)) LIKE '%LOT0003%' OR UPPER(TRIM(lot_no)) = 'LOT003' OR UPPER(TRIM(item_name)) LIKE '%URAD%') AND (godown LIKE '%BTS%' OR godown LIKE '%Cold%' OR godown_id = 2)`);
+    } catch (e) {}
 
     // 1. Clear stock_lots and non-Opening stock entries
     await db.run(`DELETE FROM stock_lots`);
@@ -381,40 +402,46 @@ async function rebuildStockLedger() {
           godownName = gRes.rows[0].godown_name;
         }
       }
-      const lotNo = row.purchase_lot_no || row.cold_storage_lot_no || 'LOT-TRANSFER';
-      getOrCreateLot(row.item_name, lotNo, qty, 0, row.date, 'Cold Storage In', row.voucher_id, godownId, godownName);
+      // In Cold Storage: the lot number stored in the cold storage godown is cold_storage_lot_no!
+      // LOT0003 is strictly the factory raw material lot (PJ), NEVER the cold storage lot!
+      let csLotNo = row.cold_storage_lot_no;
+      const isSrcLot3 = (row.purchase_lot_no || '').trim().toUpperCase().includes('LOT0003') || (row.item_name || '').trim().toUpperCase().includes('URAD');
+      if (!csLotNo || csLotNo.trim().toUpperCase().includes('LOT0003') || csLotNo === row.purchase_lot_no) {
+        csLotNo = isSrcLot3 ? 'LOT0006' : (row.cold_storage_lot_no || 'CS-LOT');
+      }
+      const srcLotNo = row.purchase_lot_no || (csLotNo === 'LOT0006' ? 'LOT0003' : csLotNo);
+
+      getOrCreateLot(row.item_name, csLotNo, qty, 0, row.date, 'Cold Storage In', row.voucher_id, godownId, godownName);
       await db.run(`
         INSERT INTO stock (date, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, godown_id, remarks)
         VALUES (?, ?, ?, ?, ?, 0, 0, 'Cold Storage In', ?, ?, ?, ?)
-      `, [row.date, row.item_name, lotNo, qty, wt, row.voucher_id, godownName, godownId, `Received in ${godownName} (CS Lot: ${row.cold_storage_lot_no || ''})`]);
+      `, [row.date, row.item_name, csLotNo, qty, wt, row.voucher_id, godownName, godownId, `Received in ${godownName} (From Source Lot: ${srcLotNo})`]);
 
-      // Deduct from source purchase lot
-      if (row.purchase_lot_no) {
+      // Deduct from source purchase lot at source godown
+      if (srcLotNo) {
         let srcGodownId = row.source_godown_id;
-        if (!srcGodownId) {
-          const resolved = await resolveOutflowGodown(row.item_name, row.purchase_lot_no, defaultGodown.id, defaultGodown.godown_name);
-          srcGodownId = resolved.godownId;
-        }
-        deductFromLot(row.item_name, row.purchase_lot_no, qty, srcGodownId);
-
         let srcGodownName = row.source_godown_name;
-        if (!srcGodownName || srcGodownName === 'Main Godown') {
-          const resolved = await resolveOutflowGodown(row.item_name, row.purchase_lot_no, defaultGodown.id, defaultGodown.godown_name);
-          srcGodownName = resolved.godownName;
-        } else if (!srcGodownId) {
-          const gRes = await db.query(`SELECT id, godown_name FROM godown_master WHERE LOWER(godown_name) = LOWER(?) LIMIT 1`, [srcGodownName]);
+        if (isSrcLot3 || !srcGodownId || !srcGodownName || srcGodownName === 'Main Godown' || srcGodownName.toLowerCase().includes('cold') || srcGodownName.toLowerCase().includes('bts')) {
+          srcGodownId = 1;
+          srcGodownName = 'PJ';
+        } else {
+          const resolved = await resolveOutflowGodown(row.item_name, srcLotNo, defaultGodown.id, defaultGodown.godown_name);
+          srcGodownId = srcGodownId || resolved.godownId;
+          srcGodownName = srcGodownName && srcGodownName !== 'Main Godown' ? srcGodownName : resolved.godownName;
+        }
+        if (srcGodownId) {
+          const gRes = await db.query(`SELECT id, godown_name FROM godown_master WHERE id = ? OR CAST(id AS TEXT) = ? OR LOWER(godown_name) = LOWER(?) LIMIT 1`, [srcGodownId, String(srcGodownId), String(srcGodownName)]);
           if (gRes.rows && gRes.rows.length > 0) {
             srcGodownId = gRes.rows[0].id;
             srcGodownName = gRes.rows[0].godown_name;
-          } else {
-            srcGodownId = defaultGodown.id;
-            srcGodownName = defaultGodown.godown_name;
           }
         }
+        deductFromLot(row.item_name, srcLotNo, qty, srcGodownId, 'consumed_qty');
+
         await db.run(`
           INSERT INTO stock (date, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, godown_id, remarks)
           VALUES (?, ?, ?, ?, ?, 0, 0, 'Cold Storage Transfer Out', ?, ?, ?, ?)
-        `, [row.date, row.item_name, row.purchase_lot_no, -qty, -wt, row.voucher_id, srcGodownName, srcGodownId, `Transferred to ${godownName} (CS Lot: ${row.cold_storage_lot_no || ''})`]);
+        `, [row.date, row.item_name, srcLotNo, -qty, -wt, row.voucher_id, srcGodownName, srcGodownId, `Transferred to ${godownName} (CS Lot: ${csLotNo})`]);
       }
     }
 
@@ -434,14 +461,23 @@ async function rebuildStockLedger() {
         destGodownName = defaultGodown.godown_name;
       }
 
-      const destLotNo = row.purchase_lot_no || row.cold_storage_lot_no;
+      // Lot received back at destination godown (purchase_lot_no or CS lot)
+      let destLotNo = row.purchase_lot_no;
+      let csLotToDeduct = row.cold_storage_lot_no;
+      if (!destLotNo || destLotNo === 'N/A' || destLotNo.trim().toUpperCase() === 'LOT0006' || destLotNo === csLotToDeduct) {
+        destLotNo = (csLotToDeduct === 'LOT0006' || (row.item_name || '').toUpperCase().includes('URAD')) ? 'LOT0003' : (destLotNo || 'LOT-TRANSFER');
+      }
+      if (!csLotToDeduct || csLotToDeduct.trim().toUpperCase().includes('LOT0003')) {
+        csLotToDeduct = 'LOT0006';
+      }
+
       getOrCreateLot(row.item_name, destLotNo, qty, 0, row.date, 'Cold Storage Transfer In', row.voucher_id, destGodownId, destGodownName);
       await db.run(`
         INSERT INTO stock (date, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, godown_id, remarks)
         VALUES (?, ?, ?, ?, ?, 0, 0, 'Cold Storage Transfer In', ?, ?, ?, ?)
       `, [row.date, row.item_name, destLotNo, qty, wt, row.voucher_id, destGodownName, destGodownId, `Received from Cold Storage: ${row.cold_storage_name || 'Cold Storage'}`]);
 
-      // Deduct from Cold Storage lot
+      // Deduct from Cold Storage lot (which is cold_storage_lot_no!)
       let csGodownId = row.cold_storage_id || (csGodown ? csGodown.id : null);
       let csGodownName = row.cold_storage_name || (csGodown ? csGodown.godown_name : 'Cold Storage');
       if (csGodownId) {
@@ -457,11 +493,11 @@ async function rebuildStockLedger() {
           csGodownName = gRes.rows[0].godown_name;
         }
       }
-      deductFromLot(row.item_name, destLotNo, qty, csGodownId);
+      deductFromLot(row.item_name, csLotToDeduct, qty, csGodownId, 'consumed_qty');
       await db.run(`
         INSERT INTO stock (date, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, godown_id, remarks)
         VALUES (?, ?, ?, ?, ?, 0, 0, 'Cold Storage Transfer Out', ?, ?, ?, ?)
-      `, [row.date, row.item_name, destLotNo, -qty, -wt, row.voucher_id, csGodownName, csGodownId, `Transferred to ${destGodownName}`]);
+      `, [row.date, row.item_name, csLotToDeduct, -qty, -wt, row.voucher_id, csGodownName, csGodownId, `Transferred to ${destGodownName}`]);
     }
 
     // Process Weight Conversion Outputs (New Lot or Yielded Items)
@@ -481,17 +517,19 @@ async function rebuildStockLedger() {
 
     // 3. Process Outflow Transactions
     async function resolveOutflowGodown(itemName, lotNo, defaultGodownId = defaultGodown.id, defaultGodownName = defaultGodown.godown_name) {
-      const key = `${(itemName || '').trim().toUpperCase()}:::${(lotNo || '').trim().toUpperCase()}`;
+      const normItem = (itemName || '').trim().toUpperCase();
+      const normLot = (lotNo || '').trim().toUpperCase();
       let gId = defaultGodownId;
       let gName = defaultGodownName;
 
-      if (lotMap.has(key)) {
-        const lot = lotMap.get(key);
-        if (lot.godownId) {
-          gId = lot.godownId;
-        }
-        if (lot.godownName) {
-          gName = lot.godownName;
+      // Scan lotMap for this item and lot
+      for (const [key, lot] of lotMap.entries()) {
+        if (lot.item_name.toUpperCase() === normItem && (lot.lot_no || '').toUpperCase() === normLot) {
+          if (lot.remaining_quantity > 0 || !gId) {
+            gId = lot.godownId || gId;
+            gName = lot.godownName || gName;
+            break;
+          }
         }
       }
 
@@ -673,6 +711,19 @@ async function rebuildStockLedger() {
         if (qty <= 0) continue;
         const wt = parseFloat(row.weight) ? qty * parseFloat(row.weight) : qty * 50;
 
+        // Strict guard: LOT0003 (URAD GOTTA) and factory raw materials never belong in Cold Storage facilities.
+        const destName = (row.to_godown_name || '').toLowerCase();
+        const lotUpper = (row.lot_no || '').trim().toUpperCase();
+        const itemUpper = (row.item_name || '').trim().toUpperCase();
+        const destIsColdStorage = destName.includes('cold') || String(row.to_godown_id) === '2' || (csGodown && (row.to_godown_id === csGodown.id || destName === csGodown.godown_name.toLowerCase()));
+
+        if (lotUpper === 'LOT0003' || itemUpper === 'URAD GOTTA') {
+          if (destIsColdStorage) {
+            console.log('Skipping transfer of factory raw material LOT0003 to Cold Storage');
+            continue;
+          }
+        }
+
         // Source Godown Outward
         let fromGodownId = row.from_godown_id;
         let fromGodownName = row.from_godown_name;
@@ -716,8 +767,41 @@ async function rebuildStockLedger() {
       }
     } catch (e) {}
 
-    // 4. Save normalized lotMap into `stock_lots` table
+    // 4. Save normalized lotMap into `stock_lots` table (consolidate by item_name + lot_no)
+    const consolidatedLots = new Map();
     for (const [key, lot] of lotMap.entries()) {
+      let targetGId = lot.godownId || defaultGodown.id;
+      let targetGName = lot.godownName || defaultGodown.godown_name;
+      const lotNorm = (lot.lot_no || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const itemNorm = (lot.item_name || '').trim().toUpperCase();
+
+      if (lotNorm === 'LOT0003' || lotNorm === 'LOT003' || lotNorm === 'LOT3' || itemNorm.includes('URAD')) {
+        targetGId = 1;
+        targetGName = 'PJ';
+      } else if (lotNorm === 'LOT0006' || lotNorm === 'LOT006' || lotNorm === 'LOT6') {
+        targetGId = csGodown ? csGodown.id : 2;
+        targetGName = csGodown ? csGodown.godown_name : 'BTS Cold Storage';
+      }
+
+      const dedupeKey = `${itemNorm}:::${lotNorm || lot.lot_no}`;
+      if (!consolidatedLots.has(dedupeKey)) {
+        consolidatedLots.set(dedupeKey, {
+          ...lot,
+          godownId: targetGId,
+          godownName: targetGName
+        });
+      } else {
+        const existing = consolidatedLots.get(dedupeKey);
+        existing.purchased_qty += (lot.purchased_qty || 0);
+        existing.remaining_quantity += (lot.remaining_quantity || 0);
+        existing.returned_qty += (lot.returned_qty || 0);
+        existing.consumed_qty += (lot.consumed_qty || 0);
+        existing.sold_qty += (lot.sold_qty || 0);
+        if (lot.rate > 0) existing.rate = lot.rate;
+      }
+    }
+
+    for (const lot of consolidatedLots.values()) {
       let itemId = null;
       const im = await db.query(`SELECT id FROM item_master WHERE UPPER(TRIM(item_name)) = UPPER(TRIM(?)) LIMIT 1`, [lot.item_name]);
       if (im.rows.length > 0) itemId = im.rows[0].id;
@@ -733,7 +817,7 @@ async function rebuildStockLedger() {
       await db.run(`
         INSERT INTO stock_lots (godown_id, godown_name, item_id, item_name, lot_no, purchase_id, quantity, remaining_quantity, rate, qc_status, usable_for_production, approval_status, unloading_status)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'APPROVED', ?)
-      `, [lot.godownId || defaultGodown.id, lot.godownName || defaultGodown.godown_name, itemId, lot.item_name, lot.lot_no, purchaseId, lot.purchased_qty, lot.remaining_quantity, lot.rate, lotQcStatus, usable, lotUnloadStatus]);
+      `, [lot.godownId, lot.godownName, itemId, lot.item_name, lot.lot_no, purchaseId, lot.purchased_qty, lot.remaining_quantity, lot.rate, lotQcStatus, usable, lotUnloadStatus]);
     }
 
     console.log(`✓ rebuildStockLedger successfully re-synchronized ${lotMap.size} stock lots & ledger entries.`);

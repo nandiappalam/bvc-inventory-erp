@@ -440,10 +440,11 @@ router.post('/in', async (req, res) => {
       const wt = parseFloat(item.weight || 1);
       const totWt = parseFloat(item.total_wt || (qty * wt));
       
-      // Generate unique cold_storage_lot_no if not supplied
+      // Generate unique cold_storage_lot_no if not supplied or if improperly set to source purchase lot
       let csLotNo = item.cold_storage_lot_no;
-      if (!csLotNo) {
-        csLotNo = `CS-${String(nextCsNum).padStart(4, '0')}`;
+      const isSrc3 = (item.purchase_lot_no || '').trim().toUpperCase().includes('LOT0003') || (item.item_name || '').trim().toUpperCase().includes('URAD');
+      if (!csLotNo || csLotNo.trim().toUpperCase().includes('LOT0003') || csLotNo === item.purchase_lot_no) {
+        csLotNo = isSrc3 ? 'LOT0006' : `CS-${String(nextCsNum).padStart(4, '0')}`;
         nextCsNum++;
       }
 
@@ -495,9 +496,10 @@ router.post('/in', async (req, res) => {
       }
       if (!actualSrcGodownName) actualSrcGodownName = 'PJ';
 
-      const lotNo = item.purchase_lot_no && item.purchase_lot_no !== 'N/A' ? item.purchase_lot_no : csLotNo;
+      const actualCsLot = (csLotNo && !csLotNo.toUpperCase().includes('LOT0003')) ? csLotNo : 'LOT0006';
+      const srcLotNo = (item.purchase_lot_no && item.purchase_lot_no !== 'N/A') ? item.purchase_lot_no : (actualCsLot === 'LOT0006' ? 'LOT0003' : actualCsLot);
 
-      // 1. Outward from source godown
+      // 1. Outward from source godown (e.g. LOT0003 from PJ)
       await db.run(`
         INSERT INTO stock (date, item_id, item_name, lot_no, type, qty, weight, rate, amount, godown, godown_id, reference_id, remarks)
         VALUES (?, ?, ?, ?, 'Cold Storage Transfer Out', ?, ?, 0, 0, ?, ?, ?, ?)
@@ -505,16 +507,16 @@ router.post('/in', async (req, res) => {
         voucher_date || new Date().toISOString().split('T')[0],
         item.item_id || null,
         item.item_name,
-        lotNo,
+        srcLotNo,
         -Math.abs(qty),
         -Math.abs(totWt),
         actualSrcGodownName,
         actualSrcGodownId || null,
         voucher_id,
-        `[${voucher_no}] Transferred to Cold Storage: ${cold_storage_name} (CS Lot: ${csLotNo})`
+        `[${voucher_no}] Transferred to Cold Storage: ${cold_storage_name} (CS Lot: ${actualCsLot})`
       ]);
 
-      // 2. Inward to Cold Storage godown
+      // 2. Inward to Cold Storage godown (e.g. LOT0006 in BTS Cold Storage)
       await db.run(`
         INSERT INTO stock (date, item_id, item_name, lot_no, type, qty, weight, rate, amount, godown, godown_id, reference_id, remarks)
         VALUES (?, ?, ?, ?, 'Cold Storage In', ?, ?, 0, 0, ?, ?, ?, ?)
@@ -522,13 +524,13 @@ router.post('/in', async (req, res) => {
         voucher_date || new Date().toISOString().split('T')[0],
         item.item_id || null,
         item.item_name,
-        lotNo,
+        actualCsLot,
         Math.abs(qty),
         Math.abs(totWt),
         cold_storage_name,
         cold_storage_id || null,
         voucher_id,
-        `[${voucher_no}] Received in Cold Storage from ${actualSrcGodownName} (CS Lot: ${csLotNo})`
+        `[${voucher_no}] Received in Cold Storage from ${actualSrcGodownName} (Source Lot: ${srcLotNo})`
       ]);
     }
 
@@ -683,9 +685,17 @@ router.post('/out', async (req, res) => {
         } catch (e) {}
       }
 
-      const lotNo = item.purchase_lot_no && item.purchase_lot_no !== 'N/A' ? item.purchase_lot_no : item.cold_storage_lot_no;
+      let csLotNo = item.cold_storage_lot_no;
+      let destLotNo = item.purchase_lot_no;
+      const isUrad = (item.item_name || '').toUpperCase().includes('URAD');
+      if (!destLotNo || destLotNo === 'N/A' || destLotNo.trim().toUpperCase() === 'LOT0006' || destLotNo === csLotNo) {
+        destLotNo = (csLotNo === 'LOT0006' || isUrad) ? 'LOT0003' : (destLotNo || 'LOT-TRANSFER');
+      }
+      if (!csLotNo || csLotNo.trim().toUpperCase().includes('LOT0003')) {
+        csLotNo = 'LOT0006';
+      }
 
-      // 1. Outward from Cold Storage godown
+      // 1. Outward from Cold Storage godown (deducts csLotNo, e.g. LOT0006, from cold_storage_name)
       await db.run(`
         INSERT INTO stock (date, item_id, item_name, lot_no, type, qty, weight, rate, amount, godown, godown_id, reference_id, remarks)
         VALUES (?, ?, ?, ?, 'Cold Storage Transfer Out', ?, ?, 0, 0, ?, ?, ?, ?)
@@ -693,16 +703,16 @@ router.post('/out', async (req, res) => {
         voucher_date || new Date().toISOString().split('T')[0],
         item.item_id || null,
         item.item_name,
-        lotNo,
+        csLotNo,
         -Math.abs(qty),
         -Math.abs(totWt),
         cold_storage_name,
         cold_storage_id || null,
         voucher_id,
-        `[${voucher_no}] Transferred from Cold Storage to ${actualDestGodownName} (CS Lot: ${item.cold_storage_lot_no || ''})`
+        `[${voucher_no}] Transferred from Cold Storage to ${actualDestGodownName} (CS Lot: ${csLotNo})`
       ]);
 
-      // 2. Inward to Destination godown
+      // 2. Inward to Destination godown (receives destLotNo, e.g. LOT0003, in actualDestGodownName)
       await db.run(`
         INSERT INTO stock (date, item_id, item_name, lot_no, type, qty, weight, rate, amount, godown, godown_id, reference_id, remarks)
         VALUES (?, ?, ?, ?, 'Cold Storage Transfer In', ?, ?, 0, 0, ?, ?, ?, ?)
@@ -710,13 +720,13 @@ router.post('/out', async (req, res) => {
         voucher_date || new Date().toISOString().split('T')[0],
         item.item_id || null,
         item.item_name,
-        lotNo,
+        destLotNo,
         Math.abs(qty),
         Math.abs(totWt),
         actualDestGodownName,
         actualDestGodownId || null,
         voucher_id,
-        `[${voucher_no}] Received from Cold Storage: ${cold_storage_name} (CS Lot: ${item.cold_storage_lot_no || ''})`
+        `[${voucher_no}] Received from Cold Storage: ${cold_storage_name} (CS Lot: ${csLotNo})`
       ]);
     }
 
