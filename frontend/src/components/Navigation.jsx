@@ -22,8 +22,10 @@ import DashboardCustomizeIcon from '@mui/icons-material/DashboardCustomize';
 import LogoutIcon from '@mui/icons-material/Logout';
 import CalculateIcon from '@mui/icons-material/Calculate';
 import RecyclingIcon from '@mui/icons-material/Recycling';
+import SearchIcon from '@mui/icons-material/Search';
 import CalculatorModal from './CalculatorModal';
 import RecycleBinModal from './RecycleBinModal';
+import UniversalSearchModal from './common/UniversalSearchModal';
 import StockAlertBell from './StockAlert/StockAlertBell';
 import CentralNotificationsBell from './CentralNotificationsBell';
 import SystemStatus from './SystemStatus';
@@ -321,7 +323,20 @@ const Navigation = () => {
   
   const [calcOpen, setCalcOpen] = useState(false);
   const [recycleBinOpen, setRecycleBinOpen] = useState(false);
+  const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date().toLocaleString());
+
+  // Global keyboard shortcut: Ctrl+K / Cmd+K opens Universal ERP Search
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setSearchModalOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -906,6 +921,44 @@ const Navigation = () => {
             <Typography variant="body2" sx={{ color: '#e0f2fe', fontSize: '12px', background: 'rgba(255,255,255,0.15)', px: 1, py: 0.3, borderRadius: '4px', fontFamily: 'monospace' }}>
               {currentTime}
             </Typography>
+
+            {/* Universal Search Header Action */}
+            <Tooltip title="Search anything in BVC ERP (Ctrl + K)">
+              <Button
+                onClick={() => setSearchModalOpen(true)}
+                size="small"
+                startIcon={<SearchIcon sx={{ fontSize: 17 }} />}
+                sx={{
+                  color: '#ffffff',
+                  backgroundColor: 'rgba(255, 255, 255, 0.16)',
+                  border: '1px solid rgba(255, 255, 255, 0.35)',
+                  borderRadius: '20px',
+                  px: 1.8,
+                  py: 0.4,
+                  textTransform: 'none',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  letterSpacing: '0.2px',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                  transition: 'all 0.2s ease',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 0.5,
+                  '&:hover': {
+                    backgroundColor: 'rgba(255, 255, 255, 0.28)',
+                    borderColor: '#ffffff',
+                    boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+                    transform: 'translateY(-1px)'
+                  }
+                }}
+              >
+                <span>Search BVC ERP...</span>
+                <Box component="span" sx={{ ml: 0.8, px: 0.8, py: 0.1, bgcolor: 'rgba(0,0,0,0.3)', borderRadius: '10px', fontSize: '11px', fontFamily: 'monospace', fontWeight: 700 }}>
+                  Ctrl K
+                </Box>
+              </Button>
+            </Tooltip>
+
             <SystemStatus />
             <StockAlertBell />
             <CentralNotificationsBell />
@@ -1714,6 +1767,9 @@ const Navigation = () => {
 
       {/* Recycle Bin Dialog Modal */}
       <RecycleBinModal open={recycleBinOpen} onClose={() => setRecycleBinOpen(false)} />
+
+      {/* Universal Common ERP Search Modal */}
+      <UniversalSearchModal open={searchModalOpen} onClose={() => setSearchModalOpen(false)} />
     </>
   );
 };

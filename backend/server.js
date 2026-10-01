@@ -139,6 +139,9 @@ app.use('/api/open', openRouter)
 // Accounts Reports API - Mounted under /api/accounts
 app.use('/api/accounts', reportsRouter)
 
+// Universal ERP Common Search API
+app.use('/api/search', require('./routes/search'))
+
 // Companies, Auth and Features API
 app.use('/api/companies', companiesRouter)
 app.use('/api/auth', authRouter)
