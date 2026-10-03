@@ -12,7 +12,8 @@ import {
   CircularProgress,
   Alert,
   InputAdornment,
-  IconButton
+  IconButton,
+  Chip
 } from '@mui/material';
 import LockIcon from '@mui/icons-material/Lock';
 import PersonIcon from '@mui/icons-material/Person';
@@ -33,8 +34,8 @@ const LoginPage = () => {
   const navigate = useNavigate();
   const { login: setAuthLogin, selectedCompany } = useAuth();
 
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
+  const [username, setUsername] = useState('admin');
+  const [password, setPassword] = useState('admin123');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -231,6 +232,28 @@ const LoginPage = () => {
               }}
             />
 
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 1.5, mb: 1 }}>
+              <Typography variant="caption" sx={{ color: '#64748b' }}>
+                Quick Fill:
+              </Typography>
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Chip 
+                  size="small" 
+                  label="Admin (admin / admin123)" 
+                  onClick={() => { setUsername('admin'); setPassword('admin123'); }} 
+                  clickable 
+                  sx={{ fontSize: '0.75rem', bgcolor: themeColors.lightBlue, color: themeColors.primary, fontWeight: 600 }}
+                />
+                <Chip 
+                  size="small" 
+                  label="Staff (staff / staff123)" 
+                  onClick={() => { setUsername('staff'); setPassword('staff123'); }} 
+                  clickable 
+                  sx={{ fontSize: '0.75rem', bgcolor: '#f1f5f9', color: '#475569', fontWeight: 600 }}
+                />
+              </Box>
+            </Box>
+
             {/* Login Button */}
             <Button
               type="submit"
@@ -239,8 +262,8 @@ const LoginPage = () => {
               size="large"
               disabled={loading}
               sx={{
-                mt: 3,
-                mb: 2,
+                mt: 2,
+                mb: 1.5,
                 backgroundColor: themeColors.primary,
                 '&:hover': { backgroundColor: themeColors.secondary },
                 py: 1.5,
@@ -251,10 +274,25 @@ const LoginPage = () => {
               {loading ? (
                 <CircularProgress size={24} sx={{ color: themeColors.white }} />
               ) : (
-                'Login'
+                `Login to ${selectedCompany?.name || 'Company'}`
               )}
             </Button>
           </form>
+
+          {/* Swap Company Option */}
+          <Button
+            fullWidth
+            variant="text"
+            onClick={() => navigate('/company-select')}
+            sx={{
+              color: themeColors.primary,
+              textTransform: 'none',
+              fontWeight: 600,
+              mt: 1
+            }}
+          >
+            ← Swap / Choose Different Company
+          </Button>
 
           {/* Help Text */}
           <Typography variant="body2" color="textSecondary" sx={{ textAlign: 'center', mt: 2 }}>

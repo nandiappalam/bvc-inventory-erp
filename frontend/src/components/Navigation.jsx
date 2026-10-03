@@ -353,13 +353,13 @@ const Navigation = () => {
     return () => clearInterval(timer);
   }, []);
 
-  const [entryOpen, setEntryOpen] = useState(true);
-  const [masterOpen, setMasterOpen] = useState(true);
+  const [entryOpen, setEntryOpen] = useState(false);
+  const [masterOpen, setMasterOpen] = useState(false);
   const [coldStorageOpen, setColdStorageOpen] = useState(false);
   const [qualityOpen, setQualityOpen] = useState(false);
   const [documentsOpen, setDocumentsOpen] = useState(false);
   const [manufacturingOpen, setManufacturingOpen] = useState(false);
-  const [intelligenceOpen, setIntelligenceOpen] = useState(true);
+  const [intelligenceOpen, setIntelligenceOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [accountsOpen, setAccountsOpen] = useState(false);
   const [featuresOpen, setFeaturesOpen] = useState(false);

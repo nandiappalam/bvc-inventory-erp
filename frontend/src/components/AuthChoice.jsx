@@ -126,10 +126,10 @@ const AuthChoice = () => {
           {/* Back Button */}
           <Button
             fullWidth
-            sx={{ mt: 3, color: themeColors.textPrimary }}
+            sx={{ mt: 3, color: themeColors.primary, fontWeight: 600 }}
             onClick={() => navigate('/company-select')}
           >
-            ← Back to Company List
+            ← Swap / Select Another Company
           </Button>
         </CardContent>
       </Card>
