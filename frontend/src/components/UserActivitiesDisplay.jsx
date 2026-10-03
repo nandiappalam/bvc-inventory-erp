@@ -37,31 +37,38 @@ const themeColors = {
   textPrimary: '#333333',
 };
 
-const formatLocalDate = (createdAtVal, defaultDate) => {
-  if (!createdAtVal) return defaultDate || '-';
-  let dateStr = createdAtVal;
-  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(createdAtVal)) {
-    dateStr = createdAtVal.replace(' ', 'T') + 'Z';
+const parseToDate = (val) => {
+  if (!val) return null;
+  if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
+  let str = String(val).trim();
+  // If it's a SQL/ISO timestamp without explicit timezone, e.g. "2026-10-03 09:57:13" or "2026-10-03T09:57:13.123"
+  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/.test(str)) {
+    str = str.replace(' ', 'T');
+    if (!str.endsWith('Z') && !/[+-]\d{2}:\d{2}$/.test(str)) {
+      str += 'Z';
+    }
   }
-  const dt = new Date(dateStr);
-  if (isNaN(dt.getTime())) return defaultDate || '-';
-  
-  const day = String(dt.getDate()).padStart(2, '0');
-  const month = String(dt.getMonth() + 1).padStart(2, '0');
-  const year = dt.getFullYear();
-  return `${day}-${month}-${year}`;
+  const dt = new Date(str);
+  return isNaN(dt.getTime()) ? null : dt;
+};
+
+const formatLocalDate = (createdAtVal, defaultDate) => {
+  const dt = parseToDate(createdAtVal);
+  if (dt) {
+    const day = String(dt.getDate()).padStart(2, '0');
+    const month = String(dt.getMonth() + 1).padStart(2, '0');
+    const year = dt.getFullYear();
+    return `${day}-${month}-${year}`;
+  }
+  return defaultDate || '-';
 };
 
 const formatLocalTime = (createdAtVal, defaultTime) => {
-  if (!createdAtVal) return defaultTime || '-';
-  let dateStr = createdAtVal;
-  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(createdAtVal)) {
-    dateStr = createdAtVal.replace(' ', 'T') + 'Z';
+  const dt = parseToDate(createdAtVal);
+  if (dt) {
+    return dt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true });
   }
-  const dt = new Date(dateStr);
-  if (isNaN(dt.getTime())) return defaultTime || '-';
-  
-  return dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true });
+  return defaultTime || '-';
 };
 
 const UserActivitiesDisplay = () => {

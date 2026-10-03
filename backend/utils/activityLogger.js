@@ -16,11 +16,10 @@ async function logUserActivity(req, activityType, remarks, companyId = 1) {
     }
 
     const now = new Date();
-    const day = String(now.getDate()).padStart(2, '0');
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const year = now.getFullYear();
-    const activity_date = `${day}-${month}-${year}`; // DD-MM-YYYY
-    const activity_time = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true });
+    // Record explicit date & time in Indian Standard Time (Asia/Kolkata - IST UTC+5:30)
+    const activity_date = now.toLocaleDateString('en-GB', { timeZone: 'Asia/Kolkata' }).replace(/\//g, '-'); // DD-MM-YYYY
+    const activity_time = now.toLocaleTimeString('en-US', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true });
+    const iso_created = now.toISOString();
 
     await db.run(`
       CREATE TABLE IF NOT EXISTS user_activities (
@@ -36,8 +35,8 @@ async function logUserActivity(req, activityType, remarks, companyId = 1) {
     `);
 
     await db.run(
-      `INSERT INTO user_activities (user_name, activity_type, activity_date, activity_time, remarks, company_id) VALUES (?, ?, ?, ?, ?, ?)`,
-      [userName, activityType, activity_date, activity_time, remarks || '', companyId]
+      `INSERT INTO user_activities (user_name, activity_type, activity_date, activity_time, remarks, company_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [userName, activityType, activity_date, activity_time, remarks || '', companyId, iso_created]
     );
   } catch (err) {
     console.error('Error in logUserActivity:', err.message);

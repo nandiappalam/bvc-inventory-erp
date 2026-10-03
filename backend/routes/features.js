@@ -62,33 +62,25 @@ router.get('/activities', async (req, res) => {
     const { startDate, endDate, user } = req.query;
     let rows = [];
 
-    // 1. Explicit user_activities table
-    try {
-      let query = `SELECT id, activity_date as date, activity_time as time, user_name as user, activity_type as activities, remarks, created_at FROM user_activities WHERE 1=1`;
-      const params = [];
-      if (user) {
-        query += ` AND LOWER(user_name) LIKE LOWER(?)`;
-        params.push(`%${user}%`);
-      }
-      const actRes = await db.query(query, params);
-      (actRes.rows || []).forEach(r => {
-        rows.push({
-          id: `ua-${r.id}`,
-          date: r.date,
-          time: r.time,
-          user: r.user || 'admin',
-          activities: r.activities,
-          remarks: r.remarks || '',
-          created_at: r.created_at
-        });
-      });
-    } catch (e) {
-      console.error('Error fetching user_activities table:', e.message);
-    }
-
-    // Helper to format date/time
+    // Helper to format date/time in Indian Standard Time (IST - Asia/Kolkata)
     const parseFormat = (dtVal, fallbackDate) => {
-      let dt = dtVal ? new Date(dtVal) : null;
+      let dt = null;
+      if (dtVal instanceof Date) {
+        dt = dtVal;
+      } else if (typeof dtVal === 'string') {
+        let s = dtVal.trim();
+        // If it's a SQL timestamp without timezone, e.g. "2026-10-03 09:57:13" or "2026-10-03 09:57:13.123"
+        if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/.test(s)) {
+          s = s.replace(' ', 'T');
+          if (!s.endsWith('Z') && !/[+-]\d{2}:\d{2}$/.test(s)) {
+            s += 'Z';
+          }
+        }
+        dt = new Date(s);
+      } else if (dtVal) {
+        dt = new Date(dtVal);
+      }
+
       if (!dt || isNaN(dt.getTime())) {
         if (fallbackDate && fallbackDate.length >= 8) {
           if (fallbackDate.includes('-')) {
@@ -99,13 +91,44 @@ router.get('/activities', async (req, res) => {
         }
       }
       if (!dt || isNaN(dt.getTime())) dt = new Date();
-      const day = String(dt.getDate()).padStart(2, '0');
-      const month = String(dt.getMonth() + 1).padStart(2, '0');
-      const year = dt.getFullYear();
-      const dateStr = `${day}-${month}-${year}`;
-      const timeStr = dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true });
+
+      const dateStr = dt.toLocaleDateString('en-GB', { timeZone: 'Asia/Kolkata' }).replace(/\//g, '-'); // DD-MM-YYYY
+      const timeStr = dt.toLocaleTimeString('en-US', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true });
       return { dateStr, timeStr, iso: dt.toISOString() };
     };
+
+    // 1. Explicit user_activities table
+    try {
+      let query = `SELECT id, activity_date as date, activity_time as time, user_name as user, activity_type as activities, remarks, created_at FROM user_activities WHERE 1=1`;
+      const params = [];
+      if (user) {
+        query += ` AND LOWER(user_name) LIKE LOWER(?)`;
+        params.push(`%${user}%`);
+      }
+      const actRes = await db.query(query, params);
+      (actRes.rows || []).forEach(r => {
+        let dStr = r.date;
+        let tStr = r.time;
+        let isoStr = r.created_at;
+        if (r.created_at) {
+          const parsed = parseFormat(r.created_at, r.date);
+          dStr = parsed.dateStr;
+          tStr = parsed.timeStr;
+          isoStr = parsed.iso;
+        }
+        rows.push({
+          id: `ua-${r.id}`,
+          date: dStr,
+          time: tStr,
+          user: r.user || 'admin',
+          activities: r.activities,
+          remarks: r.remarks || '',
+          created_at: isoStr
+        });
+      });
+    } catch (e) {
+      console.error('Error fetching user_activities table:', e.message);
+    }
 
     // 2. Purchases module creations
     try {
