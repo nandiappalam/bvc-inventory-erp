@@ -213,6 +213,73 @@ const PurchaseRequestDashboard = () => {
         </Grid>
       </Grid>
 
+      {/* Extended Requisition Tracking KPIs */}
+      <Grid container spacing={2} sx={{ mb: 3 }}>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card elevation={2} sx={{ borderRadius: 1.5, borderLeft: '5px solid #0284c7' }}>
+            <CardContent>
+              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 'bold' }}>
+                PR → PO CONVERTED
+              </Typography>
+              <Typography variant="h4" sx={{ fontWeight: 'bold', color: '#0284c7', my: 0.5 }}>
+                {metrics.converted_to_po || 0}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Transferred into active Purchase Orders
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12} sm={6} md={3}>
+          <Card elevation={2} sx={{ borderRadius: 1.5, borderLeft: '5px solid #d97706' }}>
+            <CardContent>
+              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 'bold' }}>
+                PENDING DEMAND QTY
+              </Typography>
+              <Typography variant="h4" sx={{ fontWeight: 'bold', color: '#d97706', my: 0.5 }}>
+                {(metrics.pending_qty || 0).toLocaleString('en-IN', { maximumFractionDigits: 1 })} kg
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Unfulfilled raw material requisition volume
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12} sm={6} md={3}>
+          <Card elevation={2} sx={{ borderRadius: 1.5, borderLeft: '5px solid #e11d48' }}>
+            <CardContent>
+              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 'bold' }}>
+                OVERDUE REQUISITIONS
+              </Typography>
+              <Typography variant="h4" sx={{ fontWeight: 'bold', color: '#e11d48', my: 0.5 }}>
+                {metrics.overdue_pr || 0}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Required date has passed without PO
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12} sm={6} md={3}>
+          <Card elevation={2} sx={{ borderRadius: 1.5, borderLeft: '5px solid #64748b' }}>
+            <CardContent>
+              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 'bold' }}>
+                REJECTED REQUISITIONS
+              </Typography>
+              <Typography variant="h4" sx={{ fontWeight: 'bold', color: '#64748b', my: 0.5 }}>
+                {metrics.rejected_pr || 0}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Declined during executive review
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+
       {/* Main Dashboard Grid */}
       <Grid container spacing={3}>
         {/* Recent Purchase Requests */}

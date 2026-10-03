@@ -20,6 +20,7 @@ export const MasterTableLayout = ({
   onRefresh,
   moduleName,
   extraFilters = null,
+  renderExtraActions = null,
 }) => {
   const { isAdmin, hasPermission } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
@@ -205,7 +206,7 @@ export const MasterTableLayout = ({
                 ))}
 
                 {showActions && (
-                  <th className="actions-header" style={{ width: onPrint ? '200px' : '140px', minWidth: onPrint ? '200px' : '140px' }}>Actions</th>
+                  <th className="actions-header" style={{ width: (onPrint || renderExtraActions) ? '250px' : '140px', minWidth: (onPrint || renderExtraActions) ? '250px' : '140px' }}>Actions</th>
                 )}
               </tr>
             </thead>
@@ -226,10 +227,11 @@ export const MasterTableLayout = ({
                     ))}
                     {showActions && (
                       <td className="actions-cell">
+                        {renderExtraActions && renderExtraActions(row)}
                         {canPrint && onPrint && <button onClick={() => onPrint(row)} className="action-btn print-btn" disabled={deleting}>Print</button>}
                         {canEdit && <button onClick={() => onEdit(row)} className="action-btn update-btn" disabled={deleting}>Update</button>}
                         {canDelete && <button onClick={() => setDeleteConfirmRow(row)} className="action-btn delete-btn" disabled={deleting}>Delete</button>}
-                        {!canEdit && !canPrint && !canDelete && <span style={{ color: '#888', fontSize: '12px' }}>-</span>}
+                        {!canEdit && !canPrint && !canDelete && !renderExtraActions && <span style={{ color: '#888', fontSize: '12px' }}>-</span>}
                       </td>
                     )}
                   </tr>

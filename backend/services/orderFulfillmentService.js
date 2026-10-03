@@ -105,6 +105,52 @@ class OrderFulfillmentService {
   }
 
   /**
+   * Get Active Fulfillment Exception Alerts for Dashboard
+   */
+  async getExceptionAlerts() {
+    const ordersRes = await db.query('SELECT * FROM customer_order_fulfillment ORDER BY order_date DESC, id DESC');
+    const orders = ordersRes.rows || [];
+    const nowStr = new Date().toISOString().split('T')[0];
+    const alerts = [];
+
+    for (const ord of orders) {
+      if (['COMPLETED', 'CANCELLED', 'DISPATCHED'].includes(ord.status)) continue;
+
+      if (ord.target_delivery_date && ord.target_delivery_date < nowStr) {
+        alerts.push({
+          id: `overdue-${ord.id}`,
+          orderId: ord.id,
+          orderNo: ord.order_no,
+          customerName: ord.customer_name,
+          exceptionType: 'OVERDUE_DELIVERY',
+          details: `Target delivery date (${ord.target_delivery_date}) has passed`
+        });
+      }
+      if (ord.status === 'QC_HOLD') {
+        alerts.push({
+          id: `qchold-${ord.id}`,
+          orderId: ord.id,
+          orderNo: ord.order_no,
+          customerName: ord.customer_name,
+          exceptionType: 'QC_HOLD',
+          details: 'Quarantine quality check pending approval'
+        });
+      }
+      if (ord.status === 'STOCK_PENDING') {
+        alerts.push({
+          id: `shortage-${ord.id}`,
+          orderId: ord.id,
+          orderNo: ord.order_no,
+          customerName: ord.customer_name,
+          exceptionType: 'STOCK_SHORTAGE',
+          details: 'Raw material stock allocation required'
+        });
+      }
+    }
+    return alerts;
+  }
+
+  /**
    * Create New Customer Order for Fulfillment Tracking
    */
   async createOrder(data) {

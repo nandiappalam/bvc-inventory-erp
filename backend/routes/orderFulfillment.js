@@ -25,7 +25,7 @@ router.get(['/orders', '/orders-pipeline'], async (req, res) => {
 // Exception Alerts
 router.get(['/exceptions', '/exception-alerts'], async (req, res) => {
   try {
-    const data = await service.getExceptionAlerts ? service.getExceptionAlerts() : [];
+    const data = typeof service.getExceptionAlerts === 'function' ? await service.getExceptionAlerts() : [];
     res.json({ success: true, data });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

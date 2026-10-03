@@ -141,7 +141,7 @@ router.get('/available-lots', async (req, res) => {
           pi.item_name,
           pi.lot_no AS purchase_lot_no,
           COALESCE(g.godown_name, p.godown, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) AS current_godown,
-          COALESCE(g.id, p.godown_id, (SELECT id FROM godown_master ORDER BY id ASC LIMIT 1)) AS current_godown_id,
+          COALESCE(g.id, (SELECT id FROM godown_master ORDER BY id ASC LIMIT 1)) AS current_godown_id,
           SUM(pi.qty) AS purchased_qty,
           SUM(COALESCE(pi.total_wt, pi.qty * COALESCE(pi.weight, 0), pi.qty)) AS total_weight,
           COALESCE(NULLIF(MAX(pi.weight), 0), NULLIF(MAX(pi.per_unit_weight), 0), 1) AS weight,
@@ -151,7 +151,7 @@ router.get('/available-lots', async (req, res) => {
         LEFT JOIN purchases p ON pi.purchase_id = p.id
         LEFT JOIN godown_master g ON (CAST(p.godown AS TEXT) = CAST(g.id AS TEXT) OR LOWER(TRIM(p.godown)) = LOWER(TRIM(g.godown_name)))
         WHERE pi.lot_no IS NOT NULL AND pi.lot_no != ''
-        GROUP BY pi.item_name, pi.lot_no, g.godown_name, p.godown, g.id, p.godown_id, pi.unit
+        GROUP BY pi.item_name, pi.lot_no, g.godown_name, p.godown, g.id, pi.unit
         ORDER BY pi.item_name, pi.lot_no
       `);
     } catch (colErr) {
@@ -440,11 +440,12 @@ router.post('/in', async (req, res) => {
       const wt = parseFloat(item.weight || 1);
       const totWt = parseFloat(item.total_wt || (qty * wt));
       
-      // Generate unique cold_storage_lot_no if not supplied or if improperly set to source purchase lot
+      // Generate unique cold_storage_lot_no if not supplied
       let csLotNo = item.cold_storage_lot_no;
-      const isSrc3 = (item.purchase_lot_no || '').trim().toUpperCase().includes('LOT0003') || (item.item_name || '').trim().toUpperCase().includes('URAD');
-      if (!csLotNo || csLotNo.trim().toUpperCase().includes('LOT0003') || csLotNo === item.purchase_lot_no) {
-        csLotNo = isSrc3 ? 'LOT0006' : `CS-${String(nextCsNum).padStart(4, '0')}`;
+      if (!csLotNo || csLotNo === item.purchase_lot_no) {
+        csLotNo = (item.purchase_lot_no && item.purchase_lot_no !== 'N/A')
+          ? (item.purchase_lot_no.startsWith('CS-') ? item.purchase_lot_no : `CS-${item.purchase_lot_no}`)
+          : `CS-${String(nextCsNum).padStart(4, '0')}`;
         nextCsNum++;
       }
 
@@ -472,7 +473,7 @@ router.post('/in', async (req, res) => {
       if (!actualSrcGodownName || actualSrcGodownName === 'Main Godown') {
         try {
           const pLookup = await db.query(`
-            SELECT COALESCE(g.godown_name, p.godown) as godown_name, COALESCE(g.id, p.godown_id, 3) as godown_id
+            SELECT COALESCE(g.godown_name, p.godown) as godown_name, COALESCE(g.id, 3) as godown_id
             FROM purchases p
             JOIN purchase_items pi ON pi.purchase_id = p.id
             LEFT JOIN godown_master g ON (CAST(p.godown AS TEXT) = CAST(g.id AS TEXT) OR LOWER(TRIM(p.godown)) = LOWER(TRIM(g.godown_name)))
@@ -496,8 +497,8 @@ router.post('/in', async (req, res) => {
       }
       if (!actualSrcGodownName) actualSrcGodownName = 'PJ';
 
-      const actualCsLot = (csLotNo && !csLotNo.toUpperCase().includes('LOT0003')) ? csLotNo : 'LOT0006';
-      const srcLotNo = (item.purchase_lot_no && item.purchase_lot_no !== 'N/A') ? item.purchase_lot_no : (actualCsLot === 'LOT0006' ? 'LOT0003' : actualCsLot);
+      const actualCsLot = csLotNo;
+      const srcLotNo = (item.purchase_lot_no && item.purchase_lot_no !== 'N/A') ? item.purchase_lot_no : actualCsLot.replace(/^CS-/, '');
 
       // 1. Outward from source godown (e.g. LOT0003 from PJ)
       await db.run(`
@@ -687,12 +688,8 @@ router.post('/out', async (req, res) => {
 
       let csLotNo = item.cold_storage_lot_no;
       let destLotNo = item.purchase_lot_no;
-      const isUrad = (item.item_name || '').toUpperCase().includes('URAD');
-      if (!destLotNo || destLotNo === 'N/A' || destLotNo.trim().toUpperCase() === 'LOT0006' || destLotNo === csLotNo) {
-        destLotNo = (csLotNo === 'LOT0006' || isUrad) ? 'LOT0003' : (destLotNo || 'LOT-TRANSFER');
-      }
-      if (!csLotNo || csLotNo.trim().toUpperCase().includes('LOT0003')) {
-        csLotNo = 'LOT0006';
+      if (!destLotNo || destLotNo === 'N/A' || destLotNo === csLotNo) {
+        destLotNo = csLotNo ? csLotNo.replace(/^CS-/, '') : 'LOT-TRANSFER';
       }
 
       // 1. Outward from Cold Storage godown (deducts csLotNo, e.g. LOT0006, from cold_storage_name)

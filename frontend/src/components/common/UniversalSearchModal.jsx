@@ -966,29 +966,42 @@ const UniversalSearchModal = ({ open, onClose }) => {
                         <Paper
                           key={i}
                           elevation={0}
-                          onClick={() => handleNavigate(doc.url, doc.docNumber || doc.title)}
                           sx={{
                             p: 1.5,
                             borderRadius: '8px',
                             border: '1px solid #e2e8f0',
-                            cursor: 'pointer',
                             display: 'flex',
                             justifyContent: 'space-between',
                             alignItems: 'center',
+                            flexWrap: 'wrap',
+                            gap: 1,
                             '&:hover': { bgcolor: '#f8fafc', borderColor: '#2563eb' }
                           }}
                         >
                           <Box display="flex" alignItems="center" gap={1.5}>
-                            <DescriptionIcon sx={{ color: '#0284c7', fontSize: 20 }} />
+                            <DescriptionIcon sx={{ color: doc.type?.includes('Digital') ? '#16a34a' : '#0284c7', fontSize: 22 }} />
                             <Box>
                               <Box display="flex" alignItems="center" gap={1}>
-                                <Chip label={doc.docCode} size="small" sx={{ height: 18, fontSize: '10px', fontWeight: 800, bgcolor: '#f1f5f9' }} />
+                                <Chip label={doc.docCode || doc.type} size="small" sx={{ height: 18, fontSize: '10px', fontWeight: 800, bgcolor: '#f1f5f9' }} />
                                 <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a' }}>{doc.title}</Typography>
+                                {doc.status && <Chip label={doc.status} size="small" color={doc.statusColor || 'success'} sx={{ height: 18, fontSize: '10px', fontWeight: 700 }} />}
                               </Box>
-                              <Typography variant="caption" sx={{ color: '#64748b' }}>Doc: {doc.docNumber || '—'} | Dept: {doc.department || 'Operations'}</Typography>
+                              <Typography variant="caption" sx={{ color: '#64748b' }}>
+                                Doc: {doc.docNumber || '—'} {doc.date && `| Date: ${doc.date}`} {doc.department && `| Dept: ${doc.department}`}
+                              </Typography>
                             </Box>
                           </Box>
-                          <Chip label={doc.status || 'Active'} size="small" color="success" sx={{ height: 18, fontSize: '10px', fontWeight: 700 }} />
+                          <Stack direction="row" spacing={1}>
+                            <Button
+                              size="small"
+                              variant="contained"
+                              color={doc.type?.includes('Digital') ? 'success' : 'primary'}
+                              onClick={() => handleNavigate(doc.actionUrl || doc.url, doc.docNumber || doc.title)}
+                              sx={{ textTransform: 'none', fontWeight: 700, borderRadius: '6px', py: 0.2, fontSize: '11px' }}
+                            >
+                              {doc.actionLabel || 'Open Document'}
+                            </Button>
+                          </Stack>
                         </Paper>
                       ))}
                     </Stack>

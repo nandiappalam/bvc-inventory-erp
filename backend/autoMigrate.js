@@ -542,6 +542,7 @@ module.exports = async function autoMigrate() {
   await safeAddColumn('purchases', 'source_order_no', 'TEXT');
   await safeAddColumn('purchases', 'inv_date', 'TEXT');
   await safeAddColumn('purchases', 'pay_type', "TEXT DEFAULT 'Credit'");
+  await safeAddColumn('purchases', 'godown_id', 'INTEGER');
 
   await safeAddColumn('sales', 'total_amt', 'REAL DEFAULT 0');
   await safeAddColumn('sales', 'total_wt', 'REAL DEFAULT 0');
@@ -1859,8 +1860,102 @@ module.exports = async function autoMigrate() {
       await db.run(`
         DELETE FROM demand_forecast_records WHERE customer_name IN ('ABC Foods', 'XYZ Foods', 'PQR Foods', 'Lakshmi Traders & Agencies');
       `).catch(() => {});
+      // Digital Document Platform & E-Bill Tables
       await db.run(`
-        DELETE FROM cleaning_changeover_orders WHERE cleaning_code = 'CLN-2026-0012';
+        CREATE TABLE IF NOT EXISTS document_access_tokens (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          token TEXT UNIQUE NOT NULL,
+          document_type TEXT NOT NULL,
+          document_id TEXT,
+          document_no TEXT NOT NULL,
+          company_id INTEGER DEFAULT 1,
+          party_name TEXT,
+          date TEXT,
+          total_amount REAL DEFAULT 0,
+          status TEXT DEFAULT 'VALID',
+          upi_payment_link TEXT,
+          irn_number TEXT,
+          qr_code_data TEXT,
+          item_summary TEXT,
+          expires_at TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          views_count INTEGER DEFAULT 0
+        )
+      `).catch(() => {});
+
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS digital_acknowledgements (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          token TEXT NOT NULL,
+          document_no TEXT NOT NULL,
+          received_status TEXT DEFAULT 'YES',
+          received_by TEXT,
+          quantity_received TEXT,
+          condition TEXT DEFAULT 'Good',
+          remarks TEXT,
+          signature_data TEXT,
+          device_info TEXT,
+          ip_address TEXT,
+          acknowledged_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `).catch(() => {});
+
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS document_signatures (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          document_type TEXT NOT NULL,
+          document_id TEXT,
+          document_no TEXT NOT NULL,
+          stage TEXT NOT NULL,
+          signed_by_name TEXT NOT NULL,
+          signed_by_role TEXT,
+          signature_hash TEXT,
+          signed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          certificate_ref TEXT
+        )
+      `).catch(() => {});
+
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS digital_payment_records (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          token TEXT,
+          document_no TEXT NOT NULL,
+          party_name TEXT,
+          amount REAL NOT NULL,
+          payment_mode TEXT DEFAULT 'UPI',
+          transaction_ref TEXT,
+          vpa_id TEXT,
+          status TEXT DEFAULT 'COMPLETED',
+          paid_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          notes TEXT
+        )
+      `).catch(() => {});
+
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS document_audit_logs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          company_id INTEGER DEFAULT 1,
+          document_type TEXT NOT NULL,
+          document_no TEXT NOT NULL,
+          action TEXT NOT NULL,
+          user_name TEXT,
+          user_role TEXT,
+          details TEXT,
+          ip_address TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `).catch(() => {});
+
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS document_sequences (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          company_id INTEGER DEFAULT 1,
+          financial_year TEXT NOT NULL,
+          document_type TEXT NOT NULL,
+          prefix TEXT NOT NULL,
+          current_sequence INTEGER DEFAULT 0,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
       `).catch(() => {});
     }
   } catch (schemaErr) {

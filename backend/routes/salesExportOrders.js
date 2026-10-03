@@ -1,6 +1,7 @@
 const express = require('express')
 const router = express.Router()
 const db = require('../config/database')
+const rebuildStockLedger = require('../utils/stockRebuilder')
 
 // Ensure is_order column exists in sales_export_orders
 async function ensureExportColumns() {
@@ -222,6 +223,41 @@ router.post('/', async (req, res) => {
             VALUES (?, ?, ?, ?, ?, 'Sale Export', 'Active')
           `, [formData.date || new Date().toISOString().split('T')[0], itemName, lotNo || '', -qty, usdRate]);
         }
+      }
+    }
+
+    // Vehicle movement and stock sync for actual export dispatch
+    if (isOrderValue === 0) {
+      if (formData.lorry_no || formData.vehicle_no) {
+        try {
+          const vNo = formData.lorry_no || formData.vehicle_no;
+          await db.run(`
+            INSERT INTO vehicle_movements (
+              reference_type, reference_id, movement_type, operation_type, vehicle_no, driver_name,
+              gate_in_time, gate_out_time, status, item_name, qty, weight, party_name, lot_no, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'OUT', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+          `, [
+            'SALES_EXPORT',
+            formData.bill_no || exportOrderId,
+            'OUTWARD',
+            'Export Dispatch',
+            vNo,
+            formData.driver || '',
+            validItems[0]?.description || '',
+            totalQty,
+            parseFloat(formData.net_wt) || 0,
+            formData.consignee || formData.exporter || '',
+            validItems[0]?.lot_no || ''
+          ]);
+        } catch (vmErr) {
+          console.error('Error inserting vehicle movement for sales export:', vmErr);
+        }
+      }
+
+      try {
+        await rebuildStockLedger();
+      } catch (stkErr) {
+        console.warn('Notice rebuilding stock ledger on export sale:', stkErr.message);
       }
     }
 

@@ -37,6 +37,33 @@ const themeColors = {
   textPrimary: '#333333',
 };
 
+const formatLocalDate = (createdAtVal, defaultDate) => {
+  if (!createdAtVal) return defaultDate || '-';
+  let dateStr = createdAtVal;
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(createdAtVal)) {
+    dateStr = createdAtVal.replace(' ', 'T') + 'Z';
+  }
+  const dt = new Date(dateStr);
+  if (isNaN(dt.getTime())) return defaultDate || '-';
+  
+  const day = String(dt.getDate()).padStart(2, '0');
+  const month = String(dt.getMonth() + 1).padStart(2, '0');
+  const year = dt.getFullYear();
+  return `${day}-${month}-${year}`;
+};
+
+const formatLocalTime = (createdAtVal, defaultTime) => {
+  if (!createdAtVal) return defaultTime || '-';
+  let dateStr = createdAtVal;
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(createdAtVal)) {
+    dateStr = createdAtVal.replace(' ', 'T') + 'Z';
+  }
+  const dt = new Date(dateStr);
+  if (isNaN(dt.getTime())) return defaultTime || '-';
+  
+  return dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true });
+};
+
 const UserActivitiesDisplay = () => {
   const navigate = useNavigate();
   const { selectedCompany } = useAuth();
@@ -233,8 +260,8 @@ const UserActivitiesDisplay = () => {
                   }}
                 >
                   <TableCell sx={{ fontWeight: 'medium', color: '#666' }}>{idx + 1}</TableCell>
-                  <TableCell>{item.date || '-'}</TableCell>
-                  <TableCell>{item.time || '-'}</TableCell>
+                  <TableCell>{formatLocalDate(item.created_at, item.date)}</TableCell>
+                  <TableCell>{formatLocalTime(item.created_at, item.time)}</TableCell>
                   <TableCell>
                     <Chip
                       label={item.user || 'System'}

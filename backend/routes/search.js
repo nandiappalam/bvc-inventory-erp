@@ -610,6 +610,31 @@ router.get('/', async (req, res) => {
     if (categoryFilter === 'all' || categoryFilter === 'documents') {
       const docPromises = [];
 
+      // Digital ERP Documents & Verified E-Bills
+      if (await hasTable('document_access_tokens')) {
+        docPromises.push(
+          db.query(`
+            SELECT id, token, document_type, document_no, party_name, date, total_amount, status, item_summary
+            FROM document_access_tokens
+            WHERE LOWER(COALESCE(token, '')) LIKE ? OR LOWER(COALESCE(document_no, '')) LIKE ? OR LOWER(COALESCE(party_name, '')) LIKE ? OR LOWER(COALESCE(document_type, '')) LIKE ?
+            ORDER BY id DESC
+            LIMIT ?
+          `, [qLike, qLike, qLike, qLike, limit], cId).then(r => (r.rows || []).map(dt => ({
+            type: `Digital ${dt.document_type || 'Doc'}`,
+            id: dt.id,
+            docCode: dt.token,
+            docNumber: dt.document_no,
+            title: `${dt.document_type}: ${dt.document_no} (${dt.party_name || 'Party'}) - ₹${parseFloat(dt.total_amount || 0).toLocaleString('en-IN')}`,
+            date: dt.date,
+            status: dt.status || 'VALID',
+            statusColor: dt.status === 'PAID' ? 'success' : 'primary',
+            url: `/v/${dt.token}`,
+            actionUrl: `/v/${dt.token}`,
+            actionLabel: 'Verify Document'
+          }))).catch(() => [])
+        );
+      }
+
       if (await hasTable('compliance_documents')) {
         docPromises.push(
           db.query(`

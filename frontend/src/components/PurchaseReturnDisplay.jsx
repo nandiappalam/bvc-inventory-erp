@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { EntryDisplay } from './entry';
 import { printHtml } from '../utils/printHelper';
 import api from '../services/api.js';
+import DigitalDocumentModal from './documents/DigitalDocumentModal';
 
 // Column definitions for Purchase Return Display
 const columns = [
@@ -223,53 +224,72 @@ const handlePrint = async (row) => {
 // Custom actions for Purchase Return
 const PurchaseReturnDisplay = () => {
   const navigate = useNavigate();
+  const [activeDoc, setActiveDoc] = useState(null);
 
   const handleEdit = (row) => {
     navigate(`/entry/purchase-return-create?id=${row.id}`);
   };
 
-  const handleDelete = async (id, refresh, showConfirm, showAlert) => {
-    if (!id) {
-      if (showAlert) showAlert('Error', 'Cannot delete: missing record id');
-      else alert('Cannot delete: missing record id');
-      return;
-    }
-
-    const doDelete = async () => {
-      try {
-        const res = await api(`/purchase-returns/${id}`, { method: 'DELETE' });
-        if (res && res.success !== false) {
-          if (showAlert) showAlert('Success', 'Record deleted successfully', refresh);
-          else { alert('Record deleted successfully'); if (refresh) refresh(); }
-        } else {
-          if (showAlert) showAlert('Error', 'Delete failed: ' + (res?.message || 'Unknown error'));
-          else alert('Delete failed: ' + (res?.message || 'Unknown error'));
-        }
-      } catch (err) {
-        console.error(err);
-        if (showAlert) showAlert('Error', 'Delete failed: ' + err.message);
-        else alert('Delete failed: ' + err.message);
-      }
-    };
-
-    if (showConfirm) {
-      showConfirm('Delete Record', 'Delete this record?', doDelete);
-    } else {
-      if (window.confirm('Delete this record?')) {
-        doDelete();
-      }
-    }
-  };
+  const customActions = (row) => (
+    <div style={{ display: 'flex', gap: '5px', justifyContent: 'center', flexWrap: 'wrap', alignItems: 'center' }}>
+      <button 
+        className="action-btn" 
+        style={{ backgroundColor: '#0f172a', color: '#ffffff', border: 'none', padding: '5px 11px', borderRadius: '4px', fontWeight: 700, fontSize: '12px', cursor: 'pointer' }}
+        onClick={() => setActiveDoc({
+          documentType: 'Purchase Return',
+          documentId: row.id || row.s_no,
+          documentNo: row.return_inv_no || `PRT-${row.s_no || row.id}`,
+          partyName: row.supplier_print_name || row.supplier_master_name || row.supplier,
+          totalAmount: parseFloat(row.grand_total || row.total_amount || 0),
+          date: row.date,
+          itemSummary: row.item_names || 'Purchased RM Return (Debit Note)',
+          status: 'VALID'
+        })}
+        title="Open Digital Document, BVC QR, PDF & Signatures"
+      >
+        Digital Doc
+      </button>
+      <button 
+        className="action-btn update-btn" 
+        style={{ backgroundColor: '#1976d2', color: '#ffffff', border: 'none', padding: '5px 11px', borderRadius: '4px', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}
+        onClick={() => handleEdit(row)}
+      >
+        Update
+      </button>
+      <button 
+        className="action-btn print-btn" 
+        style={{ backgroundColor: '#0288d1', color: '#ffffff', border: 'none', padding: '5px 11px', borderRadius: '4px', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}
+        onClick={() => handlePrint(row)}
+      >
+        Print
+      </button>
+    </div>
+  );
 
   return (
-    <EntryDisplay
-      title="Purchase Return Display"
-      apiEndpoint="/api/purchase-returns"
-      columns={columns}
-      onEdit={handleEdit}
-      onPrint={handlePrint}
-      addNewLink="/entry/purchase-return-create"
-    />
+    <>
+      <EntryDisplay
+        title="Purchase Return Display"
+        apiEndpoint="/api/purchase-returns"
+        columns={columns}
+        customActions={customActions}
+        addNewLink="/entry/purchase-return-create"
+      />
+      {activeDoc && (
+        <DigitalDocumentModal
+          open={Boolean(activeDoc)}
+          onClose={() => setActiveDoc(null)}
+          documentType={activeDoc.documentType}
+          documentId={activeDoc.documentId}
+          documentNo={activeDoc.documentNo}
+          partyName={activeDoc.partyName}
+          totalAmount={activeDoc.totalAmount}
+          date={activeDoc.date}
+          itemSummary={activeDoc.itemSummary}
+          status={activeDoc.status}
+        />
+      )}
+    </>
   );
 };
 

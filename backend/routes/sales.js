@@ -303,6 +303,33 @@ router.post('/', async (req, res) => {
       // Continue even if ledger entries fail - don't rollback the sales
     }
 
+    // Create vehicle movement entry for sales dispatch if lorry/vehicle is provided
+    if (formData.lorry_no || formData.vehicle_no) {
+      try {
+        const vNo = formData.lorry_no || formData.vehicle_no;
+        await db.run(`
+          INSERT INTO vehicle_movements (
+            reference_type, reference_id, movement_type, operation_type, vehicle_no, driver_name,
+            gate_in_time, gate_out_time, status, item_name, qty, weight, party_name, lot_no, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'OUT', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        `, [
+          'SALES',
+          billNo || salesId,
+          'OUTWARD',
+          'Sales Dispatch / Loading',
+          vNo,
+          formData.driver || '',
+          items[0]?.item_name || '',
+          parseFloat(totals?.totalQty) || parseFloat(formData.total_qty) || 0,
+          parseFloat(totals?.totalWeight) || parseFloat(formData.total_wt) || 0,
+          formData.customer || '',
+          items[0]?.lot_no || ''
+        ]);
+      } catch (vmErr) {
+        console.error('Error inserting vehicle movement for sales:', vmErr);
+      }
+    }
+
     try {
       await rebuildStockLedger();
     } catch (e) {

@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { EntryDisplay } from './entry';
 import { printHtml } from '../utils/printHelper';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api.js';
+import DigitalDocumentModal from './documents/DigitalDocumentModal';
 
 // Column definitions for Sales Display
 const columns = [
@@ -78,6 +79,7 @@ const SalesDisplayPage = () => {
   const navigate = useNavigate();
   const isOrder = window.location.pathname.includes('order');
   const { isAdmin, hasPermission } = useAuth();
+  const [activeDoc, setActiveDoc] = useState(null);
 
   const moduleName = isOrder ? 'Sales Order' : 'Sales';
   const canEdit = isAdmin || hasPermission(moduleName, 'Display', 'can_edit') || hasPermission(moduleName, 'can_edit');
@@ -101,8 +103,12 @@ const SalesDisplayPage = () => {
       console.error(e);
     }
     const firstItem = items[0] || {};
-    const lotNo = firstItem.lotNo || firstItem.lot_no || '';
-    const qcId = firstItem.qc_id;
+    const lotNo = firstItem.lotNo || firstItem.lot_no || row.lot_no || '';
+    const qcId = firstItem.qc_id || row.qc_id;
+
+    const amt = (row.grand_total !== undefined && row.grand_total !== null && Number(row.grand_total) > 0) 
+      ? Number(row.grand_total) 
+      : Number(row.total_amt || 0);
 
     const doDelete = async () => {
       try {
@@ -144,6 +150,23 @@ const SalesDisplayPage = () => {
 
     return (
       <div style={{ display: 'flex', gap: '5px', justifyContent: 'center', flexWrap: 'wrap', alignItems: 'center' }}>
+        <button 
+          className="action-btn" 
+          style={{ backgroundColor: '#0f172a', color: '#ffffff', border: 'none', padding: '5px 11px', borderRadius: '4px', fontWeight: 700, fontSize: '12px', cursor: 'pointer' }}
+          onClick={() => setActiveDoc({
+            documentType: isOrder ? 'Sales Order' : 'Sales Invoice',
+            documentId: row.id || row.s_no,
+            documentNo: row.inv_no || (row.s_no ? `SI-${row.s_no}` : `SI-${row.id}`),
+            partyName: row.customer || 'Valued Customer',
+            totalAmount: amt,
+            date: row.date ? row.date.substring(0, 10) : new Date().toISOString().split('T')[0],
+            itemSummary: row.item_name ? `${row.item_name} (${row.qty || ''} bags)` : 'Sales Invoice Goods',
+            status: 'VALID'
+          })}
+          title="Open Digital Document, BVC QR, PDF & UPI Payment"
+        >
+          Digital Doc
+        </button>
         {canEdit && (
           <button 
             className="action-btn update-btn" 
@@ -196,13 +219,29 @@ const SalesDisplayPage = () => {
   };
 
   return (
-    <EntryDisplay
-      title={isOrder ? "Sales Order Display" : "Sales Display"}
-      apiEndpoint={isOrder ? "/api/sales?is_order=1" : "/api/sales?is_order=0"}
-      columns={columns}
-      customActions={customActions}
-      addNewLink={isOrder ? "/entry/sales-order-create" : "/entry/sales-create"}
-    />
+    <>
+      <EntryDisplay
+        title={isOrder ? "Sales Order Display" : "Sales Display"}
+        apiEndpoint={isOrder ? "/api/sales?is_order=1" : "/api/sales?is_order=0"}
+        columns={columns}
+        customActions={customActions}
+        addNewLink={isOrder ? "/entry/sales-order-create" : "/entry/sales-create"}
+      />
+      {activeDoc && (
+        <DigitalDocumentModal
+          open={Boolean(activeDoc)}
+          onClose={() => setActiveDoc(null)}
+          documentType={activeDoc.documentType}
+          documentId={activeDoc.documentId}
+          documentNo={activeDoc.documentNo}
+          partyName={activeDoc.partyName}
+          totalAmount={activeDoc.totalAmount}
+          date={activeDoc.date}
+          itemSummary={activeDoc.itemSummary}
+          status={activeDoc.status}
+        />
+      )}
+    </>
   );
 };
 

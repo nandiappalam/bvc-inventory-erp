@@ -228,6 +228,7 @@ import CustomerComplaintCenter from './modules/customerComplaint/CustomerComplai
 import RecallManagementCenter from './modules/recallManagement/RecallManagementCenter'
 import BusinessIntelligenceCenter from './modules/businessIntelligence/BusinessIntelligenceCenter'
 import AiIntelligenceCenter from './modules/aiIntelligence/AiIntelligenceCenter'
+import PublicDocumentVerification from './components/documents/PublicDocumentVerification'
 
 const theme = createTheme({
   palette: {
@@ -594,6 +595,8 @@ function App() {
               <Route path="/login" element={<LoginPage />} />
               <Route path="/auth-choice" element={<AuthChoice />} />
               <Route path="/user/create" element={<UserCreate />} />
+              <Route path="/v/:token" element={<PublicDocumentVerification />} />
+              <Route path="/verify-document/:token" element={<PublicDocumentVerification />} />
               
               {/* Protected Routes */}
               <Route path="*" element={<AppLayout />} />

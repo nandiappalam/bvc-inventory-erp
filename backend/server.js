@@ -156,8 +156,12 @@ app.use('/api/papad-companies', papadCompaniesRouter)
 app.use('/api/recycle-bin', require('./routes/recycleBin'))
 app.use('/api/qc', require('./routes/qc'))
 app.use('/api/quality', require('./routes/qc'))
+// Digital Document Platform, E-Bill, QR & E-Signatures
+const digitalDocumentsRouter = require('./routes/digitalDocuments');
+app.use('/api/digital-documents', digitalDocumentsRouter);
+app.use('/api/documents', digitalDocumentsRouter);
+
 app.use('/api/compliance', require('./routes/compliance'))
-app.use('/api/documents', require('./routes/compliance'))
 app.use('/api/command-center', require('./routes/commandCenter'))
 app.use('/api/procurement-planning', require('./routes/procurementPlanning'))
 app.use('/api/inventory-intelligence', require('./routes/inventoryIntelligence'))

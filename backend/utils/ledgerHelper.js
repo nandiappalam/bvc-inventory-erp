@@ -1110,6 +1110,203 @@ async function deletePurchaseReturnVoucherChain(referenceId) {
 }
 
 /**
+ * Create Sales Return / Credit Note voucher chain and ledger entries
+ * - Customer Account (Credit) - Reverses customer receivable
+ * - Sales Return Account / Sales Account (Debit) - Reverses sales revenue
+ * - Output GST (Debit) - Reverses tax liability
+ */
+async function createSalesReturnVoucherChain(returnData) {
+  await ensureVoucherTables()
+  const {
+    customer,
+    date,
+    returnInvNo,
+    sNo,
+    salesReturnId,
+    totalAmount = 0,
+    baseAmount = 0,
+    taxAmount = 0,
+    cgstAmount = 0,
+    sgstAmount = 0,
+    igstAmount = 0,
+    narration = ''
+  } = returnData
+
+  const effectiveId = salesReturnId || returnData.id
+  if (effectiveId) {
+    await deleteSalesReturnVoucherChain(effectiveId)
+  }
+
+  const invoiceRef = returnInvNo || sNo || effectiveId || 'SRT'
+  const voucherDate = date || new Date().toISOString().split('T')[0]
+  const totalVal = Math.abs(parseFloat(totalAmount) || 0)
+  const baseVal = Math.abs(parseFloat(baseAmount) || totalVal)
+  const taxVal = Math.abs(parseFloat(taxAmount) || 0)
+  if (totalVal <= 0) return null
+
+  let resolvedCustomer = customer
+  if (customer && /^\d+$/.test(String(customer))) {
+    const custRes = await db.query('SELECT print_name, name FROM customer_master WHERE id = ?', [customer])
+    if (custRes.rows?.length > 0) {
+      resolvedCustomer = custRes.rows[0].print_name || custRes.rows[0].name
+    }
+  }
+
+  const effectiveNarration = narration || `Credit Note / Sales Return #${invoiceRef} for ${resolvedCustomer || customer || 'Customer'}`
+  const voucherNo = await getNextVoucherNumber('CN')
+
+  const vResult = await db.run(`
+    INSERT INTO voucher (voucher_type, voucher_no, date, reference_no, narration)
+    VALUES ('Credit Note', ?, ?, ?, ?)
+  `, [voucherNo, voucherDate, String(effectiveId || invoiceRef), effectiveNarration])
+
+  const voucherId = vResult.lastID || vResult.lastInsertRowid
+  const particulars = `Sales Return / Credit Note #${invoiceRef}`
+
+  const voucherEntryRows = []
+  const ledgerEntries = []
+
+  // 1. Credit Customer (reverses receivable)
+  voucherEntryRows.push({
+    ledgerName: resolvedCustomer || 'Customer Account',
+    debit: 0,
+    credit: totalVal,
+    remarks: particulars
+  })
+  ledgerEntries.push(createLedgerEntry({
+    ledgerName: resolvedCustomer || 'Customer Account',
+    date: voucherDate,
+    voucherType: 'Credit Note',
+    voucherNo,
+    debit: 0,
+    credit: totalVal,
+    referenceId: effectiveId,
+    referenceType: 'sales_return',
+    particulars,
+    voucherId,
+    transactionId: effectiveId,
+    transactionType: 'sales_return'
+  }))
+
+  // 2. Debit Sales Return Account
+  let salesReturnLedger = 'Sales Return Account'
+  try {
+    const returnLedgerCheck = await db.query("SELECT id FROM ledgermaster WHERE LOWER(name) = 'sales return account' OR LOWER(printname) = 'sales return account'")
+    if (!returnLedgerCheck.rows?.length) {
+      salesReturnLedger = 'Sales Account'
+    }
+  } catch (e) {
+    salesReturnLedger = 'Sales Account'
+  }
+
+  voucherEntryRows.push({
+    ledgerName: salesReturnLedger,
+    debit: baseVal,
+    credit: 0,
+    remarks: particulars
+  })
+  ledgerEntries.push(createLedgerEntry({
+    ledgerName: salesReturnLedger,
+    date: voucherDate,
+    voucherType: 'Credit Note',
+    voucherNo,
+    debit: baseVal,
+    credit: 0,
+    referenceId: effectiveId,
+    referenceType: 'sales_return',
+    particulars,
+    voucherId,
+    transactionId: effectiveId,
+    transactionType: 'sales_return'
+  }))
+
+  // 3. Debit Output GST
+  const cgst = parseFloat(cgstAmount) || 0
+  const sgst = parseFloat(sgstAmount) || 0
+  const igst = parseFloat(igstAmount) || 0
+
+  if (cgst > 0 || sgst > 0 || igst > 0) {
+    if (cgst > 0) {
+      voucherEntryRows.push({ ledgerName: 'CGST Output', debit: cgst, credit: 0, remarks: particulars })
+      ledgerEntries.push(createLedgerEntry({
+        ledgerName: 'CGST Output', date: voucherDate, voucherType: 'Credit Note', voucherNo, debit: cgst, credit: 0,
+        referenceId: effectiveId, referenceType: 'sales_return', particulars, voucherId, transactionId: effectiveId, transactionType: 'sales_return'
+      }))
+    }
+    if (sgst > 0) {
+      voucherEntryRows.push({ ledgerName: 'SGST Output', debit: sgst, credit: 0, remarks: particulars })
+      ledgerEntries.push(createLedgerEntry({
+        ledgerName: 'SGST Output', date: voucherDate, voucherType: 'Credit Note', voucherNo, debit: sgst, credit: 0,
+        referenceId: effectiveId, referenceType: 'sales_return', particulars, voucherId, transactionId: effectiveId, transactionType: 'sales_return'
+      }))
+    }
+    if (igst > 0) {
+      voucherEntryRows.push({ ledgerName: 'IGST Output', debit: igst, credit: 0, remarks: particulars })
+      ledgerEntries.push(createLedgerEntry({
+        ledgerName: 'IGST Output', date: voucherDate, voucherType: 'Credit Note', voucherNo, debit: igst, credit: 0,
+        referenceId: effectiveId, referenceType: 'sales_return', particulars, voucherId, transactionId: effectiveId, transactionType: 'sales_return'
+      }))
+    }
+  } else if (taxVal > 0) {
+    const halfTax = Number((taxVal / 2).toFixed(2))
+    voucherEntryRows.push({ ledgerName: 'CGST Output', debit: halfTax, credit: 0, remarks: particulars })
+    ledgerEntries.push(createLedgerEntry({
+      ledgerName: 'CGST Output', date: voucherDate, voucherType: 'Credit Note', voucherNo, debit: halfTax, credit: 0,
+      referenceId: effectiveId, referenceType: 'sales_return', particulars, voucherId, transactionId: effectiveId, transactionType: 'sales_return'
+    }))
+    voucherEntryRows.push({ ledgerName: 'SGST Output', debit: halfTax, credit: 0, remarks: particulars })
+    ledgerEntries.push(createLedgerEntry({
+      ledgerName: 'SGST Output', date: voucherDate, voucherType: 'Credit Note', voucherNo, debit: halfTax, credit: 0,
+      referenceId: effectiveId, referenceType: 'sales_return', particulars, voucherId, transactionId: effectiveId, transactionType: 'sales_return'
+    }))
+  }
+
+  // 4. Save voucher_entry rows
+  for (const entry of voucherEntryRows) {
+    const lId = await resolveLedgerId(entry.ledgerName)
+    await db.run(`
+      INSERT INTO voucher_entry (voucher_id, type, ledger_id, ledger_name, debit, credit, remarks)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `, [
+      voucherId,
+      entry.debit > 0 ? 'Dr' : 'Cr',
+      lId,
+      entry.ledgerName,
+      entry.debit || 0,
+      entry.credit || 0,
+      entry.remarks || ''
+    ])
+  }
+
+  await Promise.all(ledgerEntries)
+  return { voucherId, voucherNo }
+}
+
+async function deleteSalesReturnVoucherChain(referenceId) {
+  try {
+    const voucherRows = await db.query(
+      "SELECT id, voucher_no FROM voucher WHERE reference_no = ? AND (voucher_type = 'Credit Note' OR voucher_type = 'Sales Return')",
+      [String(referenceId)]
+    )
+
+    for (const voucher of voucherRows.rows || []) {
+      await db.run('DELETE FROM voucher_entry WHERE voucher_id = ?', [voucher.id])
+      await db.run("DELETE FROM ledger_entries WHERE voucher_id = ? OR (reference_id = ? AND (voucher_type = 'Credit Note' OR voucher_type = 'Sales Return' OR reference_type = 'sales_return'))", [
+        voucher.id,
+        referenceId,
+      ])
+      await db.run('DELETE FROM voucher WHERE id = ?', [voucher.id])
+    }
+
+    await db.run("DELETE FROM ledger_entries WHERE reference_id = ? AND (reference_type = 'sales_return' OR voucher_type = 'Credit Note' OR voucher_type = 'Sales Return')", [referenceId])
+    return true
+  } catch (error) {
+    console.error('Error deleting sales return voucher chain:', error)
+    return false
+  }
+}
+
+/**
  * Delete ledger entries for a reference.
  */
 async function deleteLedgerEntries(referenceId) {
@@ -1117,6 +1314,7 @@ async function deleteLedgerEntries(referenceId) {
     await deletePurchaseVoucherChain(referenceId)
     await deleteSalesVoucherChain(referenceId)
     await deletePurchaseReturnVoucherChain(referenceId)
+    await deleteSalesReturnVoucherChain(referenceId)
     await db.run('DELETE FROM ledger_entries WHERE reference_id = ?', [referenceId])
     return true
   } catch (error) {
@@ -1243,11 +1441,13 @@ module.exports = {
   createPurchaseLedgerEntries,
   createPurchaseVoucherChain,
   createPurchaseReturnVoucherChain,
+  createSalesReturnVoucherChain,
   createSalesLedgerEntries,
   createAdvanceLedgerEntries,
   deleteLedgerEntries,
   deletePurchaseVoucherChain,
   deletePurchaseReturnVoucherChain,
+  deleteSalesReturnVoucherChain,
   resolveLedgerId,
   ensureVoucherTables,
   syncAllLedgers,

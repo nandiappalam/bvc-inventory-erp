@@ -497,8 +497,8 @@ const ColdStorageVouchers = () => {
 
       {/* View Voucher Modal */}
       <Dialog open={viewModalOpen} onClose={() => setViewModalOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle sx={{ backgroundColor: '#1f4fb2', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Typography variant="h6">Cold Storage Voucher Details</Typography>
+        <DialogTitle component="div" sx={{ backgroundColor: '#1f4fb2', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Typography variant="h6" component="span" sx={{ fontWeight: 600 }}>Cold Storage Voucher Details</Typography>
           <IconButton onClick={() => setViewModalOpen(false)} sx={{ color: '#fff' }}>×</IconButton>
         </DialogTitle>
         <DialogContent sx={{ pt: 3 }}>

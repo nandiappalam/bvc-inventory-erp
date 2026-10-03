@@ -71,7 +71,7 @@ async function rebuildStockLedger() {
 
     // A. Purchases
     const purchases = await db.query(`
-      SELECT pi.*, p.date, p.supplier, p.id as purchase_id, p.godown as godown_id
+      SELECT pi.*, p.date, p.supplier, p.id as purchase_id, COALESCE(p.godown_id, p.godown) as godown_id, p.godown as godown_name
       FROM purchase_items pi
       JOIN purchases p ON pi.purchase_id = p.id
       ORDER BY p.date ASC, pi.id ASC
@@ -289,11 +289,14 @@ async function rebuildStockLedger() {
       
       let godownId = rmGodown.id;
       let godownName = rmGodown.godown_name;
-      if (row.godown_id) {
-        const gRes = await db.query(`SELECT id, godown_name FROM godown_master WHERE id = ? OR CAST(id AS TEXT) = ? OR LOWER(godown_name) = LOWER(?) LIMIT 1`, [row.godown_id, String(row.godown_id), String(row.godown_id)]);
+      const gLookup = row.godown_id || row.godown_name;
+      if (gLookup) {
+        const gRes = await db.query(`SELECT id, godown_name FROM godown_master WHERE id = ? OR CAST(id AS TEXT) = ? OR LOWER(godown_name) = LOWER(?) LIMIT 1`, [gLookup, String(gLookup), String(gLookup)]);
         if (gRes.rows && gRes.rows.length > 0) {
           godownId = gRes.rows[0].id;
           godownName = gRes.rows[0].godown_name;
+        } else if (typeof gLookup === 'string' && isNaN(parseInt(gLookup, 10))) {
+          godownName = gLookup;
         }
       }
 
@@ -402,15 +405,30 @@ async function rebuildStockLedger() {
           godownName = gRes.rows[0].godown_name;
         }
       }
-      // In Cold Storage: the lot number stored in the cold storage godown is cold_storage_lot_no!
-      // LOT0003 is strictly the factory raw material lot (PJ), NEVER the cold storage lot!
-      let csLotNo = row.cold_storage_lot_no;
-      const isSrcLot3 = (row.purchase_lot_no || '').trim().toUpperCase().includes('LOT0003') || (row.item_name || '').trim().toUpperCase().includes('URAD');
-      if (!csLotNo || csLotNo.trim().toUpperCase().includes('LOT0003') || csLotNo === row.purchase_lot_no) {
-        csLotNo = isSrcLot3 ? 'LOT0006' : (row.cold_storage_lot_no || 'CS-LOT');
-      }
-      const srcLotNo = row.purchase_lot_no || (csLotNo === 'LOT0006' ? 'LOT0003' : csLotNo);
 
+      // Check if this CSI voucher is from direct purchase inward
+      const isDirectPurchase = (row.source_godown_name || '').toLowerCase().includes('purchase') ||
+                               (row.remarks || '').toLowerCase().includes('purchase') ||
+                               !row.source_godown_id;
+
+      let csLotNo = row.cold_storage_lot_no || (row.purchase_lot_no ? `CS-${row.purchase_lot_no}` : 'CS-LOT');
+      const srcLotNo = row.purchase_lot_no || csLotNo;
+
+      if (isDirectPurchase) {
+        // Stock in the Cold Storage facility was ALREADY established by the Purchase transaction.
+        // Ensure lot in lotMap has godownId and godownName set to this Cold Storage.
+        const key = `${row.item_name.toUpperCase()}:::${srcLotNo.toUpperCase()}:::${godownId}`;
+        if (!lotMap.has(key)) {
+          getOrCreateLot(row.item_name, srcLotNo, qty, 0, row.date, 'Cold Storage In', row.voucher_id, godownId, godownName);
+        } else {
+          const l = lotMap.get(key);
+          l.godownId = godownId;
+          l.godownName = godownName;
+        }
+        continue;
+      }
+
+      // Regular transfer voucher from a source factory godown:
       getOrCreateLot(row.item_name, csLotNo, qty, 0, row.date, 'Cold Storage In', row.voucher_id, godownId, godownName);
       await db.run(`
         INSERT INTO stock (date, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, godown_id, remarks)
@@ -421,10 +439,7 @@ async function rebuildStockLedger() {
       if (srcLotNo) {
         let srcGodownId = row.source_godown_id;
         let srcGodownName = row.source_godown_name;
-        if (isSrcLot3 || !srcGodownId || !srcGodownName || srcGodownName === 'Main Godown' || srcGodownName.toLowerCase().includes('cold') || srcGodownName.toLowerCase().includes('bts')) {
-          srcGodownId = 1;
-          srcGodownName = 'PJ';
-        } else {
+        if (!srcGodownId || !srcGodownName || srcGodownName === 'Main Godown') {
           const resolved = await resolveOutflowGodown(row.item_name, srcLotNo, defaultGodown.id, defaultGodown.godown_name);
           srcGodownId = srcGodownId || resolved.godownId;
           srcGodownName = srcGodownName && srcGodownName !== 'Main Godown' ? srcGodownName : resolved.godownName;
@@ -464,11 +479,8 @@ async function rebuildStockLedger() {
       // Lot received back at destination godown (purchase_lot_no or CS lot)
       let destLotNo = row.purchase_lot_no;
       let csLotToDeduct = row.cold_storage_lot_no;
-      if (!destLotNo || destLotNo === 'N/A' || destLotNo.trim().toUpperCase() === 'LOT0006' || destLotNo === csLotToDeduct) {
-        destLotNo = (csLotToDeduct === 'LOT0006' || (row.item_name || '').toUpperCase().includes('URAD')) ? 'LOT0003' : (destLotNo || 'LOT-TRANSFER');
-      }
-      if (!csLotToDeduct || csLotToDeduct.trim().toUpperCase().includes('LOT0003')) {
-        csLotToDeduct = 'LOT0006';
+      if (!destLotNo || destLotNo === 'N/A' || destLotNo === csLotToDeduct) {
+        destLotNo = row.purchase_lot_no || (csLotToDeduct ? csLotToDeduct.replace(/^CS-/, '') : 'LOT-TRANSFER');
       }
 
       getOrCreateLot(row.item_name, destLotNo, qty, 0, row.date, 'Cold Storage Transfer In', row.voucher_id, destGodownId, destGodownName);
@@ -775,7 +787,7 @@ async function rebuildStockLedger() {
       const lotNorm = (lot.lot_no || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
       const itemNorm = (lot.item_name || '').trim().toUpperCase();
 
-      if (lotNorm === 'LOT0003' || lotNorm === 'LOT003' || lotNorm === 'LOT3' || itemNorm.includes('URAD')) {
+      if (lotNorm === 'LOT0003' || lotNorm === 'LOT003' || lotNorm === 'LOT3') {
         targetGId = 1;
         targetGName = 'PJ';
       } else if (lotNorm === 'LOT0006' || lotNorm === 'LOT006' || lotNorm === 'LOT6') {

@@ -338,8 +338,8 @@ const ProductionPlanningDashboard = () => {
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {yieldBatches.map((b) => (
-                      <TableRow key={`yb-${b.id}`} hover>
+                    {yieldBatches.map((b, idx) => (
+                      <TableRow key={`yb-${b.id || b.batchNo || idx}-${idx}`} hover>
                         <TableCell sx={{ fontWeight: 700, color: '#0284c7' }}>{b.batchNo}</TableCell>
                         <TableCell>{b.machineLine}</TableCell>
                         <TableCell>{b.productName}</TableCell>

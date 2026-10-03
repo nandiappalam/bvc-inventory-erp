@@ -72,16 +72,14 @@ async function getBatchYieldList(filters = {}) {
       COALESCE(NULLIF(g.work_order_no, ''), 'MILL-' || CAST(g.s_no AS TEXT)) as batchNo,
       SUBSTR(COALESCE(CAST(g.date AS TEXT), CAST(g.created_at AS TEXT), ''), 1, 10) as batchDate,
       COALESCE(fmm.flourmill, g.flour_mill, 'BVC MILL') as machineLine,
-      COALESCE(goi.item_name, 'Urad Flour') as productName,
-      gii.lot_no as rawLotNo,
-      goi.lot_no as fgLotNo,
-      COALESCE(NULLIF(gii.total_wt, 0), gii.qty * 50, g.total_input_kg, 0) as inputKg,
-      COALESCE(NULLIF(goi.total_wt, 0), goi.qty * 50, g.total_output_kg, 0) as outputKg,
+      COALESCE((SELECT item_name FROM grain_output_items WHERE grain_id = g.id AND item_name IS NOT NULL LIMIT 1), 'Urad Flour') as productName,
+      (SELECT lot_no FROM grain_input_items WHERE grain_id = g.id AND lot_no IS NOT NULL LIMIT 1) as rawLotNo,
+      (SELECT lot_no FROM grain_output_items WHERE grain_id = g.id AND lot_no IS NOT NULL LIMIT 1) as fgLotNo,
+      COALESCE((SELECT SUM(COALESCE(NULLIF(total_wt, 0), qty * 50, 0)) FROM grain_input_items WHERE grain_id = g.id), g.total_input_kg, 0) as inputKg,
+      COALESCE((SELECT SUM(COALESCE(NULLIF(total_wt, 0), qty * 50, 0)) FROM grain_output_items WHERE grain_id = g.id), g.total_output_kg, 0) as outputKg,
       COALESCE(g.total_wastage_kg, 0) as wastageKg
     FROM grains g
     LEFT JOIN flour_mill_master fmm ON (CAST(fmm.id AS TEXT) = CAST(g.flour_mill AS TEXT) OR fmm.flourmill = g.flour_mill)
-    LEFT JOIN grain_input_items gii ON g.id = gii.grain_id
-    LEFT JOIN grain_output_items goi ON g.id = goi.grain_id
     ORDER BY g.id DESC
     LIMIT ?
   `, [numLimit]);

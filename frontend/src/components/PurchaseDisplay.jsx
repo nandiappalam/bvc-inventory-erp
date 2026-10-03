@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { EntryDisplay } from './entry';
 import { deletePurchase } from '../utils/api';
@@ -6,6 +6,7 @@ import { printHtml } from '../utils/printHelper';
 import { generateVehicleInPassHtml } from '../utils/vehiclePassPrint';
 import { generatePurchasePrintHtml } from '../utils/purchasePrintHelper';
 import { useAuth } from '../context/AuthContext';
+import DigitalDocumentModal from './documents/DigitalDocumentModal';
 import './PurchaseDisplay.css';
 
 // Classic ERP Column definitions for Purchase Display
@@ -103,6 +104,7 @@ const handleEdit = (row, navigate) => {
 const PurchaseDisplay = () => {
   const navigate = useNavigate();
   const { isAdmin, hasPermission, selectedCompany } = useAuth();
+  const [activeDoc, setActiveDoc] = useState(null);
 
   const canEdit = isAdmin || hasPermission('Purchase', 'Display', 'can_edit') || hasPermission('Purchase', 'can_edit');
   const canDelete = isAdmin || hasPermission('Purchase', 'Display', 'can_delete') || hasPermission('Purchase', 'can_delete');
@@ -110,6 +112,23 @@ const PurchaseDisplay = () => {
 
   const customActions = (row, onSuccess, showConfirm, showAlert) => (
     <div style={{ display: 'flex', gap: '5px', justifyContent: 'center', flexWrap: 'wrap', alignItems: 'center' }}>
+      <button 
+        className="action-btn" 
+        style={{ backgroundColor: '#0f172a', color: '#ffffff', border: 'none', padding: '5px 11px', borderRadius: '4px', fontWeight: 700, fontSize: '12px', cursor: 'pointer' }}
+        onClick={() => setActiveDoc({
+          documentType: 'Purchase Invoice',
+          documentId: row.id || row.s_no,
+          documentNo: row.inv_no || row.invoice_no || `PUR-${row.s_no || row.id}`,
+          partyName: row.supplier_name || row.supplier,
+          totalAmount: parseFloat(row.grand_total || row.total_amount || 0),
+          date: row.date || row.invoice_date,
+          itemSummary: row.item_name ? `${row.item_name} (${row.qty || ''} bags)` : 'Raw Commodity Inward',
+          status: 'VALID'
+        })}
+        title="Open Digital Document, BVC QR, PDF & Signatures"
+      >
+        Digital Doc
+      </button>
       {canEdit && (
         <button 
           className="action-btn update-btn" 
@@ -219,12 +238,28 @@ const PurchaseDisplay = () => {
   );
 
   return (
-    <EntryDisplay
-      title="Purchase Display"
-      apiEndpoint="/api/purchases/purchase-list"
-      columns={columns}
-      customActions={customActions}
-    />
+    <>
+      <EntryDisplay
+        title="Purchase Display"
+        apiEndpoint="/api/purchases/purchase-list"
+        columns={columns}
+        customActions={customActions}
+      />
+      {activeDoc && (
+        <DigitalDocumentModal
+          open={Boolean(activeDoc)}
+          onClose={() => setActiveDoc(null)}
+          documentType={activeDoc.documentType}
+          documentId={activeDoc.documentId}
+          documentNo={activeDoc.documentNo}
+          partyName={activeDoc.partyName}
+          totalAmount={activeDoc.totalAmount}
+          date={activeDoc.date}
+          itemSummary={activeDoc.itemSummary}
+          status={activeDoc.status}
+        />
+      )}
+    </>
   );
 };
 

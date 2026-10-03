@@ -177,6 +177,20 @@ export const DynamicMasterDisplay = ({ configKey }) => {
     printHtml(html, `${title} Details - ${row.name || row.godown_name || row.flourmill || ''}`);
   };
 
+  const renderExtraActions = (row) => {
+    if (normalizedKey === 'ledger' || tableName === 'ledgermaster') {
+      return (
+        <button
+          onClick={() => navigate(`/reports/ledger-statement?ledger=${encodeURIComponent(row.name)}&type=${encodeURIComponent(row.ledger_type || 'General')}`)}
+          className="action-btn statement-btn"
+        >
+          Statement
+        </button>
+      );
+    }
+    return null;
+  };
+
   return (
     <MasterTableLayout
       title={`${title} MASTER`}
@@ -188,6 +202,7 @@ export const DynamicMasterDisplay = ({ configKey }) => {
       onCreate={handleCreate}
       showActions={true}
       onRefresh={loadData}
+      renderExtraActions={renderExtraActions}
     />
   );
 };

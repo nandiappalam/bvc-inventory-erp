@@ -170,9 +170,22 @@ const revertPapadInStock = async (papadInId) => {
   }
 };
 
+// Sync all flour out and papad in stock entries via the unified stock rebuilder
+const syncFlourOutAndPapadInStock = async () => {
+  try {
+    const { rebuildStockLedger } = require('./stockRebuilder');
+    if (typeof rebuildStockLedger === 'function') {
+      await rebuildStockLedger();
+    }
+  } catch (err) {
+    console.warn('Notice in syncFlourOutAndPapadInStock:', err.message);
+  }
+};
+
 module.exports = {
   deductFlourOutStock,
   revertFlourOutStock,
   addPapadInStock,
-  revertPapadInStock
+  revertPapadInStock,
+  syncFlourOutAndPapadInStock
 };

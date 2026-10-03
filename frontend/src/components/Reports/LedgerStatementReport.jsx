@@ -30,6 +30,19 @@ const LedgerStatementReport = () => {
     setToDate(today.toISOString().split('T')[0])
   }, [])
 
+  // Parse URL search params on mount
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const ledgerParam = params.get('ledger')
+    const typeParam = params.get('type')
+    if (ledgerParam) {
+      setSelectedLedger(ledgerParam)
+      if (typeParam) {
+        setSelectedType(typeParam)
+      }
+    }
+  }, [])
+
   // Fetch ledgers for dropdown
   useEffect(() => {
     const fetchLedgers = async () => {
@@ -155,7 +168,7 @@ const LedgerStatementReport = () => {
         <td style="padding: 6px 8px; border: 1px solid #cbd5e1;">${row.particulars || '-'}</td>
         <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; color: ${parseFloat(row.debit) > 0 ? '#059669' : 'inherit'};">${parseFloat(row.debit || 0) > 0 ? parseFloat(row.debit).toFixed(2) : '-'}</td>
         <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; color: ${parseFloat(row.credit) > 0 ? '#d97706' : 'inherit'};">${parseFloat(row.credit || 0) > 0 ? parseFloat(row.credit).toFixed(2) : '-'}</td>
-        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; font-weight: bold;">${parseFloat(row.balance || 0).toFixed(2)}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; font-weight: bold;">${Math.abs(parseFloat(row.balance || 0)).toFixed(2)}</td>
       </tr>
     `).join('');
 
@@ -193,7 +206,7 @@ const LedgerStatementReport = () => {
           <tfoot>
             <tr style="background-color: #e2e8f0; font-weight: bold;">
               <td colspan="6" style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right;">Closing Balance:</td>
-              <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; color: #1f4fb2;">₹ ${parseFloat(reportData?.closingBalance || 0).toFixed(2)}</td>
+              <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; color: #1f4fb2;">₹ ${Math.abs(parseFloat(reportData?.closingBalance || 0)).toFixed(2)}</td>
             </tr>
           </tfoot>
         </table>
@@ -335,7 +348,7 @@ const LedgerStatementReport = () => {
                         <td>{row.particulars || '-'}</td>
                         <td className="text-right">{parseFloat(row.debit || 0).toFixed(2)}</td>
                         <td className="text-right">{parseFloat(row.credit || 0).toFixed(2)}</td>
-                        <td className="text-right">{parseFloat(row.balance || 0).toFixed(2)}</td>
+                        <td className="text-right">{Math.abs(parseFloat(row.balance || 0)).toFixed(2)}</td>
                       </tr>
                     );
                   })}
@@ -343,7 +356,7 @@ const LedgerStatementReport = () => {
                     <td colSpan="4"><strong>Closing Balance</strong></td>
                     <td></td>
                     <td></td>
-                    <td className="text-right"><strong>{parseFloat(reportData.closingBalance || 0).toFixed(2)}</strong></td>
+                    <td className="text-right"><strong>{Math.abs(parseFloat(reportData.closingBalance || 0)).toFixed(2)}</strong></td>
                   </tr>
                 </>
               )}

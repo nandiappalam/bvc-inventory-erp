@@ -1,6 +1,8 @@
 const express = require('express')
 const router = express.Router()
 const db = require('../config/database')
+const { createSalesReturnVoucherChain, deleteSalesReturnVoucherChain } = require('../utils/ledgerHelper')
+const rebuildStockLedger = require('../utils/stockRebuilder')
 
 // Ensure deduction columns exist in sales_return
 async function ensureReturnColumns() {
@@ -231,6 +233,30 @@ router.post('/', async (req, res) => {
       }
     }
 
+    // 1. Rebuild stock ledger to synchronize balances and reports
+    try {
+      await rebuildStockLedger();
+    } catch (stkErr) {
+      console.warn('Notice rebuilding stock ledger on sales return save:', stkErr.message);
+    }
+
+    // 2. Post Credit Note and ledger entries for customer and tax reversal
+    try {
+      await createSalesReturnVoucherChain({
+        customer,
+        date: date || new Date().toISOString().split('T')[0],
+        returnInvNo: s_no ? `SRT-${s_no}` : `SRT-${salesReturnId}`,
+        sNo: s_no,
+        salesReturnId,
+        totalAmount: parseFloat(grand_total) || parseFloat(total_amt) || 0,
+        baseAmount: (parseFloat(grand_total) || parseFloat(total_amt) || 0) - (parseFloat(req.body.tax_amt) || 0),
+        taxAmount: parseFloat(req.body.tax_amt) || 0,
+        narration: remarks || `Sales Return #${s_no || salesReturnId}`
+      });
+    } catch (ledgErr) {
+      console.warn('Notice creating sales return voucher chain:', ledgErr.message);
+    }
+
     res.status(201).json({ success: true, id: salesReturnId, message: 'Sales return created successfully' })
   } catch (err) {
     console.error('Error creating sales return:', err)
@@ -267,6 +293,29 @@ router.put('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Sales return not found' })
     }
 
+    // Re-sync stock and ledger
+    try {
+      await rebuildStockLedger();
+    } catch (stkErr) {
+      console.warn('Notice rebuilding stock ledger on sales return update:', stkErr.message);
+    }
+
+    try {
+      await createSalesReturnVoucherChain({
+        customer,
+        date: date || new Date().toISOString().split('T')[0],
+        returnInvNo: s_no ? `SRT-${s_no}` : `SRT-${id}`,
+        sNo: s_no,
+        salesReturnId: id,
+        totalAmount: parseFloat(grand_total) || parseFloat(total_amt) || 0,
+        baseAmount: (parseFloat(grand_total) || parseFloat(total_amt) || 0) - (parseFloat(req.body.tax_amt) || 0),
+        taxAmount: parseFloat(req.body.tax_amt) || 0,
+        narration: remarks || `Sales Return #${s_no || id}`
+      });
+    } catch (ledgErr) {
+      console.warn('Notice updating sales return voucher chain:', ledgErr.message);
+    }
+
     res.json({ success: true, message: 'Sales return updated successfully' })
   } catch (err) {
     console.error('Error updating sales return:', err)
@@ -279,11 +328,25 @@ router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params
 
-    // Delete items first (due to foreign key constraint)
+    // 1. Delete ledger entries and voucher chain
+    try {
+      await deleteSalesReturnVoucherChain(id);
+    } catch (ledgErr) {
+      console.warn('Notice deleting sales return voucher chain:', ledgErr.message);
+    }
+
+    // 2. Delete items first
     await db.run('DELETE FROM sales_return_items WHERE sales_return_id = ?', [id])
 
-    // Delete the sales return
+    // 3. Delete the sales return
     const result = await db.run('DELETE FROM sales_return WHERE id = ?', [id])
+
+    // 4. Rebuild stock ledger
+    try {
+      await rebuildStockLedger();
+    } catch (stkErr) {
+      console.warn('Notice rebuilding stock ledger on sales return delete:', stkErr.message);
+    }
 
     if (result.changes === 0) {
       return res.status(404).json({ error: 'Sales return not found' })

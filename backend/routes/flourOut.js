@@ -258,6 +258,33 @@ router.post('/', async (req, res) => {
       // Deduct stock
       await deductFlourOutStock(flourOutId, formData.date, activeItems);
 
+      // Track vehicle movement if vehicle/lorry is provided
+      if (formData.vehicle_no || formData.lorry_no) {
+        try {
+          const vNo = formData.vehicle_no || formData.lorry_no;
+          await db.run(`
+            INSERT INTO vehicle_movements (
+              reference_type, reference_id, movement_type, operation_type, vehicle_no, driver_name,
+              gate_in_time, gate_out_time, status, item_name, qty, weight, party_name, lot_no, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'OUT', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+          `, [
+            'FLOUR_OUT',
+            formData.s_no || flourOutId,
+            'OUTWARD',
+            'Flour Out Dispatched',
+            vNo,
+            formData.driver || '',
+            activeItems[0]?.item_name || 'Flour',
+            parseFloat(formData.total_qty) || 0,
+            parseFloat(formData.total_weight) || 0,
+            formData.papad_company || '',
+            activeItems[0]?.lot_no || ''
+          ]);
+        } catch (vmErr) {
+          console.error('Error inserting vehicle movement for flour out:', vmErr);
+        }
+      }
+
       res.status(201).json({
         success: true,
         message: 'Flour out record saved successfully!',

@@ -285,11 +285,22 @@ const getDashboardMetricsHandler = async (req, res) => {
     const monthPrefix = todayStr.substring(0, 7);
 
     const todayReqRes = await db.query(`SELECT COUNT(*) as count FROM purchase_requests WHERE request_date LIKE ?`, [`${todayStr}%`]);
-    const pendingRes = await db.query(`SELECT COUNT(*) as count FROM purchase_requests WHERE status = 'Submitted'`);
+    const pendingRes = await db.query(`SELECT COUNT(*) as count FROM purchase_requests WHERE status IN ('Submitted', 'Pending Approval', 'Pending')`);
+    const approvedTotalRes = await db.query(`SELECT COUNT(*) as count FROM purchase_requests WHERE status = 'Approved'`);
     const approvedTodayRes = await db.query(`SELECT COUNT(*) as count FROM purchase_requests WHERE status = 'Approved' AND (approved_date LIKE ? OR updated_at LIKE ?)`, [`${todayStr}%`, `${todayStr}%`]);
+    const rejectedTotalRes = await db.query(`SELECT COUNT(*) as count FROM purchase_requests WHERE status = 'Rejected'`);
     const rejectedTodayRes = await db.query(`SELECT COUNT(*) as count FROM purchase_requests WHERE status = 'Rejected' AND updated_at LIKE ?`, [`${todayStr}%`]);
-    const urgentRes = await db.query(`SELECT COUNT(*) as count FROM purchase_requests WHERE status = 'Submitted' AND priority IN ('High', 'Urgent')`);
+    const convertedRes = await db.query(`SELECT COUNT(*) as count FROM purchase_requests WHERE converted_to_po_id IS NOT NULL OR status = 'Converted to PO'`);
+    const overdueRes = await db.query(`SELECT COUNT(*) as count FROM purchase_requests WHERE status NOT IN ('Closed', 'Converted to PO') AND required_date IS NOT NULL AND required_date != '' AND required_date < ?`, [todayStr]);
+    const urgentRes = await db.query(`SELECT COUNT(*) as count FROM purchase_requests WHERE status IN ('Submitted', 'Pending Approval') AND priority IN ('High', 'Urgent')`);
     const monthlyRes = await db.query(`SELECT COUNT(*) as count FROM purchase_requests WHERE request_date LIKE ?`, [`${monthPrefix}%`]);
+
+    const pendingQtyRes = await db.query(`
+      SELECT COALESCE(SUM(pri.requested_qty), 0) as pending_qty
+      FROM purchase_requests pr
+      JOIN purchase_request_items pri ON pr.id = pri.purchase_request_id
+      WHERE pr.status IN ('Submitted', 'Pending Approval', 'Approved', 'Draft') AND pr.converted_to_po_id IS NULL
+    `).catch(() => ({ rows: [{ pending_qty: 0 }] }));
 
     const monthlyValRes = await db.query(`
       SELECT COALESCE(SUM(pri.estimated_amount), 0) as total_value
@@ -319,9 +330,16 @@ const getDashboardMetricsHandler = async (req, res) => {
     const metricsObj = {
       today_requests: todayReqRes.rows[0]?.count || 0,
       pending_approvals: pendingRes.rows[0]?.count || 0,
-      urgent_pending: urgentRes.rows[0]?.count || 0,
+      pending_pr: pendingRes.rows[0]?.count || 0,
+      approved_pr: approvedTotalRes.rows[0]?.count || 0,
       approved_today: approvedTodayRes.rows[0]?.count || 0,
+      rejected_pr: rejectedTotalRes.rows[0]?.count || 0,
       rejected_today: rejectedTodayRes.rows[0]?.count || 0,
+      converted_to_po: convertedRes.rows[0]?.count || 0,
+      overdue_pr: overdueRes.rows[0]?.count || 0,
+      urgent_pending: urgentRes.rows[0]?.count || 0,
+      urgent_requirements: urgentRes.rows[0]?.count || 0,
+      pending_qty: parseFloat(pendingQtyRes.rows[0]?.pending_qty) || 0,
       monthly_total: monthlyRes.rows[0]?.count || 0,
       monthly_value: monthlyValRes.rows[0]?.total_value || 0
     };
