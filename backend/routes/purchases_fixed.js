@@ -564,6 +564,17 @@ router.post('/', async (req, res) => {
   }
 })
 
+function sanitizeDate(val) {
+  if (val === null || val === undefined) return null;
+  const s = String(val).trim();
+  if (s === '' || s === 'null' || s === 'undefined') return null;
+  const ddmmyyyy = s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
+  if (ddmmyyyy) {
+    return `${ddmmyyyy[3]}-${ddmmyyyy[2].padStart(2, '0')}-${ddmmyyyy[1].padStart(2, '0')}`;
+  }
+  return s;
+}
+
 // PUT update purchase
 router.put('/:id', async (req, res) => {
   try {
@@ -575,6 +586,9 @@ router.put('/:id', async (req, res) => {
     const transporter = formData.transporter || formData.transport || '';
     const vehicle_no = formData.vehicle_no || formData.lorry_no || '';
     const driver_name = formData.driver_name || formData.driver || '';
+
+    const sanitizedDate = sanitizeDate(formData.date) || new Date().toISOString().slice(0, 10);
+    const sanitizedInvDate = sanitizeDate(formData.invDate || formData.inv_date);
 
     await db.run(`
       UPDATE purchases SET
@@ -590,11 +604,11 @@ router.put('/:id', async (req, res) => {
       WHERE id = ?
     `, [
       formData.sno || formData.s_no,
-      formData.date,
+      sanitizedDate,
       formData.invNo || formData.inv_no,
       formData.supplier || formData.supplier_id,
       formData.payType || formData.pay_type,
-      formData.invDate,
+      sanitizedInvDate,
       formData.type,
       formData.contact_person,
       formData.address,

@@ -70,8 +70,8 @@ const DatabaseUtility = () => {
     if (!file) return;
 
     const lowerName = file.name.toLowerCase();
-    if (!lowerName.endsWith('.db') && !lowerName.endsWith('.json') && !lowerName.endsWith('.sqlite') && !lowerName.endsWith('.sqlite3')) {
-      setStatus({ type: 'error', message: 'Please select a valid database backup file (.db or .json).' });
+    if (!lowerName.endsWith('.db') && !lowerName.endsWith('.json') && !lowerName.endsWith('.sql') && !lowerName.endsWith('.sqlite') && !lowerName.endsWith('.sqlite3')) {
+      setStatus({ type: 'error', message: 'Please select a valid database backup file (.db, .sql, or .json).' });
       return;
     }
 
@@ -86,9 +86,25 @@ const DatabaseUtility = () => {
     const formData = new FormData();
     formData.append('database', file);
 
+    const headers = {};
+    try {
+      const token = localStorage.getItem('erp_token');
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const selComp = localStorage.getItem('erp_selected_company') || localStorage.getItem('erp_company');
+      if (selComp) {
+        try {
+          const parsed = JSON.parse(selComp);
+          if (parsed?.id) headers['X-Company-Id'] = String(parsed.id);
+        } catch (_) {
+          headers['X-Company-Id'] = String(selComp);
+        }
+      }
+    } catch (_) {}
+
     try {
       const response = await fetch('/api/db/restore', {
         method: 'POST',
+        headers,
         body: formData,
       });
 

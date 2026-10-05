@@ -1022,6 +1022,19 @@ async function executePgQuery(sql, params = [], companyId = 1, isMaster = false)
       } else if (queryErr.code === '23505' && /duplicate key value violates unique constraint/i.test(queryErr.message)) {
         await resyncPostgresSequences(client, schemaName);
         result = await client.query(transformedSql, params);
+      } else if (queryErr.code === '22007' || /invalid input syntax for type (?:date|timestamp)/i.test(queryErr.message)) {
+        // Automatically convert empty strings to null and format DD-MM-YYYY to YYYY-MM-DD
+        const sanitizedParams = (params || []).map(p => {
+          if (p === null || p === undefined) return null;
+          if (typeof p === 'string') {
+            const trimmed = p.trim();
+            if (trimmed === '' || trimmed === 'null' || trimmed === 'undefined') return null;
+            const ddmmyyyy = trimmed.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
+            if (ddmmyyyy) return `${ddmmyyyy[3]}-${ddmmyyyy[2].padStart(2, '0')}-${ddmmyyyy[1].padStart(2, '0')}`;
+          }
+          return p;
+        });
+        result = await client.query(transformedSql, sanitizedParams);
       } else if (queryErr.code === '23503' && /violates foreign key constraint/i.test(queryErr.message)) {
         const constraintMatch = queryErr.message.match(/violates foreign key constraint "([^"]+)"/i) || [null, queryErr.constraint];
         const referencingTableMatch = queryErr.message.match(/on table "([^"]+)"/i) || queryErr.message.match(/table "([^"]+)"/i) || [null, queryErr.table];
@@ -1333,9 +1346,21 @@ async function restoreDatabase(tempFilePath, companyId = 1) {
     // In PostgreSQL mode: Restore tables from SQLite backup, SQL script, or JSON backup
     const client = await pgPool.connect();
     try {
-      const schemaName = `company_${cId}`;
+      const targetCompanyId = (jsonData && jsonData.companyId) ? parseInt(jsonData.companyId, 10) : cId;
+      const schemaName = (jsonData && jsonData.schema) ? jsonData.schema : `company_${targetCompanyId}`;
+
       await client.query(`CREATE SCHEMA IF NOT EXISTS ${schemaName};`);
       await client.query(`SET search_path TO ${schemaName}, public;`);
+
+      // Ensure all standard company tables exist in the target schema first
+      try {
+        const { COMPANY_TABLES } = require('../database/companySchema.js');
+        for (const ddl of COMPANY_TABLES) {
+          try {
+            await client.query(translateSqlForPostgres(ddl, targetCompanyId));
+          } catch (ddlErr) {}
+        }
+      } catch (importErr) {}
 
       if (isSql) {
         const sqlContent = fs.readFileSync(tempFilePath, 'utf8');
