@@ -558,6 +558,17 @@ router.post('/', async (req, res) => {
   }
 });
 
+function sanitizeDate(val) {
+  if (val === null || val === undefined) return null;
+  const s = String(val).trim();
+  if (s === '' || s === 'null' || s === 'undefined') return null;
+  const ddmmyyyy = s.match(/^(\d{1,2})\s*[-\/]\s*(\d{1,2})\s*[-\/]\s*(\d{4})$/);
+  if (ddmmyyyy) {
+    return `${ddmmyyyy[3]}-${ddmmyyyy[2].padStart(2, '0')}-${ddmmyyyy[1].padStart(2, '0')}`;
+  }
+  return s;
+}
+
 // PUT update Work Order Slip
 router.put('/:id', async (req, res) => {
   try {
@@ -586,6 +597,8 @@ router.put('/:id', async (req, res) => {
       output_items = [],
       wastage_items = []
     } = req.body;
+
+    const cleanDate = sanitizeDate(date);
 
     const rawItems = (Array.isArray(input_items) && input_items.length > 0) ? input_items : items;
     const finalOutputItems = Array.isArray(output_items) ? output_items : [];
@@ -645,7 +658,7 @@ router.put('/:id', async (req, res) => {
       flour_mill_id || null,
       product,
       product_id || null,
-      date,
+      cleanDate,
       status,
       calcOutputQty,
       calcOutputWt,

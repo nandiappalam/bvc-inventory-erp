@@ -307,6 +307,17 @@ router.post('/', async (req, res) => {
   }
 });
 
+function sanitizeDate(val) {
+  if (val === null || val === undefined) return null;
+  const s = String(val).trim();
+  if (s === '' || s === 'null' || s === 'undefined') return null;
+  const ddmmyyyy = s.match(/^(\d{1,2})\s*[-\/]\s*(\d{1,2})\s*[-\/]\s*(\d{4})$/);
+  if (ddmmyyyy) {
+    return `${ddmmyyyy[3]}-${ddmmyyyy[2].padStart(2, '0')}-${ddmmyyyy[1].padStart(2, '0')}`;
+  }
+  return s;
+}
+
 // PUT update papad in record
 router.put('/:id', async (req, res) => {
   try {
@@ -318,7 +329,7 @@ router.put('/:id', async (req, res) => {
     const flourOutId = req.params.id;
 
     const sNo = formData.sNo || formData.s_no || formData.sno || '1';
-    const date = formData.date || new Date().toISOString().split('T')[0];
+    const date = sanitizeDate(formData.date) || new Date().toISOString().split('T')[0];
     const papadCompany = formData.papadCompany || formData.papad_company || formData.company || '';
     const remarks = formData.remarks || '';
 

@@ -580,12 +580,32 @@ router.put('/:id', async (req, res) => {
   try {
     const { formData, items, totals, deductions } = req.body
     const purchaseId = req.params.id
+    const safeDeductions = Array.isArray(deductions) ? deductions : [];
 
     const purchase_order_id = formData.purchase_order_id || formData.purchaseOrderId || formData.po_id || formData.source_order_id || null;
     const po_no = formData.po_no || formData.poNo || formData.source_order_no || null;
     const transporter = formData.transporter || formData.transport || '';
     const vehicle_no = formData.vehicle_no || formData.lorry_no || '';
     const driver_name = formData.driver_name || formData.driver || '';
+
+    let resolvedGodownId = null;
+    let resolvedGodownName = formData.godown || '';
+    const rawGodown = formData.godown_id || formData.godownId || formData.godown || null;
+    if (rawGodown && /^\d+$/.test(String(rawGodown))) {
+      resolvedGodownId = parseInt(rawGodown, 10);
+    }
+    try {
+      if (resolvedGodownId) {
+        const gRes = await db.query('SELECT godown_name FROM godown_master WHERE id = ?', [resolvedGodownId]);
+        if (gRes.rows && gRes.rows[0]) resolvedGodownName = gRes.rows[0].godown_name;
+      } else if (resolvedGodownName) {
+        const gRes = await db.query('SELECT id, godown_name FROM godown_master WHERE LOWER(godown_name) = LOWER(?)', [resolvedGodownName]);
+        if (gRes.rows && gRes.rows[0]) {
+          resolvedGodownId = gRes.rows[0].id;
+          resolvedGodownName = gRes.rows[0].godown_name;
+        }
+      }
+    } catch (e) {}
 
     const sanitizedDate = sanitizeDate(formData.date) || new Date().toISOString().slice(0, 10);
     const sanitizedInvDate = sanitizeDate(formData.invDate || formData.inv_date);
@@ -751,10 +771,10 @@ router.put('/:id', async (req, res) => {
       await db.run(`
         INSERT INTO stock (item_id, item_name, lot_no, qty, weight, rate, amount, date, type, reference_id, godown, godown_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Purchase', ?, ?, ?)
-      `, [itemId, normalizedItem.item_name, lotNo, qty, totalWt, rate, amount, formData.date, purchaseId, resolvedGodownName || 'Main Godown', resolvedGodownId || 1])
+      `, [itemId, normalizedItem.item_name, lotNo, qty, totalWt, rate, amount, sanitizedDate, purchaseId, resolvedGodownName || 'Main Godown', resolvedGodownId || 1])
     }
 
-    for (const ded of deductions) {
+    for (const ded of safeDeductions) {
       await db.run(`
         INSERT INTO purchase_deductions (
           purchase_id, deduction_purchase_id, deduction_name, type, calc_type, value, amount, affect_cost_of_goods, remarks
@@ -776,14 +796,14 @@ router.put('/:id', async (req, res) => {
       await deleteLedgerEntries(purchaseId, 'Purchase')
       await createPurchaseLedgerEntries({
         supplier: formData.supplier,
-        date: formData.date,
+        date: sanitizedDate,
         invNo: formData.invNo || '',
         purchaseId,
-        baseAmount: parseFloat(totals.baseAmount) || 0,
-        taxAmount: parseFloat(totals.taxAmount) || 0,
-        discAmount: parseFloat(totals.discAmount) || 0,
-        netAmount: parseFloat(totals.grandTotal) || 0,
-        deductions: deductions || []
+        baseAmount: parseFloat(totals?.baseAmount || totals?.totalAmount || 0) || 0,
+        taxAmount: parseFloat(totals?.taxAmount || 0) || 0,
+        discAmount: parseFloat(totals?.discAmount || 0) || 0,
+        netAmount: parseFloat(totals?.grandTotal || totals?.netAmount || 0) || 0,
+        deductions: safeDeductions
       })
     } catch (ledgerError) {
       console.error('Error updating ledger entries for purchase:', ledgerError)

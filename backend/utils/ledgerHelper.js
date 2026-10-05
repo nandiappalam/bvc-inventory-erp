@@ -5,6 +5,17 @@
 
 const db = require('../config/database')
 
+function sanitizeDate(val) {
+  if (val === null || val === undefined) return null;
+  const s = String(val).trim();
+  if (s === '' || s === 'null' || s === 'undefined') return null;
+  const ddmmyyyy = s.match(/^(\d{1,2})\s*[-\/]\s*(\d{1,2})\s*[-\/]\s*(\d{4})$/);
+  if (ddmmyyyy) {
+    return `${ddmmyyyy[3]}-${ddmmyyyy[2].padStart(2, '0')}-${ddmmyyyy[1].padStart(2, '0')}`;
+  }
+  return s;
+}
+
 async function ensureVoucherTables() {
   try {
     await db.run(`
@@ -329,6 +340,7 @@ async function createLedgerEntry({
 }) {
   try {
     const ledgerId = await resolveLedgerId(ledgerName, ledgerType)
+    const cleanEntryDate = sanitizeDate(date) || new Date().toISOString().slice(0, 10)
 
     await db.run(`
       INSERT INTO ledger_entries (
@@ -339,7 +351,7 @@ async function createLedgerEntry({
     `, [
       ledgerId,
       ledgerName,
-      date,
+      cleanEntryDate,
       voucherType,
       voucherNo,
       debit,
@@ -381,7 +393,7 @@ async function createPurchaseVoucherChain(purchaseData) {
 
   const resolvedSupplier = await getPartyName(supplier, 'supplier')
 
-  const voucherDate = date || new Date().toISOString().slice(0, 10)
+  const voucherDate = sanitizeDate(date) || new Date().toISOString().slice(0, 10)
   const voucherNo = await getNextVoucherNumber('Purchase')
 
   const voucherResult = await db.run(`
@@ -623,7 +635,7 @@ async function createSalesVoucherChain(salesData) {
 
   const resolvedCustomer = await getPartyName(customer, 'customer')
 
-  const voucherDate = date || new Date().toISOString().slice(0, 10)
+  const voucherDate = sanitizeDate(date) || new Date().toISOString().slice(0, 10)
   const voucherNo = await getNextVoucherNumber('Sales')
 
   // Support baseAmount if not explicitly passed
@@ -957,7 +969,7 @@ async function createPurchaseReturnVoucherChain(returnData) {
   }
 
   const resolvedSupplier = await getPartyName(supplier, 'supplier')
-  const voucherDate = date || new Date().toISOString().slice(0, 10)
+  const voucherDate = sanitizeDate(date) || new Date().toISOString().slice(0, 10)
   const voucherNo = await getNextVoucherNumber('Debit Note')
   const invoiceRef = returnInvNo || sNo || effectiveId || ''
   const effectiveNarration = narration || `Debit Note / Purchase Return #${invoiceRef} to ${resolvedSupplier || supplier || 'Vendor'}`
@@ -1138,7 +1150,7 @@ async function createSalesReturnVoucherChain(returnData) {
   }
 
   const invoiceRef = returnInvNo || sNo || effectiveId || 'SRT'
-  const voucherDate = date || new Date().toISOString().split('T')[0]
+  const voucherDate = sanitizeDate(date) || new Date().toISOString().split('T')[0]
   const totalVal = Math.abs(parseFloat(totalAmount) || 0)
   const baseVal = Math.abs(parseFloat(baseAmount) || totalVal)
   const taxVal = Math.abs(parseFloat(taxAmount) || 0)

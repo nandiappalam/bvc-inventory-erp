@@ -395,11 +395,23 @@ const revertSalesStock = async (salesId) => {
   }
 }
 
+function sanitizeDate(val) {
+  if (val === null || val === undefined) return null;
+  const s = String(val).trim();
+  if (s === '' || s === 'null' || s === 'undefined') return null;
+  const ddmmyyyy = s.match(/^(\d{1,2})\s*[-\/]\s*(\d{1,2})\s*[-\/]\s*(\d{4})$/);
+  if (ddmmyyyy) {
+    return `${ddmmyyyy[3]}-${ddmmyyyy[2].padStart(2, '0')}-${ddmmyyyy[1].padStart(2, '0')}`;
+  }
+  return s;
+}
+
 // PUT update sales
 router.put('/:id', async (req, res) => {
   try {
     const { formData, items, totals } = req.body
     const salesId = req.params.id
+    const cleanDate = sanitizeDate(formData.date) || new Date().toISOString().split('T')[0];
 
     const activeItems = (items || []).filter(item => item.item_name || item.itemName)
 
@@ -448,7 +460,7 @@ router.put('/:id', async (req, res) => {
       WHERE id = ?
     `, [
       formData.sNo || formData.bill_no || formData.s_no || salesId,
-      formData.date || new Date().toISOString().split('T')[0],
+      cleanDate,
       formData.customer || '',
       formData.remarks || '',
       totalQty,

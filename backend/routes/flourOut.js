@@ -300,6 +300,17 @@ router.post('/', async (req, res) => {
   }
 });
 
+function sanitizeDate(val) {
+  if (val === null || val === undefined) return null;
+  const s = String(val).trim();
+  if (s === '' || s === 'null' || s === 'undefined') return null;
+  const ddmmyyyy = s.match(/^(\d{1,2})\s*[-\/]\s*(\d{1,2})\s*[-\/]\s*(\d{4})$/);
+  if (ddmmyyyy) {
+    return `${ddmmyyyy[3]}-${ddmmyyyy[2].padStart(2, '0')}-${ddmmyyyy[1].padStart(2, '0')}`;
+  }
+  return s;
+}
+
 // PUT update flour out
 router.put('/:id', async (req, res) => {
   try {
@@ -319,13 +330,14 @@ router.put('/:id', async (req, res) => {
 
     const sNoVal = formData.sNo || formData.s_no || formData.sno || '';
     const compVal = formData.papad_company || formData.papadCompany || formData.company || '';
+    const cleanDate = sanitizeDate(formData.date) || new Date().toISOString().slice(0, 10);
 
     // Update flour out header
     await db.run(`
       UPDATE flour_out 
       SET s_no = ?, date = ?, papad_company = ?, address = ?, remarks = ?, total_qty = ?, total_weight = ?, total_wages = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
-    `, [sNoVal, formData.date, compVal, formData.address || '', formData.remarks || '', totalQty, totalWeight, totalWages, flourOutId]);
+    `, [sNoVal, cleanDate, compVal, formData.address || '', formData.remarks || '', totalQty, totalWeight, totalWages, flourOutId]);
 
     // Delete existing items
     await db.run('DELETE FROM flour_out_items WHERE flour_out_id = ?', [flourOutId]);

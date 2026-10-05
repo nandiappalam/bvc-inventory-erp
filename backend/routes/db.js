@@ -106,6 +106,38 @@ router.post('/restore', upload.any(), async (req, res) => {
   }
 })
 
+// Direct One-Click Restore for KIYA (Company 7)
+router.post('/init-kiya', async (req, res) => {
+  try {
+    const candidatePaths = [
+      path.join(__dirname, '../database/kiya_company_7_backup.json'),
+      path.join(process.cwd(), 'frontend/public/kiya_company_7_backup.json'),
+      path.join(process.cwd(), 'backend/database/kiya_company_7_backup.json'),
+      path.join(__dirname, '../../frontend/public/kiya_company_7_backup.json')
+    ];
+    let backupPath = null;
+    for (const p of candidatePaths) {
+      if (fs.existsSync(p)) {
+        backupPath = p;
+        break;
+      }
+    }
+    if (!backupPath) {
+      return res.status(404).json({ success: false, message: 'KIYA company backup file not found on server.' });
+    }
+
+    const result = await db.restoreDatabase(backupPath, 7);
+    res.json({
+      success: true,
+      message: 'KIYA (Company 7) backup restored and initialized successfully!',
+      details: result
+    });
+  } catch (error) {
+    console.error('Error initializing KIYA database:', error);
+    res.status(500).json({ success: false, message: 'Failed to initialize KIYA database: ' + error.message });
+  }
+});
+
 // Execute Query (SELECT) - returns array of results
 router.post('/query', async (req, res) => {
   try {

@@ -19,6 +19,49 @@ const DatabaseUtility = () => {
   const [downloading, setDownloading] = useState(false);
   const [status, setStatus] = useState({ type: '', message: '' });
 
+  const [initializingKiya, setInitializingKiya] = useState(false);
+
+  const handleInitKiya = async () => {
+    const confirm = window.confirm(
+      'Are you sure you want to restore and initialize all data for KIYA (Company 7)? This will populate all suppliers, items, purchases, vouchers, and stock.'
+    );
+    if (!confirm) return;
+
+    setInitializingKiya(true);
+    setStatus({ type: '', message: '' });
+
+    const headers = { 'Content-Type': 'application/json' };
+    try {
+      const token = localStorage.getItem('erp_token');
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      headers['X-Company-Id'] = '7';
+    } catch (_) {}
+
+    try {
+      const response = await fetch('/api/db/init-kiya', {
+        method: 'POST',
+        headers,
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        setStatus({
+          type: 'success',
+          message: 'KIYA (Company 7) data restored successfully! Reloading page in 2 seconds...',
+        });
+        setTimeout(() => {
+          window.location.reload();
+        }, 2000);
+      } else {
+        throw new Error(data.message || 'Failed to initialize KIYA data');
+      }
+    } catch (err) {
+      console.error('Init KIYA error:', err);
+      setStatus({ type: 'error', message: err.message });
+    } finally {
+      setInitializingKiya(false);
+    }
+  };
+
   const handleDownload = async () => {
     setDownloading(true);
     setStatus({ type: '', message: '' });
@@ -161,13 +204,44 @@ const DatabaseUtility = () => {
         </Alert>
       )}
 
+      <Card sx={{ border: '2px solid #2e7d32', borderRadius: 3, boxShadow: '0 4px 16px rgba(46,125,50,0.12)', mb: 3, backgroundColor: '#f1f8e9' }}>
+        <CardContent sx={{ p: 4 }}>
+          <Typography variant="h6" sx={{ fontWeight: 'bold', mb: 1, color: '#1b5e20', display: 'flex', alignItems: 'center', gap: 1 }}>
+            ⚡ 1-Click Restore KIYA Company (Company 7)
+          </Typography>
+          <Typography variant="body2" sx={{ color: '#2e7d32', mb: 3 }}>
+            Directly populate and restore all KIYA company data (Suppliers, Items, Purchases, Vouchers, Stock Lots, and Ledger) with a single click. No file upload or SQL copy-paste needed!
+          </Typography>
+
+          <Button
+            variant="contained"
+            color="success"
+            size="large"
+            onClick={handleInitKiya}
+            disabled={initializingKiya || downloading || uploading}
+            startIcon={initializingKiya ? <CircularProgress size={20} color="inherit" /> : <CheckCircleIcon />}
+            sx={{
+              backgroundColor: '#2e7d32',
+              textTransform: 'none',
+              borderRadius: 2,
+              fontWeight: 'bold',
+              px: 4,
+              py: 1.5,
+              '&:hover': { backgroundColor: '#1b5e20' },
+            }}
+          >
+            {initializingKiya ? 'Restoring KIYA Company Data...' : 'Restore KIYA Company (Company 7) Now'}
+          </Button>
+        </CardContent>
+      </Card>
+
       <Card sx={{ border: '1px solid #dbe7fb', borderRadius: 3, boxShadow: '0 4px 12px rgba(0,0,0,0.05)', mb: 3 }}>
         <CardContent sx={{ p: 4 }}>
           <Typography variant="h6" sx={{ fontWeight: 'bold', mb: 1, color: '#333' }}>
             Export Database Backup
           </Typography>
           <Typography variant="body2" sx={{ color: '#666', mb: 3 }}>
-            Download the entire local SQLite database (including all your created companies, purchase logs, items, etc.) as a single file to your computer.
+            Download your database backup as a JSON file or SQLite database to your computer.
           </Typography>
 
           <Button
@@ -175,7 +249,7 @@ const DatabaseUtility = () => {
             color="primary"
             size="large"
             onClick={handleDownload}
-            disabled={downloading || uploading}
+            disabled={downloading || uploading || initializingKiya}
             startIcon={downloading ? <CircularProgress size={20} color="inherit" /> : <CloudDownloadIcon />}
             sx={{
               backgroundColor: '#1f4fb2',
@@ -194,10 +268,10 @@ const DatabaseUtility = () => {
       <Card sx={{ border: '1px solid #dbe7fb', borderRadius: 3, boxShadow: '0 4px 12px rgba(0,0,0,0.05)' }}>
         <CardContent sx={{ p: 4 }}>
           <Typography variant="h6" sx={{ fontWeight: 'bold', mb: 1, color: '#333' }}>
-            Import / Restore Database Backup
+            Import / Restore Database Backup (JSON, DB, SQL)
           </Typography>
           <Typography variant="body2" sx={{ color: '#666', mb: 3 }}>
-            Overwrite the current database by uploading a previously downloaded <code>.db</code> or <code>.json</code> backup file. This will restore all your previous records.
+            Upload any backup file (<code>.json</code>, <code>.db</code>, or <code>.sql</code>) to restore data.
           </Typography>
 
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
@@ -206,7 +280,7 @@ const DatabaseUtility = () => {
               color="primary"
               size="large"
               component="label"
-              disabled={downloading || uploading}
+              disabled={downloading || uploading || initializingKiya}
               startIcon={uploading ? <CircularProgress size={20} /> : <CloudUploadIcon />}
               sx={{
                 textTransform: 'none',
@@ -218,8 +292,8 @@ const DatabaseUtility = () => {
                 '&:hover': { borderColor: '#163a8a', backgroundColor: '#eaf2fb' },
               }}
             >
-              {uploading ? 'Restoring Database...' : 'Select & Upload Backup (.db, .json)'}
-              <input type="file" accept=".db,.json,.sqlite,.sqlite3" hidden onChange={handleUpload} />
+              {uploading ? 'Restoring Database...' : 'Select & Upload Backup (.json, .db, .sql)'}
+              <input type="file" accept=".db,.json,.sqlite,.sqlite3,.sql" hidden onChange={handleUpload} />
             </Button>
           </Box>
         </CardContent>

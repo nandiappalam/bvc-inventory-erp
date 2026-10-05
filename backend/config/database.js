@@ -1442,7 +1442,16 @@ async function restoreDatabase(tempFilePath, companyId = 1) {
             const colList = validKeys.map((k) => `"${k}"`).join(', ');
             const values = validKeys.map((k) => {
               const v = row[k];
-              return typeof v === 'object' && v !== null ? JSON.stringify(v) : v;
+              if (typeof v === 'object' && v !== null) return JSON.stringify(v);
+              if (typeof v === 'string' && (k.toLowerCase().includes('date') || k.toLowerCase().endsWith('_dt'))) {
+                const s = v.trim();
+                if (s === '' || s === 'null' || s === 'undefined') return null;
+                const ddmmyyyy = s.match(/^(\d{1,2})\s*[-\/]\s*(\d{1,2})\s*[-\/]\s*(\d{4})$/);
+                if (ddmmyyyy) {
+                  return `${ddmmyyyy[3]}-${ddmmyyyy[2].padStart(2, '0')}-${ddmmyyyy[1].padStart(2, '0')}`;
+                }
+              }
+              return v;
             });
             try {
               await client.query(
@@ -1452,6 +1461,7 @@ async function restoreDatabase(tempFilePath, companyId = 1) {
             } catch (err) {}
           }
         }
+        await resyncPostgresSequences(client, schemaName);
       }
 
       console.log(`✅ [PostgreSQL] Restored company_${cId} schema from backup file successfully!`);

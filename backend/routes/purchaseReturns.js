@@ -980,6 +980,17 @@ router.post('/', async (req, res) => {
   }
 });
 
+function sanitizeDate(val) {
+  if (val === null || val === undefined) return null;
+  const s = String(val).trim();
+  if (s === '' || s === 'null' || s === 'undefined') return null;
+  const ddmmyyyy = s.match(/^(\d{1,2})\s*[-\/]\s*(\d{1,2})\s*[-\/]\s*(\d{4})$/);
+  if (ddmmyyyy) {
+    return `${ddmmyyyy[3]}-${ddmmyyyy[2].padStart(2, '0')}-${ddmmyyyy[1].padStart(2, '0')}`;
+  }
+  return s;
+}
+
 // PUT update purchase return
 router.put('/:id', async (req, res) => {
   try {
@@ -1005,6 +1016,9 @@ router.put('/:id', async (req, res) => {
 
     const returnSource = formData.returnMethod === 'QC_IQR' ? 'QC_REJECTION' : (formData.source || 'MANUAL');
 
+    const cleanDate = sanitizeDate(formData.date) || new Date().toISOString().slice(0, 10);
+    const cleanInvDate = sanitizeDate(formData.invDate || formData.inv_date);
+
     // Update purchase return
     await db.run(`
       UPDATE purchase_returns SET
@@ -1018,11 +1032,11 @@ router.put('/:id', async (req, res) => {
       WHERE id = ?
     `, [
       formData.sNo ?? formData.s_no, 
-      formData.date, 
+      cleanDate, 
       formData.returnInvNo ?? formData.return_inv_no, 
       formData.supplier, 
       formData.payType ?? formData.pay_type ?? 'Credit',
-      formData.invDate ?? formData.inv_date, 
+      cleanInvDate, 
       formData.type ?? 'Urad', 
       formData.address ?? '', 
       formData.taxType ?? formData.tax_type ?? 'Exclusive', 
