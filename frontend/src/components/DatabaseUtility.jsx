@@ -108,6 +108,73 @@ const DatabaseUtility = () => {
     }
   };
 
+  const [jsonText, setJsonText] = useState('');
+  const [showJsonPaste, setShowJsonPaste] = useState(false);
+  const [restoringJson, setRestoringJson] = useState(false);
+
+  const handleJsonPasteRestore = async () => {
+    if (!jsonText.trim()) {
+      setStatus({ type: 'error', message: 'Please paste valid JSON backup content.' });
+      return;
+    }
+
+    let parsedData = null;
+    try {
+      parsedData = JSON.parse(jsonText.trim());
+    } catch (e) {
+      setStatus({ type: 'error', message: 'Invalid JSON format: ' + e.message });
+      return;
+    }
+
+    const confirmRestore = window.confirm(
+      'WARNING: Restoring will overwrite existing records with this JSON data. Are you sure you want to proceed?'
+    );
+    if (!confirmRestore) return;
+
+    setRestoringJson(true);
+    setStatus({ type: '', message: '' });
+
+    const headers = { 'Content-Type': 'application/json' };
+    try {
+      const token = localStorage.getItem('erp_token');
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const selComp = localStorage.getItem('erp_selected_company') || localStorage.getItem('erp_company');
+      if (selComp) {
+        try {
+          const parsed = JSON.parse(selComp);
+          if (parsed?.id) headers['X-Company-Id'] = String(parsed.id);
+        } catch (_) {
+          headers['X-Company-Id'] = String(selComp);
+        }
+      }
+    } catch (_) {}
+
+    try {
+      const response = await fetch('/api/db/restore-json', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ jsonData: parsedData }),
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        setStatus({
+          type: 'success',
+          message: 'Database restored successfully from JSON! Reloading page in 2 seconds...',
+        });
+        setTimeout(() => {
+          window.location.reload();
+        }, 2000);
+      } else {
+        throw new Error(data.message || data.error || 'JSON restoration failed');
+      }
+    } catch (err) {
+      console.error('JSON restore error:', err);
+      setStatus({ type: 'error', message: `Failed to restore database: ${err.message}` });
+    } finally {
+      setRestoringJson(false);
+    }
+  };
+
   const handleUpload = async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -126,9 +193,6 @@ const DatabaseUtility = () => {
     setUploading(true);
     setStatus({ type: '', message: '' });
 
-    const formData = new FormData();
-    formData.append('database', file);
-
     const headers = {};
     try {
       const token = localStorage.getItem('erp_token');
@@ -145,6 +209,35 @@ const DatabaseUtility = () => {
     } catch (_) {}
 
     try {
+      // If it's a JSON file, read it client-side and use pure JSON API (bypasses multer/disk storage entirely)
+      if (lowerName.endsWith('.json')) {
+        const fileContent = await file.text();
+        const parsedJson = JSON.parse(fileContent);
+        headers['Content-Type'] = 'application/json';
+        const response = await fetch('/api/db/restore-json', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ jsonData: parsedJson }),
+        });
+        const data = await response.json();
+        if (response.ok && data.success) {
+          setStatus({
+            type: 'success',
+            message: 'Database backup restored successfully! Reloading page in 2 seconds to apply changes...',
+          });
+          setTimeout(() => {
+            window.location.reload();
+          }, 2000);
+          return;
+        } else {
+          throw new Error(data.message || data.error || 'Restoration failed');
+        }
+      }
+
+      // For binary DB / SQL files, use standard multipart upload
+      const formData = new FormData();
+      formData.append('database', file);
+
       const response = await fetch('/api/db/restore', {
         method: 'POST',
         headers,
@@ -152,24 +245,22 @@ const DatabaseUtility = () => {
       });
 
       const contentType = response.headers.get('content-type') || '';
-
       let data = {};
       if (contentType.includes('application/json')) {
         data = await response.json();
       } else {
         const responseText = await response.text();
-        console.error('Non-JSON response received:', response.status, responseText);
-        throw new Error(`Server returned status ${response.status}. Please ensure the backend server is running.`);
+        throw new Error(`Server returned status ${response.status}: ${responseText.slice(0, 100)}`);
       }
 
       if (response.ok && data.success) {
         setStatus({
           type: 'success',
-          message: 'Database backup restored successfully! Reloading page in 3 seconds to apply changes...',
+          message: 'Database backup restored successfully! Reloading page in 2 seconds to apply changes...',
         });
         setTimeout(() => {
           window.location.reload();
-        }, 3000);
+        }, 2000);
       } else {
         throw new Error(data.message || data.error || 'Restoration failed');
       }
@@ -178,7 +269,6 @@ const DatabaseUtility = () => {
       setStatus({ type: 'error', message: `Failed to restore database: ${error.message}` });
     } finally {
       setUploading(false);
-      // Reset file input
       event.target.value = '';
     }
   };
@@ -280,7 +370,7 @@ const DatabaseUtility = () => {
               color="primary"
               size="large"
               component="label"
-              disabled={downloading || uploading || initializingKiya}
+              disabled={downloading || uploading || initializingKiya || restoringJson}
               startIcon={uploading ? <CircularProgress size={20} /> : <CloudUploadIcon />}
               sx={{
                 textTransform: 'none',
@@ -296,6 +386,65 @@ const DatabaseUtility = () => {
               <input type="file" accept=".db,.json,.sqlite,.sqlite3,.sql" hidden onChange={handleUpload} />
             </Button>
           </Box>
+        </CardContent>
+      </Card>
+
+      <Card sx={{ border: '1px solid #dbe7fb', borderRadius: 3, boxShadow: '0 4px 12px rgba(0,0,0,0.05)', mt: 3 }}>
+        <CardContent sx={{ p: 4 }}>
+          <Typography variant="h6" sx={{ fontWeight: 'bold', mb: 1, color: '#333' }}>
+            📋 Direct JSON Paste & Restore
+          </Typography>
+          <Typography variant="body2" sx={{ color: '#666', mb: 2 }}>
+            Optionally copy and paste the contents of your <code>kiya_company_7_backup.json</code> file below to restore directly without file upload dialogs.
+          </Typography>
+
+          <Button
+            size="small"
+            onClick={() => setShowJsonPaste(!showJsonPaste)}
+            sx={{ mb: 2, textTransform: 'none', fontWeight: 'bold', color: '#1f4fb2' }}
+          >
+            {showJsonPaste ? '▲ Hide Paste Box' : '▼ Show Paste Box'}
+          </Button>
+
+          {showJsonPaste && (
+            <Box sx={{ mt: 1 }}>
+              <textarea
+                value={jsonText}
+                onChange={(e) => setJsonText(e.target.value)}
+                placeholder='Paste backup JSON content here: {"companyId": 7, "tables": { ... }}'
+                style={{
+                  width: '100%',
+                  height: '140px',
+                  fontFamily: 'monospace',
+                  fontSize: '12px',
+                  padding: '10px',
+                  border: '1px solid #ccc',
+                  borderRadius: '6px',
+                  boxSizing: 'border-box'
+                }}
+              />
+              <Box sx={{ mt: 2 }}>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  onClick={handleJsonPasteRestore}
+                  disabled={restoringJson || !jsonText.trim()}
+                  startIcon={restoringJson ? <CircularProgress size={18} color="inherit" /> : <CheckCircleIcon />}
+                  sx={{
+                    backgroundColor: '#1f4fb2',
+                    textTransform: 'none',
+                    fontWeight: 'bold',
+                    borderRadius: 2,
+                    px: 3,
+                    py: 1,
+                    '&:hover': { backgroundColor: '#163a8a' },
+                  }}
+                >
+                  {restoringJson ? 'Restoring from JSON...' : 'Restore Pasted JSON Now'}
+                </Button>
+              </Box>
+            </Box>
+          )}
         </CardContent>
       </Card>
     </Box>

@@ -111,24 +111,29 @@ router.post('/restore', upload.any(), async (req, res) => {
 // Direct One-Click Restore for KIYA (Company 7)
 router.post('/init-kiya', async (req, res) => {
   try {
-    const candidatePaths = [
-      path.join(__dirname, '../database/kiya_company_7_backup.json'),
-      path.join(process.cwd(), 'frontend/public/kiya_company_7_backup.json'),
-      path.join(process.cwd(), 'backend/database/kiya_company_7_backup.json'),
-      path.join(__dirname, '../../frontend/public/kiya_company_7_backup.json')
-    ];
-    let backupPath = null;
-    for (const p of candidatePaths) {
-      if (fs.existsSync(p)) {
-        backupPath = p;
-        break;
+    let kiyaData = null;
+    try {
+      kiyaData = require('../database/kiyaData.js');
+    } catch (requireErr) {
+      const candidatePaths = [
+        path.join(__dirname, '../database/kiya_company_7_backup.json'),
+        path.join(process.cwd(), 'frontend/public/kiya_company_7_backup.json'),
+        path.join(process.cwd(), 'backend/database/kiya_company_7_backup.json'),
+        path.join(__dirname, '../../frontend/public/kiya_company_7_backup.json')
+      ];
+      for (const p of candidatePaths) {
+        if (fs.existsSync(p)) {
+          kiyaData = JSON.parse(fs.readFileSync(p, 'utf8'));
+          break;
+        }
       }
     }
-    if (!backupPath) {
-      return res.status(404).json({ success: false, message: 'KIYA company backup file not found on server.' });
+
+    if (!kiyaData) {
+      return res.status(404).json({ success: false, message: 'KIYA company backup data could not be loaded.' });
     }
 
-    const result = await db.restoreDatabase(backupPath, 7);
+    const result = await db.restoreFromJsonData(kiyaData, 7);
     res.json({
       success: true,
       message: 'KIYA (Company 7) backup restored and initialized successfully!',
@@ -137,6 +142,28 @@ router.post('/init-kiya', async (req, res) => {
   } catch (error) {
     console.error('Error initializing KIYA database:', error);
     res.status(500).json({ success: false, message: 'Failed to initialize KIYA database: ' + error.message });
+  }
+});
+
+// Restore from raw JSON payload (no temp files or multer required)
+router.post('/restore-json', async (req, res) => {
+  try {
+    const { jsonData } = req.body;
+    const companyId = req.headers['x-company-id'] || req.body.companyId || req.body.company_id || 7;
+
+    if (!jsonData || typeof jsonData !== 'object') {
+      return res.status(400).json({ success: false, message: 'Valid jsonData object is required in request body.' });
+    }
+
+    const result = await db.restoreFromJsonData(jsonData, companyId);
+    res.json({
+      success: true,
+      message: result?.message || 'Database restored successfully from JSON payload!',
+      details: result
+    });
+  } catch (error) {
+    console.error('JSON restore error:', error);
+    res.status(500).json({ success: false, message: 'Failed to restore database from JSON: ' + error.message });
   }
 });
 

@@ -2273,6 +2273,176 @@ class SqliteDbConnection {
   }
 }
 
+async function restoreFromJsonData(jsonData, companyId = 1) {
+  if (!jsonData || typeof jsonData !== 'object') {
+    throw new Error('Invalid JSON data provided for restore');
+  }
+  const cId = parseInt(companyId, 10) || 1;
+  const targetCompanyId = (jsonData && jsonData.companyId) ? parseInt(jsonData.companyId, 10) : cId;
+
+  if (isPostgres) {
+    const client = await pgPool.connect();
+    try {
+      const schemaName = (jsonData && jsonData.schema) ? jsonData.schema : `company_${targetCompanyId}`;
+
+      // Ensure company entry exists in public.companies
+      try {
+        await client.query(`
+          INSERT INTO public.companies (id, code, name, address, gst_number, contact, email, state, state_code, tax_reg_type, status)
+          VALUES ($1, $2, $3, 'Industrial Area', '33AABCB1234A1Z5', '9876543210', 'info@bvc.com', 'Tamil Nadu', '33', 'Regular', 'Active')
+          ON CONFLICT (id) DO NOTHING
+        `, [targetCompanyId, `COMP_${targetCompanyId}`, targetCompanyId === 7 ? 'KIYA' : `Company ${targetCompanyId}`]);
+      } catch (e) {}
+
+      await client.query(`CREATE SCHEMA IF NOT EXISTS "${schemaName}";`);
+      await client.query(`SET search_path TO "${schemaName}", public;`);
+
+      // Ensure all standard company tables exist in the target schema first
+      try {
+        const { COMPANY_TABLES } = require('../database/companySchema.js');
+        for (const ddl of COMPANY_TABLES) {
+          try {
+            await client.query(translateSqlForPostgres(ddl, targetCompanyId));
+          } catch (ddlErr) {}
+        }
+      } catch (importErr) {}
+
+      let replicationRoleChanged = false;
+      try {
+        await client.query(`SET session_replication_role = 'replica';`);
+        replicationRoleChanged = true;
+      } catch (e) {}
+
+      const tablesObj = jsonData.tables || (typeof jsonData === 'object' && !Array.isArray(jsonData) ? jsonData : {});
+      for (const [table, rows] of Object.entries(tablesObj)) {
+        if (!Array.isArray(rows) || rows.length === 0 || table.startsWith('sqlite_') || table === 'users' || table === 'companies') continue;
+
+        const tblCheck = await client.query(
+          `SELECT column_name FROM information_schema.columns WHERE LOWER(table_schema) = LOWER($1) AND LOWER(table_name) = LOWER($2)`,
+          [schemaName, table]
+        );
+        if (!tblCheck.rows || tblCheck.rows.length === 0) continue;
+        const colSet = new Set(tblCheck.rows.map((r) => r.column_name.toLowerCase()));
+
+        try {
+          await client.query(`TRUNCATE TABLE "${schemaName}"."${table}" CASCADE;`);
+        } catch (e) {}
+
+        for (const row of rows) {
+          if (!row || typeof row !== 'object') continue;
+          const validKeys = Object.keys(row).filter((k) => colSet.has(k.toLowerCase()));
+          if (validKeys.length === 0) continue;
+          const placeholders = validKeys.map((_, idx) => `$${idx + 1}`).join(', ');
+          const colList = validKeys.map((k) => `"${k}"`).join(', ');
+          const values = validKeys.map((k) => {
+            const v = row[k];
+            if (typeof v === 'object' && v !== null) return JSON.stringify(v);
+            if (typeof v === 'string' && (k.toLowerCase().includes('date') || k.toLowerCase().endsWith('_dt'))) {
+              const s = v.trim();
+              if (s === '' || s === 'null' || s === 'undefined') return null;
+              const ddmmyyyy = s.match(/^(\d{1,2})\s*[-\/]\s*(\d{1,2})\s*[-\/]\s*(\d{4})$/);
+              if (ddmmyyyy) {
+                return `${ddmmyyyy[3]}-${ddmmyyyy[2].padStart(2, '0')}-${ddmmyyyy[1].padStart(2, '0')}`;
+              }
+            }
+            return v;
+          });
+          try {
+            await client.query(
+              `INSERT INTO "${schemaName}"."${table}" (${colList}) VALUES (${placeholders}) ON CONFLICT DO NOTHING`,
+              values
+            );
+          } catch (err) {}
+        }
+      }
+
+      if (replicationRoleChanged) {
+        try { await client.query(`SET session_replication_role = 'origin';`); } catch (e) {}
+      }
+      await resyncPostgresSequences(client, schemaName);
+      return { success: true, message: `Database restored successfully into PostgreSQL schema ${schemaName}.` };
+    } finally {
+      client.release();
+    }
+  } else {
+    const targetDbPath = getCompanyDbPath(targetCompanyId);
+    if (companyDbPool.has(targetCompanyId)) {
+      const oldInstance = companyDbPool.get(targetCompanyId);
+      try {
+        await new Promise((res) => oldInstance.close(() => res()));
+      } catch (e) {}
+      companyDbPool.delete(targetCompanyId);
+    }
+    if (!fs.existsSync(targetDbPath) || !isSQLiteDatabaseFile(targetDbPath)) {
+      await createCompanyDatabase(targetCompanyId);
+    }
+    const targetDb = new sqlite3.Database(targetDbPath);
+    const tablesObj = jsonData.tables || (typeof jsonData === 'object' && !Array.isArray(jsonData) ? jsonData : {});
+
+    await new Promise((resolve, reject) => {
+      targetDb.serialize(async () => {
+        try {
+          await new Promise((res, rej) => targetDb.run('PRAGMA foreign_keys = OFF', (err) => err ? rej(err) : res()));
+          await new Promise((res, rej) => targetDb.run('BEGIN TRANSACTION', (err) => err ? rej(err) : res()));
+
+          const existingTables = await new Promise((res, rej) => {
+            targetDb.all("SELECT name FROM sqlite_master WHERE type='table'", (err, rows) => {
+              if (err) rej(err);
+              else res(new Set((rows || []).map((r) => r.name)));
+            });
+          });
+
+          for (const [tableName, rows] of Object.entries(tablesObj)) {
+            if (!Array.isArray(rows) || tableName.startsWith('sqlite_')) continue;
+            if (!existingTables.has(tableName)) {
+              const matchingDdl = COMPANY_TABLES.find((sql) => {
+                const match = sql.match(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`]?([a-zA-Z0-9_]+)["`]?/i);
+                return match && match[1].toLowerCase() === tableName.toLowerCase();
+              });
+              if (matchingDdl) {
+                await new Promise((res) => targetDb.run(matchingDdl, () => res()));
+                existingTables.add(tableName);
+              }
+            }
+
+            await new Promise((res) => targetDb.run(`DELETE FROM "${tableName}"`, () => res()));
+
+            for (const row of rows) {
+              if (!row || typeof row !== 'object') continue;
+              const keys = Object.keys(row);
+              if (keys.length === 0) continue;
+              const placeholders = keys.map(() => '?').join(', ');
+              const colList = keys.map((k) => `"${k}"`).join(', ');
+              const values = keys.map((k) => {
+                const v = row[k];
+                return typeof v === 'object' && v !== null ? JSON.stringify(v) : v;
+              });
+              await new Promise((res) => {
+                targetDb.run(
+                  `INSERT OR IGNORE INTO "${tableName}" (${colList}) VALUES (${placeholders})`,
+                  values,
+                  () => res()
+                );
+              });
+            }
+          }
+
+          await new Promise((res) => targetDb.run('COMMIT', (err) => err ? rej(err) : res()));
+          await new Promise((res) => targetDb.run('PRAGMA foreign_keys = ON', () => res()));
+          resolve();
+        } catch (err) {
+          targetDb.run('ROLLBACK', () => reject(err));
+        }
+      });
+    });
+
+    targetDb.close();
+    const freshDb = new sqlite3.Database(targetDbPath);
+    companyDbPool.set(targetCompanyId, freshDb);
+    return { success: true, message: 'Database restored successfully from JSON backup!' };
+  }
+}
+
 // ============================================================================
 // MODULE EXPORTS (Unified Dual-Engine API)
 // ============================================================================
@@ -2284,6 +2454,7 @@ module.exports = {
   getMasterDbPath: () => masterDbPath,
   createCompanyDatabase,
   restoreDatabase,
+  restoreFromJsonData,
   ensurePostgresMasterSchema,
   ensurePostgresCompanySequences,
   syncPostgresTenantSchemas: async () => {
