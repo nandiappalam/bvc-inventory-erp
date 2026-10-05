@@ -4,14 +4,16 @@ const db = require('../config/database')
 const multer = require('multer')
 const fs = require('fs')
 const path = require('path')
+const os = require('os')
 
-// Multer setup for temporary storage
-const upload = multer({ dest: 'database/temp/' })
-
-// Ensure temp directory exists
-if (!fs.existsSync('database/temp/')) {
-  fs.mkdirSync('database/temp/', { recursive: true })
+// Multer setup for temporary storage using os.tmpdir()
+const tempUploadDir = path.join(os.tmpdir(), 'bvc_erp_temp_uploads')
+if (!fs.existsSync(tempUploadDir)) {
+  try {
+    fs.mkdirSync(tempUploadDir, { recursive: true })
+  } catch (_) {}
 }
+const upload = multer({ dest: tempUploadDir })
 
 // Download/Export database backup
 router.get('/backup', async (req, res) => {
