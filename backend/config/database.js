@@ -1444,12 +1444,24 @@ async function restoreDatabase(tempFilePath, companyId = 1) {
         for (const [table, rows] of Object.entries(tablesObj)) {
           if (!Array.isArray(rows) || rows.length === 0 || table.startsWith('sqlite_') || table === 'users' || table === 'companies') continue;
 
-          const tblCheck = await client.query(
+          let tblCheck = await client.query(
             `SELECT column_name FROM information_schema.columns WHERE LOWER(table_schema) = LOWER($1) AND LOWER(table_name) = LOWER($2)`,
             [schemaName, table]
           );
-          if (!tblCheck.rows || tblCheck.rows.length === 0) continue;
-          const colSet = new Set(tblCheck.rows.map((r) => r.column_name.toLowerCase()));
+          let colSet = new Set((tblCheck.rows || []).map((r) => r.column_name.toLowerCase()));
+
+          if (rows.length > 0 && rows[0] && typeof rows[0] === 'object') {
+            for (const key of Object.keys(rows[0])) {
+              if (!colSet.has(key.toLowerCase())) {
+                try {
+                  await client.query(`ALTER TABLE "${schemaName}"."${table}" ADD COLUMN IF NOT EXISTS "${key}" TEXT;`);
+                  colSet.add(key.toLowerCase());
+                } catch (alterErr) {}
+              }
+            }
+          }
+
+          if (colSet.size === 0) continue;
 
           try {
             await client.query(`TRUNCATE TABLE "${schemaName}"."${table}" CASCADE;`);
@@ -1486,6 +1498,13 @@ async function restoreDatabase(tempFilePath, companyId = 1) {
           try { await client.query(`SET session_replication_role = 'origin';`); } catch (e) {}
         }
         await resyncPostgresSequences(client, schemaName);
+
+        try {
+          const { rebuildStockLedger } = require('../utils/stockRebuilder');
+          if (typeof rebuildStockLedger === 'function') {
+            await rebuildStockLedger();
+          }
+        } catch (e) {}
       }
 
       console.log(`✅ [PostgreSQL] Restored company_${cId} schema from backup file successfully!`);
@@ -2317,12 +2336,25 @@ async function restoreFromJsonData(jsonData, companyId = 1) {
       for (const [table, rows] of Object.entries(tablesObj)) {
         if (!Array.isArray(rows) || rows.length === 0 || table.startsWith('sqlite_') || table === 'users' || table === 'companies') continue;
 
-        const tblCheck = await client.query(
+        let tblCheck = await client.query(
           `SELECT column_name FROM information_schema.columns WHERE LOWER(table_schema) = LOWER($1) AND LOWER(table_name) = LOWER($2)`,
           [schemaName, table]
         );
-        if (!tblCheck.rows || tblCheck.rows.length === 0) continue;
-        const colSet = new Set(tblCheck.rows.map((r) => r.column_name.toLowerCase()));
+        let colSet = new Set((tblCheck.rows || []).map((r) => r.column_name.toLowerCase()));
+
+        // Dynamically add any missing columns from backup rows into PostgreSQL table
+        if (rows.length > 0 && rows[0] && typeof rows[0] === 'object') {
+          for (const key of Object.keys(rows[0])) {
+            if (!colSet.has(key.toLowerCase())) {
+              try {
+                await client.query(`ALTER TABLE "${schemaName}"."${table}" ADD COLUMN IF NOT EXISTS "${key}" TEXT;`);
+                colSet.add(key.toLowerCase());
+              } catch (alterErr) {}
+            }
+          }
+        }
+
+        if (colSet.size === 0) continue;
 
         try {
           await client.query(`TRUNCATE TABLE "${schemaName}"."${table}" CASCADE;`);
@@ -2360,6 +2392,14 @@ async function restoreFromJsonData(jsonData, companyId = 1) {
         try { await client.query(`SET session_replication_role = 'origin';`); } catch (e) {}
       }
       await resyncPostgresSequences(client, schemaName);
+
+      try {
+        const { rebuildStockLedger } = require('../utils/stockRebuilder');
+        if (typeof rebuildStockLedger === 'function') {
+          await rebuildStockLedger();
+        }
+      } catch (e) {}
+
       return { success: true, message: `Database restored successfully into PostgreSQL schema ${schemaName}.` };
     } finally {
       client.release();
@@ -2405,15 +2445,36 @@ async function restoreFromJsonData(jsonData, companyId = 1) {
               }
             }
 
+            // Discover table columns and dynamically add any missing ones
+            let currentCols = await new Promise((res) => {
+              targetDb.all(`PRAGMA table_info("${tableName}")`, (err, cList) => {
+                if (err || !cList) res(new Set());
+                else res(new Set(cList.map(c => c.name.toLowerCase())));
+              });
+            });
+
+            if (rows.length > 0 && rows[0] && typeof rows[0] === 'object') {
+              for (const key of Object.keys(rows[0])) {
+                if (!currentCols.has(key.toLowerCase())) {
+                  await new Promise((res) => {
+                    targetDb.run(`ALTER TABLE "${tableName}" ADD COLUMN "${key}" TEXT`, () => {
+                      currentCols.add(key.toLowerCase());
+                      res();
+                    });
+                  });
+                }
+              }
+            }
+
             await new Promise((res) => targetDb.run(`DELETE FROM "${tableName}"`, () => res()));
 
             for (const row of rows) {
               if (!row || typeof row !== 'object') continue;
-              const keys = Object.keys(row);
-              if (keys.length === 0) continue;
-              const placeholders = keys.map(() => '?').join(', ');
-              const colList = keys.map((k) => `"${k}"`).join(', ');
-              const values = keys.map((k) => {
+              const validKeys = Object.keys(row).filter((k) => currentCols.has(k.toLowerCase()));
+              if (validKeys.length === 0) continue;
+              const placeholders = validKeys.map(() => '?').join(', ');
+              const colList = validKeys.map((k) => `"${k}"`).join(', ');
+              const values = validKeys.map((k) => {
                 const v = row[k];
                 return typeof v === 'object' && v !== null ? JSON.stringify(v) : v;
               });
@@ -2439,6 +2500,14 @@ async function restoreFromJsonData(jsonData, companyId = 1) {
     targetDb.close();
     const freshDb = new sqlite3.Database(targetDbPath);
     companyDbPool.set(targetCompanyId, freshDb);
+
+    try {
+      const { rebuildStockLedger } = require('../utils/stockRebuilder');
+      if (typeof rebuildStockLedger === 'function') {
+        await rebuildStockLedger();
+      }
+    } catch (e) {}
+
     return { success: true, message: 'Database restored successfully from JSON backup!' };
   }
 }

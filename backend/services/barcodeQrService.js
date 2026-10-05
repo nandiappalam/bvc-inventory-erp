@@ -109,31 +109,54 @@ class BarcodeQrService {
     const qcInfo = qcRes.rows[0] || null;
 
     // 4. Milling / Grinding Production records
-    const millingInputRes = await db.query(`
-      SELECT 
-        gi.grain_id,
-        gi.qty,
-        gi.total_wt as weight_kg,
-        g.date as milling_date,
-        COALESCE(g.work_order_no, 'WO-' || g.s_no) as batch_no,
-        g.machine_no
-      FROM grain_input_items gi
-      JOIN grains g ON gi.grain_id = g.id
-      WHERE gi.lot_no = ?
-    `, [lotNo]);
+    let millingInputRes = { rows: [] };
+    try {
+      millingInputRes = await db.query(`
+        SELECT 
+          gi.grain_id,
+          gi.qty,
+          gi.total_wt as weight_kg,
+          g.date as milling_date,
+          COALESCE(g.work_order_no, 'WO-' || g.s_no) as batch_no,
+          COALESCE(g.machine_no, '') as machine_no
+        FROM grain_input_items gi
+        JOIN grains g ON gi.grain_id = g.id
+        WHERE gi.lot_no = ?
+      `, [lotNo]);
+    } catch (e) {
+      try {
+        millingInputRes = await db.query(`
+          SELECT 
+            gi.grain_id,
+            gi.qty,
+            gi.total_wt as weight_kg,
+            g.date as milling_date,
+            COALESCE(g.work_order_no, 'WO-' || g.s_no) as batch_no,
+            '' as machine_no
+          FROM grain_input_items gi
+          JOIN grains g ON gi.grain_id = g.id
+          WHERE gi.lot_no = ?
+        `, [lotNo]);
+      } catch (err2) {
+        millingInputRes = { rows: [] };
+      }
+    }
 
-    const millingOutputRes = await db.query(`
-      SELECT 
-        go.grain_id,
-        go.item_name,
-        go.qty,
-        go.total_wt as weight_kg,
-        g.date as milling_date,
-        COALESCE(g.work_order_no, 'WO-' || g.s_no) as batch_no
-      FROM grain_output_items go
-      JOIN grains g ON go.grain_id = g.id
-      WHERE go.lot_no = ?
-    `, [lotNo]);
+    let millingOutputRes = { rows: [] };
+    try {
+      millingOutputRes = await db.query(`
+        SELECT 
+          go.grain_id,
+          go.item_name,
+          go.qty,
+          go.total_wt as weight_kg,
+          g.date as milling_date,
+          COALESCE(g.work_order_no, 'WO-' || g.s_no) as batch_no
+        FROM grain_output_items go
+        JOIN grains g ON go.grain_id = g.id
+        WHERE go.lot_no = ?
+      `, [lotNo]);
+    } catch (_) {}
 
     // 5. Cold Storage Inward & Outward Movements
     let csInwardRes = { rows: [] };

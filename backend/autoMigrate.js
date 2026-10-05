@@ -65,11 +65,33 @@ module.exports = async function autoMigrate() {
             BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchase_items" ADD COLUMN IF NOT EXISTS "total_weight" REAL DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
             BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchase_items" ADD COLUMN IF NOT EXISTS "disc_amount" REAL DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
             BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchase_items" ADD COLUMN IF NOT EXISTS "tax_amount" REAL DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchase_items" ADD COLUMN IF NOT EXISTS "total_amt" REAL DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchase_items" ADD COLUMN IF NOT EXISTS "total_amount" REAL DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
 
             -- purchases
             BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchases" ADD COLUMN IF NOT EXISTS "voucher_no" TEXT'; EXCEPTION WHEN OTHERS THEN END;
             BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchases" ADD COLUMN IF NOT EXISTS "s_no" INTEGER DEFAULT 1'; EXCEPTION WHEN OTHERS THEN END;
             BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchases" ADD COLUMN IF NOT EXISTS "godown" TEXT DEFAULT ''Main Godown'''; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchases" ADD COLUMN IF NOT EXISTS "sub_total" REAL DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchases" ADD COLUMN IF NOT EXISTS "total_deductions" REAL DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchases" ADD COLUMN IF NOT EXISTS "round_off" REAL DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchases" ADD COLUMN IF NOT EXISTS "gross_weight" REAL DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchases" ADD COLUMN IF NOT EXISTS "tare_weight" REAL DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchases" ADD COLUMN IF NOT EXISTS "net_weight" REAL DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchases" ADD COLUMN IF NOT EXISTS "bill_amt" REAL DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchases" ADD COLUMN IF NOT EXISTS "total_amt" REAL DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
+
+            -- grains
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."grains" ADD COLUMN IF NOT EXISTS "machine_no" TEXT'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."grains" ADD COLUMN IF NOT EXISTS "operator" TEXT'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."grains" ADD COLUMN IF NOT EXISTS "shift" TEXT'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."grains" ADD COLUMN IF NOT EXISTS "total_input_kg" REAL DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."grains" ADD COLUMN IF NOT EXISTS "total_output_kg" REAL DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."grains" ADD COLUMN IF NOT EXISTS "total_wastage_kg" REAL DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."grains" ADD COLUMN IF NOT EXISTS "recovery_percent" REAL DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
+
+            -- stock_lots
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."stock_lots" ADD COLUMN IF NOT EXISTS "godown_name" TEXT'; EXCEPTION WHEN OTHERS THEN END;
 
             -- godown_master
             BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."godown_master" ADD COLUMN IF NOT EXISTS "print_name" TEXT'; EXCEPTION WHEN OTHERS THEN END;
