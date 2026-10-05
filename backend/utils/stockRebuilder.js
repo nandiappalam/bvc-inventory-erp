@@ -71,7 +71,7 @@ async function rebuildStockLedger() {
 
     // A. Purchases
     const purchases = await db.query(`
-      SELECT pi.*, p.date, p.supplier, p.id as purchase_id, COALESCE(p.godown_id, p.godown) as godown_id, p.godown as godown_name
+      SELECT pi.*, p.date, p.supplier, p.id as purchase_id, COALESCE(p.godown_id, 1) as godown_id, p.godown as godown_name
       FROM purchase_items pi
       JOIN purchases p ON pi.purchase_id = p.id
       ORDER BY p.date ASC, pi.id ASC

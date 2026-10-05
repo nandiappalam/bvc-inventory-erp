@@ -38,9 +38,9 @@ router.get(['/', '/list'], async (req, res) => {
   try {
     // Dynamic sequence auto-repair if any s_no is null or empty
     try {
-      const nullSnoCheck = await db.query('SELECT id FROM flour_out WHERE s_no IS NULL OR s_no = "" ORDER BY created_at ASC');
+      const nullSnoCheck = await db.query("SELECT id FROM flour_out WHERE s_no IS NULL OR s_no = '' ORDER BY created_at ASC");
       if (nullSnoCheck.rows.length > 0) {
-        const maxSnoRes = await db.query('SELECT COALESCE(MAX(CAST(s_no AS INTEGER)), 0) as maxSno FROM flour_out WHERE s_no IS NOT NULL AND s_no != ""');
+        const maxSnoRes = await db.query("SELECT COALESCE(MAX(CAST(s_no AS INTEGER)), 0) as maxSno FROM flour_out WHERE s_no IS NOT NULL AND s_no != ''");
         let currentMax = maxSnoRes.rows[0]?.maxSno || 0;
         for (const row of nullSnoCheck.rows) {
           currentMax++;

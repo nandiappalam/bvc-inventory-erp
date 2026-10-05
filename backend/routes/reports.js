@@ -295,11 +295,11 @@ router.get('/godown-stock', async (req, res) => {
           WHEN UPPER(TRIM(s.lot_no)) LIKE '%LOT0006%' OR UPPER(TRIM(s.lot_no)) = 'LOT006' THEN 2
           ELSE s.godown_id
         END as godown_id,
-        im.id as item_id,
-        COALESCE(im.item_code, UPPER(SUBSTR(s.item_name, 1, 4))) as item_code,
-        COALESCE(im.type, im.item_group, 'General') as category,
-        COALESCE(im.unit, 'kg') as unit,
-        AVG(COALESCE(s.weight, im.weight, 1)) as weight,
+        MAX(im.id) as item_id,
+        COALESCE(MAX(im.item_code), UPPER(SUBSTR(s.item_name, 1, 4))) as item_code,
+        COALESCE(MAX(im.type), MAX(im.item_group), 'General') as category,
+        COALESCE(MAX(im.unit), 'kg') as unit,
+        AVG(COALESCE(s.weight, 50)) as weight,
         SUM(CASE WHEN s.type IN ('Opening Stock', 'Open Stock', 'Opening') THEN COALESCE(s.qty, 0) ELSE 0 END) as opening_qty,
         SUM(CASE WHEN s.type NOT IN ('Opening Stock', 'Open Stock', 'Opening') AND s.qty > 0 THEN COALESCE(s.qty, 0) ELSE 0 END) as in_qty,
         SUM(CASE WHEN LOWER(s.type) = 'purchase return' THEN COALESCE(ABS(s.qty), 0) ELSE 0 END) as return_qty,

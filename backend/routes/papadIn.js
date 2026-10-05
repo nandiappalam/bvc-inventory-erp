@@ -205,7 +205,7 @@ router.post('/', async (req, res) => {
 
     let sNo = formData.sNo || formData.s_no || formData.sno || '';
     if (!sNo || sNo === '1') {
-      const maxSnoRes = await db.query('SELECT COALESCE(MAX(CAST(s_no AS INTEGER)), 0) as maxSno FROM flour_out WHERE papad_company IS NOT NULL AND papad_company != ""');
+      const maxSnoRes = await db.query("SELECT COALESCE(MAX(CAST(s_no AS INTEGER)), 0) as maxSno FROM flour_out WHERE papad_company IS NOT NULL AND papad_company != ''");
       sNo = String((maxSnoRes.rows[0]?.maxSno || 0) + 1);
     }
 
