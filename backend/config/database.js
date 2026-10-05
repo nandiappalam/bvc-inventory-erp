@@ -1349,6 +1349,15 @@ async function restoreDatabase(tempFilePath, companyId = 1) {
       const targetCompanyId = (jsonData && jsonData.companyId) ? parseInt(jsonData.companyId, 10) : cId;
       const schemaName = (jsonData && jsonData.schema) ? jsonData.schema : `company_${targetCompanyId}`;
 
+      // Ensure company entry exists in public.companies
+      try {
+        await client.query(`
+          INSERT INTO public.companies (id, code, name, address, gst_number, contact, email, state, state_code, tax_reg_type, status)
+          VALUES ($1, $2, $3, 'Industrial Area', '33AABCB1234A1Z5', '9876543210', 'info@bvc.com', 'Tamil Nadu', '33', 'Regular', 'Active')
+          ON CONFLICT (id) DO NOTHING
+        `, [targetCompanyId, `COMP_${targetCompanyId}`, targetCompanyId === 7 ? 'KIYA' : `Company ${targetCompanyId}`]);
+      } catch (e) {}
+
       await client.query(`CREATE SCHEMA IF NOT EXISTS ${schemaName};`);
       await client.query(`SET search_path TO ${schemaName}, public;`);
 
@@ -1362,10 +1371,19 @@ async function restoreDatabase(tempFilePath, companyId = 1) {
         }
       } catch (importErr) {}
 
+      // Temporarily relax foreign keys if possible for fast bulk import
+      let replicationRoleChanged = false;
+      try {
+        await client.query(`SET session_replication_role = 'replica';`);
+        replicationRoleChanged = true;
+      } catch (e) {}
+
       if (isSql) {
         const sqlContent = fs.readFileSync(tempFilePath, 'utf8');
-        // Prepend search_path to ensure statements execute inside target company schema
         await client.query(`SET search_path TO ${schemaName}, public; ${sqlContent}`);
+        if (replicationRoleChanged) {
+          try { await client.query(`SET session_replication_role = 'origin';`); } catch (e) {}
+        }
         await resyncPostgresSequences(client, schemaName);
         console.log(`✅ [PostgreSQL] Restored ${schemaName} from SQL script successfully!`);
         return { success: true, message: `Database restored successfully into PostgreSQL schema ${schemaName}.` };
@@ -1382,7 +1400,7 @@ async function restoreDatabase(tempFilePath, companyId = 1) {
           if (table === 'users' || table === 'companies') continue;
           
           const tblCheck = await client.query(
-            `SELECT column_name FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2`,
+            `SELECT column_name FROM information_schema.columns WHERE LOWER(table_schema) = LOWER($1) AND LOWER(table_name) = LOWER($2)`,
             [schemaName, table]
           );
           if (!tblCheck.rows || tblCheck.rows.length === 0) continue;
@@ -1397,7 +1415,7 @@ async function restoreDatabase(tempFilePath, companyId = 1) {
 
           if (rows && rows.length > 0) {
             try {
-              await client.query(`TRUNCATE TABLE ${schemaName}.${table} CASCADE;`);
+              await client.query(`TRUNCATE TABLE "${schemaName}"."${table}" CASCADE;`);
             } catch (e) {}
 
             for (const row of rows) {
@@ -1409,7 +1427,7 @@ async function restoreDatabase(tempFilePath, companyId = 1) {
               const values = validKeys.map((k) => row[k]);
               try {
                 await client.query(
-                  `INSERT INTO ${schemaName}.${table} (${colList}) VALUES (${placeholders}) ON CONFLICT DO NOTHING`,
+                  `INSERT INTO "${schemaName}"."${table}" (${colList}) VALUES (${placeholders}) ON CONFLICT DO NOTHING`,
                   values
                 );
               } catch (err) {}
@@ -1417,6 +1435,9 @@ async function restoreDatabase(tempFilePath, companyId = 1) {
           }
         }
         tempDb.close();
+        if (replicationRoleChanged) {
+          try { await client.query(`SET session_replication_role = 'origin';`); } catch (e) {}
+        }
         await resyncPostgresSequences(client, schemaName);
       } else if (jsonData) {
         const tablesObj = jsonData.tables || (typeof jsonData === 'object' && !Array.isArray(jsonData) ? jsonData : {});
@@ -1424,14 +1445,14 @@ async function restoreDatabase(tempFilePath, companyId = 1) {
           if (!Array.isArray(rows) || rows.length === 0 || table.startsWith('sqlite_') || table === 'users' || table === 'companies') continue;
 
           const tblCheck = await client.query(
-            `SELECT column_name FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2`,
+            `SELECT column_name FROM information_schema.columns WHERE LOWER(table_schema) = LOWER($1) AND LOWER(table_name) = LOWER($2)`,
             [schemaName, table]
           );
           if (!tblCheck.rows || tblCheck.rows.length === 0) continue;
           const colSet = new Set(tblCheck.rows.map((r) => r.column_name.toLowerCase()));
 
           try {
-            await client.query(`TRUNCATE TABLE ${schemaName}.${table} CASCADE;`);
+            await client.query(`TRUNCATE TABLE "${schemaName}"."${table}" CASCADE;`);
           } catch (e) {}
 
           for (const row of rows) {
@@ -1455,11 +1476,14 @@ async function restoreDatabase(tempFilePath, companyId = 1) {
             });
             try {
               await client.query(
-                `INSERT INTO ${schemaName}.${table} (${colList}) VALUES (${placeholders}) ON CONFLICT DO NOTHING`,
+                `INSERT INTO "${schemaName}"."${table}" (${colList}) VALUES (${placeholders}) ON CONFLICT DO NOTHING`,
                 values
               );
             } catch (err) {}
           }
+        }
+        if (replicationRoleChanged) {
+          try { await client.query(`SET session_replication_role = 'origin';`); } catch (e) {}
         }
         await resyncPostgresSequences(client, schemaName);
       }
