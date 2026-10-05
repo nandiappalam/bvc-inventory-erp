@@ -17,15 +17,40 @@ const { orderTablesByDependencies } = require('../utils/schemaOrderer');
 // Context storage for multi-tenant requests
 const asyncLocalStorage = new AsyncLocalStorage();
 
+// Helper to clean connection string (strip quotes, psql command wrappers, spaces)
+function sanitizeConnectionString(connStr) {
+  if (!connStr || typeof connStr !== 'string') return '';
+  let cleaned = connStr.trim();
+  // Remove wrapping single or double quotes
+  if ((cleaned.startsWith('"') && cleaned.endsWith('"')) || (cleaned.startsWith("'") && cleaned.endsWith("'"))) {
+    cleaned = cleaned.slice(1, -1).trim();
+  }
+  // Strip 'psql' wrapper if copied from console: psql 'postgres://...'
+  if (cleaned.startsWith('psql ')) {
+    cleaned = cleaned.replace(/^psql\s+['"]?/, '').replace(/['"]?$/, '').trim();
+  }
+  return cleaned;
+}
+
+// Helper to mask password in connection string for safe logging
+function maskConnectionUrl(connStr) {
+  if (!connStr || typeof connStr !== 'string') return '';
+  try {
+    return connStr.replace(/(:\/\/[^:]+:)([^@]+)(@)/, '$1*****$3');
+  } catch (_) {
+    return 'postgresql://*****';
+  }
+}
+
 // Check if PostgreSQL (Neon / Supabase / RDS / Render Postgres) is configured
-const rawConnectionString = (
+const rawConnectionString = sanitizeConnectionString(
   process.env.DATABASE_URL || 
   process.env.POSTGRES_URL || 
   process.env.NEON_DATABASE_URL || 
   process.env.DATABASE_URI || 
   process.env.PGURI || 
   ''
-).trim();
+);
 
 const isPostgres = process.env.DB_ENGINE === 'postgres' || (!!rawConnectionString && process.env.DB_ENGINE !== 'sqlite');
 
@@ -45,6 +70,7 @@ if (isPostgres) {
   console.log('================================================================');
   console.log('🚀 [BVC ERP MODE 2: RENDER / CLOUD]');
   console.log('🔹 Database Engine: Neon PostgreSQL ONLY');
+  console.log('🔹 Target URL:', maskConnectionUrl(rawConnectionString));
   console.log('🔹 SQLite Files: DISABLED');
   console.log('🔹 Local SQLite Fallback: DISABLED');
   console.log('🔹 Cloud-Desktop Sync: STRICTLY NON-SYNCED & NON-LINKED');
@@ -70,7 +96,12 @@ if (isPostgres) {
     });
 
     pgPool.on('error', (err) => {
-      console.error('⚠️ [PostgreSQL Pool] Error on idle client:', err.message);
+      if (err.code === '28P01' || err.message?.includes('password authentication failed')) {
+        console.error('❌ [Neon DB Auth Error] Password authentication failed for PostgreSQL user.');
+        console.error('   Please copy the fresh connection string from console.neon.tech and update DATABASE_URL in Render Dashboard.');
+      } else {
+        console.error('⚠️ [PostgreSQL Pool] Error on idle client:', err.message);
+      }
     });
   }
 } else {
@@ -1263,6 +1294,22 @@ function parseBackupJson(filePath) {
   return null;
 }
 
+function isSqlTextFile(filePath) {
+  try {
+    if (!fs.existsSync(filePath)) return false;
+    const stat = fs.statSync(filePath);
+    if (stat.size < 5) return false;
+    const buf = Buffer.alloc(Math.min(stat.size, 1024));
+    const fd = fs.openSync(filePath, 'r');
+    fs.readSync(fd, buf, 0, buf.length, 0);
+    fs.closeSync(fd);
+    const head = buf.toString('utf8').trim();
+    return /^(?:--|\/\*|SET\b|INSERT\b|CREATE\b|SELECT\b|BEGIN\b|DROP\b)/i.test(head);
+  } catch (e) {
+    return false;
+  }
+}
+
 async function restoreDatabase(tempFilePath, companyId = 1) {
   const cId = parseInt(companyId, 10) || 1;
   if (!fs.existsSync(tempFilePath)) {
@@ -1275,21 +1322,29 @@ async function restoreDatabase(tempFilePath, companyId = 1) {
   }
 
   const isSQLite = isSQLiteDatabaseFile(tempFilePath);
-  const jsonData = !isSQLite ? parseBackupJson(tempFilePath) : null;
+  const isSql = !isSQLite ? isSqlTextFile(tempFilePath) : false;
+  const jsonData = (!isSQLite && !isSql) ? parseBackupJson(tempFilePath) : null;
 
-  if (!isSQLite && !jsonData) {
-    throw new Error('Integrity check failed: uploaded file is neither a valid SQLite database nor a valid JSON backup export.');
+  if (!isSQLite && !isSql && !jsonData) {
+    throw new Error('Integrity check failed: uploaded file is neither a valid SQLite database (.db), SQL script (.sql), nor a valid JSON backup export.');
   }
 
   if (isPostgres) {
-    // In PostgreSQL mode: Restore tables from either SQLite backup or JSON backup
+    // In PostgreSQL mode: Restore tables from SQLite backup, SQL script, or JSON backup
     const client = await pgPool.connect();
     try {
       const schemaName = `company_${cId}`;
       await client.query(`CREATE SCHEMA IF NOT EXISTS ${schemaName};`);
       await client.query(`SET search_path TO ${schemaName}, public;`);
 
-      if (isSQLite) {
+      if (isSql) {
+        const sqlContent = fs.readFileSync(tempFilePath, 'utf8');
+        // Prepend search_path to ensure statements execute inside target company schema
+        await client.query(`SET search_path TO ${schemaName}, public; ${sqlContent}`);
+        await resyncPostgresSequences(client, schemaName);
+        console.log(`✅ [PostgreSQL] Restored ${schemaName} from SQL script successfully!`);
+        return { success: true, message: `Database restored successfully into PostgreSQL schema ${schemaName}.` };
+      } else if (isSQLite) {
         const tempDb = new sqlite3.Database(tempFilePath, sqlite3.OPEN_READONLY);
         const tables = await new Promise((resolve) => {
           tempDb.all("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'", (err, rows) => {
@@ -1300,10 +1355,18 @@ async function restoreDatabase(tempFilePath, companyId = 1) {
 
         for (const table of tables) {
           if (table === 'users' || table === 'companies') continue;
+          
+          const tblCheck = await client.query(
+            `SELECT column_name FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2`,
+            [schemaName, table]
+          );
+          if (!tblCheck.rows || tblCheck.rows.length === 0) continue;
+          const colSet = new Set(tblCheck.rows.map((r) => r.column_name.toLowerCase()));
+
           const rows = await new Promise((resolve) => {
-            tempDb.all(`SELECT * FROM ${table}`, (err, rows) => {
+            tempDb.all(`SELECT * FROM "${table}"`, (err, r) => {
               if (err) resolve([]);
-              else resolve(rows || []);
+              else resolve(r || []);
             });
           });
 
@@ -1313,10 +1376,12 @@ async function restoreDatabase(tempFilePath, companyId = 1) {
             } catch (e) {}
 
             for (const row of rows) {
-              const keys = Object.keys(row);
-              const values = Object.values(row);
-              const placeholders = keys.map((_, idx) => `$${idx + 1}`).join(', ');
-              const colList = keys.map((k) => `"${k}"`).join(', ');
+              if (!row || typeof row !== 'object') continue;
+              const validKeys = Object.keys(row).filter((k) => colSet.has(k.toLowerCase()));
+              if (validKeys.length === 0) continue;
+              const placeholders = validKeys.map((_, idx) => `$${idx + 1}`).join(', ');
+              const colList = validKeys.map((k) => `"${k}"`).join(', ');
+              const values = validKeys.map((k) => row[k]);
               try {
                 await client.query(
                   `INSERT INTO ${schemaName}.${table} (${colList}) VALUES (${placeholders}) ON CONFLICT DO NOTHING`,
@@ -1327,6 +1392,7 @@ async function restoreDatabase(tempFilePath, companyId = 1) {
           }
         }
         tempDb.close();
+        await resyncPostgresSequences(client, schemaName);
       } else if (jsonData) {
         const tablesObj = jsonData.tables || (typeof jsonData === 'object' && !Array.isArray(jsonData) ? jsonData : {});
         for (const [table, rows] of Object.entries(tablesObj)) {
@@ -1397,6 +1463,24 @@ async function restoreDatabase(tempFilePath, companyId = 1) {
         if (fs.existsSync(`${targetDbPath}-wal`)) fs.unlinkSync(`${targetDbPath}-wal`);
         if (fs.existsSync(`${targetDbPath}-shm`)) fs.unlinkSync(`${targetDbPath}-shm`);
       } catch (e) {}
+    }
+
+    if (isSql) {
+      if (!fs.existsSync(targetDbPath) || !isSQLiteDatabaseFile(targetDbPath)) {
+        await createCompanyDatabase(cId);
+      }
+      const targetDb = new sqlite3.Database(targetDbPath);
+      const sqlContent = fs.readFileSync(tempFilePath, 'utf8');
+      await new Promise((resolve, reject) => {
+        targetDb.exec(sqlContent, (err) => {
+          if (err) return reject(new Error(`Failed to execute SQL script: ${err.message}`));
+          resolve();
+        });
+      });
+      targetDb.close();
+      const freshInstance = new sqlite3.Database(targetDbPath);
+      companyDbPool.set(cId, freshInstance);
+      return { success: true, message: `Database restored successfully from SQL script for company ${cId}.` };
     }
 
     if (isSQLite) {

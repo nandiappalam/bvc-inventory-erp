@@ -178,11 +178,11 @@ const normalizeMasterData = async (tableName, rawData) => {
 // hasStatus: false = table doesn't have status column, return all records
 // NOTE: Fixed hasStatus to correctly reflect which tables actually have status column
 const masterTypeAliases = {
-  // Type aliases (frontend-friendly names) -> { table, displayField, hasStatus }
-  item: { table: 'item_master', displayField: 'item_name', hasStatus: true },
-  items: { table: 'item_master', displayField: 'item_name', hasStatus: true },
-  item_master: { table: 'item_master', displayField: 'item_name', hasStatus: true },
-  items_master: { table: 'item_master', displayField: 'item_name', hasStatus: true },
+  // Type aliases (frontend-friendly names) -> { table, displayField, hasStatus, uniqueField }
+  item: { table: 'item_master', displayField: 'item_name', hasStatus: true, uniqueField: 'item_code' },
+  items: { table: 'item_master', displayField: 'item_name', hasStatus: true, uniqueField: 'item_code' },
+  item_master: { table: 'item_master', displayField: 'item_name', hasStatus: true, uniqueField: 'item_code' },
+  items_master: { table: 'item_master', displayField: 'item_name', hasStatus: true, uniqueField: 'item_code' },
   group: { table: 'item_groups', displayField: 'group_name', hasStatus: false },
   groups: { table: 'item_groups', displayField: 'group_name', hasStatus: false },
   item_group: { table: 'item_groups', displayField: 'group_name', hasStatus: false },
@@ -190,22 +190,22 @@ const masterTypeAliases = {
   deduction_sale: { table: 'deduction_sales', displayField: 'ded_name', hasStatus: false },
   deduction_sales: { table: 'deduction_sales', displayField: 'ded_name', hasStatus: false },
   deduction_purchase: { table: 'deduction_purchase', displayField: 'ded_name', hasStatus: false },
-  customer: { table: 'customer_master', displayField: 'name', hasStatus: true },
-  customers: { table: 'customer_master', displayField: 'name', hasStatus: true },
-  supplier: { table: 'supplier_master', displayField: 'name', hasStatus: true },
-  suppliers: { table: 'supplier_master', displayField: 'name', hasStatus: true },
-  flour_mill: { table: 'flour_mill_master', displayField: 'flourmill', hasStatus: true },
-  flour_mills: { table: 'flour_mill_master', displayField: 'flourmill', hasStatus: true },
-  papad_company: { table: 'papad_company_master', displayField: 'name', hasStatus: true },
-  papad_companies: { table: 'papad_company_master', displayField: 'name', hasStatus: true },
-  weight: { table: 'weightmaster', displayField: 'name', hasStatus: true },
-  weights: { table: 'weightmaster', displayField: 'name', hasStatus: true },
-  ledger_group: { table: 'ledgergroupmaster', displayField: 'name', hasStatus: true },
-  ledger_groups: { table: 'ledgergroupmaster', displayField: 'name', hasStatus: true },
-  ledger: { table: 'ledgermaster', displayField: 'name', hasStatus: false },
-  ledgers: { table: 'ledgermaster', displayField: 'name', hasStatus: false },
-  area: { table: 'area_master', displayField: 'name', hasStatus: true },
-  areas: { table: 'area_master', displayField: 'name', hasStatus: true },
+  customer: { table: 'customer_master', displayField: 'name', hasStatus: true, uniqueField: 'name' },
+  customers: { table: 'customer_master', displayField: 'name', hasStatus: true, uniqueField: 'name' },
+  supplier: { table: 'supplier_master', displayField: 'name', hasStatus: true, uniqueField: 'name' },
+  suppliers: { table: 'supplier_master', displayField: 'name', hasStatus: true, uniqueField: 'name' },
+  flour_mill: { table: 'flour_mill_master', displayField: 'flourmill', hasStatus: true, uniqueField: 'flourmill' },
+  flour_mills: { table: 'flour_mill_master', displayField: 'flourmill', hasStatus: true, uniqueField: 'flourmill' },
+  papad_company: { table: 'papad_company_master', displayField: 'name', hasStatus: true, uniqueField: 'name' },
+  papad_companies: { table: 'papad_company_master', displayField: 'name', hasStatus: true, uniqueField: 'name' },
+  weight: { table: 'weightmaster', displayField: 'name', hasStatus: false, uniqueField: 'name' },
+  weights: { table: 'weightmaster', displayField: 'name', hasStatus: false, uniqueField: 'name' },
+  ledger_group: { table: 'ledgergroupmaster', displayField: 'name', hasStatus: true, uniqueField: 'name' },
+  ledger_groups: { table: 'ledgergroupmaster', displayField: 'name', hasStatus: true, uniqueField: 'name' },
+  ledger: { table: 'ledgermaster', displayField: 'name', hasStatus: false, uniqueField: 'name' },
+  ledgers: { table: 'ledgermaster', displayField: 'name', hasStatus: false, uniqueField: 'name' },
+  area: { table: 'area_master', displayField: 'name', hasStatus: true, uniqueField: 'name' },
+  areas: { table: 'area_master', displayField: 'name', hasStatus: true, uniqueField: 'name' },
   city: { table: 'city_master', displayField: 'name', hasStatus: true },
   cities: { table: 'city_master', displayField: 'name', hasStatus: true },
   consignee: { table: 'consignee_group_master', displayField: 'name', hasStatus: true },
@@ -861,7 +861,7 @@ router.get('/record/:table/:id', async (req, res) => {
 
     const paramId = req.params.id
 
-    // Try finding by id (with cast), then by unique field or display field
+    // Try finding by id (with cast), then by unique field, item_code, code, or display field
     let result = { rows: [] }
     try {
       result = await db.query(`SELECT * FROM ${tableName} WHERE CAST(id AS TEXT) = ?`, [String(paramId)])
@@ -873,6 +873,15 @@ router.get('/record/:table/:id', async (req, res) => {
       } catch (e2) {}
     }
 
+    if (result.rows.length === 0) {
+      try {
+        const hasItemCode = await columnExists(tableName, 'item_code')
+        if (hasItemCode) {
+          result = await db.query(`SELECT * FROM ${tableName} WHERE item_code = ?`, [String(paramId)])
+        }
+      } catch (eItemCode) {}
+    }
+
     if (result.rows.length === 0 && tableConfig?.displayField) {
       try {
         result = await db.query(`SELECT * FROM ${tableName} WHERE ${tableConfig.displayField} = ?`, [String(paramId)])
@@ -880,13 +889,23 @@ router.get('/record/:table/:id', async (req, res) => {
     }
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ message: 'Record not found' })
+      try {
+        const hasName = await columnExists(tableName, 'name')
+        if (hasName) {
+          result = await db.query(`SELECT * FROM ${tableName} WHERE name = ?`, [String(paramId)])
+        }
+      } catch (eName) {}
     }
 
-    res.json(result.rows[0])
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Record not found' })
+    }
+
+    const rowData = result.rows[0]
+    res.json({ success: true, data: rowData, ...rowData })
   } catch (error) {
     console.error('Error fetching master record:', error)
-    res.status(500).json({ message: 'Error fetching record', error: error.message })
+    res.status(500).json({ success: false, message: 'Error fetching record', error: error.message })
   }
 })
 
@@ -1086,10 +1105,41 @@ router.put('/:table/:id', async (req, res) => {
     let result
     if (isNumericId) {
       result = await db.run(`UPDATE ${tableName} SET ${setClause} WHERE id = ?`, [...values, Number(reference)])
-    } else if (tableConfig?.uniqueField && tableConfig.uniqueField !== 'id') {
-      result = await db.run(`UPDATE ${tableName} SET ${setClause} WHERE ${tableConfig.uniqueField} = ?`, [...values, reference])
+      if (result.changes === 0) {
+        // Could be a numeric code like '5432'
+        const hasItemCode = await columnExists(tableName, 'item_code');
+        if (hasItemCode) {
+          result = await db.run(`UPDATE ${tableName} SET ${setClause} WHERE item_code = ?`, [...values, String(reference)]);
+        }
+      }
     } else {
-      return res.status(400).json({ success: false, message: 'A numeric record ID is required' })
+      let uniqueCol = tableConfig?.uniqueField;
+      if (!uniqueCol || uniqueCol === 'id') {
+        const hasItemCode = await columnExists(tableName, 'item_code');
+        if (hasItemCode) uniqueCol = 'item_code';
+        else {
+          const hasCode = await columnExists(tableName, 'code');
+          if (hasCode) uniqueCol = 'code';
+          else {
+            const hasName = await columnExists(tableName, 'name');
+            if (hasName) uniqueCol = 'name';
+          }
+        }
+      }
+
+      if (uniqueCol && uniqueCol !== 'id') {
+        result = await db.run(`UPDATE ${tableName} SET ${setClause} WHERE ${uniqueCol} = ?`, [...values, reference]);
+      } else {
+        const findRow = await db.query(
+          `SELECT id FROM ${tableName} WHERE item_code = ? OR name = ? LIMIT 1`,
+          [reference, reference]
+        );
+        if (findRow?.rows && findRow.rows.length > 0) {
+          result = await db.run(`UPDATE ${tableName} SET ${setClause} WHERE id = ?`, [...values, findRow.rows[0].id]);
+        } else {
+          result = await db.run(`UPDATE ${tableName} SET ${setClause} WHERE item_code = ?`, [...values, reference]);
+        }
+      }
     }
 
     if (result.changes > 0) {
@@ -1132,11 +1182,20 @@ router.put('/record/:table/:id', async (req, res) => {
 
     let result = await db.run(query, values)
 
-    if (result.changes === 0 && tableConfig?.uniqueField) {
-      const queryFallback = `UPDATE ${tableName} SET ${setClause} WHERE ${tableConfig.uniqueField} = ?`
-      const resultFallback = await db.run(queryFallback, values)
-      if (resultFallback.changes > 0) {
-        result = resultFallback
+    if (result.changes === 0) {
+      if (tableConfig?.uniqueField) {
+        const queryFallback = `UPDATE ${tableName} SET ${setClause} WHERE ${tableConfig.uniqueField} = ?`
+        const resultFallback = await db.run(queryFallback, values)
+        if (resultFallback.changes > 0) {
+          result = resultFallback
+        }
+      }
+      if (result.changes === 0) {
+        const hasItemCode = await columnExists(tableName, 'item_code');
+        if (hasItemCode) {
+          const itemCodeFallback = await db.run(`UPDATE ${tableName} SET ${setClause} WHERE item_code = ?`, values);
+          if (itemCodeFallback.changes > 0) result = itemCodeFallback;
+        }
       }
     }
 

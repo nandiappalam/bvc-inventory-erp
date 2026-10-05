@@ -138,7 +138,8 @@ const ItemDisplay = () => {
     };
 
     try {
-      const res = await api(`/masters/item_master/${item.item_code}`, {
+      const itemRef = item.id || item.item_code;
+      const res = await api(`/masters/item_master/${encodeURIComponent(itemRef)}`, {
         method: 'PUT',
         body: updatedItem
       });
@@ -200,7 +201,8 @@ const ItemDisplay = () => {
     };
 
     try {
-      const res = await api(`/masters/item_master/${currentEditingItem.item_code}`, {
+      const editRef = currentEditingItem.id || currentEditingItem.item_code;
+      const res = await api(`/masters/item_master/${encodeURIComponent(editRef)}`, {
         method: 'PUT',
         body: updatedItem
       });
@@ -263,7 +265,8 @@ const ItemDisplay = () => {
 
   // Edit/Update navigation
   const handleEditItem = (item) => {
-    navigate(`/master/item-create?edit=${item.item_code}`);
+    const editRef = item.id || item.item_code;
+    navigate(`/master/item-create?edit=${encodeURIComponent(editRef)}`);
   };
 
   // Computed filtered list
