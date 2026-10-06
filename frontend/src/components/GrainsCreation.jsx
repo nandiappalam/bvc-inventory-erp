@@ -16,7 +16,19 @@ const GrainsCreation = () => {
     s_no: '1',
     flour_mill: '',
     date: today,
-    remarks: ''
+    remarks: '',
+    process_mode: 'INSIDE_MILL',
+    mill_type: 'Inside Mill',
+    external_mill_name: '',
+    create_outpass: true,
+    vehicle_no: '',
+    driver_name: '',
+    processing_charge_per_kg: '',
+    outpass_id: null,
+    outpass_no: null,
+    inpass_id: null,
+    inpass_no: null,
+    status: 'Completed'
   });
 
   const [inputItems, setInputItems] = useState([
@@ -129,7 +141,22 @@ const GrainsCreation = () => {
               s_no: String(grain.s_no || grain.id),
               flour_mill: grain.flour_mill || '',
               date: grain.date ? grain.date.split('T')[0] : today,
-              remarks: grain.remarks || ''
+              remarks: grain.remarks || '',
+              process_mode: grain.process_mode || (grain.mill_type === 'Outside Mill' ? 'OUTSIDE_MILL' : 'INSIDE_MILL'),
+              mill_type: grain.mill_type || (grain.process_mode === 'OUTSIDE_MILL' ? 'Outside Mill' : 'Inside Mill'),
+              external_mill_name: grain.external_mill_name || grain.flour_mill || '',
+              outpass_id: grain.outpass_id || null,
+              outpass_no: grain.outpass_no || null,
+              inpass_id: grain.inpass_id || null,
+              inpass_no: grain.inpass_no || null,
+              status: grain.status || 'Completed',
+              processing_charge_per_kg: grain.processing_charge_per_kg ? String(grain.processing_charge_per_kg) : '',
+              total_processing_charges: grain.total_processing_charges || 0,
+              discrepancy_kg: grain.discrepancy_kg || 0,
+              discrepancy_reason: grain.discrepancy_reason || '',
+              create_outpass: false,
+              vehicle_no: grain.outpass?.vehicle_no || '',
+              driver_name: grain.outpass?.driver_name || ''
             });
 
             if (grain.inputItems && grain.inputItems.length > 0) {
@@ -569,7 +596,15 @@ const GrainsCreation = () => {
             remarks: formData.remarks,
             operator: verificationData.operator,
             workOrderId: formData.work_order_id,
-            workOrderNo: formData.work_order_no
+            workOrderNo: formData.work_order_no,
+            process_mode: formData.process_mode || 'INSIDE_MILL',
+            processMode: formData.process_mode || 'INSIDE_MILL',
+            mill_type: formData.mill_type || (formData.process_mode === 'OUTSIDE_MILL' ? 'Outside Mill' : 'Inside Mill'),
+            external_mill_name: formData.flour_mill || formData.external_mill_name,
+            create_outpass: formData.create_outpass,
+            vehicle_no: formData.vehicle_no,
+            driver_name: formData.driver_name,
+            processing_charge_per_kg: formData.processing_charge_per_kg
           }, 
           inputItems: inputItems.map(item => ({
             itemName: item.item_name,
@@ -913,6 +948,183 @@ const GrainsCreation = () => {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Processing Mode Switcher */}
+      <div style={{
+        display: 'flex',
+        gap: '8px',
+        marginBottom: '16px',
+        background: '#f1f5f9',
+        padding: '6px',
+        borderRadius: '8px',
+        border: '1px solid #e2e8f0'
+      }}>
+        <button
+          type="button"
+          onClick={() => setFormData(prev => ({ ...prev, process_mode: 'INSIDE_MILL', mill_type: 'Inside Mill' }))}
+          style={{
+            flex: 1,
+            padding: '10px 16px',
+            borderRadius: '6px',
+            fontWeight: 'bold',
+            fontSize: '13px',
+            border: 'none',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '8px',
+            backgroundColor: formData.process_mode === 'INSIDE_MILL' ? '#15803d' : 'transparent',
+            color: formData.process_mode === 'INSIDE_MILL' ? '#ffffff' : '#475569',
+            boxShadow: formData.process_mode === 'INSIDE_MILL' ? '0 1px 3px rgba(0,0,0,0.15)' : 'none',
+            transition: 'all 0.2s'
+          }}
+        >
+          🏭 1. Inside Mill Process (In-House Factory Grinding)
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setFormData(prev => ({ ...prev, process_mode: 'OUTSIDE_MILL', mill_type: 'Outside Mill' }))}
+          style={{
+            flex: 1,
+            padding: '10px 16px',
+            borderRadius: '6px',
+            fontWeight: 'bold',
+            fontSize: '13px',
+            border: 'none',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '8px',
+            backgroundColor: formData.process_mode === 'OUTSIDE_MILL' ? '#2563eb' : 'transparent',
+            color: formData.process_mode === 'OUTSIDE_MILL' ? '#ffffff' : '#475569',
+            boxShadow: formData.process_mode === 'OUTSIDE_MILL' ? '0 1px 3px rgba(0,0,0,0.15)' : 'none',
+            transition: 'all 0.2s'
+          }}
+        >
+          🚚 2. Outside Mill Process (External Mill Jobwork & Outpass)
+        </button>
+      </div>
+
+      {/* Outside Mill Workflow & Logistics Panel */}
+      {formData.process_mode === 'OUTSIDE_MILL' && (
+        <div style={{
+          background: '#eff6ff',
+          border: '1px solid #bfdbfe',
+          borderRadius: '8px',
+          padding: '14px',
+          marginBottom: '16px',
+          fontSize: '13px',
+          color: '#1e3a8a'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' }}>
+            <div style={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span>🚚 Outside Mill Processing Controls:</span>
+              <span style={{
+                background: formData.outpass_no ? '#dcfce7' : '#fef3c7',
+                color: formData.outpass_no ? '#166534' : '#92400e',
+                padding: '2px 8px',
+                borderRadius: '4px',
+                fontSize: '11px',
+                fontWeight: 'bold'
+              }}>
+                STATUS: {formData.status || (formData.outpass_no ? 'OUTPASSED' : 'OUTPASS PENDING')}
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', gap: '8px' }}>
+              {formData.outpass_no && (
+                <span style={{ background: '#e0e7ff', color: '#3730a3', padding: '4px 10px', borderRadius: '4px', fontWeight: 'bold', fontSize: '12px' }}>
+                  Outpass: {formData.outpass_no}
+                </span>
+              )}
+              {formData.inpass_no && (
+                <span style={{ background: '#dcfce7', color: '#15803d', padding: '4px 10px', borderRadius: '4px', fontWeight: 'bold', fontSize: '12px' }}>
+                  Inpass: {formData.inpass_no}
+                </span>
+              )}
+              {formData.outpass_id && !formData.inpass_no && (
+                <button
+                  type="button"
+                  onClick={() => navigate(`/entry/inpass-create?outpass_id=${formData.outpass_id}&grind_id=${recordId}`)}
+                  style={{
+                    background: '#16a34a',
+                    color: '#ffffff',
+                    border: 'none',
+                    padding: '4px 12px',
+                    borderRadius: '4px',
+                    fontWeight: 'bold',
+                    fontSize: '12px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  📥 Receive Inpass
+                </button>
+              )}
+            </div>
+          </div>
+
+          <p style={{ margin: '0 0 10px 0', fontSize: '12px', color: '#3b82f6' }}>
+            Material physically leaves the factory. Stock moves into <em>Outside Processing Stock</em>.
+            When the external mill completes processing, receive the processed material back via <strong>Inpass</strong> with mass-balance validation.
+          </p>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px' }}>
+            <div>
+              <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', fontSize: '12px' }}>Vehicle No</label>
+              <input
+                type="text"
+                name="vehicle_no"
+                value={formData.vehicle_no || ''}
+                onChange={handleFormChange}
+                placeholder="e.g. TN-01-AB-1234"
+                style={{ width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '12px', boxSizing: 'border-box' }}
+              />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', fontSize: '12px' }}>Driver Name</label>
+              <input
+                type="text"
+                name="driver_name"
+                value={formData.driver_name || ''}
+                onChange={handleFormChange}
+                placeholder="Driver Name"
+                style={{ width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '12px', boxSizing: 'border-box' }}
+              />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontWeight: '600', marginBottom: '3px', fontSize: '12px' }}>Agreed Processing Fee (₹ / KG)</label>
+              <input
+                type="number"
+                step="0.01"
+                name="processing_charge_per_kg"
+                value={formData.processing_charge_per_kg || ''}
+                onChange={handleFormChange}
+                placeholder="e.g. 3.00"
+                style={{ width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '12px', boxSizing: 'border-box', fontWeight: 'bold', color: '#1e40af' }}
+              />
+            </div>
+
+            {!isEditMode && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', paddingTop: '18px' }}>
+                <input
+                  type="checkbox"
+                  id="create_outpass_chk"
+                  checked={formData.create_outpass !== false}
+                  onChange={(e) => setFormData(prev => ({ ...prev, create_outpass: e.target.checked }))}
+                />
+                <label htmlFor="create_outpass_chk" style={{ fontWeight: 'bold', fontSize: '12px', cursor: 'pointer' }}>
+                  Auto-generate Outpass on Save
+                </label>
               </div>
             )}
           </div>

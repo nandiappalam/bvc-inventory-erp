@@ -64,6 +64,102 @@ async function columnExists(tableName, columnName) {
   }
 }
 
+// GET /api/masters/item-stock-details/:identifier
+router.get('/item-stock-details/:identifier', async (req, res) => {
+  try {
+    const rawId = req.params.identifier ? decodeURIComponent(req.params.identifier).trim() : '';
+    if (!rawId) {
+      return res.status(400).json({ success: false, message: 'Identifier is required' });
+    }
+
+    // 1. Fetch item master row
+    const itemRes = await db.query(`
+      SELECT * FROM item_master 
+      WHERE CAST(id AS TEXT) = ? OR LOWER(TRIM(item_name)) = LOWER(TRIM(?)) OR LOWER(TRIM(item_code)) = LOWER(TRIM(?))
+      LIMIT 1
+    `, [rawId, rawId, rawId]);
+
+    const item = itemRes.rows[0] || {
+      id: null,
+      item_name: rawId,
+      item_code: 'ITM-' + rawId.slice(0, 4).toUpperCase(),
+      item_group: 'General',
+      type: 'RM',
+      unit: 'kg',
+      weight: 50
+    };
+
+    const targetItemName = item.item_name || rawId;
+
+    // 2. Query stock table entries grouped by godown
+    const stockByGodownRes = await db.query(`
+      SELECT 
+        s.godown_id,
+        COALESCE(g.godown_name, s.godown, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name,
+        SUM(COALESCE(s.qty, 0)) as available_qty,
+        SUM(COALESCE(s.weight, (COALESCE(s.qty, 0) * 50))) as total_weight,
+        AVG(COALESCE(s.rate, 0)) as avg_rate
+      FROM stock s
+      LEFT JOIN godown_master g ON (CAST(s.godown_id AS TEXT) = CAST(g.id AS TEXT) OR LOWER(TRIM(s.godown)) = LOWER(TRIM(g.godown_name)))
+      WHERE LOWER(TRIM(s.item_name)) = LOWER(TRIM(?))
+      GROUP BY s.godown_id, COALESCE(g.godown_name, s.godown, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1))
+      HAVING SUM(COALESCE(s.qty, 0)) != 0
+    `, [targetItemName]);
+
+    // 3. Query active lots from stock_lots
+    const lotsRes = await db.query(`
+      SELECT 
+        sl.id,
+        sl.lot_no,
+        sl.godown_id,
+        COALESCE(g.godown_name, sl.godown_name, 'Main Godown') as godown_name,
+        sl.quantity,
+        sl.remaining_quantity,
+        sl.rate,
+        sl.qc_status,
+        COALESCE(sl.unloading_status, 'UNLOADED') as unloading_status,
+        sl.created_at
+      FROM stock_lots sl
+      LEFT JOIN godown_master g ON (CAST(sl.godown_id AS TEXT) = CAST(g.id AS TEXT) OR LOWER(TRIM(sl.godown_name)) = LOWER(TRIM(g.godown_name)))
+      WHERE LOWER(TRIM(sl.item_name)) = LOWER(TRIM(?)) AND sl.remaining_quantity > 0
+      ORDER BY sl.id DESC
+    `, [targetItemName]);
+
+    // 4. Query recent movements
+    const movementsRes = await db.query(`
+      SELECT s.date, s.type, s.lot_no, COALESCE(g.godown_name, s.godown) as godown_name, s.qty, s.weight, s.rate, s.amount, s.created_at
+      FROM stock s
+      LEFT JOIN godown_master g ON (CAST(s.godown_id AS TEXT) = CAST(g.id AS TEXT) OR LOWER(TRIM(s.godown)) = LOWER(TRIM(g.godown_name)))
+      WHERE LOWER(TRIM(s.item_name)) = LOWER(TRIM(?))
+      ORDER BY s.date DESC, s.id DESC
+      LIMIT 20
+    `, [targetItemName]);
+
+    const totalAvailableQty = (stockByGodownRes.rows || []).reduce((acc, r) => acc + (parseFloat(r.available_qty) || 0), 0);
+    const totalWeight = (stockByGodownRes.rows || []).reduce((acc, r) => acc + (parseFloat(r.total_weight) || 0), 0);
+    const totalValuation = (stockByGodownRes.rows || []).reduce((acc, r) => acc + ((parseFloat(r.available_qty) || 0) * (parseFloat(r.avg_rate) || 0)), 0);
+
+    res.json({
+      success: true,
+      data: {
+        item,
+        summary: {
+          totalAvailableQty,
+          totalWeight,
+          totalValuation,
+          activeLotsCount: (lotsRes.rows || []).length
+        },
+        godowns: stockByGodownRes.rows || [],
+        lots: lotsRes.rows || [],
+        movements: movementsRes.rows || []
+      }
+    });
+  } catch (err) {
+    console.error('Error fetching item stock details:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // Helper function to resolve alias to table name and configuration
 const resolveTableConfig = (tableParam) => {
   if (!tableParam) return { tableName: null, tableConfig: null };

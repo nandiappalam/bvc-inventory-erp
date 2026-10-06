@@ -489,6 +489,100 @@ const GrainsDisplay = () => {
     { key: 'date', title: 'Date', render: (val) => val ? val.split('T')[0] : '' },
     { key: 'flour_mill', title: 'Flour Mill', render: (val, row) => row.flour_mill_name || row.flour_mill || '' },
     {
+      key: 'process_mode',
+      title: 'Process Mode & Pipeline',
+      render: (_, row) => {
+        const isOutside = row.process_mode === 'OUTSIDE_MILL' || row.mill_type === 'Outside Mill';
+        const status = row.status || (isOutside ? (row.inpass_no ? 'Completed' : (row.outpass_no ? 'Outpassed' : 'Outpass Pending')) : 'Completed');
+
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '150px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{
+                padding: '2px 7px',
+                borderRadius: '4px',
+                fontSize: '11px',
+                fontWeight: 'bold',
+                backgroundColor: isOutside ? '#e0e7ff' : '#dcfce7',
+                color: isOutside ? '#3730a3' : '#166534',
+                border: `1px solid ${isOutside ? '#c7d2fe' : '#bbf7d0'}`
+              }}>
+                {isOutside ? '🚚 Outside Mill' : '🏭 Inside Mill'}
+              </span>
+
+              <span style={{
+                padding: '2px 6px',
+                borderRadius: '4px',
+                fontSize: '10px',
+                fontWeight: 'extrabold',
+                backgroundColor: status === 'Completed' ? '#dcfce7' : status === 'Outpassed' ? '#dbeafe' : '#fef3c7',
+                color: status === 'Completed' ? '#15803d' : status === 'Outpassed' ? '#1e40af' : '#92400e'
+              }}>
+                {status.toUpperCase()}
+              </span>
+            </div>
+
+            {/* Linked Passes & Actions */}
+            {isOutside && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap', marginTop: '2px' }}>
+                {row.outpass_no ? (
+                  <span style={{ fontSize: '10px', fontFamily: 'monospace', fontWeight: 'bold', background: '#eff6ff', color: '#1d4ed8', padding: '1px 5px', borderRadius: '3px' }}>
+                    OP: {row.outpass_no}
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigate(`/entry/outpass-create?ref_type=Grind&ref_id=${row.id}`);
+                    }}
+                    style={{
+                      fontSize: '10px',
+                      fontWeight: 'bold',
+                      background: '#3b82f6',
+                      color: '#ffffff',
+                      border: 'none',
+                      padding: '2px 6px',
+                      borderRadius: '3px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    + Issue Outpass
+                  </button>
+                )}
+
+                {row.inpass_no ? (
+                  <span style={{ fontSize: '10px', fontFamily: 'monospace', fontWeight: 'bold', background: '#ecfdf5', color: '#047857', padding: '1px 5px', borderRadius: '3px' }}>
+                    IP: {row.inpass_no}
+                  </span>
+                ) : (row.outpass_id || row.outpass_no) ? (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigate(`/entry/inpass-create?outpass_id=${row.outpass_id}&grind_id=${row.id}`);
+                    }}
+                    style={{
+                      fontSize: '10px',
+                      fontWeight: 'bold',
+                      background: '#10b981',
+                      color: '#ffffff',
+                      border: 'none',
+                      padding: '2px 6px',
+                      borderRadius: '3px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    + Receive Inpass
+                  </button>
+                ) : null}
+              </div>
+            )}
+          </div>
+        );
+      }
+    },
+    {
       key: 'input_details',
       title: 'Input Items & Lots',
       render: (_, row) => {

@@ -49,6 +49,11 @@ import UnderConstruction from './components/UnderConstruction' // Generic placeh
 import PurchaseDisplay from './components/PurchaseDisplay'
 import GrainsCreation from './components/GrainsCreation'
 import GrainsDisplay from './components/GrainsDisplay'
+import OutpassCreate from './components/outpass/OutpassCreate'
+import OutpassDisplay from './components/outpass/OutpassDisplay'
+import InpassCreate from './components/inpass/InpassCreate'
+import InpassDisplay from './components/inpass/InpassDisplay'
+import OutsideProcessingReport from './components/outpass/OutsideProcessingReport'
 import WorkOrderSlipCreate from './components/WorkOrderSlipCreate'
 import WorkOrderSlipDisplay from './components/WorkOrderSlipDisplay'
 import FlourOutCreation from './components/FlourOutCreation'
@@ -401,6 +406,15 @@ const AppLayout = () => {
 
           <Route path="/entry/grind-create" element={<GrainsCreation />} />
           <Route path="/entry/grind-display" element={<GrainsDisplay />} />
+
+          {/* Universal Material Gate Passes & Outside Processing Routes */}
+          <Route path="/entry/outpass-create" element={<OutpassCreate />} />
+          <Route path="/entry/outpass-display" element={<OutpassDisplay />} />
+          <Route path="/entry/outpass" element={<OutpassDisplay />} />
+          <Route path="/entry/inpass-create" element={<InpassCreate />} />
+          <Route path="/entry/inpass-display" element={<InpassDisplay />} />
+          <Route path="/entry/inpass" element={<InpassDisplay />} />
+          <Route path="/reports/outside-processing" element={<OutsideProcessingReport />} />
           <Route path="/entry/flour-out-create" element={<FlourOutCreation />} />
           <Route path="/entry/flour-out-display" element={<FlourOutDisplay />} />
           <Route path="/entry/flour-out-return-create" element={<FlourOutReturnCreation />} />

@@ -457,6 +457,8 @@ router.get('/lots', async (req, res) => {
         END as godown_id,
         sl.quantity as purchased_qty,
         sl.remaining_quantity,
+        COALESCE(sl.outside_processing_qty, 0) as outside_processing_qty,
+        COALESCE(sl.custody_status, 'AVAILABLE') as custody_status,
         sl.rate,
         sl.created_at,
         im.item_group,

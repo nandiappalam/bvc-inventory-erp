@@ -167,6 +167,25 @@ router.get('/stats', async (req, res) => {
       stockSummary.total_qty = slRes.rows[0]?.total_qty || 0;
     } catch (e) {}
 
+    // 7b. Outside Mill Processing Summary
+    let outsideMillSummary = { total_outpasses: 0, total_weight: 0, returned_weight: 0, pending_weight: 0 };
+    let outsideMillBatches = 0;
+    try {
+      const omRes = await db.query(`
+        SELECT 
+          COUNT(*) as total_outpasses,
+          COALESCE(SUM(total_weight), 0) as total_weight,
+          COALESCE(SUM(returned_weight), 0) as returned_weight,
+          COALESCE(SUM(CASE WHEN status != 'CLOSED' THEN (total_weight - COALESCE(returned_weight, 0)) ELSE 0 END), 0) as pending_weight,
+          COALESCE(SUM(CASE WHEN status != 'CLOSED' THEN 1 ELSE 0 END), 0) as active_batches
+        FROM outpasses
+      `);
+      if (omRes.rows && omRes.rows[0]) {
+        outsideMillSummary = omRes.rows[0];
+        outsideMillBatches = omRes.rows[0].active_batches || 0;
+      }
+    } catch (e) {}
+
     // 8. Monthly Trends for Charts (Past 6 Months)
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const now = new Date();
@@ -359,6 +378,39 @@ router.get('/stats', async (req, res) => {
         });
       }
 
+      // Outpass & Inpass Movements
+      const opRecent = await db.query(`
+        SELECT id, outpass_no, date, party_name, total_weight, total_qty, created_at, status
+        FROM outpasses
+        ORDER BY id DESC LIMIT 3
+      `).catch(() => ({ rows: [] }));
+      for (const r of opRecent.rows) {
+        activities.push({
+          id: `OP-${r.id}`,
+          action: `Outpass #${r.outpass_no} (${r.total_weight} kg) issued to ${r.party_name} [${r.status}]`,
+          time: r.created_at || r.date || 'Recently',
+          timestamp: new Date(r.created_at || r.date || Date.now()).getTime(),
+          type: 'Outpass',
+          amount: 0
+        });
+      }
+
+      const ipRecent = await db.query(`
+        SELECT id, inpass_no, outpass_no, date, party_name, output_weight, created_at
+        FROM inpasses
+        ORDER BY id DESC LIMIT 3
+      `).catch(() => ({ rows: [] }));
+      for (const r of ipRecent.rows) {
+        activities.push({
+          id: `IP-${r.id}`,
+          action: `Inpass #${r.inpass_no} received ${r.output_weight} kg from ${r.party_name}`,
+          time: r.created_at || r.date || 'Recently',
+          timestamp: new Date(r.created_at || r.date || Date.now()).getTime(),
+          type: 'Inpass',
+          amount: 0
+        });
+      }
+
       // Check user activities table as well
       const uActivities = await db.query(`
         SELECT id, user_name, activity_type, remarks, created_at 
@@ -411,7 +463,14 @@ router.get('/stats', async (req, res) => {
         totalFlourOutBatches: foCount,
 
         pendingPRs,
-        stockSummary
+        stockSummary,
+        outsideMillSummary: {
+          totalOutpasses: outsideMillSummary.total_outpasses || 0,
+          pendingWeight: outsideMillSummary.pending_weight || 0,
+          returnedWeight: outsideMillSummary.returned_weight || 0,
+          totalDispatchedWeight: outsideMillSummary.total_weight || 0,
+          activeDispatches: outsideMillBatches
+        }
       },
       monthlyTrends: months,
       recentActivities: activities.slice(0, 8)
@@ -425,6 +484,100 @@ router.get('/stats', async (req, res) => {
 // GET /api/dashboard - alias
 router.get('/', (req, res) => {
   res.redirect('/api/dashboard/stats');
+});
+
+/**
+ * GET /api/dashboard/outside-mill-pipeline
+ * Returns complete Outside Mill Grinding tracker with input items, quantities, mill, area,
+ * outpass details, arrival status (arrived vs not arrived / pending), and linked inpass info.
+ */
+router.get('/outside-mill-pipeline', async (req, res) => {
+  try {
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+
+    const outpassesRes = await db.query(`
+      SELECT 
+        o.id,
+        o.outpass_no,
+        o.date,
+        o.purpose,
+        COALESCE(fmm.flourmill, fmm.print_name, o.party_name) as party_name,
+        COALESCE(fmm.area, o.destination, '') as area,
+        o.destination,
+        o.vehicle_no,
+        o.driver_name,
+        o.total_qty,
+        o.total_weight,
+        o.returned_qty,
+        o.returned_weight,
+        o.status,
+        o.processing_rate_kg,
+        o.estimated_charges,
+        o.reference_type,
+        o.reference_id,
+        o.reference_no,
+        (o.total_weight - COALESCE(o.returned_weight, 0)) as pending_weight,
+        g.id as grind_id,
+        g.s_no as grind_s_no,
+        g.remarks as grind_remarks
+      FROM outpasses o
+      LEFT JOIN grains g ON (g.outpass_id = o.id OR o.reference_id = g.id)
+      LEFT JOIN flour_mill_master fmm ON (CAST(fmm.id AS TEXT) = CAST(o.party_name AS TEXT) OR fmm.flourmill = o.party_name OR fmm.print_name = o.party_name)
+      ORDER BY o.date DESC, o.id DESC
+      LIMIT 50
+    `, [], activeCompanyId);
+
+    const pipeline = [];
+
+    for (const op of (outpassesRes.rows || [])) {
+      // Fetch input dispatched items
+      const opItemsRes = await db.query(
+        `SELECT item_name, lot_no, qty, weight, total_weight, godown_name, reason FROM outpass_items WHERE outpass_id = ?`,
+        [op.id],
+        activeCompanyId
+      );
+      const inputItems = opItemsRes.rows || [];
+
+      // Fetch linked inpasses to see what has arrived
+      const inpassRes = await db.query(
+        `SELECT id, inpass_no, date as arrived_date, output_weight, yield_percent, qc_status, status FROM inpasses WHERE outpass_id = ? OR outpass_no = ?`,
+        [op.id, op.outpass_no],
+        activeCompanyId
+      );
+      const linkedInpasses = inpassRes.rows || [];
+
+      let arrivedItems = [];
+      if (linkedInpasses.length > 0) {
+        const inpassIds = linkedInpasses.map(ip => ip.id);
+        const inpassItemsRes = await db.query(
+          `SELECT item_name, output_type, lot_no, qty, weight, total_weight, qc_status, godown_name FROM inpass_items WHERE inpass_id IN (${inpassIds.map(() => '?').join(',')})`,
+          inpassIds,
+          activeCompanyId
+        );
+        arrivedItems = inpassItemsRes.rows || [];
+      }
+
+      const pendingWeight = Math.max(0, (parseFloat(op.total_weight) || 0) - (parseFloat(op.returned_weight) || 0));
+      const hasArrived = (parseFloat(op.returned_weight) || 0) > 0;
+      const isFullyArrived = op.status === 'CLOSED' || pendingWeight <= 0.1;
+
+      pipeline.push({
+        ...op,
+        input_items: inputItems,
+        arrived_items: arrivedItems,
+        linked_inpasses: linkedInpasses,
+        arrival_status: isFullyArrived ? 'Fully Arrived' : (hasArrived ? 'Partially Arrived' : 'Not Arrived (At External Mill)'),
+        pending_weight: pendingWeight,
+        has_arrived: hasArrived,
+        is_fully_arrived: isFullyArrived
+      });
+    }
+
+    res.json({ success: true, data: pipeline });
+  } catch (error) {
+    console.error('Error fetching outside mill pipeline:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
 });
 
 module.exports = router;

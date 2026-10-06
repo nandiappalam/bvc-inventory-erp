@@ -71,7 +71,7 @@ async function rebuildStockLedger() {
 
     // A. Purchases
     const purchases = await db.query(`
-      SELECT pi.*, p.date, p.supplier, p.id as purchase_id, COALESCE(p.godown_id, 1) as godown_id, p.godown as godown_name
+      SELECT pi.*, p.date, p.supplier, p.id as purchase_id, p.godown_id as godown_id, p.godown as godown_name
       FROM purchase_items pi
       JOIN purchases p ON pi.purchase_id = p.id
       ORDER BY p.date ASC, pi.id ASC
@@ -287,24 +287,56 @@ async function rebuildStockLedger() {
       const qty = parseFloat(row.qty) || 0;
       const wt = parseFloat(row.total_wt || row.total_weight) || (qty * (parseFloat(row.weight) || 50));
       
-      let godownId = rmGodown.id;
-      let godownName = rmGodown.godown_name;
-      const gLookup = row.godown_id || row.godown_name;
-      if (gLookup) {
-        const gRes = await db.query(`SELECT id, godown_name FROM godown_master WHERE id = ? OR CAST(id AS TEXT) = ? OR LOWER(godown_name) = LOWER(?) LIMIT 1`, [gLookup, String(gLookup), String(gLookup)]);
-        if (gRes.rows && gRes.rows.length > 0) {
-          godownId = gRes.rows[0].id;
-          godownName = gRes.rows[0].godown_name;
-        } else if (typeof gLookup === 'string' && isNaN(parseInt(gLookup, 10))) {
-          godownName = gLookup;
-        }
+      // Check if multi-godown split unloading allocations exist for this lot
+      let allocations = [];
+      if (row.lot_no) {
+        try {
+          const allocRes = await db.query(
+            `SELECT godown_id, godown_name, qty FROM stock_unloading_allocations WHERE lot_no = ? AND qty > 0`,
+            [row.lot_no]
+          );
+          allocations = allocRes.rows || [];
+        } catch (_) {}
       }
 
-      getOrCreateLot(row.item_name, row.lot_no, qty, row.rate, row.date, 'Purchase', row.purchase_id, godownId, godownName);
-      await db.run(`
-        INSERT INTO stock (date, item_id, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, godown_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Purchase', ?, ?, ?)
-      `, [row.date, row.item_id || null, row.item_name, row.lot_no || '', qty, wt, row.rate || 0, row.total_amt || 0, row.purchase_id, godownName, godownId]);
+      if (allocations.length > 0) {
+        // Multi-godown split unloading allocation exists!
+        for (const alloc of allocations) {
+          const allocQty = parseFloat(alloc.qty) || 0;
+          const unitWt = parseFloat(row.per_unit_weight || row.weight) || (qty > 0 ? (wt / qty) : 50);
+          const allocWt = allocQty * unitWt;
+          const allocAmt = (parseFloat(row.total_amt || row.amount) || 0) * (qty > 0 ? (allocQty / qty) : 1);
+
+          let aGId = alloc.godown_id;
+          let aGName = alloc.godown_name;
+
+          getOrCreateLot(row.item_name, row.lot_no, allocQty, row.rate, row.date, 'Purchase', row.purchase_id, aGId, aGName);
+          await db.run(`
+            INSERT INTO stock (date, item_id, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, godown_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Purchase', ?, ?, ?)
+          `, [row.date, row.item_id || null, row.item_name, row.lot_no || '', allocQty, allocWt, row.rate || 0, allocAmt, row.purchase_id, aGName, aGId]);
+        }
+      } else {
+        // Standard single godown allocation
+        let godownId = rmGodown.id;
+        let godownName = rmGodown.godown_name;
+        const gLookup = row.godown_id || row.godown_name;
+        if (gLookup) {
+          const gRes = await db.query(`SELECT id, godown_name FROM godown_master WHERE id = ? OR CAST(id AS TEXT) = ? OR LOWER(godown_name) = LOWER(?) LIMIT 1`, [gLookup, String(gLookup), String(gLookup)]);
+          if (gRes.rows && gRes.rows.length > 0) {
+            godownId = gRes.rows[0].id;
+            godownName = gRes.rows[0].godown_name;
+          } else if (typeof gLookup === 'string' && isNaN(parseInt(gLookup, 10))) {
+            godownName = gLookup;
+          }
+        }
+
+        getOrCreateLot(row.item_name, row.lot_no, qty, row.rate, row.date, 'Purchase', row.purchase_id, godownId, godownName);
+        await db.run(`
+          INSERT INTO stock (date, item_id, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, godown_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Purchase', ?, ?, ?)
+        `, [row.date, row.item_id || null, row.item_name, row.lot_no || '', qty, wt, row.rate || 0, row.total_amt || 0, row.purchase_id, godownName, godownId]);
+      }
     }
 
     // Process Grain Outputs

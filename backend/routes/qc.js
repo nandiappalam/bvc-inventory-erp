@@ -1175,14 +1175,19 @@ router.post('/coa/generate', asyncHandler(async (req, res) => {
 
 // POST /api/qc/unload or /api/quality/unload
 router.post('/unload', asyncHandler(async (req, res) => {
-  const { lotNo, status } = req.body;
+  const { lotNo, status, godownSplits } = req.body;
+  const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+
   if (!lotNo || !status) {
     return res.status(400).json({ success: false, message: 'lotNo and status are required' });
   }
 
   // Ensure columns exist in SQLite
   try {
-    await db.run("ALTER TABLE stock_lots ADD COLUMN unloading_status TEXT DEFAULT 'PENDING_DECISION'");
+    await db.run("ALTER TABLE stock_lots ADD COLUMN unloading_status TEXT DEFAULT 'PENDING_DECISION'", [], activeCompanyId);
+  } catch (e) {}
+  try {
+    await db.run("ALTER TABLE stock_lots ADD COLUMN godown_name TEXT", [], activeCompanyId);
   } catch (e) {}
 
   if (status === 'RETURNED') {
@@ -1190,7 +1195,8 @@ router.post('/unload', asyncHandler(async (req, res) => {
       `UPDATE stock_lots 
        SET unloading_status = 'RETURNED', qc_status = 'REJECTED', usable_for_production = 0, approval_status = 'REJECTED' 
        WHERE lot_no = ?`,
-      [lotNo]
+      [lotNo],
+      activeCompanyId
     );
 
     try {
@@ -1198,7 +1204,8 @@ router.post('/unload', asyncHandler(async (req, res) => {
         `UPDATE qc_inspections 
          SET overall_result = 'REJECTED' 
          WHERE rm_lot_no = ?`,
-        [lotNo]
+        [lotNo],
+        activeCompanyId
       );
     } catch (e) {}
 
@@ -1208,21 +1215,176 @@ router.post('/unload', asyncHandler(async (req, res) => {
          SET status = 'RETURNED', operation_type = 'RETURN', gate_out_time = datetime('now', 'localtime') 
          WHERE UPPER(lot_no) = UPPER(?) 
             OR reference_id IN (SELECT CAST(purchase_id AS TEXT) FROM stock_lots WHERE lot_no = ?)`,
-        [lotNo, lotNo]
+        [lotNo, lotNo],
+        activeCompanyId
       );
     } catch (e) {}
 
     // Remove any existing stock entries for this lot
     try {
-      await db.run("DELETE FROM stock WHERE lot_no = ? AND type = 'Purchase'", [lotNo]);
+      await db.run("DELETE FROM stock WHERE lot_no = ? AND type = 'Purchase'", [lotNo], activeCompanyId);
     } catch (e) {}
   } else {
-    await db.run(
-      `UPDATE stock_lots 
-       SET unloading_status = ? 
-       WHERE lot_no = ?`,
-      [status, lotNo]
-    );
+    // If godownSplits provided, perform multi-godown split allocation
+    if (Array.isArray(godownSplits) && godownSplits.length > 0) {
+      try {
+        // Fetch lot and purchase item info
+        const lotRes = await db.query(
+          `SELECT sl.*, p.date as pur_date, p.inv_no 
+           FROM stock_lots sl 
+           LEFT JOIN purchases p ON sl.purchase_id = p.id 
+           WHERE UPPER(TRIM(sl.lot_no)) = UPPER(TRIM(?)) LIMIT 1`,
+          [lotNo],
+          activeCompanyId
+        );
+        
+        const lRow = lotRes.rows?.[0] || {};
+        const itemId = lRow.item_id || null;
+        const itemName = lRow.item_name || 'Material Item';
+        const purchaseId = lRow.purchase_id || null;
+        const rate = lRow.rate || 0;
+        const txnDate = lRow.pur_date || new Date().toISOString().slice(0, 10);
+
+        // Remove existing pending purchase stock entries for this lot
+        await db.run("DELETE FROM stock WHERE UPPER(TRIM(lot_no)) = UPPER(TRIM(?)) AND type = 'Purchase'", [lotNo], activeCompanyId);
+
+        let primaryGodownId = null;
+        const splitSummaryParts = [];
+
+        for (const split of godownSplits) {
+          let gId = split.godownId || split.godown_id || null;
+          let gName = split.godownName || split.godown_name || 'Main Godown';
+          const splitQty = parseFloat(split.qty || split.quantity) || 0;
+          const splitWeight = parseFloat(split.weight) || (splitQty * 50);
+          const splitRate = parseFloat(split.rate) || rate || 0;
+          const splitAmount = Number((splitQty * splitRate).toFixed(2));
+
+          // Ensure godown exists in godown_master
+          try {
+            if (gId) {
+              const gCheck = await db.query('SELECT id, godown_name FROM godown_master WHERE id = ?', [gId], activeCompanyId);
+              if (gCheck.rows && gCheck.rows[0]) {
+                gName = gCheck.rows[0].godown_name;
+              }
+            } else if (gName) {
+              const gCheck = await db.query('SELECT id, godown_name FROM godown_master WHERE LOWER(TRIM(godown_name)) = LOWER(TRIM(?))', [gName], activeCompanyId);
+              if (gCheck.rows && gCheck.rows[0]) {
+                gId = gCheck.rows[0].id;
+                gName = gCheck.rows[0].godown_name;
+              }
+            }
+
+            if (!gId && gName) {
+              const gType = gName.toLowerCase().includes('cold') ? 'Cold Storage' : 'Normal';
+              const insG = await db.run('INSERT INTO godown_master (godown_name, godown_type, status) VALUES (?, ?, "Active")', [gName, gType], activeCompanyId);
+              gId = insG.lastID || insG.lastInsertRowid || 1;
+            }
+          } catch (e) {
+            console.warn('Godown lookup/insert error in qc unload:', e.message);
+          }
+
+          if (!gId) gId = 1;
+
+          if (!primaryGodownId) primaryGodownId = gId;
+          splitSummaryParts.push(`${gName} (${splitQty})`);
+
+          await db.run(
+            `INSERT INTO stock (item_id, item_name, lot_no, qty, weight, rate, amount, date, type, reference_id, godown, godown_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Purchase', ?, ?, ?)`,
+            [itemId, itemName, lotNo, splitQty, splitWeight, splitRate, splitAmount, txnDate, purchaseId, gName, gId],
+            activeCompanyId
+          );
+
+          if (gName.toLowerCase().includes('cold') || Number(gId) === 2) {
+            try {
+              let nextVoucherNo = 'CSI-000001';
+              const csVRes = await db.query(`SELECT voucher_no FROM cold_storage_vouchers WHERE voucher_type = 'IN' ORDER BY id DESC LIMIT 1`, [], activeCompanyId);
+              if (csVRes.rows && csVRes.rows.length > 0) {
+                const num = parseInt(String(csVRes.rows[0].voucher_no || '').replace(/\D/g, ''), 10);
+                if (!isNaN(num)) nextVoucherNo = `CSI-${String(num + 1).padStart(6, '0')}`;
+              }
+
+              const csVoucherRes = await db.run(`
+                INSERT INTO cold_storage_vouchers 
+                (voucher_no, voucher_type, voucher_date, cold_storage_id, cold_storage_name, source_godown_id, source_godown_name, remarks, total_qty, total_wt, created_by)
+                VALUES (?, 'IN', ?, ?, ?, NULL, NULL, ?, ?, ?, ?)
+              `, [
+                nextVoucherNo,
+                txnDate,
+                gId,
+                gName,
+                `Auto-inward from Unload Lot ${lotNo}`,
+                splitQty,
+                splitWeight,
+                'System / Unload Auto-Inward'
+              ], activeCompanyId);
+
+              const csVoucherId = csVoucherRes.lastID || csVoucherRes.lastInsertRowid;
+              const csLot = lotNo.startsWith('CS-') ? lotNo : `CS-${lotNo}`;
+
+              await db.run(`
+                INSERT INTO cold_storage_items 
+                (voucher_id, voucher_no, item_id, item_name, purchase_lot_no, cold_storage_lot_no, quantity, weight, total_wt, unit, remarks)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              `, [
+                csVoucherId,
+                nextVoucherNo,
+                itemId,
+                itemName,
+                lotNo,
+                csLot,
+                splitQty,
+                splitWeight / (splitQty || 1),
+                splitWeight,
+                'KG',
+                `Auto from QC Unload Lot ${lotNo}`
+              ], activeCompanyId);
+            } catch (csUnloadErr) {
+              console.warn('Error creating cold storage voucher on unload split:', csUnloadErr.message);
+            }
+          }
+        }
+
+        const splitSummary = splitSummaryParts.join(', ');
+
+        await db.run(
+          `UPDATE stock_lots 
+           SET unloading_status = 'UNLOADED', qc_status = 'APPROVED', usable_for_production = 1, approval_status = 'APPROVED', godown_id = ?, godown_name = ?
+           WHERE UPPER(TRIM(lot_no)) = UPPER(TRIM(?))`,
+          [primaryGodownId, splitSummary, lotNo],
+          activeCompanyId
+        );
+
+        // Sync Cold Storage if any split godown is Cold Storage
+        try {
+          const { syncColdStorageStock } = require('./coldStorage');
+          if (typeof syncColdStorageStock === 'function') {
+            await syncColdStorageStock(db, activeCompanyId);
+          }
+        } catch (e) {
+          console.warn('Notice syncing cold storage in unload:', e.message);
+        }
+
+      } catch (splitErr) {
+        console.error('Error executing multi-godown split unload:', splitErr);
+        // Fallback to basic unload status
+        await db.run(
+          `UPDATE stock_lots 
+           SET unloading_status = ? 
+           WHERE lot_no = ?`,
+          [status, lotNo],
+          activeCompanyId
+        );
+      }
+    } else {
+      await db.run(
+        `UPDATE stock_lots 
+         SET unloading_status = ? 
+         WHERE lot_no = ?`,
+        [status, lotNo],
+        activeCompanyId
+      );
+    }
   }
 
   // Gather details for return data prefill
@@ -1396,6 +1558,36 @@ router.post('/confirm-disposal', asyncHandler(async (req, res) => {
         todayStr
       ]
     );
+  }
+
+  // Save into stock_unloading_allocations for real-time stock rebuilder persistence
+  try {
+    await db.run(`CREATE TABLE IF NOT EXISTS stock_unloading_allocations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      lot_no TEXT NOT NULL,
+      purchase_id INTEGER,
+      godown_id INTEGER NOT NULL,
+      godown_name TEXT NOT NULL,
+      qty REAL DEFAULT 0,
+      unloading_status TEXT DEFAULT 'UNLOADED',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+    await db.run('DELETE FROM stock_unloading_allocations WHERE lot_no = ?', [lotNo]);
+    for (const alloc of finalAllocations) {
+      let gName = '';
+      try {
+        const gR = await db.query('SELECT godown_name FROM godown_master WHERE id = ? LIMIT 1', [alloc.godownId]);
+        gName = gR.rows?.[0]?.godown_name || `Godown ${alloc.godownId}`;
+      } catch (_) {
+        gName = `Godown ${alloc.godownId}`;
+      }
+      await db.run(`
+        INSERT INTO stock_unloading_allocations (lot_no, purchase_id, godown_id, godown_name, qty, unloading_status)
+        VALUES (?, ?, ?, ?, ?, 'UNLOADED')
+      `, [lotNo, finalPurchaseId, alloc.godownId, gName, alloc.qty]);
+    }
+  } catch (e) {
+    console.error('Notice saving stock_unloading_allocations:', e.message);
   }
 
   // 3. Update stock table entries for each allocated godown

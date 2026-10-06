@@ -52,8 +52,80 @@ const initTables = async () => {
 initTables();
 
 // Ensure all cold storage transfers reflect in the stock table for reports and ledgers
-const syncColdStorageStock = async (dbInstance = db) => {
+const syncColdStorageStock = async (dbInstance = db, companyId = 1) => {
   try {
+    const cId = parseInt(companyId, 10) || 1;
+    const coldLots = await db.query(`
+      SELECT sl.*, p.date as pur_date, p.inv_no, g.id as g_id, g.godown_name as g_name
+      FROM stock_lots sl
+      LEFT JOIN purchases p ON sl.purchase_id = p.id
+      LEFT JOIN godown_master g ON sl.godown_id = g.id OR LOWER(sl.godown_name) = LOWER(g.godown_name)
+      WHERE LOWER(COALESCE(sl.godown_name, '')) LIKE '%cold%' 
+         OR sl.godown_id = 2 
+         OR LOWER(COALESCE(g.godown_type, '')) LIKE '%cold%'
+         OR LOWER(COALESCE(g.storage_location, '')) LIKE '%outside%'
+    `, [], cId);
+
+    for (const lot of (coldLots.rows || [])) {
+      const lotNo = lot.lot_no;
+      if (!lotNo) continue;
+
+      const existingCs = await db.query(`
+        SELECT csi.id FROM cold_storage_items csi 
+        WHERE UPPER(TRIM(csi.purchase_lot_no)) = UPPER(TRIM(?))
+      `, [lotNo], cId);
+
+      if (!existingCs.rows || existingCs.rows.length === 0) {
+        let gId = lot.godown_id || lot.g_id || 2;
+        let gName = lot.godown_name || lot.g_name || 'BTS Cold Storage';
+
+        let nextVoucherNo = 'CSI-000001';
+        try {
+          const csVRes = await db.query(`SELECT voucher_no FROM cold_storage_vouchers WHERE voucher_type = 'IN' ORDER BY id DESC LIMIT 1`, [], cId);
+          if (csVRes.rows && csVRes.rows.length > 0) {
+            const num = parseInt(String(csVRes.rows[0].voucher_no || '').replace(/\D/g, ''), 10);
+            if (!isNaN(num)) nextVoucherNo = `CSI-${String(num + 1).padStart(6, '0')}`;
+          }
+        } catch (_) {}
+
+        const csVoucherRes = await db.run(`
+          INSERT INTO cold_storage_vouchers 
+          (voucher_no, voucher_type, voucher_date, cold_storage_id, cold_storage_name, source_godown_id, source_godown_name, remarks, total_qty, total_wt, created_by)
+          VALUES (?, 'IN', ?, ?, ?, NULL, NULL, ?, ?, ?, ?)
+        `, [
+          nextVoucherNo,
+          lot.pur_date || new Date().toISOString().slice(0, 10),
+          gId,
+          gName,
+          `Auto-sync from Stock Lot ${lotNo}`,
+          parseFloat(lot.quantity || lot.remaining_quantity) || 0,
+          (parseFloat(lot.quantity || lot.remaining_quantity) || 0) * 50,
+          'System / Auto-Sync Cold Storage'
+        ], cId);
+
+        const csVoucherId = csVoucherRes.lastID || csVoucherRes.lastInsertRowid;
+        const csLot = lotNo.startsWith('CS-') ? lotNo : `CS-${lotNo}`;
+
+        await db.run(`
+          INSERT INTO cold_storage_items 
+          (voucher_id, voucher_no, item_id, item_name, purchase_lot_no, cold_storage_lot_no, quantity, weight, total_wt, unit, remarks)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+          csVoucherId,
+          nextVoucherNo,
+          lot.item_id || null,
+          lot.item_name || 'Material',
+          lotNo,
+          csLot,
+          parseFloat(lot.quantity || lot.remaining_quantity) || 0,
+          50,
+          (parseFloat(lot.quantity || lot.remaining_quantity) || 0) * 50,
+          'KG',
+          `Auto-synced from Stock Lot ${lotNo}`
+        ], cId);
+      }
+    }
+
     await rebuildStockLedger();
   } catch (err) {
     console.warn('Notice in syncColdStorageStock:', err.message);
@@ -225,6 +297,9 @@ router.get('/available-lots', async (req, res) => {
 // GET Cold Storage Stock (Lot breakdown in Cold Storages)
 router.get('/stock', async (req, res) => {
   try {
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    await syncColdStorageStock(db, activeCompanyId);
+
     const { cold_storage_id, item_name, search } = req.query;
 
     let query = `

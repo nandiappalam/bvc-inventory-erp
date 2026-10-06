@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { api, getMasters } from '../../services/api.js';
 import { safeArray } from './safeArray.js';
+import ItemStockDetailsModal from '../common/ItemStockDetailsModal.jsx';
 
 /**
  * Returns distinctive color schemes for different stock types
@@ -136,6 +137,7 @@ const ItemDropdownCell = ({
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const [stockModalOpen, setStockModalOpen] = useState(false);
 
   const containerRef = useRef(null);
   const inputRef = useRef(null);
@@ -666,22 +668,29 @@ const ItemDropdownCell = ({
                 {selectedName}
               </span>
 
-              {/* Stock Type & Stock Mini Badge */}
+              {/* Stock Type & Clickable Stock Mini Badge */}
               {selectedItem && (
                 <span
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    if (selectedName) setStockModalOpen(true);
+                  }}
                   style={{
                     fontSize: '10px',
-                    fontWeight: '700',
-                    padding: '1px 5px',
-                    borderRadius: '3px',
-                    backgroundColor: selectedColor.badgeBg,
-                    color: selectedColor.badgeText,
-                    border: `1px solid ${selectedColor.border}`,
+                    fontWeight: '800',
+                    padding: '2px 6px',
+                    borderRadius: '4px',
+                    backgroundColor: '#1d4ed8',
+                    color: '#ffffff',
                     whiteSpace: 'nowrap',
                     flexShrink: 0,
+                    cursor: 'pointer',
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.15)'
                   }}
+                  title="Click to view live godown-wise stock breakdown popup"
                 >
-                  {selectedItem.type || 'Item'} • Stk: {Number(selectedItem.stock_qty || 0).toFixed(0)}
+                  📊 Stk: {Number(selectedItem.stock_qty || 0).toFixed(0)}
                 </span>
               )}
             </>
@@ -1017,6 +1026,13 @@ const ItemDropdownCell = ({
           </div>
         </div>
       )}
+      {/* Item Stock Details Popup Modal */}
+      <ItemStockDetailsModal
+        isOpen={stockModalOpen}
+        onClose={() => setStockModalOpen(false)}
+        itemName={selectedName}
+        itemId={selectedItem?.id}
+      />
     </div>
   );
 };

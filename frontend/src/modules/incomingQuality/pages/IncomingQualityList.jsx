@@ -23,6 +23,8 @@ import ERPBreadcrumb from '../../../components/erp/ERPBreadcrumb';
 import ERPHeader from '../../../components/erp/ERPHeader';
 import ERPTable from '../../../components/erp/ERPTable';
 import api from '../../../services/api';
+import IQRUnloadGodownModal from '../../../components/common/IQRUnloadGodownModal';
+import ItemStockDetailsModal from '../../../components/common/ItemStockDetailsModal';
 
 const columns = [
   { key: 'iqr_no', label: 'IQR Number', sx: { width: '15%' } },
@@ -43,6 +45,12 @@ export default function IncomingQualityList() {
   const [searchQuery, setSearchQuery] = useState('');
   const [iqrList, setIqrList] = useState([]);
   const [toast, setToast] = useState({ open: false, message: '', severity: 'success' });
+
+  // Modals state
+  const [unloadModalOpen, setUnloadModalOpen] = useState(false);
+  const [selectedUnloadRow, setSelectedUnloadRow] = useState(null);
+  const [stockModalOpen, setStockModalOpen] = useState(false);
+  const [selectedStockItem, setSelectedStockItem] = useState('');
 
   const loadData = () => {
     setLoading(true);
@@ -76,6 +84,17 @@ export default function IncomingQualityList() {
       String(r.supplier_name || '').toLowerCase().includes(q)
     );
   }, [iqrList, searchQuery]);
+
+  const handleOpenUnloadModal = (row) => {
+    setSelectedUnloadRow(row);
+    setUnloadModalOpen(true);
+  };
+
+  const handleItemClick = (itemName) => {
+    if (!itemName) return;
+    setSelectedStockItem(itemName);
+    setStockModalOpen(true);
+  };
 
   const handleUnloadLot = (lotNo) => {
     if (!lotNo) return;
@@ -204,7 +223,24 @@ export default function IncomingQualityList() {
                   <TableRow key={row.id}>
                     <TableCell style={{ fontWeight: 800, padding: '12px' }}>{row.iqr_no}</TableCell>
                     <TableCell style={{ fontWeight: 700, padding: '12px' }}>{row.rm_lot_no}</TableCell>
-                    <TableCell style={{ padding: '12px' }}>{row.item_name}</TableCell>
+                    <TableCell style={{ padding: '12px' }}>
+                      <Box
+                        component="span"
+                        onClick={() => handleItemClick(row.item_name)}
+                        sx={{
+                          color: '#1d4ed8',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          textDecoration: 'underline',
+                          '&:hover': { color: '#1e40af', backgroundColor: '#eff6ff' },
+                          px: 1,
+                          py: 0.5,
+                          borderRadius: 1
+                        }}
+                      >
+                        {row.item_name}
+                      </Box>
+                    </TableCell>
                     <TableCell style={{ padding: '12px' }}>{row.supplier_name || '-'}</TableCell>
                     <TableCell style={{ padding: '12px' }}>{row.uploaded_date || '-'}</TableCell>
                     <TableCell style={{ padding: '12px' }}>
@@ -262,7 +298,7 @@ export default function IncomingQualityList() {
                               color="success"
                               disabled={actionLoading}
                               startIcon={<LocalShippingIcon fontSize="small" />}
-                              onClick={() => handleUnloadLot(row.rm_lot_no)}
+                              onClick={() => handleOpenUnloadModal(row)}
                               sx={{ fontWeight: 800 }}
                             >
                               Unload
@@ -289,6 +325,28 @@ export default function IncomingQualityList() {
             />
           )}
         </Paper>
+
+        {/* Multi-Godown Split Unload Modal */}
+        <IQRUnloadGodownModal
+          open={unloadModalOpen}
+          onClose={() => setUnloadModalOpen(false)}
+          lotData={selectedUnloadRow}
+          onSuccess={(res) => {
+            setToast({
+              open: true,
+              message: `Lot ${selectedUnloadRow?.rm_lot_no || ''} successfully unloaded and allocated to Godowns!`,
+              severity: 'success'
+            });
+            loadData();
+          }}
+        />
+
+        {/* Item Stock Details Popup Modal */}
+        <ItemStockDetailsModal
+          isOpen={stockModalOpen}
+          onClose={() => setStockModalOpen(false)}
+          itemName={selectedStockItem}
+        />
 
         {/* Toast Alerts */}
         <Snackbar 

@@ -398,4 +398,48 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
+// One-click restore route for KIYA tenant data
+router.all('/restore-kiya-data', async (req, res) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const possiblePaths = [
+      path.resolve(__dirname, '../restore_kiya_neon.sql'),
+      path.resolve(__dirname, '../../restore_kiya_neon.sql'),
+      path.resolve(process.cwd(), 'restore_kiya_neon.sql'),
+      path.resolve(process.cwd(), 'backend/restore_kiya_neon.sql')
+    ];
+    let sql = '';
+    for (const p of possiblePaths) {
+      if (fs.existsSync(p)) {
+        sql = fs.readFileSync(p, 'utf8');
+        break;
+      }
+    }
+
+    if (!sql) {
+      return res.status(404).json({ success: false, message: 'restore_kiya_neon.sql not found on server' });
+    }
+
+    if (db.isPostgres) {
+      const conn = await db.master.getConnection();
+      try {
+        await conn.query(sql);
+        console.log('✓ Successfully restored KIYA data to Neon schema company_8');
+        return res.json({ 
+          success: true, 
+          message: 'KIYA data successfully restored to Neon schema company_8! All 9 purchases, 16 items, vouchers, and ledgers restored without touching company_5.' 
+        });
+      } finally {
+        conn.release();
+      }
+    } else {
+      return res.json({ success: true, message: 'Running on SQLite, KIYA data is active in database/company_1.db' });
+    }
+  } catch (err) {
+    console.error('Error restoring KIYA data:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;

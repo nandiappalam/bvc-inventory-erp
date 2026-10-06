@@ -258,6 +258,18 @@ router.get('/godown-stock', async (req, res) => {
       ];
     }
 
+    // Include distinct godowns from stock table
+    try {
+      const extraGRes = await db.query(`SELECT DISTINCT godown_id, godown FROM stock WHERE godown IS NOT NULL AND godown != ''`);
+      (extraGRes.rows || []).forEach((eg) => {
+        const egName = (eg.godown || '').trim();
+        const egId = eg.godown_id;
+        if (egName && !godowns.some(g => (g.godown_name || '').toLowerCase().trim() === egName.toLowerCase() || String(g.id) === String(egId))) {
+          godowns.push({ id: egId || (godowns.length + 10), godown_name: egName, area: 'Storage' });
+        }
+      });
+    } catch (e) {}
+
     // Filter by godown if provided
     if (gId && gId !== 'all') {
       godowns = godowns.filter(g => String(g.id) === String(gId) || norm(g.godown_name) === norm(gId));
@@ -280,21 +292,17 @@ router.get('/godown-stock', async (req, res) => {
       SELECT 
         s.item_name,
         s.lot_no,
-        CASE 
-          WHEN UPPER(TRIM(s.lot_no)) LIKE '%LOT0003%' OR UPPER(TRIM(s.lot_no)) = 'LOT003' OR UPPER(TRIM(s.item_name)) LIKE '%URAD%' THEN COALESCE((SELECT godown_name FROM godown_master WHERE id = 1), 'PJ')
-          WHEN UPPER(TRIM(s.lot_no)) LIKE '%LOT0006%' OR UPPER(TRIM(s.lot_no)) = 'LOT006' THEN COALESCE((SELECT godown_name FROM godown_master WHERE id = 2 OR LOWER(godown_name) LIKE '%cold%' LIMIT 1), 'BTS Cold Storage')
-          ELSE COALESCE(
-            (SELECT gm.godown_name FROM godown_master gm WHERE gm.id = s.godown_id OR LOWER(TRIM(gm.godown_name)) = LOWER(TRIM(s.godown)) LIMIT 1),
-            s.godown,
-            (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1),
-            'PJ'
-          )
-        END as godown_name,
-        CASE 
-          WHEN UPPER(TRIM(s.lot_no)) LIKE '%LOT0003%' OR UPPER(TRIM(s.lot_no)) = 'LOT003' OR UPPER(TRIM(s.item_name)) LIKE '%URAD%' THEN 1
-          WHEN UPPER(TRIM(s.lot_no)) LIKE '%LOT0006%' OR UPPER(TRIM(s.lot_no)) = 'LOT006' THEN 2
-          ELSE s.godown_id
-        END as godown_id,
+        COALESCE(
+          (SELECT gm.godown_name FROM godown_master gm WHERE gm.id = s.godown_id OR LOWER(TRIM(gm.godown_name)) = LOWER(TRIM(s.godown)) LIMIT 1),
+          NULLIF(s.godown, ''),
+          (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1),
+          'Main Godown'
+        ) as godown_name,
+        COALESCE(
+          s.godown_id,
+          (SELECT gm.id FROM godown_master gm WHERE LOWER(TRIM(gm.godown_name)) = LOWER(TRIM(s.godown)) LIMIT 1),
+          1
+        ) as godown_id,
         MAX(im.id) as item_id,
         COALESCE(MAX(im.item_code), UPPER(SUBSTR(s.item_name, 1, 4))) as item_code,
         COALESCE(MAX(im.type), MAX(im.item_group), 'General') as category,
@@ -324,21 +332,17 @@ router.get('/godown-stock', async (req, res) => {
     }
 
     stockQuery += ` GROUP BY s.item_name, s.lot_no, 
-        CASE 
-          WHEN UPPER(TRIM(s.lot_no)) LIKE '%LOT0003%' OR UPPER(TRIM(s.lot_no)) = 'LOT003' OR UPPER(TRIM(s.item_name)) LIKE '%URAD%' THEN COALESCE((SELECT godown_name FROM godown_master WHERE id = 1), 'PJ')
-          WHEN UPPER(TRIM(s.lot_no)) LIKE '%LOT0006%' OR UPPER(TRIM(s.lot_no)) = 'LOT006' THEN COALESCE((SELECT godown_name FROM godown_master WHERE id = 2 OR LOWER(godown_name) LIKE '%cold%' LIMIT 1), 'BTS Cold Storage')
-          ELSE COALESCE(
-            (SELECT gm.godown_name FROM godown_master gm WHERE gm.id = s.godown_id OR LOWER(TRIM(gm.godown_name)) = LOWER(TRIM(s.godown)) LIMIT 1),
-            s.godown,
-            (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1),
-            'PJ'
-          )
-        END,
-        CASE 
-          WHEN UPPER(TRIM(s.lot_no)) LIKE '%LOT0003%' OR UPPER(TRIM(s.lot_no)) = 'LOT003' OR UPPER(TRIM(s.item_name)) LIKE '%URAD%' THEN 1
-          WHEN UPPER(TRIM(s.lot_no)) LIKE '%LOT0006%' OR UPPER(TRIM(s.lot_no)) = 'LOT006' THEN 2
-          ELSE s.godown_id
-        END`;
+        COALESCE(
+          (SELECT gm.godown_name FROM godown_master gm WHERE gm.id = s.godown_id OR LOWER(TRIM(gm.godown_name)) = LOWER(TRIM(s.godown)) LIMIT 1),
+          NULLIF(s.godown, ''),
+          (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1),
+          'Main Godown'
+        ),
+        COALESCE(
+          s.godown_id,
+          (SELECT gm.id FROM godown_master gm WHERE LOWER(TRIM(gm.godown_name)) = LOWER(TRIM(s.godown)) LIMIT 1),
+          1
+        )`;
 
     let stockTxnRows = [];
     try {
@@ -354,16 +358,8 @@ router.get('/godown-stock', async (req, res) => {
         sl.id,
         sl.item_name,
         sl.lot_no,
-        CASE 
-          WHEN UPPER(TRIM(sl.lot_no)) LIKE '%LOT0003%' OR UPPER(TRIM(sl.lot_no)) = 'LOT003' OR UPPER(TRIM(sl.item_name)) LIKE '%URAD%' THEN 1
-          WHEN UPPER(TRIM(sl.lot_no)) LIKE '%LOT0006%' OR UPPER(TRIM(sl.lot_no)) = 'LOT006' THEN 2
-          ELSE COALESCE(sl.godown_id, g.id)
-        END as godown_id,
-        CASE 
-          WHEN UPPER(TRIM(sl.lot_no)) LIKE '%LOT0003%' OR UPPER(TRIM(sl.lot_no)) = 'LOT003' OR UPPER(TRIM(sl.item_name)) LIKE '%URAD%' THEN COALESCE((SELECT godown_name FROM godown_master WHERE id = 1), 'PJ')
-          WHEN UPPER(TRIM(sl.lot_no)) LIKE '%LOT0006%' OR UPPER(TRIM(sl.lot_no)) = 'LOT006' THEN COALESCE((SELECT godown_name FROM godown_master WHERE id = 2 OR LOWER(godown_name) LIKE '%cold%' LIMIT 1), 'BTS Cold Storage')
-          ELSE COALESCE(g.godown_name, sl.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1), 'PJ')
-        END as godown_name,
+        COALESCE(sl.godown_id, g.id, 1) as godown_id,
+        COALESCE(g.godown_name, NULLIF(sl.godown_name, ''), (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1), 'Main Godown') as godown_name,
         sl.quantity as opening_qty,
         sl.remaining_quantity as available_qty,
         sl.rate,
@@ -4229,11 +4225,7 @@ const categoryReportHandler = async (req, res) => {
         sql = `
           SELECT 
             MAX(s.id) as id,
-            CASE 
-              WHEN UPPER(TRIM(s.lot_no)) LIKE '%LOT0003%' OR UPPER(TRIM(s.lot_no)) = 'LOT003' OR UPPER(TRIM(s.item_name)) LIKE '%URAD%' THEN COALESCE((SELECT godown_name FROM godown_master WHERE id = 1), 'PJ')
-              WHEN UPPER(TRIM(s.lot_no)) LIKE '%LOT0006%' OR UPPER(TRIM(s.lot_no)) = 'LOT006' THEN COALESCE((SELECT godown_name FROM godown_master WHERE id = 2 OR LOWER(godown_name) LIKE '%cold%' LIMIT 1), 'BTS Cold Storage')
-              ELSE COALESCE(g.godown_name, s.godown, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1), 'PJ')
-            END as godown_name,
+            COALESCE(g.godown_name, NULLIF(s.godown, ''), (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1), 'Main Godown') as godown_name,
             s.item_name,
             COALESCE(MAX(NULLIF(TRIM(im.item_group), '')), MAX(NULLIF(TRIM(im.type), '')), 'General') as item_group,
             COALESCE(s.lot_no, 'LOT-GEN') as lot_no,
@@ -4250,11 +4242,7 @@ const categoryReportHandler = async (req, res) => {
           LEFT JOIN godown_master g ON (CAST(s.godown_id AS TEXT) = CAST(g.id AS TEXT) OR LOWER(TRIM(s.godown)) = LOWER(TRIM(g.godown_name)))
           ${where}
           GROUP BY 
-            CASE 
-              WHEN UPPER(TRIM(s.lot_no)) LIKE '%LOT0003%' OR UPPER(TRIM(s.lot_no)) = 'LOT003' OR UPPER(TRIM(s.item_name)) LIKE '%URAD%' THEN COALESCE((SELECT godown_name FROM godown_master WHERE id = 1), 'PJ')
-              WHEN UPPER(TRIM(s.lot_no)) LIKE '%LOT0006%' OR UPPER(TRIM(s.lot_no)) = 'LOT006' THEN COALESCE((SELECT godown_name FROM godown_master WHERE id = 2 OR LOWER(godown_name) LIKE '%cold%' LIMIT 1), 'BTS Cold Storage')
-              ELSE COALESCE(g.godown_name, s.godown, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1), 'PJ')
-            END,
+            COALESCE(g.godown_name, NULLIF(s.godown, ''), (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1), 'Main Godown'),
             s.item_name,
             COALESCE(s.lot_no, 'LOT-GEN')
           HAVING SUM(COALESCE(s.qty, 0)) != 0
@@ -4269,11 +4257,7 @@ const categoryReportHandler = async (req, res) => {
             COALESCE(MAX(NULLIF(TRIM(im.item_group), '')), MAX(NULLIF(TRIM(im.type), '')), 'General') as item_group,
             MAX(COALESCE(im.type, '')) as item_type,
             COALESCE(s.lot_no, 'LOT-GEN') as lot_no,
-            CASE 
-              WHEN UPPER(TRIM(s.lot_no)) LIKE '%LOT0003%' OR UPPER(TRIM(s.lot_no)) = 'LOT003' OR UPPER(TRIM(s.item_name)) LIKE '%URAD%' THEN COALESCE((SELECT godown_name FROM godown_master WHERE id = 1), 'PJ')
-              WHEN UPPER(TRIM(s.lot_no)) LIKE '%LOT0006%' OR UPPER(TRIM(s.lot_no)) = 'LOT006' THEN COALESCE((SELECT godown_name FROM godown_master WHERE id = 2 OR LOWER(godown_name) LIKE '%cold%' LIMIT 1), 'BTS Cold Storage')
-              ELSE COALESCE(g.godown_name, s.godown, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1), 'PJ')
-            END as godown_name,
+            COALESCE(g.godown_name, NULLIF(s.godown, ''), (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1), 'Main Godown') as godown_name,
             SUM(CASE WHEN s.type IN ('Opening Stock', 'Open Stock', 'Opening') THEN COALESCE(s.qty, 0) ELSE 0 END) as opening_qty,
             SUM(CASE WHEN s.type NOT IN ('Opening Stock', 'Open Stock', 'Opening') AND s.qty > 0 THEN COALESCE(s.qty, 0) ELSE 0 END) as total_purchased,
             SUM(CASE WHEN LOWER(COALESCE(s.type, '')) = 'purchase return' THEN COALESCE(ABS(s.qty), 0) ELSE 0 END) as total_returned,
@@ -4289,11 +4273,7 @@ const categoryReportHandler = async (req, res) => {
           GROUP BY 
             s.item_name,
             COALESCE(s.lot_no, 'LOT-GEN'),
-            CASE 
-              WHEN UPPER(TRIM(s.lot_no)) LIKE '%LOT0003%' OR UPPER(TRIM(s.lot_no)) = 'LOT003' OR UPPER(TRIM(s.item_name)) LIKE '%URAD%' THEN COALESCE((SELECT godown_name FROM godown_master WHERE id = 1), 'PJ')
-              WHEN UPPER(TRIM(s.lot_no)) LIKE '%LOT0006%' OR UPPER(TRIM(s.lot_no)) = 'LOT006' THEN COALESCE((SELECT godown_name FROM godown_master WHERE id = 2 OR LOWER(godown_name) LIKE '%cold%' LIMIT 1), 'BTS Cold Storage')
-              ELSE COALESCE(g.godown_name, s.godown, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1), 'PJ')
-            END
+            COALESCE(g.godown_name, NULLIF(s.godown, ''), (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1), 'Main Godown')
           HAVING SUM(COALESCE(s.qty, 0)) != 0
           ORDER BY s.item_name ASC
         `;

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import axios from 'axios'
+import ItemStockDetailsModal from './common/ItemStockDetailsModal'
 
 /**
  * LotDropdown - Displays available lots for an item with stock count
@@ -27,6 +28,7 @@ const LotDropdown = ({
   const [lots, setLots] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [showItemModal, setShowItemModal] = useState(false)
 
   // Fetch available lots when item changes
   useEffect(() => {
@@ -105,10 +107,23 @@ const LotDropdown = ({
 
   return (
     <div className="form-row">
-      <label>
-        {label}
-        {required && <span className="required">*</span>}
-      </label>
+      <div className="flex justify-between items-center mb-1">
+        <label className="m-0">
+          {label}
+          {required && <span className="required">*</span>}
+        </label>
+        {(itemName || itemId) && (
+          <button
+            type="button"
+            onClick={() => setShowItemModal(true)}
+            className="text-[11px] font-bold text-blue-600 hover:text-blue-800 underline cursor-pointer flex items-center space-x-1"
+            title="Click to view live item stock & godown breakdown"
+          >
+            <span>View Stock Breakdown</span>
+            <span>ℹ️</span>
+          </button>
+        )}
+      </div>
       <select
         className="uniform-input"
         value={value || ''}
@@ -141,6 +156,13 @@ const LotDropdown = ({
           No stock available
         </span>
       )}
+
+      <ItemStockDetailsModal
+        isOpen={showItemModal}
+        onClose={() => setShowItemModal(false)}
+        itemName={itemName}
+        itemId={itemId}
+      />
     </div>
   )
 }

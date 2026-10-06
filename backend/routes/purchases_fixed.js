@@ -344,6 +344,49 @@ router.post('/', async (req, res) => {
       }
     } catch (e) {}
 
+    let resolvedGodownId = null;
+    let resolvedGodownName = '';
+    const rawGodown = formData.godown_id || formData.godownId || formData.godown_name || formData.godown || null;
+
+    if (rawGodown !== null && rawGodown !== undefined && rawGodown !== '') {
+      const rawStr = String(rawGodown).trim();
+      if (/^\d+$/.test(rawStr)) {
+        resolvedGodownId = parseInt(rawStr, 10);
+      } else {
+        resolvedGodownName = rawStr;
+      }
+    }
+    if (!resolvedGodownName && formData.godown && !/^\d+$/.test(String(formData.godown))) {
+      resolvedGodownName = String(formData.godown).trim();
+    }
+
+    try {
+      if (resolvedGodownId) {
+        const gRes = await db.query('SELECT godown_name FROM godown_master WHERE id = ?', [resolvedGodownId]);
+        if (gRes.rows && gRes.rows[0]) resolvedGodownName = gRes.rows[0].godown_name;
+      } else if (resolvedGodownName) {
+        const gRes = await db.query('SELECT id, godown_name FROM godown_master WHERE LOWER(TRIM(godown_name)) = LOWER(TRIM(?))', [resolvedGodownName]);
+        if (gRes.rows && gRes.rows[0]) {
+          resolvedGodownId = gRes.rows[0].id;
+          resolvedGodownName = gRes.rows[0].godown_name;
+        }
+      }
+    } catch (e) {}
+
+    if (!resolvedGodownName) {
+      try {
+        const defaultG = await db.query('SELECT id, godown_name FROM godown_master ORDER BY id ASC LIMIT 1');
+        if (defaultG.rows && defaultG.rows[0]) {
+          resolvedGodownId = defaultG.rows[0].id;
+          resolvedGodownName = defaultG.rows[0].godown_name;
+        }
+      } catch (e) {}
+    }
+    if (!resolvedGodownName) {
+      resolvedGodownName = 'Main Godown';
+      resolvedGodownId = 1;
+    }
+
     const insertValues = [
       finalSno,
       formData.date || new Date().toISOString().slice(0, 10),
@@ -360,7 +403,7 @@ router.post('/', async (req, res) => {
       formData.email || '',
       formData.taxType || formData.tax_type || 'Exclusive',
       formData.tax_percent || 0,
-      formData.godown || '',
+      resolvedGodownName,
       formData.remarks || '',
       transporter,
       transporter,
@@ -406,25 +449,6 @@ router.post('/', async (req, res) => {
         console.error('Error updating purchase order status on inward:', err);
       }
     }
-
-    let resolvedGodownId = null;
-    let resolvedGodownName = formData.godown || '';
-    const rawGodown = formData.godown_id || formData.godownId || formData.godown || null;
-    if (rawGodown && /^\d+$/.test(String(rawGodown))) {
-      resolvedGodownId = parseInt(rawGodown, 10);
-    }
-    try {
-      if (resolvedGodownId) {
-        const gRes = await db.query('SELECT godown_name FROM godown_master WHERE id = ?', [resolvedGodownId]);
-        if (gRes.rows && gRes.rows[0]) resolvedGodownName = gRes.rows[0].godown_name;
-      } else if (resolvedGodownName) {
-        const gRes = await db.query('SELECT id, godown_name FROM godown_master WHERE LOWER(godown_name) = LOWER(?)', [resolvedGodownName]);
-        if (gRes.rows && gRes.rows[0]) {
-          resolvedGodownId = gRes.rows[0].id;
-          resolvedGodownName = gRes.rows[0].godown_name;
-        }
-      }
-    } catch (e) {}
 
     const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
 
@@ -488,14 +512,77 @@ router.post('/', async (req, res) => {
       }
 
       await db.run(`
-        INSERT INTO stock_lots (item_id, item_name, lot_no, purchase_id, quantity, remaining_quantity, rate, qc_status, unloading_status, godown_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'QC_PENDING', 'PENDING_DECISION', ?)
-      `, [itemId, normalizedItem.item_name, lotNo, purchaseId, qty, qty, rate, resolvedGodownId])
+        INSERT INTO stock_lots (item_id, item_name, lot_no, purchase_id, quantity, remaining_quantity, rate, qc_status, unloading_status, godown_id, godown_name)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'QC_PENDING', 'PENDING_DECISION', ?, ?)
+      `, [itemId, normalizedItem.item_name, lotNo, purchaseId, qty, qty, rate, resolvedGodownId, resolvedGodownName])
 
       await db.run(`
         INSERT INTO stock (item_id, item_name, lot_no, qty, weight, rate, amount, date, type, reference_id, godown, godown_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Purchase', ?, ?, ?)
       `, [itemId, normalizedItem.item_name, lotNo, qty, totalWt, rate, amount, formData.date, purchaseId, resolvedGodownName || 'Main Godown', resolvedGodownId || 1])
+    }
+
+    // Check if the target godown is Cold Storage and automatically create Cold Storage IN voucher & items
+    const isColdStorage = (resolvedGodownName || '').toLowerCase().includes('cold') || String(resolvedGodownId) === '2';
+    if (isColdStorage) {
+      try {
+        let nextVoucherNo = 'CSI-000001';
+        try {
+          const csVRes = await db.query(`SELECT voucher_no FROM cold_storage_vouchers WHERE voucher_type = 'IN' ORDER BY id DESC LIMIT 1`, [], activeCompanyId);
+          if (csVRes.rows && csVRes.rows.length > 0) {
+            const num = parseInt(String(csVRes.rows[0].voucher_no || '').replace(/\D/g, ''), 10);
+            if (!isNaN(num)) {
+              nextVoucherNo = `CSI-${String(num + 1).padStart(6, '0')}`;
+            }
+          }
+        } catch (_) {}
+
+        const csVoucherRes = await db.run(`
+          INSERT INTO cold_storage_vouchers 
+          (voucher_no, voucher_type, voucher_date, cold_storage_id, cold_storage_name, source_godown_id, source_godown_name, remarks, total_qty, total_wt, created_by)
+          VALUES (?, 'IN', ?, ?, ?, NULL, NULL, ?, ?, ?, ?)
+        `, [
+          nextVoucherNo,
+          formData.date || new Date().toISOString().slice(0, 10),
+          resolvedGodownId || 2,
+          resolvedGodownName || 'BTS Cold Storage',
+          `Auto-inward from Purchase #${formData.invNo || formData.inv_no || purchaseId}`,
+          parseFloat(totals.totalQty) || 0,
+          parseFloat(totals.totalWeight) || 0,
+          formData.createdBy || 'System / Purchase Auto-Inward'
+        ], activeCompanyId);
+
+        const csVoucherId = csVoucherRes.lastID || csVoucherRes.lastInsertRowid;
+
+        const pItemsRes = await db.query(`SELECT * FROM purchase_items WHERE purchase_id = ?`, [purchaseId], activeCompanyId);
+        for (const pIt of (pItemsRes.rows || [])) {
+          const pLot = pIt.lot_no || 'LOT-GEN';
+          const csLot = (pLot && pLot.startsWith('CS-')) ? pLot : `CS-${pLot}`;
+          const qty = parseFloat(pIt.qty) || 0;
+          const wt = parseFloat(pIt.per_unit_weight) || 50;
+          const totWt = parseFloat(pIt.total_weight) || (qty * wt);
+
+          await db.run(`
+            INSERT INTO cold_storage_items 
+            (voucher_id, voucher_no, item_id, item_name, purchase_lot_no, cold_storage_lot_no, quantity, weight, total_wt, unit, remarks)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `, [
+            csVoucherId,
+            nextVoucherNo,
+            pIt.item_id || null,
+            pIt.item_name,
+            pLot,
+            csLot,
+            qty,
+            wt,
+            totWt,
+            'KG',
+            `Auto from Purchase #${formData.invNo || formData.inv_no || purchaseId}`
+          ], activeCompanyId);
+        }
+      } catch (csErr) {
+        console.warn('Error creating auto-inward cold storage voucher on purchase:', csErr.message);
+      }
     }
 
     if (vehicle_no) {
@@ -523,7 +610,7 @@ router.post('/', async (req, res) => {
       }
     }
 
-    for (const ded of deductions) {
+    for (const ded of (deductions || [])) {
       await db.run(`
         INSERT INTO purchase_deductions (
           purchase_id, deduction_purchase_id, deduction_name, type, calc_type, value, amount, affect_cost_of_goods, remarks
@@ -638,7 +725,7 @@ router.put('/:id', async (req, res) => {
       formData.email,
       formData.taxType || formData.tax_type,
       formData.tax_percent || 0,
-      formData.godown,
+      resolvedGodownName || formData.godown || '',
       formData.remarks,
       transporter,
       transporter,
@@ -739,9 +826,9 @@ router.put('/:id', async (req, res) => {
       }
 
       await db.run(`
-        INSERT INTO stock_lots (item_id, item_name, lot_no, purchase_id, quantity, remaining_quantity, rate, qc_status, unloading_status, godown_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'QC_PENDING', 'PENDING_DECISION', ?)
-      `, [itemId, normalizedItem.item_name, lotNo, purchaseId, qty, qty, rate, resolvedGodownId])
+        INSERT INTO stock_lots (item_id, item_name, lot_no, purchase_id, quantity, remaining_quantity, rate, qc_status, unloading_status, godown_id, godown_name)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'QC_PENDING', 'PENDING_DECISION', ?, ?)
+      `, [itemId, normalizedItem.item_name, lotNo, purchaseId, qty, qty, rate, resolvedGodownId, resolvedGodownName])
 
       // Re-apply preserved status if this lot number already existed
       const key = lotNo.toUpperCase();

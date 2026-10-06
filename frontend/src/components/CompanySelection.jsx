@@ -342,11 +342,11 @@ const CompanySelection = () => {
           />
 
           <Typography
-            variant="h3"
+            variant="h2"
             sx={{
-              fontWeight: 80,
+              fontWeight: 800,
               fontSize: { xs: '2.2rem', md: '3.6rem' },
-              lineHeight: 1,
+              lineHeight: 1.15,
               letterSpacing: '-1px',
               mb: 3,
               maxWidth: 900,
@@ -360,9 +360,9 @@ const CompanySelection = () => {
             variant="h6"
             sx={{
               color: '#cbd5e1',
-              fontWeight: 40,
+              fontWeight: 400,
               fontSize: { xs: '1rem', md: '1.25rem' },
-              lineHeight: 1,
+              lineHeight: 1.6,
               maxWidth: 760,
               mx: 'auto',
               mb: 5
@@ -381,11 +381,11 @@ const CompanySelection = () => {
                 bgcolor: themeColors.primary,
                 '&:hover': { bgcolor: '#2563eb' },
                 fontSize: '1rem',
-                fontWeight: 70,
+                fontWeight: 700,
                 textTransform: 'none',
                 py: 1.5,
                 px: 4,
-                borderRadius: 1,
+                borderRadius: 2,
                 boxShadow: '0 4px 20px rgba(31, 79, 178, 0.4)'
               }}
             >
@@ -487,7 +487,7 @@ const CompanySelection = () => {
           <Typography variant="overline" sx={{ color: themeColors.primary, fontWeight: 800, letterSpacing: '1px' }}>
             SECURE ACCESS PORTAL
           </Typography>
-          <Typography variant="h4" sx={{ fontWeight: 80, color: themeColors.navy, letterSpacing: '-0.5px' }}>
+          <Typography variant="h3" sx={{ fontWeight: 800, color: themeColors.navy, letterSpacing: '-0.5px' }}>
             Company Selection & Login
           </Typography>
           <Typography variant="body1" sx={{ color: '#64748b', maxWidth: 600, mx: 'auto', mt: 1 }}>
@@ -924,10 +924,10 @@ const CompanySelection = () => {
       >
         <Box sx={{ maxWidth: 1200, mx: 'auto' }}>
           <Box sx={{ textAlign: 'center', mb: 8 }}>
-            <Typography variant="overline" sx={{ color: themeColors.primary, fontWeight: 600, letterSpacing: '1px' }}>
+            <Typography variant="overline" sx={{ color: themeColors.primary, fontWeight: 800, letterSpacing: '1px' }}>
               POWERFUL SYSTEM MODULES
             </Typography>
-            <Typography variant="h4" sx={{ fontWeight: 600, color: themeColors.navy, letterSpacing: '-0.5px' }}>
+            <Typography variant="h3" sx={{ fontWeight: 800, color: themeColors.navy, letterSpacing: '-0.5px' }}>
               Built for Manufacturing & Supply Chain
             </Typography>
             <Typography variant="body1" sx={{ color: '#64748b', maxWidth: 640, mx: 'auto', mt: 1 }}>

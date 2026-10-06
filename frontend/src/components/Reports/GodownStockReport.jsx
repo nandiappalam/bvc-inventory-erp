@@ -41,6 +41,7 @@ import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { printHtml } from '../../utils/printHelper';
 import api from '../../services/api.js';
+import ItemStockDetailsModal from '../common/ItemStockDetailsModal';
 
 const GodownStockReport = () => {
   const [data, setData] = useState([]);
@@ -54,6 +55,8 @@ const GodownStockReport = () => {
   const [categories, setCategories] = useState([]);
   const [configs, setConfigs] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [stockModalOpen, setStockModalOpen] = useState(false);
+  const [selectedStockItem, setSelectedStockItem] = useState('');
 
   // Pagination state
   const [page, setPage] = useState(0);
@@ -883,7 +886,25 @@ const GodownStockReport = () => {
                             <TableCell align="center" sx={{ color: '#94a3b8', fontSize: '11px' }}>{idx + 1}</TableCell>
                             <TableCell sx={{ fontWeight: 700, color: '#0f172a' }}>{row.godown_name}</TableCell>
                             <TableCell sx={{ fontFamily: 'monospace', color: '#64748b', fontSize: '11px' }}>{row.item_code}</TableCell>
-                            <TableCell sx={{ fontWeight: 700, color: '#1e293b' }}>{row.item_name}</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>
+                              <Box
+                                component="span"
+                                onClick={() => { setSelectedStockItem(row.item_name); setStockModalOpen(true); }}
+                                sx={{
+                                  color: '#2563eb',
+                                  fontWeight: 700,
+                                  cursor: 'pointer',
+                                  textDecoration: 'underline',
+                                  '&:hover': { color: '#1d4ed8', backgroundColor: '#eff6ff' },
+                                  px: 0.5,
+                                  py: 0.2,
+                                  borderRadius: 0.5
+                                }}
+                                title="Click to view live item stock details across godowns"
+                              >
+                                {row.item_name}
+                              </Box>
+                            </TableCell>
                             <TableCell sx={{ color: '#64748b', fontSize: '11px' }}>{row.category}</TableCell>
                             <TableCell sx={{ fontFamily: 'monospace', fontWeight: 700, color: '#2563eb' }}>{row.lot_no}</TableCell>
                             <TableCell align="right" sx={{ color: '#475569' }}>{row.unit_weight} {row.unit}</TableCell>
@@ -952,6 +973,13 @@ const GodownStockReport = () => {
           )}
         </Stack>
       )}
+
+      {/* Item Stock Details Popup Modal */}
+      <ItemStockDetailsModal
+        isOpen={stockModalOpen}
+        onClose={() => setStockModalOpen(false)}
+        itemName={selectedStockItem}
+      />
     </Container>
   );
 };

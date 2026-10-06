@@ -66,7 +66,27 @@ const initSchema = async () => {
     } catch (e) {
       // already exists
     }
-    console.log("Grains wastage items table and columns initialized successfully.");
+
+    const grainCols = [
+      'ALTER TABLE grains ADD COLUMN process_mode TEXT DEFAULT "INSIDE_MILL"',
+      'ALTER TABLE grains ADD COLUMN mill_type TEXT DEFAULT "Inside Mill"',
+      'ALTER TABLE grains ADD COLUMN external_mill_id INTEGER',
+      'ALTER TABLE grains ADD COLUMN external_mill_name TEXT',
+      'ALTER TABLE grains ADD COLUMN outpass_id INTEGER',
+      'ALTER TABLE grains ADD COLUMN outpass_no TEXT',
+      'ALTER TABLE grains ADD COLUMN inpass_id INTEGER',
+      'ALTER TABLE grains ADD COLUMN inpass_no TEXT',
+      'ALTER TABLE grains ADD COLUMN status TEXT DEFAULT "Completed"',
+      'ALTER TABLE grains ADD COLUMN processing_charge_per_kg REAL DEFAULT 0',
+      'ALTER TABLE grains ADD COLUMN total_processing_charges REAL DEFAULT 0',
+      'ALTER TABLE grains ADD COLUMN discrepancy_kg REAL DEFAULT 0',
+      'ALTER TABLE grains ADD COLUMN discrepancy_reason TEXT'
+    ];
+    for (const sql of grainCols) {
+      try { await db.run(sql); } catch (e) {}
+    }
+
+    console.log("Grains wastage items and outside mill columns initialized successfully.");
   } catch (err) {
     console.error("Failed to initialize grains wastage items table/columns:", err.message);
   }
@@ -317,6 +337,23 @@ router.get(['/', '/list'], async (req, res) => {
         grain.qc_status = 'APPROVED';
         grain.operator = 'Operator 1';
       }
+
+      // Derive processing mode and outside mill status
+      grain.process_mode = grain.process_mode || (grain.mill_type === 'Outside Mill' ? 'OUTSIDE_MILL' : 'INSIDE_MILL');
+      grain.mill_type = grain.mill_type || (grain.process_mode === 'OUTSIDE_MILL' ? 'Outside Mill' : 'Inside Mill');
+      
+      // Automatic status determination
+      if (grain.process_mode === 'OUTSIDE_MILL') {
+        if (grain.inpass_id || grain.inpass_no) {
+          grain.status = 'Completed';
+        } else if (grain.outpass_id || grain.outpass_no) {
+          grain.status = 'Outpassed';
+        } else {
+          grain.status = 'Outpass Pending';
+        }
+      } else {
+        grain.status = grain.status || 'Completed';
+      }
     }
     
     res.json(grains);
@@ -431,7 +468,54 @@ router.get('/:id', async (req, res) => {
     grain.verification = verifRes.rows.length > 0 ? verifRes.rows[0] : null;
     grain.operatorLogs = opLogsRes.rows;
 
-    res.json(grain)
+    // Derive processing mode
+    grain.process_mode = grain.process_mode || (grain.mill_type === 'Outside Mill' ? 'OUTSIDE_MILL' : 'INSIDE_MILL');
+    grain.mill_type = grain.mill_type || (grain.process_mode === 'OUTSIDE_MILL' ? 'Outside Mill' : 'Inside Mill');
+
+    // Fetch linked Outpass if exists
+    try {
+      const opRes = await db.query(
+        `SELECT * FROM outpasses WHERE id = ? OR outpass_no = ? OR (reference_type = 'Grind' AND reference_id = ?)`,
+        [grain.outpass_id || -1, grain.outpass_no || '', id]
+      );
+      if (opRes.rows && opRes.rows.length > 0) {
+        grain.outpass = opRes.rows[0];
+        const opiRes = await db.query(`SELECT * FROM outpass_items WHERE outpass_id = ?`, [grain.outpass.id]);
+        grain.outpass.items = opiRes.rows || [];
+        grain.outpass_id = grain.outpass.id;
+        grain.outpass_no = grain.outpass.outpass_no;
+      }
+    } catch (e) {}
+
+    // Fetch linked Inpass if exists
+    try {
+      const ipRes = await db.query(
+        `SELECT * FROM inpasses WHERE id = ? OR inpass_no = ? OR (reference_type = 'Grind' AND reference_id = ?)`,
+        [grain.inpass_id || -1, grain.inpass_no || '', id]
+      );
+      if (ipRes.rows && ipRes.rows.length > 0) {
+        grain.inpass = ipRes.rows[0];
+        const ipiRes = await db.query(`SELECT * FROM inpass_items WHERE inpass_id = ?`, [grain.inpass.id]);
+        grain.inpass.items = ipiRes.rows || [];
+        grain.inpass_id = grain.inpass.id;
+        grain.inpass_no = grain.inpass.inpass_no;
+      }
+    } catch (e) {}
+
+    // Status auto-determination
+    if (grain.process_mode === 'OUTSIDE_MILL') {
+      if (grain.inpass || grain.inpass_id) {
+        grain.status = 'Completed';
+      } else if (grain.outpass || grain.outpass_id) {
+        grain.status = 'Outpassed';
+      } else {
+        grain.status = 'Outpass Pending';
+      }
+    } else {
+      grain.status = grain.status || 'Completed';
+    }
+
+    res.json(grain);
   } catch (error) {
     console.error('Error fetching grain:', error)
     res.status(500).json({ message: 'Error fetching grain', error: error.message })
@@ -760,14 +844,37 @@ router.post('/', async (req, res) => {
   try {
     const { formData, inputItems, outputItems, wastageItems } = req.body
 
-    // Insert grain
+    // Insert grain with process_mode support
     const workOrderId = formData.work_order_id || formData.workOrderId || null;
     const workOrderNo = formData.work_order_no || formData.workOrderNo || null;
 
+    const processMode = (formData.process_mode || formData.processMode || (formData.mill_type === 'Outside Mill' ? 'OUTSIDE_MILL' : 'INSIDE_MILL')).toUpperCase();
+    const millType = processMode === 'OUTSIDE_MILL' ? 'Outside Mill' : 'Inside Mill';
+    const externalMillId = formData.external_mill_id || formData.externalMillId || null;
+    const externalMillName = formData.external_mill_name || formData.externalMillName || (processMode === 'OUTSIDE_MILL' ? (formData.flourMill || formData.flour_mill) : null);
+    const processingRate = parseFloat(formData.processing_charge_per_kg || formData.processingChargePerKg) || 0;
+
     const grainResult = await db.run(`
-      INSERT INTO grains (s_no, flour_mill, date, remarks, work_order_id, work_order_no)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `, [formData.sNo || formData.s_no, formData.flourMill || formData.flour_mill, formData.date, formData.remarks, workOrderId, workOrderNo])
+      INSERT INTO grains (
+        s_no, flour_mill, date, remarks, work_order_id, work_order_no,
+        process_mode, mill_type, external_mill_id, external_mill_name,
+        processing_charge_per_kg, status
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      formData.sNo || formData.s_no,
+      formData.flourMill || formData.flour_mill,
+      formData.date,
+      formData.remarks,
+      workOrderId,
+      workOrderNo,
+      processMode,
+      millType,
+      externalMillId,
+      externalMillName,
+      processingRate,
+      processMode === 'OUTSIDE_MILL' ? 'Outpass Pending' : 'Completed'
+    ]);
 
     const grainId = grainResult.lastID
 
@@ -917,13 +1024,108 @@ router.post('/', async (req, res) => {
       console.warn('Auxiliary table check warning:', tblErr.message);
     }
 
-    // Apply stock changes using filtered active rows
-    try {
-      await deductGrainsInputStock(grainId, formData.date, activeInputItems);
-      await addGrainsOutputStock(grainId, formData.date, activeOutputItems);
-      await addGrainsWastageStock(grainId, formData.date, activeWastageItems);
-    } catch (stkErr) {
-      console.error('Error applying stock changes for grains:', stkErr);
+    // Apply stock changes based on Processing Mode
+    let createdOutpassNo = null;
+    let createdOutpassId = null;
+
+    if (processMode === 'OUTSIDE_MILL') {
+      const autoOutpass = formData.create_outpass !== false;
+      if (autoOutpass && activeInputItems.length > 0) {
+        try {
+          const opCountRes = await db.query(`SELECT outpass_no FROM outpasses ORDER BY id DESC LIMIT 1`);
+          let lastNum = 0;
+          if (opCountRes.rows && opCountRes.rows.length > 0) {
+            const match = String(opCountRes.rows[0].outpass_no || '').match(/\d+/);
+            if (match) lastNum = parseInt(match[0], 10);
+          }
+          createdOutpassNo = formData.outpass_no || `OP-${String(lastNum + 1).padStart(5, '0')}`;
+
+          const totalInQty = activeInputItems.reduce((s, it) => s + (parseFloat(it.qty) || 0), 0);
+          const totalInWt = activeInputItems.reduce((s, it) => s + (parseFloat(it.totalWt || it.total_wt) || ((parseFloat(it.qty) || 0) * (parseFloat(it.weight) || 50))), 0);
+          const estimatedCharges = Number((totalInWt * processingRate).toFixed(2));
+
+          const insOp = await db.run(`
+            INSERT INTO outpasses (
+              outpass_no, date, purpose, item_type, reference_type, reference_id, reference_no,
+              party_type, party_id, party_name, destination, vehicle_no, driver_name,
+              total_qty, total_weight, processing_rate_kg, estimated_charges, status, remarks, created_by
+            ) VALUES (?, ?, 'Outside Processing', 'RM', 'Grind', ?, ?, 'Flour Mill', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OUTPASSED', ?, 'Admin')
+          `, [
+            createdOutpassNo,
+            formData.date,
+            grainId,
+            `GRIND-${formData.sNo || formData.s_no || grainId}`,
+            externalMillId,
+            externalMillName || 'External Mill',
+            formData.destination || externalMillName || 'Outside Mill',
+            formData.vehicle_no || '',
+            formData.driver_name || '',
+            totalInQty,
+            totalInWt,
+            processingRate,
+            estimatedCharges,
+            formData.remarks || ''
+          ]);
+          createdOutpassId = insOp.lastID || insOp.lastInsertRowid;
+
+          for (const it of activeInputItems) {
+            const itName = it.itemName || it.item_name;
+            const itLot = it.lotNo || it.lot_no;
+            const itQty = parseFloat(it.qty) || 0;
+            const itUnitWt = parseFloat(it.weight) || (itQty > 0 ? (parseFloat(it.totalWt || it.total_wt) || 0) / itQty : 50);
+            const itTotWt = parseFloat(it.totalWt || it.total_wt) || (itQty * itUnitWt);
+            const itRate = parseFloat(it.rate) || 0;
+            const itAmt = itQty * itRate;
+
+            await db.run(`
+              INSERT INTO outpass_items (
+                outpass_id, outpass_no, item_name, lot_no, qty, weight, total_weight,
+                rate, amount, status, reason, remarks
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'OUTSIDE_PROCESSING', 'Outside Mill Grinding', ?)
+            `, [createdOutpassId, createdOutpassNo, itName, itLot, itQty, itUnitWt, itTotWt, itRate, itAmt, it.supplierName || '']);
+
+            // Stock movement: RM leaves factory and moves to Outside Processing custody
+            await db.run(`
+              INSERT INTO stock (item_name, lot_no, qty, weight, rate, amount, date, type, reference_id, remarks)
+              VALUES (?, ?, ?, ?, ?, ?, ?, 'Outpass Issue', ?, ?)
+            `, [
+              itName, itLot, -itQty, -itTotWt, itRate, -itAmt,
+              formData.date, createdOutpassId, `Outpass #${createdOutpassNo} to ${externalMillName || 'Outside Mill'}`
+            ]);
+
+            if (itLot) {
+              await db.run(`
+                UPDATE stock_lots
+                SET remaining_quantity = MAX(0, remaining_quantity - ?),
+                    outside_processing_qty = COALESCE(outside_processing_qty, 0) + ?,
+                    custody_status = 'OUTSIDE_PROCESSING'
+                WHERE UPPER(TRIM(lot_no)) = UPPER(TRIM(?))
+              `, [itQty, itQty, itLot]);
+            }
+          }
+
+          // Link Outpass back to grains
+          await db.run(`
+            UPDATE grains SET
+              outpass_id = ?,
+              outpass_no = ?,
+              status = 'Outpassed',
+              total_processing_charges = ?
+            WHERE id = ?
+          `, [createdOutpassId, createdOutpassNo, estimatedCharges, grainId]);
+        } catch (opErr) {
+          console.error('Error auto-creating outpass for outside mill grind:', opErr);
+        }
+      }
+    } else {
+      // INSIDE MILL: normal in-factory conversion
+      try {
+        await deductGrainsInputStock(grainId, formData.date, activeInputItems);
+        await addGrainsOutputStock(grainId, formData.date, activeOutputItems);
+        await addGrainsWastageStock(grainId, formData.date, activeWastageItems);
+      } catch (stkErr) {
+        console.error('Error applying stock changes for grains:', stkErr);
+      }
     }
 
     // Save CCP Monitoring
@@ -1052,14 +1254,133 @@ router.post('/', async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: 'Grains & Food Safety record saved successfully!',
-      id: grainId
-    })
+      message: processMode === 'OUTSIDE_MILL' && createdOutpassNo
+        ? `Outside Mill Grind created & Outpass ${createdOutpassNo} issued! Material dispatched for processing.`
+        : 'Grains & Food Safety record saved successfully!',
+      id: grainId,
+      process_mode: processMode,
+      outpass_no: createdOutpassNo,
+      outpass_id: createdOutpassId
+    });
   } catch (error) {
-    console.error('Error saving grains:', error)
-    res.status(500).json({ success: false, message: 'Error saving grains', error: error.message })
+    console.error('Error saving grains:', error);
+    res.status(500).json({ success: false, message: 'Error saving grains', error: error.message });
   }
-})
+});
+
+// POST generate outpass for an existing Outside Mill grind
+router.post('/:id/generate-outpass', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { vehicle_no, driver_name, transporter, destination, remarks } = req.body || {};
+
+    const gRes = await db.query(`SELECT * FROM grains WHERE id = ?`, [id]);
+    if (!gRes.rows || gRes.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Grind record not found' });
+    }
+    const grain = gRes.rows[0];
+    if (grain.outpass_id || grain.outpass_no) {
+      return res.status(400).json({ success: false, message: `Outpass ${grain.outpass_no} is already generated for this Grind` });
+    }
+
+    const inputs = await db.query(`SELECT * FROM grain_input_items WHERE grain_id = ?`, [id]);
+    const activeItems = inputs.rows || [];
+    if (activeItems.length === 0) {
+      return res.status(400).json({ success: false, message: 'No input items found for this Grind' });
+    }
+
+    const opCountRes = await db.query(`SELECT outpass_no FROM outpasses ORDER BY id DESC LIMIT 1`);
+    let lastNum = 0;
+    if (opCountRes.rows && opCountRes.rows.length > 0) {
+      const match = String(opCountRes.rows[0].outpass_no || '').match(/\d+/);
+      if (match) lastNum = parseInt(match[0], 10);
+    }
+    const outpassNo = `OP-${String(lastNum + 1).padStart(5, '0')}`;
+
+    const totalQty = activeItems.reduce((s, it) => s + (parseFloat(it.qty) || 0), 0);
+    const totalWt = activeItems.reduce((s, it) => s + (parseFloat(it.total_wt) || ((parseFloat(it.qty) || 0) * (parseFloat(it.weight) || 50))), 0);
+    const processingRate = parseFloat(grain.processing_charge_per_kg) || 0;
+    const estCharges = Number((totalWt * processingRate).toFixed(2));
+
+    const insOp = await db.run(`
+      INSERT INTO outpasses (
+        outpass_no, date, purpose, item_type, reference_type, reference_id, reference_no,
+        party_type, party_name, destination, vehicle_no, driver_name, transporter,
+        total_qty, total_weight, processing_rate_kg, estimated_charges, status, remarks, created_by
+      ) VALUES (?, ?, 'Outside Processing', 'RM', 'Grind', ?, ?, 'Flour Mill', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OUTPASSED', ?, 'Admin')
+    `, [
+      outpassNo,
+      grain.date || new Date().toISOString().slice(0, 10),
+      id,
+      `GRIND-${grain.s_no || id}`,
+      grain.external_mill_name || grain.flour_mill || 'External Flour Mill',
+      destination || grain.external_mill_name || 'Outside Mill',
+      vehicle_no || '',
+      driver_name || '',
+      transporter || '',
+      totalQty,
+      totalWt,
+      processingRate,
+      estCharges,
+      remarks || grain.remarks || ''
+    ]);
+    const outpassId = insOp.lastID || insOp.lastInsertRowid;
+
+    for (const it of activeItems) {
+      const itQty = parseFloat(it.qty) || 0;
+      const itUnitWt = parseFloat(it.weight) || (itQty > 0 ? (parseFloat(it.total_wt) || 0) / itQty : 50);
+      const itTotWt = parseFloat(it.total_wt) || (itQty * itUnitWt);
+      const itRate = parseFloat(it.rate) || 0;
+      const itAmt = itQty * itRate;
+
+      await db.run(`
+        INSERT INTO outpass_items (
+          outpass_id, outpass_no, item_name, lot_no, qty, weight, total_weight,
+          rate, amount, status, reason, remarks
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'OUTSIDE_PROCESSING', 'Outside Mill Grinding', ?)
+      `, [outpassId, outpassNo, it.item_name, it.lot_no, itQty, itUnitWt, itTotWt, itRate, itAmt, it.supplier_name || '']);
+
+      await db.run(`
+        INSERT INTO stock (item_name, lot_no, qty, weight, rate, amount, date, type, reference_id, remarks)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'Outpass Issue', ?, ?)
+      `, [
+        it.item_name, it.lot_no, -itQty, -itTotWt, itRate, -itAmt,
+        grain.date || new Date().toISOString().slice(0, 10), outpassId, `Outpass #${outpassNo} to ${grain.external_mill_name || 'Outside Mill'}`
+      ]);
+
+      if (it.lot_no) {
+        await db.run(`
+          UPDATE stock_lots
+          SET remaining_quantity = MAX(0, remaining_quantity - ?),
+              outside_processing_qty = COALESCE(outside_processing_qty, 0) + ?,
+              custody_status = 'OUTSIDE_PROCESSING'
+          WHERE UPPER(TRIM(lot_no)) = UPPER(TRIM(?))
+        `, [itQty, itQty, it.lot_no]);
+      }
+    }
+
+    await db.run(`
+      UPDATE grains SET
+        outpass_id = ?,
+        outpass_no = ?,
+        status = 'Outpassed',
+        total_processing_charges = ?,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `, [outpassId, outpassNo, estCharges, id]);
+
+    try { await rebuildStockLedger(); } catch (e) {}
+
+    res.json({
+      success: true,
+      message: `Outpass ${outpassNo} generated successfully for Grind #${grain.s_no || id}!`,
+      data: { outpass_id: outpassId, outpass_no: outpassNo }
+    });
+  } catch (err) {
+    console.error('Error generating outpass for grind:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 
 // PUT update grains record
 router.put('/:id', async (req, res) => {

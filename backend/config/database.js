@@ -147,7 +147,8 @@ const TENANT_BUSINESS_TABLES = new Set([
   'deduction_purchase', 'deduction_sales', 'sender_group_master', 'consignee_group_master',
   'person_master', 'ptrans_master', 'cheque_printing', 'grind_ccp_monitoring',
   'grind_operator_log', 'grind_oprp_monitoring', 'grind_production_verification',
-  'work_order_items', 'work_order_outputs', 'work_order_wastages', 'weightmaster', 'lot_sequence'
+  'work_order_items', 'work_order_outputs', 'work_order_wastages', 'weightmaster', 'lot_sequence',
+  'outpasses', 'outpass_items', 'inpasses', 'inpass_items'
 ]);
 
 // Master tables MUST NEVER be included in TENANT_BUSINESS_TABLES
@@ -911,7 +912,22 @@ function getCompanyDatabaseInstance(companyId = 1) {
       'ALTER TABLE purchase_items ADD COLUMN per_unit_weight REAL DEFAULT 0',
       'ALTER TABLE purchase_items ADD COLUMN total_weight REAL DEFAULT 0',
       'ALTER TABLE purchase_items ADD COLUMN disc_amount REAL DEFAULT 0',
-      'ALTER TABLE purchase_items ADD COLUMN tax_amount REAL DEFAULT 0'
+      'ALTER TABLE purchase_items ADD COLUMN tax_amount REAL DEFAULT 0',
+      'ALTER TABLE grains ADD COLUMN process_mode TEXT DEFAULT "INSIDE_MILL"',
+      'ALTER TABLE grains ADD COLUMN mill_type TEXT DEFAULT "Inside Mill"',
+      'ALTER TABLE grains ADD COLUMN external_mill_id INTEGER',
+      'ALTER TABLE grains ADD COLUMN external_mill_name TEXT',
+      'ALTER TABLE grains ADD COLUMN outpass_id INTEGER',
+      'ALTER TABLE grains ADD COLUMN outpass_no TEXT',
+      'ALTER TABLE grains ADD COLUMN inpass_id INTEGER',
+      'ALTER TABLE grains ADD COLUMN inpass_no TEXT',
+      'ALTER TABLE grains ADD COLUMN status TEXT DEFAULT "Completed"',
+      'ALTER TABLE grains ADD COLUMN processing_charge_per_kg REAL DEFAULT 0',
+      'ALTER TABLE grains ADD COLUMN total_processing_charges REAL DEFAULT 0',
+      'ALTER TABLE grains ADD COLUMN discrepancy_kg REAL DEFAULT 0',
+      'ALTER TABLE grains ADD COLUMN discrepancy_reason TEXT',
+      'ALTER TABLE stock_lots ADD COLUMN outside_processing_qty REAL DEFAULT 0',
+      'ALTER TABLE stock_lots ADD COLUMN custody_status TEXT DEFAULT "AVAILABLE"'
     ];
     for (const sql of extraCols) {
       instance.run(sql, () => {});

@@ -148,6 +148,12 @@ app.use('/api/auth', authRouter)
 app.use('/api/features', require('./routes/features'))
 app.use('/api/financial-years', require('./routes/financialYears'))
 
+// Universal Movement & Material Gate Passes (Outpass / Inpass)
+app.use('/api/outpasses', require('./routes/outpasses'))
+app.use('/api/outpass', require('./routes/outpasses'))
+app.use('/api/inpasses', require('./routes/inpasses'))
+app.use('/api/inpass', require('./routes/inpasses'))
+
 // Database query API (for Tauri-style queries)
 app.use('/api/vouchers', require('./routes/vouchers'))
 app.use('/api/db', dbRouter)

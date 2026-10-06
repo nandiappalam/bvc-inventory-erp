@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import ItemStockDetailsModal from '../common/ItemStockDetailsModal';
 import {
   Box,
   Container,
@@ -1301,6 +1302,10 @@ const CategoryReportPage = () => {
   const [selectedRecord, setSelectedRecord] = useState(null);
   const [selectedRecordType, setSelectedRecordType] = useState(null); // 'iqr' or 'coa'
 
+  // Item Stock Details Modal State
+  const [itemStockModalOpen, setItemStockModalOpen] = useState(false);
+  const [selectedItemName, setSelectedItemName] = useState('');
+
   useEffect(() => {
     fetchFilterMasters();
 
@@ -2019,6 +2024,29 @@ const CategoryReportPage = () => {
                             );
                           }
 
+                          if (col.id === 'item_name' || col.id === 'item') {
+                            const val = row[col.id];
+                            return (
+                              <TableCell key={col.id} align={col.align || 'left'} sx={{ fontSize: '13px' }}>
+                                {val ? (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSelectedItemName(val);
+                                      setItemStockModalOpen(true);
+                                    }}
+                                    className="text-blue-700 hover:text-blue-900 font-bold underline hover:no-underline cursor-pointer text-left transition-colors flex items-center space-x-1 group"
+                                    title="Click to view live item stock details & godown breakdown"
+                                  >
+                                    <span>{val}</span>
+                                    <span className="text-[10px] text-blue-500 opacity-70 group-hover:opacity-100">ℹ️</span>
+                                  </button>
+                                ) : '—'}
+                              </TableCell>
+                            );
+                          }
+
                           if (col.id === 'godown_name') {
                             const lotNorm = (row.lot_no || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
                             const itemNorm = (row.item_name || '').toUpperCase();
@@ -2352,6 +2380,12 @@ const CategoryReportPage = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <ItemStockDetailsModal
+        isOpen={itemStockModalOpen}
+        onClose={() => setItemStockModalOpen(false)}
+        itemName={selectedItemName}
+      />
     </Container>
   );
 };

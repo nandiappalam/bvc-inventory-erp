@@ -67,6 +67,8 @@ const modulePermissionMap = {
   'Sales Return': 'Sales Return',
   'Stock Adjust': 'Stock Adjust',
   'Weight Conversion': 'Weight Conversion',
+  'Outpass': 'Open',
+  'Inpass': 'Open',
   'Voucher': 'Voucher',
   'Vehicle Movement': 'Vehicle Movement',
   // Master
@@ -385,7 +387,7 @@ const Navigation = () => {
     },
     {
       groupTitle: 'Inventory & Movement',
-      modules: ['Open', 'Stock Adjust', 'Godown Transfer', 'Weight Conversion']
+      modules: ['Open', 'Stock Adjust', 'Godown Transfer', 'Weight Conversion', 'Outpass', 'Inpass']
     },
     {
       groupTitle: 'Finance & Other Entries',
@@ -681,7 +683,8 @@ const Navigation = () => {
     {
       groupTitle: 'Production',
       items: [
-        { name: 'Production Reports', path: '/reports/category/production', permission: 'Daily Production' }
+        { name: 'Production Reports', path: '/reports/category/production', permission: 'Daily Production' },
+        { name: 'Outside Processing & Mill Movement', path: '/reports/outside-processing', permission: 'Daily Production' }
       ]
     },
     {
