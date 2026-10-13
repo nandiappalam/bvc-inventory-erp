@@ -114,7 +114,14 @@ const ColdStorageVouchers = () => {
   };
 
   const handleDeleteVoucher = async (id, voucherNo) => {
-    if (!window.confirm(`Are you sure you want to delete Cold Storage Voucher ${voucherNo}?`)) {
+    const confirmed = window.__appConfirm ? await window.__appConfirm({
+      title: 'Confirm Cold Storage Voucher Deletion',
+      message: `Are you sure you want to delete Cold Storage Voucher ${voucherNo}?\\n\\nThis will restore stock levels and move the record to the Recycle Bin.`,
+      confirmText: 'Delete Voucher',
+      confirmColor: 'error'
+    }) : window.confirm(`Are you sure you want to delete Cold Storage Voucher ${voucherNo}?`);
+
+    if (!confirmed) {
       return;
     }
     try {

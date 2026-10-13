@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
 const { rebuildStockLedger } = require('../utils/stockRebuilder');
+const recycleBinService = require('../services/RecycleBinService');
 
 // Initialize cold storage tables if not created
 const initTables = async () => {
@@ -875,6 +876,29 @@ router.get('/vouchers/:id', async (req, res) => {
 router.delete('/vouchers/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    const vRes = await db.query('SELECT * FROM cold_storage_vouchers WHERE id = ?', [id]);
+    if (vRes.rows && vRes.rows.length > 0) {
+      const vRow = vRes.rows[0];
+      try {
+        const itemsRes = await db.query('SELECT * FROM cold_storage_items WHERE voucher_id = ?', [id]);
+        await recycleBinService.saveToRecycleBin({
+          moduleName: 'Cold Storage Voucher',
+          recordId: id,
+          title: `Cold Storage Voucher #${vRow.voucher_no || id} (${vRow.voucher_type || 'IN/OUT'})`,
+          recordData: {
+            tableName: 'cold_storage_vouchers',
+            record: vRow,
+            subRecords: [
+              { tableName: 'cold_storage_items', records: itemsRes.rows || [] }
+            ]
+          },
+          deletedBy: req.user?.username || 'admin'
+        });
+      } catch (e) {
+        console.warn('Recycle bin save error in cold storage:', e.message);
+      }
+    }
+
     await db.query(`DELETE FROM stock WHERE reference_id = ? AND (type LIKE 'Cold Storage%' OR type LIKE 'CS %')`, [id]);
     await db.query(`DELETE FROM cold_storage_items WHERE voucher_id = ?`, [id]);
     await db.query(`DELETE FROM cold_storage_vouchers WHERE id = ?`, [id]);

@@ -2,6 +2,16 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
 const { rebuildStockLedger } = require('../utils/stockRebuilder');
+const { ensureMovementPassesSchema } = require('../utils/movementPassesSchema');
+
+// Ensure tables exist on request
+router.use(async (req, res, next) => {
+  try {
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    await ensureMovementPassesSchema(activeCompanyId);
+  } catch (_) {}
+  next();
+});
 
 // Auto-generate sequential outpass number: OP-00001
 async function generateNextOutpassNo(companyId = 1) {
@@ -347,6 +357,68 @@ router.post('/', async (req, res) => {
       await rebuildStockLedger();
     } catch (e) {}
 
+    // Create linked operational charges if provided in request
+    if (Array.isArray(req.body.operational_charges) && req.body.operational_charges.length > 0) {
+      const engine = require('../services/operationalChargeEngine');
+      for (const ch of req.body.operational_charges) {
+        try {
+          await engine.createOperationalCharge(activeCompanyId, {
+            ...ch,
+            source_module: 'OUTPASS',
+            source_transaction_type: 'OUTPASS',
+            source_transaction_id: outpassId,
+            source_transaction_no: outpassNo,
+            charge_date: formData.date || new Date().toISOString().slice(0, 10),
+            item_name: activeItems[0]?.item_name || 'Goods',
+            lot_no: activeItems[0]?.lot_no || '',
+            from_location: formData.from_godown_name || formData.from_location || 'Inside Factory',
+            to_location: formData.destination || formData.party_name || 'External Mill',
+            vehicle_no: ch.vehicle_no || formData.vehicle_no || '',
+            driver_name: ch.driver_name || formData.driver_name || '',
+            quantity: ch.quantity !== undefined ? ch.quantity : totalWeight
+          });
+        } catch (chErr) {
+          console.warn('[Outpass Operational Charge Error]:', chErr.message);
+        }
+      }
+    }
+
+    // Trigger Central Notification & WhatsApp Alert
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const totalBags = items.reduce((s, it) => s + (parseFloat(it.qty) || 0), 0);
+      const firstItem = items[0] || {};
+      const refCode = formData.reference_no || (formData.reference_type === 'Grind' ? `GRIND-${formData.reference_id}` : '-');
+
+      await triggerTransactionNotification({
+        moduleName: 'OUTPASS',
+        referenceNo: outpassNo,
+        title: `🚚 OUTPASS CREATED – ${outpassNo}`,
+        message: `Outpass: ${outpassNo} | Purpose: ${formData.purpose || 'Outside Processing'} | Item: ${firstItem.item_name || 'Goods'} | Lot: ${firstItem.lot_no || '-'} | Qty: ${totalWeight.toLocaleString()} KG (${totalBags} Bags) | Destination: ${formData.party_name || 'External Mill'} | Vehicle: ${formData.vehicle_no || 'N/A'} | Status: OUTPASSED`,
+        severity: 'INFO',
+        referenceId: outpassId,
+        companyId: activeCompanyId,
+        details: {
+          outpass_no: outpassNo,
+          date: formData.date,
+          purpose: formData.purpose || 'Outside Grind',
+          reference: refCode,
+          item_name: firstItem.item_name || 'Material Item',
+          lot_no: firstItem.lot_no || '-',
+          quantity: `${totalWeight.toLocaleString()} KG`,
+          bags: totalBags,
+          external_mill: formData.party_name || 'External Mill',
+          area: formData.destination || formData.party_name || '-',
+          vehicle: formData.vehicle_no || 'N/A',
+          expected_return: formData.expected_return_date || '-',
+          status: 'OUTPASSED',
+          created_by: req.user?.username || 'Factory Operator'
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Error triggering outpass notification:', notifErr.message);
+    }
+
     res.status(201).json({
       success: true,
       message: `Outpass ${outpassNo} created successfully! Material dispatched for outside processing.`,
@@ -451,6 +523,21 @@ router.delete('/:id', async (req, res) => {
     res.json({ success: true, message: 'Outpass deleted and stock restored successfully' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// GET operational charges for an outpass
+router.get('/:id/charges', async (req, res) => {
+  try {
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    const engine = require('../services/operationalChargeEngine');
+    const result = await engine.getOperationalTraceability(activeCompanyId, {
+      sourceModule: 'OUTPASS',
+      sourceTransactionId: req.params.id
+    });
+    res.json({ success: true, charges: result.charges || [], traceability: result });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 

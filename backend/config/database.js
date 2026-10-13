@@ -148,7 +148,9 @@ const TENANT_BUSINESS_TABLES = new Set([
   'person_master', 'ptrans_master', 'cheque_printing', 'grind_ccp_monitoring',
   'grind_operator_log', 'grind_oprp_monitoring', 'grind_production_verification',
   'work_order_items', 'work_order_outputs', 'work_order_wastages', 'weightmaster', 'lot_sequence',
-  'outpasses', 'outpass_items', 'inpasses', 'inpass_items'
+  'outpasses', 'outpass_items', 'inpasses', 'inpass_items',
+  'operational_parties', 'operational_rates', 'operational_rate_masters', 'operational_charges',
+  'operational_charge_lines', 'operational_payments', 'operational_payment_allocations', 'operational_audit_logs', 'operational_settings'
 ]);
 
 // Master tables MUST NEVER be included in TENANT_BUSINESS_TABLES
@@ -2580,6 +2582,38 @@ module.exports = {
     }
   },
 
+  // Primary All function (returns array of rows)
+  all: async (text, params = [], explicitCompanyId = null) => {
+    const store = asyncLocalStorage.getStore();
+    const activeCompanyId = explicitCompanyId || (store ? store.companyId : 1);
+    const isMaster = isMasterTableQuery(text);
+
+    if (isPostgres) {
+      const res = await executePgQuery(text, params, activeCompanyId, isMaster);
+      return res.rows || [];
+    } else {
+      const targetDb = resolveTargetDatabase(text, explicitCompanyId);
+      const res = await queryOnSqlite(targetDb, text, params);
+      return res.rows || [];
+    }
+  },
+
+  // Primary Get function (returns single row or null)
+  get: async (text, params = [], explicitCompanyId = null) => {
+    const store = asyncLocalStorage.getStore();
+    const activeCompanyId = explicitCompanyId || (store ? store.companyId : 1);
+    const isMaster = isMasterTableQuery(text);
+
+    if (isPostgres) {
+      const res = await executePgQuery(text, params, activeCompanyId, isMaster);
+      return (res.rows && res.rows.length > 0) ? res.rows[0] : null;
+    } else {
+      const targetDb = resolveTargetDatabase(text, explicitCompanyId);
+      const res = await queryOnSqlite(targetDb, text, params);
+      return (res.rows && res.rows.length > 0) ? res.rows[0] : null;
+    }
+  },
+
   // Explicit Company DB accessor
   forCompany: (companyId) => {
     const cId = parseInt(companyId, 10) || 1;
@@ -2591,6 +2625,22 @@ module.exports = {
       run: (text, params = []) => {
         if (isPostgres) return executePgQuery(text, params, cId, false);
         return runOnSqlite(getCompanyDatabaseInstance(cId), text, params);
+      },
+      all: async (text, params = []) => {
+        if (isPostgres) {
+          const res = await executePgQuery(text, params, cId, false);
+          return res.rows || [];
+        }
+        const res = await queryOnSqlite(getCompanyDatabaseInstance(cId), text, params);
+        return res.rows || [];
+      },
+      get: async (text, params = []) => {
+        if (isPostgres) {
+          const res = await executePgQuery(text, params, cId, false);
+          return (res.rows && res.rows.length > 0) ? res.rows[0] : null;
+        }
+        const res = await queryOnSqlite(getCompanyDatabaseInstance(cId), text, params);
+        return (res.rows && res.rows.length > 0) ? res.rows[0] : null;
       },
       getConnection: async () => {
         if (isPostgres) {

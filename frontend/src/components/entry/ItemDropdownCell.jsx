@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { api, getMasters } from '../../services/api.js';
 import { safeArray } from './safeArray.js';
 import ItemStockDetailsModal from '../common/ItemStockDetailsModal.jsx';
+import InlineMasterModal from '../common/InlineMasterModal.jsx';
 
 /**
  * Returns distinctive color schemes for different stock types
@@ -138,6 +139,7 @@ const ItemDropdownCell = ({
   const [loading, setLoading] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [stockModalOpen, setStockModalOpen] = useState(false);
+  const [inlineModalOpen, setInlineModalOpen] = useState(false);
 
   const containerRef = useRef(null);
   const inputRef = useRef(null);
@@ -1004,6 +1006,29 @@ const ItemDropdownCell = ({
               })}
           </div>
 
+          {/* Create New Item Inline Action */}
+          <div
+            onClick={() => {
+              setIsOpen(false);
+              setInlineModalOpen(true);
+            }}
+            style={{
+              padding: '8px 12px',
+              backgroundColor: '#f0fdf4',
+              borderTop: '2px dashed #cbd5e1',
+              color: '#1e3a8a',
+              fontWeight: '800',
+              fontSize: '12px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px'
+            }}
+          >
+            ➕ + Create New Item {searchTerm ? `"${searchTerm}"` : ''}
+          </div>
+
           {/* Dropdown Footer Status */}
           <div
             style={{
@@ -1032,6 +1057,26 @@ const ItemDropdownCell = ({
         onClose={() => setStockModalOpen(false)}
         itemName={selectedName}
         itemId={selectedItem?.id}
+      />
+      {/* Inline Item Master Creation Modal */}
+      <InlineMasterModal
+        open={inlineModalOpen}
+        onClose={() => setInlineModalOpen(false)}
+        masterType="items"
+        initialName={searchTerm}
+        onSuccess={async (newId, newRecord) => {
+          const res = await getMasters('items', { forceRefresh: true });
+          const list = safeArray(res?.data || res);
+          setItems(list);
+          const createdItem = list.find(i => String(i.id) === String(newId) || i.item_name === newRecord?.item_name || i.item_name === newRecord?.name) || {
+            id: newId,
+            item_name: newRecord?.item_name || newRecord?.name || searchTerm,
+            type: newRecord?.type || 'RM',
+            item_group: newRecord?.item_group || 'General',
+            weight: newRecord?.weight || 50
+          };
+          handleSelectItem(createdItem);
+        }}
       />
     </div>
   );

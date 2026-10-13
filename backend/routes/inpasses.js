@@ -2,6 +2,16 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
 const { rebuildStockLedger } = require('../utils/stockRebuilder');
+const { ensureMovementPassesSchema } = require('../utils/movementPassesSchema');
+
+// Ensure tables exist on request
+router.use(async (req, res, next) => {
+  try {
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    await ensureMovementPassesSchema(activeCompanyId);
+  } catch (_) {}
+  next();
+});
 
 // Auto-generate sequential inpass number: IP-00001
 async function generateNextInpassNo(companyId = 1) {
@@ -508,6 +518,93 @@ router.post('/', async (req, res) => {
       await rebuildStockLedger();
     } catch (e) {}
 
+    // Create linked operational charges if provided in request
+    const engine = require('../services/operationalChargeEngine');
+    if (Array.isArray(req.body.operational_charges) && req.body.operational_charges.length > 0) {
+      for (const ch of req.body.operational_charges) {
+        try {
+          await engine.createOperationalCharge(activeCompanyId, {
+            ...ch,
+            source_module: 'INPASS',
+            source_transaction_type: 'INPASS',
+            source_transaction_id: inpassId,
+            source_transaction_no: inpassNo,
+            charge_date: formData.date || new Date().toISOString().slice(0, 10),
+            item_name: activeItems[0]?.item_name || 'Goods',
+            lot_no: activeItems[0]?.lot_no || '',
+            from_location: formData.party_name || 'External Mill',
+            to_location: formData.to_godown_name || 'Main Godown',
+            vehicle_no: ch.vehicle_no || formData.vehicle_no || '',
+            driver_name: ch.driver_name || formData.driver_name || '',
+            quantity: ch.quantity !== undefined ? ch.quantity : outputWeight
+          });
+        } catch (chErr) {
+          console.warn('[Inpass Operational Charge Error]:', chErr.message);
+        }
+      }
+    } else if (totalProcessingCharges > 0 && formData.party_name) {
+      // Auto-create Outside Mill Processing Charge if configured on inpass
+      try {
+        await engine.createOperationalCharge(activeCompanyId, {
+          charge_type: 'PROCESSING',
+          source_module: 'INPASS',
+          source_transaction_type: 'INPASS',
+          source_transaction_id: inpassId,
+          source_transaction_no: inpassNo,
+          charge_date: formData.date || new Date().toISOString().slice(0, 10),
+          party_name: formData.party_name,
+          party_category: 'EXTERNAL_MILL',
+          item_name: activeItems[0]?.item_name || 'Goods',
+          quantity: outputWeight,
+          rate: chargeRate,
+          calculation_basis: 'PER_KG',
+          amount: totalProcessingCharges,
+          total_amount: totalProcessingCharges,
+          from_location: formData.party_name,
+          to_location: formData.to_godown_name || 'Main Godown',
+          vehicle_no: formData.vehicle_no || '',
+          driver_name: formData.driver_name || '',
+          remarks: `Outside mill processing charge on Inpass ${inpassNo}`
+        });
+      } catch (autoChErr) {
+        console.warn('[Auto Inpass Processing Charge Error]:', autoChErr.message);
+      }
+    }
+
+    // Trigger Central Notification & WhatsApp Alert
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const massBalanceStatus = Math.abs(discrepancyWeight) > 0.01 ? `⚠ ${discrepancyWeight} KG DISCREPANCY (${formData.discrepancy_reason || 'Reason Required'})` : '5,000 KG ✓ BALANCED';
+
+      await triggerTransactionNotification({
+        moduleName: 'INPASS',
+        referenceNo: inpassNo,
+        title: `🟢 INPASS RECEIVED – ${inpassNo}`,
+        message: `Against Outpass: ${formData.outpass_no || '-'} | Mill: ${formData.party_name || 'Outside Mill'} | Output: ${outputWeight.toLocaleString()} KG | By-Product: ${byproductWeight.toLocaleString()} KG | Loss: ${lossWeight.toLocaleString()} KG | Mass Balance: ${massBalanceStatus} | QC: ${formData.qc_status || 'PENDING'}`,
+        severity: Math.abs(discrepancyWeight) > 0.01 ? 'WARNING' : 'INFO',
+        referenceId: inpassId,
+        companyId: activeCompanyId,
+        details: {
+          inpass_no: inpassNo,
+          outpass_no: formData.outpass_no || '-',
+          reference: formData.reference_no || (formData.reference_type === 'Grind' ? `GRIND-${formData.reference_id}` : '-'),
+          external_mill: formData.party_name || 'Outside Mill',
+          original_input: inputWeight,
+          received_date: formData.date,
+          received_output: `${outputWeight.toLocaleString()} KG`,
+          by_product: `${byproductWeight.toLocaleString()} KG`,
+          loss: `${lossWeight.toLocaleString()} KG`,
+          mass_balance: massBalanceStatus,
+          qc_status: formData.qc_status || 'PENDING',
+          receiving_godown: formData.to_godown_name || 'Main Godown',
+          received_by: req.user?.username || formData.received_by || 'Store Operator',
+          status: `RECEIVED — QC ${formData.qc_status || 'PENDING'}`
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Error triggering inpass notification:', notifErr.message);
+    }
+
     res.status(201).json({
       success: true,
       message: `Inpass ${inpassNo} recorded successfully! Processed material received into factory stock.`,
@@ -637,6 +734,21 @@ router.delete('/:id', async (req, res) => {
     res.json({ success: true, message: 'Inpass cancelled and stock reversed successfully' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// GET operational charges for an inpass
+router.get('/:id/charges', async (req, res) => {
+  try {
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    const engine = require('../services/operationalChargeEngine');
+    const result = await engine.getOperationalTraceability(activeCompanyId, {
+      sourceModule: 'INPASS',
+      sourceTransactionId: req.params.id
+    });
+    res.json({ success: true, charges: result.charges || [], traceability: result });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 

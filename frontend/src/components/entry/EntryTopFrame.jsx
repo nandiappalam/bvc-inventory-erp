@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../services/api.js';
 import { getMasters, safeArray, normalizeMasterKey } from '../../services/masterservice.js';
+import { InlineMasterModal, getCreateLabel, normalizeMasterType } from '../common/InlineMasterModal.jsx';
 
 const masterTableMap = {
   suppliers: 'supplier_master',
@@ -548,8 +549,14 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
     }
   };
 
+  const [inlineModalOpen, setInlineModalOpen] = useState(false);
+
   const handleChange = async (e) => {
     const value = e.target.value;
+    if (value === '__CREATE_NEW__') {
+      setInlineModalOpen(true);
+      return;
+    }
     onChange(field.name, value);
     const key = normalizeMasterKey(field.masterType || field.name);
     const isAutofillMaster = 
@@ -559,6 +566,21 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
 
     if (value && isAutofillMaster) {
       await handleMasterSelect(value, field);
+    }
+  };
+
+  const handleInlineCreated = async (newId, newRecord) => {
+    await fetchMasterData(true);
+    const targetVal = newId !== undefined && newId !== null ? String(newId) : (newRecord?.name || '');
+    onChange(field.name, targetVal);
+    const key = normalizeMasterKey(field.masterType || field.name);
+    const isAutofillMaster = 
+      key === 'customers' || field.name === 'customer_id' || field.name === 'customer' || field.name === 'customerId' || field.name === 'customerName' ||
+      key === 'suppliers' || field.name === 'supplier_id' || field.name === 'supplier' || field.name === 'supplierId' || field.name === 'supplierName' ||
+      key === 'papad_companies' || field.name === 'papad_company' || field.name === 'papadCompany' || field.name === 'papadComp';
+
+    if (targetVal && isAutofillMaster) {
+      await handleMasterSelect(targetVal, field);
     }
   };
 
@@ -634,7 +656,20 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
               </option>
             );
           })}
+          {(isMasterField || field.masterType || MASTER_FIELD_TYPES[field.name]) && (
+            <option value="__CREATE_NEW__" style={{ fontWeight: 'bold', color: '#1e3a8a' }}>
+              {getCreateLabel(normKey || field.masterType || field.name)}
+            </option>
+          )}
         </select>
+        {(isMasterField || field.masterType || MASTER_FIELD_TYPES[field.name]) && (
+          <InlineMasterModal
+            open={inlineModalOpen}
+            onClose={() => setInlineModalOpen(false)}
+            masterType={normKey || field.masterType || field.name}
+            onSuccess={handleInlineCreated}
+          />
+        )}
       </div>
     );
   }

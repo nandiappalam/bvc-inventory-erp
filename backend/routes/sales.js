@@ -336,6 +336,68 @@ router.post('/', async (req, res) => {
       console.error('Error rebuilding stock after sale:', e);
     }
 
+    // Create linked operational charges if provided in request
+    if (Array.isArray(req.body.operational_charges) && req.body.operational_charges.length > 0) {
+      const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+      const engine = require('../services/operationalChargeEngine');
+      for (const ch of req.body.operational_charges) {
+        try {
+          await engine.createOperationalCharge(activeCompanyId, {
+            ...ch,
+            source_module: 'SALES',
+            source_transaction_type: 'SALES',
+            source_transaction_id: salesId,
+            source_transaction_no: formData.sNo || formData.s_no || formData.bill_no || `SI-${salesId}`,
+            charge_date: formData.date || new Date().toISOString().slice(0, 10),
+            item_name: items[0]?.item_name || 'Goods',
+            lot_no: items[0]?.lot_no || '',
+            from_location: 'Main Factory Godown',
+            to_location: formData.customer || 'Customer Destination',
+            vehicle_no: ch.vehicle_no || formData.lorry_no || formData.vehicle_no || '',
+            driver_name: ch.driver_name || formData.driver || '',
+            quantity: ch.quantity !== undefined ? ch.quantity : (parseFloat(totals?.totalWeight) || 0)
+          });
+        } catch (chErr) {
+          console.warn('[Sales Operational Charge Error]:', chErr.message);
+        }
+      }
+    }
+
+    // Trigger Central Notification & WhatsApp Alert
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const billNum = formData.sNo || formData.s_no || formData.bill_no || `SI-${String(salesId).padStart(5, '0')}`;
+      const totWt = (parseFloat(totals?.totalWeight) || parseFloat(formData.total_wt) || 0).toLocaleString();
+      const totalBags = items && items.length > 0 ? items.reduce((sum, it) => sum + (parseFloat(it.qty) || 0), 0) : (parseFloat(totals?.totalQty) || 0);
+      const itemsSummary = items && items.length > 0 ? `${items.length} items (${items[0].item_name || 'Goods'}${items.length > 1 ? '...' : ''})` : 'Sales Goods';
+
+      await triggerTransactionNotification({
+        moduleName: 'SALES',
+        referenceNo: billNum,
+        title: `🔵 BVC ERP – Sales Created (${billNum})`,
+        message: `Customer: ${formData.customer || 'N/A'} | Items: ${itemsSummary} | Qty: ${totalBags} Bags (${totWt} KG) | Vehicle: ${formData.lorry_no || formData.vehicle_no || 'N/A'} | Loading: PENDING | Dispatch: PENDING`,
+        severity: 'INFO',
+        referenceId: salesId,
+        companyId: req.companyId || 1,
+        details: {
+          sales_no: billNum,
+          date: formData.date,
+          customer: formData.customer || 'Customer',
+          item_summary: itemsSummary,
+          quantity: `${totalBags} Bags`,
+          bags: totalBags,
+          total_weight: `${totWt} KG`,
+          vehicle: formData.lorry_no || formData.vehicle_no || 'N/A',
+          loading_status: 'PENDING',
+          dispatch_status: 'PENDING',
+          created_by: req.user?.username || 'Sales Operator',
+          status: 'SALES CREATED'
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Error triggering sales notification:', notifErr.message);
+    }
+
     res.status(201).json({
       message: 'Sales record saved successfully!',
       id: salesId
@@ -638,5 +700,20 @@ router.delete('/:id', async (req, res) => {
     res.status(500).json({ message: 'Error deleting sales' })
   }
 })
+
+// GET operational charges for a sale
+router.get('/:id/charges', async (req, res) => {
+  try {
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    const engine = require('../services/operationalChargeEngine');
+    const result = await engine.getOperationalTraceability(activeCompanyId, {
+      sourceModule: 'SALES',
+      sourceTransactionId: req.params.id
+    });
+    res.json({ success: true, charges: result.charges || [], traceability: result });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 module.exports = router

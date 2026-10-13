@@ -2,10 +2,11 @@ import React, { useState, useEffect } from 'react';
 import {
   Container, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Typography, Button, Box, TextField, Select, MenuItem, IconButton, Chip, Dialog,
-  DialogContent, DialogActions, CircularProgress, Tooltip
+  DialogContent, DialogActions, CircularProgress, Tooltip, Snackbar, Alert
 } from '@mui/material';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import voucherAPI from './voucherService.js';
+import { useConfirm } from '../../context/ConfirmContext.jsx';
 import { safeArray } from '../../utils/safeArray.js';
 import { printElement } from '../../utils/printHelper.js';
 
@@ -25,9 +26,15 @@ const STATUSES = ['Draft', 'Submitted', 'Approved', 'Locked', 'Cancelled'];
 
 const VoucherList = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const confirm = useConfirm();
   const [vouchers, setVouchers] = useState([]);
   const [ledgers, setLedgers] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // In-app Snackbar notifications
+  const [toast, setToast] = useState({ open: false, message: '', severity: 'success' });
+  const notify = (message, severity = 'success') => setToast({ open: true, message, severity });
   const [filters, setFilters] = useState({
     from_date: '',
     to_date: '',
@@ -36,6 +43,29 @@ const VoucherList = () => {
     status: '',
     search: ''
   });
+
+  // Sync URL search params
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const searchVal = params.get('search');
+    const typeVal = params.get('type') || params.get('voucher_type');
+    const statusVal = params.get('status');
+    const ledgerVal = params.get('ledger_id');
+    const fromVal = params.get('from_date');
+    const toVal = params.get('to_date');
+
+    if (searchVal || typeVal || statusVal || ledgerVal || fromVal || toVal) {
+      setFilters(prev => ({
+        ...prev,
+        search: searchVal !== null ? searchVal : prev.search,
+        voucher_type: typeVal !== null ? typeVal : prev.voucher_type,
+        status: statusVal !== null ? statusVal : prev.status,
+        ledger_id: ledgerVal !== null ? ledgerVal : prev.ledger_id,
+        from_date: fromVal !== null ? fromVal : prev.from_date,
+        to_date: toVal !== null ? toVal : prev.to_date
+      }));
+    }
+  }, [location.search]);
 
   // Display modal states
   const [displayOpen, setDisplayOpen] = useState(false);
@@ -88,32 +118,40 @@ const VoucherList = () => {
       setDisplayVoucher(fullData);
     } catch (err) {
       console.error('Failed to load voucher details:', err);
-      alert('Could not fetch voucher details.');
+      notify('Could not fetch voucher details.', 'error');
       setDisplayOpen(false);
     } finally {
       setDisplayLoading(false);
     }
   };
 
-  const handleCancelVoucher = async (voucher) => {
-    if (window.confirm(`Are you sure you want to Cancel voucher ${voucher.voucher_no}?`)) {
-      try {
-        const fullData = await voucherAPI.get(voucher.id);
-        const updated = {
-          ...fullData,
-          status: 'Cancelled',
-          posted: 0 // Do not post cancelled voucher
-        };
-        await voucherAPI.update(voucher.id, updated);
-        alert('Voucher cancelled successfully!');
-        loadVouchers();
-        if (displayOpen && displayVoucher?.id === voucher.id) {
-          openDisplay(voucher.id);
+  const handleCancelVoucher = (voucher) => {
+    if (!voucher) return;
+    const vNo = voucher.voucher_no || `#${voucher.id}`;
+    confirm({
+      title: 'Confirm Cancel Voucher',
+      message: `Are you sure you want to cancel Voucher ${vNo}?\n\nThis will mark the voucher status as Cancelled and remove its entries from financial ledger balances.`,
+      confirmText: 'Cancel Voucher',
+      confirmColor: 'warning',
+      onConfirm: async () => {
+        try {
+          const fullData = await voucherAPI.get(voucher.id);
+          const updated = {
+            ...fullData,
+            status: 'Cancelled',
+            posted: 0 // Do not post cancelled voucher
+          };
+          await voucherAPI.update(voucher.id, updated);
+          notify(`Voucher ${voucher.voucher_no} cancelled successfully!`, 'info');
+          loadVouchers();
+          if (displayOpen && displayVoucher?.id === voucher.id) {
+            openDisplay(voucher.id);
+          }
+        } catch (err) {
+          notify('Failed to cancel voucher: ' + err.message, 'error');
         }
-      } catch (err) {
-        alert('Failed to cancel voucher: ' + err.message);
       }
-    }
+    });
   };
 
   const handleDuplicateVoucher = async (id) => {
@@ -137,21 +175,33 @@ const VoucherList = () => {
       };
       navigate('/entry/voucher-create', { state: { prefill: duplicatedData } });
     } catch (err) {
-      alert('Failed to duplicate: ' + err.message);
+      notify('Failed to duplicate: ' + err.message, 'error');
     }
   };
 
-  const deleteVoucher = async (id) => {
-    if (window.confirm('Are you absolutely sure you want to delete this voucher from the ledger? This is an irreversible action.')) {
-      try {
-        await voucherAPI.delete(id);
-        alert('Voucher deleted successfully');
-        loadVouchers();
-        setDisplayOpen(false);
-      } catch (err) {
-        alert('Delete failed: ' + err.message);
+  const deleteVoucher = (voucherOrId) => {
+    const voucher = typeof voucherOrId === 'object' ? voucherOrId : vouchers.find(v => v.id === voucherOrId);
+    const targetId = voucher ? voucher.id : voucherOrId;
+    const vNo = voucher?.voucher_no || `#${targetId}`;
+    const vType = voucher?.voucher_type || 'Voucher';
+    const vAmt = voucher?.total_amount ? ` for ₹${Number(voucher.total_amount).toLocaleString('en-IN')}` : '';
+
+    confirm({
+      title: 'Confirm Voucher Deletion',
+      message: `Are you sure you want to delete ${vType} ${vNo}${vAmt}?\n\nThis will permanently delete the voucher record and revert all associated ledger postings. This action cannot be undone.`,
+      confirmText: 'Delete Voucher',
+      confirmColor: 'error',
+      onConfirm: async () => {
+        try {
+          await voucherAPI.delete(targetId);
+          notify(`Voucher ${vNo} deleted successfully from register`, 'success');
+          loadVouchers();
+          setDisplayOpen(false);
+        } catch (err) {
+          notify('Delete failed: ' + err.message, 'error');
+        }
       }
-    }
+    });
   };
 
   const handlePrint = async (voucherOrNo) => {
@@ -195,8 +245,7 @@ const VoucherList = () => {
         const fullData = await voucherAPI.get(voucher.id);
         setDisplayVoucher(fullData);
         setTimeout(() => {
-          alert(`To download this voucher as a PDF, click OK, then select 'Save as PDF' or 'Print to PDF' as the Destination in the browser print dialog.`);
-          window.print();
+          printElement('display-modal-printable');
         }, 500);
       } catch (err) {
         console.error(err);
@@ -205,8 +254,7 @@ const VoucherList = () => {
       }
       return;
     }
-    alert(`To download this voucher as a PDF, click OK, then select 'Save as PDF' or 'Print to PDF' as the Destination in the browser print dialog.`);
-    window.print();
+    printElement('display-modal-printable');
   };
 
   // Compute bottom summaries
@@ -560,7 +608,7 @@ const VoucherList = () => {
         )}
       </Paper>
 
-      {/* Classic Tally Green Terminal-Style Voucher Display Dialog */}
+      {/* Professional Blue & White Voucher Display Dialog */}
       <Dialog
         open={displayOpen}
         onClose={() => setDisplayOpen(false)}
@@ -569,113 +617,152 @@ const VoucherList = () => {
         id="voucher-print-area"
         PaperProps={{
           sx: {
-            bgcolor: '#e8ebe6',
-            color: '#1b3a1e',
-            fontFamily: '"JetBrains Mono", Courier, monospace',
-            border: '8px solid #4a5c4e',
-            boxShadow: 24,
-            borderRadius: 0
+            bgcolor: '#ffffff',
+            color: '#1e293b',
+            fontFamily: "'Segoe UI', 'Tahoma', Arial, sans-serif",
+            border: '1px solid #cbd5e1',
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+            borderRadius: '8px',
+            overflow: 'hidden'
           }
         }}
       >
         {displayLoading ? (
-          <DialogContent sx={{ p: 6, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, bgcolor: '#e8ebe6' }}>
-            <CircularProgress color="success" />
-            <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>Fetching Ledger Journal Entries...</Typography>
+          <DialogContent sx={{ p: 6, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, bgcolor: '#ffffff' }}>
+            <CircularProgress sx={{ color: '#1f4fb2' }} />
+            <Typography variant="body2" sx={{ color: '#64748b', fontWeight: 600 }}>Loading Voucher Details...</Typography>
           </DialogContent>
         ) : displayVoucher ? (
           <>
-            {/* Tally Terminal Banner */}
-            <Box sx={{ bgcolor: '#2e4a36', color: '#fff', p: 1.5, textAlign: 'center', borderBottom: '2px solid #1b3a1e' }}>
-              <Typography variant="caption" sx={{ display: 'block', color: '#a5d6a7', letterSpacing: 1, fontFamily: 'monospace' }}>
-                Inventory Management System & Double Entry Financial Accounting Core
-              </Typography>
-              <Typography variant="caption" sx={{ display: 'block', color: '#cfd8dc', fontSize: '0.75rem', fontFamily: 'monospace' }}>
-                FINANCIAL YEAR: 2026-2027
-              </Typography>
-            </Box>
-
-            {/* Title Block */}
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', px: 3, py: 1.5, bgcolor: '#3e6147', color: '#fff' }}>
-              <Typography sx={{ fontWeight: 'bold', fontSize: '1.1rem', letterSpacing: 1, fontFamily: 'monospace' }}>
-                VOUCHER DISPLAY
-              </Typography>
-              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                <Chip label={`Status: ${displayVoucher.status || 'Approved'}`} size="small" color="success" sx={{ color: '#fff', fontFamily: 'monospace', fontWeight: 'bold' }} />
-                {displayVoucher.posted !== 0 && <Chip label="POSTED IN GENERAL LEDGER" size="small" color="primary" sx={{ color: '#fff', fontFamily: 'monospace', fontSize: '0.65rem' }} />}
+            {/* Enterprise Blue Header Banner */}
+            <Box sx={{
+              background: 'linear-gradient(135deg, #1f4fb2 0%, #2a5ea0 100%)',
+              color: '#ffffff',
+              p: '16px 24px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              boxShadow: '0 2px 4px rgba(0,0,0,0.05)'
+            }}>
+              <Box>
+                <Typography variant="caption" sx={{ display: 'block', color: '#93c5fd', letterSpacing: 1.2, fontWeight: 700, textTransform: 'uppercase', fontSize: '0.7rem' }}>
+                  Enterprise Accounting & Ledger System
+                </Typography>
+                <Typography sx={{ fontWeight: 800, fontSize: '1.25rem', letterSpacing: 0.5 }}>
+                  Voucher Details — {displayVoucher.voucher_no}
+                </Typography>
+              </Box>
+              <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center' }}>
+                <Chip
+                  label={`Status: ${displayVoucher.status || 'Approved'}`}
+                  size="small"
+                  sx={{
+                    bgcolor: displayVoucher.status === 'Cancelled' ? '#fee2e2' : '#dcfce7',
+                    color: displayVoucher.status === 'Cancelled' ? '#991b1b' : '#166534',
+                    fontWeight: 700,
+                    border: '1px solid currentColor'
+                  }}
+                />
+                {displayVoucher.posted !== 0 && (
+                  <Chip
+                    label="Posted in Ledger"
+                    size="small"
+                    sx={{ bgcolor: '#eff6ff', color: '#1d4ed8', fontWeight: 700, border: '1px solid #bfdbfe' }}
+                  />
+                )}
               </Box>
             </Box>
 
-            <DialogContent sx={{ p: 3, color: '#1b3a1e' }}>
-              {/* Voucher Meta details */}
-              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 2, mb: 3, borderBottom: '2px solid #1b3a1e', pb: 2 }}>
-                <Box>
-                  <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
-                    <strong>Voucher No : </strong> {displayVoucher.voucher_no}
-                  </Typography>
-                  <Typography variant="body2" sx={{ fontFamily: 'monospace', mt: 0.5 }}>
-                    <strong>Vch. Type  : </strong> {displayVoucher.voucher_type}
-                  </Typography>
+            <DialogContent sx={{ p: 3, bgcolor: '#f8fafc' }}>
+              {/* Voucher Meta details Card */}
+              <Paper elevation={0} sx={{ p: 2.5, mb: 3, bgcolor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '6px', display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 2 }}>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Typography variant="body2" sx={{ color: '#64748b', fontWeight: 600 }}>Voucher Number:</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 800, color: '#1f4fb2' }}>{displayVoucher.voucher_no}</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Typography variant="body2" sx={{ color: '#64748b', fontWeight: 600 }}>Voucher Type:</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a' }}>{displayVoucher.voucher_type}</Typography>
+                  </Box>
                 </Box>
-                <Box sx={{ textAlign: 'right' }}>
-                  <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
-                    <strong>Date       : </strong> {displayVoucher.date}
-                  </Typography>
-                  <Typography variant="body2" sx={{ fontFamily: 'monospace', mt: 0.5 }}>
-                    <strong>Reference  : </strong> {displayVoucher.reference_no || 'N/A'}
-                  </Typography>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Typography variant="body2" sx={{ color: '#64748b', fontWeight: 600 }}>Transaction Date:</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a' }}>{displayVoucher.date}</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Typography variant="body2" sx={{ color: '#64748b', fontWeight: 600 }}>Reference / Bill Ref:</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a' }}>{displayVoucher.reference_no || 'N/A'}</Typography>
+                  </Box>
                 </Box>
-              </Box>
+              </Paper>
 
               {/* Transactions Ledger Entry Table */}
-              <Typography variant="subtitle2" sx={{ fontWeight: 'bold', mb: 1, fontFamily: 'monospace', textDecoration: 'underline' }}>
-                Particulars / Double Entry Ledgers:
+              <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1, color: '#1e293b', textTransform: 'uppercase', fontSize: '0.8rem', letterSpacing: 0.5 }}>
+                Double Entry Account Postings & Particulars:
               </Typography>
-              <TableContainer sx={{ border: '1px solid #1b3a1e', bgcolor: '#f1f3ef' }}>
+              <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e2e8f0', borderRadius: '6px', overflow: 'hidden', bgcolor: '#ffffff' }}>
                 <Table size="small">
                   <TableHead>
-                    <TableRow sx={{ '& th': { bgcolor: '#cbd4c9', color: '#1b3a1e', fontWeight: 'bold', borderBottom: '1px solid #1b3a1e', fontFamily: 'monospace' } }}>
+                    <TableRow sx={{ '& th': { bgcolor: '#1f4fb2', color: '#ffffff', fontWeight: 700, fontSize: '0.8rem', borderBottom: '2px solid #1e40af' } }}>
                       <TableCell style={{ width: 80 }}>Type</TableCell>
-                      <TableCell>Particulars (Ledger Name)</TableCell>
-                      <TableCell align="right" style={{ width: 130 }}>Debit (₹)</TableCell>
-                      <TableCell align="right" style={{ width: 130 }}>Credit (₹)</TableCell>
+                      <TableCell>Particulars (Ledger Account Name)</TableCell>
+                      <TableCell align="right" style={{ width: 140 }}>Debit (₹)</TableCell>
+                      <TableCell align="right" style={{ width: 140 }}>Credit (₹)</TableCell>
                       <TableCell>Remarks</TableCell>
                     </TableRow>
                   </TableHead>
-                  <TableBody sx={{ '& td': { fontFamily: 'monospace', borderBottom: '1px solid #dcdfd9' } }}>
+                  <TableBody sx={{ '& td': { borderColor: '#f1f5f9', py: 1.2 } }}>
                     {safeArray(displayVoucher.entries).map((entry, index) => (
-                      <TableRow key={index} sx={{ '&:last-child td': { borderBottom: 'none' } }}>
+                      <TableRow key={index} hover sx={{ '&:nth-of-type(even)': { bgcolor: '#fcfdfe' } }}>
                         <TableCell>
-                          <strong style={{ color: entry.type === 'Dr' ? '#b71c1c' : '#1b5e20' }}>
-                            {entry.type}
-                          </strong>
+                          <Chip
+                            label={entry.type}
+                            size="small"
+                            sx={{
+                              fontWeight: 800,
+                              height: 22,
+                              fontSize: '0.7rem',
+                              bgcolor: entry.type === 'Dr' ? '#fee2e2' : '#dcfce7',
+                              color: entry.type === 'Dr' ? '#b91c1c' : '#15803d'
+                            }}
+                          />
                         </TableCell>
                         <TableCell>
-                          <strong>{entry.ledger_name}</strong>
+                          <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a' }}>
+                            {entry.ledger_name}
+                          </Typography>
                         </TableCell>
-                        <TableCell align="right">
-                          {entry.debit > 0 ? `₹${parseFloat(entry.debit).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '-'}
+                        <TableCell align="right" sx={{ fontWeight: 700, color: entry.debit > 0 ? '#b91c1c' : '#64748b' }}>
+                          {entry.debit > 0 ? `₹${parseFloat(entry.debit).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}
                         </TableCell>
-                        <TableCell align="right">
-                          {entry.credit > 0 ? `₹${parseFloat(entry.credit).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '-'}
+                        <TableCell align="right" sx={{ fontWeight: 700, color: entry.credit > 0 ? '#15803d' : '#64748b' }}>
+                          {entry.credit > 0 ? `₹${parseFloat(entry.credit).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}
                         </TableCell>
-                        <TableCell>{entry.remarks || '-'}</TableCell>
+                        <TableCell>
+                          <Typography variant="body2" sx={{ color: '#64748b', fontSize: '0.85rem' }}>
+                            {entry.remarks || '—'}
+                          </Typography>
+                        </TableCell>
                       </TableRow>
                     ))}
 
-                    {/* double underline standard totals row */}
-                    <TableRow sx={{ bgcolor: '#cbd4c9', '& td': { fontWeight: 'bold', borderTop: '2px double #1b3a1e', borderBottom: '2px double #1b3a1e' } }}>
+                    {/* Totals Row */}
+                    <TableRow sx={{ bgcolor: '#f1f5f9', '& td': { fontWeight: 800, borderTop: '2px solid #cbd5e1' } }}>
                       <TableCell colSpan={2} align="right">
-                        <strong>TOTAL:</strong>
+                        TOTAL:
                       </TableCell>
-                      <TableCell align="right">
+                      <TableCell align="right" sx={{ color: '#b91c1c' }}>
                         ₹{parseFloat(displayVoucher.total_debit || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                       </TableCell>
-                      <TableCell align="right">
+                      <TableCell align="right" sx={{ color: '#15803d' }}>
                         ₹{parseFloat(displayVoucher.total_credit || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                       </TableCell>
                       <TableCell>
-                        <strong style={{ color: '#1b5e20' }}>Balanced ✔</strong>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: '#166534', fontSize: '0.75rem', fontWeight: 700 }}>
+                          <span>Balanced ✔</span>
+                        </Box>
                       </TableCell>
                     </TableRow>
                   </TableBody>
@@ -683,97 +770,113 @@ const VoucherList = () => {
               </TableContainer>
 
               {/* Narration Box */}
-              <Box sx={{ mt: 3, p: 2, border: '1px solid #1b3a1e', bgcolor: '#f8f9f6', minHeight: 60 }}>
-                <Typography variant="caption" display="block" sx={{ fontWeight: 'bold', color: '#4a5c4e', fontFamily: 'monospace' }}>
-                  NARRATION / REMARKS:
+              <Box sx={{ mt: 3, p: 2, border: '1px solid #e2e8f0', bgcolor: '#ffffff', borderRadius: '6px' }}>
+                <Typography variant="caption" display="block" sx={{ fontWeight: 700, color: '#64748b', textTransform: 'uppercase', mb: 0.5 }}>
+                  Narration / Remarks:
                 </Typography>
-                <Typography variant="body2" sx={{ mt: 0.5, fontFamily: 'monospace', wordBreak: 'break-all' }}>
-                  {displayVoucher.narration || 'No narration provided for this double entry transaction.'}
+                <Typography variant="body2" sx={{ color: '#1e293b', fontWeight: 500 }}>
+                  {displayVoucher.narration || 'No narration provided for this transaction.'}
                 </Typography>
               </Box>
             </DialogContent>
           </>
         ) : (
-          <DialogContent sx={{ p: 3, textAlign: 'center' }}>
-            <Typography sx={{ fontFamily: 'monospace' }}>No voucher data loaded.</Typography>
+          <DialogContent sx={{ p: 6, textAlign: 'center' }}>
+            <Typography sx={{ color: '#64748b' }}>No voucher data loaded.</Typography>
           </DialogContent>
         )}
 
-        <DialogActions sx={{ p: 3, bgcolor: '#cbd4c9', gap: 1, borderTop: '1px solid #1b3a1e', display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between' }}>
-          <Box sx={{ display: 'flex', gap: 1 }}>
+        <DialogActions sx={{ p: '16px 24px', bgcolor: '#f8fafc', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1 }}>
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
             <Button
               variant="contained"
-              color="success"
-              startIcon={<PrintIcon />}
               onClick={() => handlePrint(displayVoucher?.voucher_no)}
-              sx={{ fontFamily: 'monospace', fontWeight: 'bold' }}
+              startIcon={<PrintIcon />}
+              sx={{ bgcolor: '#1f4fb2', fontWeight: 700, textTransform: 'none', '&:hover': { bgcolor: '#1e40af' } }}
+              size="small"
             >
-              Print 🖨
+              Print
             </Button>
             <Button
               variant="contained"
-              color="info"
-              startIcon={<PictureAsPdfIcon />}
               onClick={() => handleDownloadPDF(displayVoucher)}
-              sx={{ fontFamily: 'monospace', fontWeight: 'bold' }}
+              startIcon={<PictureAsPdfIcon />}
+              sx={{ bgcolor: '#0284c7', fontWeight: 700, textTransform: 'none', '&:hover': { bgcolor: '#0369a1' } }}
+              size="small"
             >
-              PDF 📄
-            </Button>
-            <Button
-              variant="contained"
-              color="primary"
-              startIcon={<EditIcon />}
-              onClick={() => {
-                if (displayVoucher) navigate(`/entry/voucher-create/${displayVoucher.id}`);
-              }}
-              sx={{ fontFamily: 'monospace', fontWeight: 'bold' }}
-            >
-              Edit ✏️
+              PDF
             </Button>
             <Button
               variant="outlined"
-              color="primary"
-              startIcon={<ContentCopyIcon />}
+              onClick={() => {
+                if (displayVoucher) navigate(`/entry/voucher-create/${displayVoucher.id}`);
+              }}
+              startIcon={<EditIcon />}
+              sx={{ color: '#1f4fb2', borderColor: '#1f4fb2', fontWeight: 700, textTransform: 'none', '&:hover': { bgcolor: '#eff6ff', borderColor: '#1e40af' } }}
+              size="small"
+            >
+              Edit
+            </Button>
+            <Button
+              variant="outlined"
               onClick={() => {
                 if (displayVoucher) handleDuplicateVoucher(displayVoucher.id);
               }}
-              sx={{ fontFamily: 'monospace', fontWeight: 'bold', bgcolor: '#fff' }}
+              startIcon={<ContentCopyIcon />}
+              sx={{ color: '#475569', borderColor: '#cbd5e1', fontWeight: 700, textTransform: 'none', '&:hover': { bgcolor: '#f1f5f9' } }}
+              size="small"
             >
               Duplicate
             </Button>
             {displayVoucher && displayVoucher.status !== 'Cancelled' && (
               <Button
                 variant="outlined"
-                color="warning"
-                startIcon={<CancelIcon />}
                 onClick={() => handleCancelVoucher(displayVoucher)}
-                sx={{ fontFamily: 'monospace', fontWeight: 'bold', bgcolor: '#fff' }}
+                startIcon={<CancelIcon />}
+                sx={{ color: '#d97706', borderColor: '#fcd34d', fontWeight: 700, textTransform: 'none', '&:hover': { bgcolor: '#fffbeb' } }}
+                size="small"
               >
-                Cancel ❌
+                Cancel
               </Button>
             )}
             <Button
-              variant="contained"
-              color="error"
-              startIcon={<DeleteIcon />}
+              variant="outlined"
               onClick={() => {
                 if (displayVoucher) deleteVoucher(displayVoucher.id);
               }}
-              sx={{ fontFamily: 'monospace', fontWeight: 'bold' }}
+              startIcon={<DeleteIcon />}
+              sx={{ color: '#dc2626', borderColor: '#fca5a5', fontWeight: 700, textTransform: 'none', '&:hover': { bgcolor: '#fef2f2' } }}
+              size="small"
             >
-              Delete 🗑
+              Delete
             </Button>
           </Box>
           <Button
             variant="contained"
-            color="inherit"
             onClick={() => setDisplayOpen(false)}
-            sx={{ fontFamily: 'monospace', fontWeight: 'bold', color: '#fff', bgcolor: '#2e3b4e', '&:hover': { bgcolor: '#1a2332' } }}
+            sx={{ bgcolor: '#64748b', fontWeight: 700, textTransform: 'none', '&:hover': { bgcolor: '#475569' } }}
+            size="small"
           >
-            Close Escape
+            Close
           </Button>
         </DialogActions>
       </Dialog>
+
+      <Snackbar
+        open={toast.open}
+        autoHideDuration={4000}
+        onClose={() => setToast(prev => ({ ...prev, open: false }))}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={() => setToast(prev => ({ ...prev, open: false }))}
+          severity={toast.severity}
+          variant="filled"
+          sx={{ width: '100%', fontWeight: 'bold' }}
+        >
+          {toast.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 };

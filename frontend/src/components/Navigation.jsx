@@ -23,6 +23,8 @@ import LogoutIcon from '@mui/icons-material/Logout';
 import CalculateIcon from '@mui/icons-material/Calculate';
 import RecyclingIcon from '@mui/icons-material/Recycling';
 import SearchIcon from '@mui/icons-material/Search';
+import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
+import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import CalculatorModal from './CalculatorModal';
 import RecycleBinModal from './RecycleBinModal';
 import UniversalSearchModal from './common/UniversalSearchModal';
@@ -598,6 +600,18 @@ const Navigation = () => {
       ]
     },
     {
+      groupTitle: 'Logistics & Labour Payments',
+      items: [
+        { name: 'Operational Charges & Worker/Driver Payments', path: '/operational-charges' }
+      ]
+    },
+    {
+      groupTitle: 'Communication & Alerts',
+      items: [
+        { name: 'Central Notification & WhatsApp Center', path: '/central-notifications' }
+      ]
+    },
+    {
       groupTitle: 'Compliance',
       items: [
         { name: 'Automated Compliance', path: '/automated-compliance' }
@@ -853,6 +867,7 @@ const Navigation = () => {
 
   const isDashboardActive = location.pathname === '/' || location.pathname === '/dashboard';
   const isCommandCenterActive = location.pathname.startsWith('/command-center');
+  const isNotificationsActive = location.pathname.startsWith('/central-notifications');
 
   // Check if a report group has at least one visible item
   const hasVisibleReportItem = (group) => {
@@ -965,6 +980,21 @@ const Navigation = () => {
             <SystemStatus />
             <StockAlertBell />
             <CentralNotificationsBell />
+            <Tooltip title="Open Central Factory Notification & WhatsApp Hub">
+              <IconButton 
+                component={Link}
+                to="/central-notifications"
+                size="small" 
+                sx={{ 
+                  color: 'white', 
+                  backgroundColor: isNotificationsActive ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.18)',
+                  '&:hover': { backgroundColor: 'rgba(255,255,255,0.35)' },
+                  ml: 0.2
+                }}
+              >
+                <NotificationsActiveIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
             <Tooltip title="Command Center Overview">
               <Button
                 component={Link}
@@ -988,6 +1018,31 @@ const Navigation = () => {
                 }}
               >
                 Command Center
+              </Button>
+            </Tooltip>
+            <Tooltip title="Operational Charges & Worker/Driver Payments Hub">
+              <Button
+                component={Link}
+                to="/operational-charges"
+                size="small"
+                startIcon={<AccountBalanceWalletIcon sx={{ fontSize: 16 }} />}
+                sx={{
+                  color: '#ffffff',
+                  backgroundColor: location.pathname === '/operational-charges' ? 'rgba(255, 255, 255, 0.32)' : 'rgba(255, 255, 255, 0.15)',
+                  border: location.pathname === '/operational-charges' ? '1px solid rgba(255, 255, 255, 0.7)' : '1px solid rgba(255, 255, 255, 0.3)',
+                  fontWeight: 600,
+                  fontSize: '12px',
+                  textTransform: 'none',
+                  px: 1.25,
+                  py: 0.35,
+                  borderRadius: '6px',
+                  '&:hover': {
+                    backgroundColor: 'rgba(255, 255, 255, 0.35)',
+                    borderColor: '#ffffff'
+                  }
+                }}
+              >
+                Ops Charges & Payments
               </Button>
             </Tooltip>
             <Tooltip title="Calculator Tool">
@@ -1090,6 +1145,38 @@ const Navigation = () => {
                 fontSize: '14px',
                 fontWeight: isCommandCenterActive ? 'bold' : 600,
                 color: isCommandCenterActive ? themeColors.white : themeColors.textPrimary,
+              }}
+              sx={{ my: 0 }}
+            />
+          </ListItemButton>
+
+          {/* Central Notification & WhatsApp Hub Link */}
+          <ListItemButton 
+            component={Link} 
+            to="/central-notifications" 
+            onClick={toggleDrawer}
+            sx={{ 
+              justifyContent: 'flex-start',
+              backgroundColor: isNotificationsActive ? themeColors.primary : 'transparent',
+              '&:hover': {
+                backgroundColor: isNotificationsActive ? themeColors.primary : themeColors.lightBlue,
+              },
+              py: 1.25,
+              mx: 1,
+              mt: 0.5,
+              borderRadius: '6px',
+            }}
+          >
+            <NotificationsActiveIcon sx={{
+              color: isNotificationsActive ? themeColors.white : themeColors.primary,
+              mr: 1
+            }} />
+            <ListItemText 
+              primary="Notifications & WhatsApp Hub"
+              primaryTypographyProps={{
+                fontSize: '14px',
+                fontWeight: isNotificationsActive ? 'bold' : 600,
+                color: isNotificationsActive ? themeColors.white : themeColors.textPrimary,
               }}
               sx={{ my: 0 }}
             />

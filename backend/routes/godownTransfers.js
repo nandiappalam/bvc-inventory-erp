@@ -224,6 +224,35 @@ router.post('/', async (req, res) => {
 
     const transferId = result.lastID;
 
+    // Create linked operational charges if provided in request
+    const chargesCreated = [];
+    if (Array.isArray(req.body.operational_charges) && req.body.operational_charges.length > 0) {
+      const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+      const engine = require('../services/operationalChargeEngine');
+      for (const ch of req.body.operational_charges) {
+        try {
+          const chRes = await engine.createOperationalCharge(activeCompanyId, {
+            ...ch,
+            source_module: 'GODOWN_TRANSFER',
+            source_transaction_type: 'GODOWN_TRANSFER',
+            source_transaction_id: transferId,
+            source_transaction_no: finalSNo,
+            charge_date: transfer_date || new Date().toISOString().split('T')[0],
+            item_name,
+            lot_no: lot_no || 'LOT-TRANSFER',
+            from_location: from_godown_name || '',
+            to_location: to_godown_name || '',
+            vehicle_no: ch.vehicle_no || req.body.vehicle_no || '',
+            driver_name: ch.driver_name || req.body.driver_name || '',
+            quantity: ch.quantity !== undefined ? ch.quantity : transferQty
+          });
+          chargesCreated.push(chRes);
+        } catch (chErr) {
+          console.warn('[Transfer Operational Charge Error]:', chErr.message);
+        }
+      }
+    }
+
     // Record stock movement (Out from From Godown, In to To Godown)
     try {
       // Outward entry
@@ -275,6 +304,21 @@ router.delete('/:id', async (req, res) => {
   } catch (err) {
     console.error('Error deleting godown transfer:', err);
     res.status(500).json({ message: 'Error deleting godown transfer', error: err.message });
+  }
+});
+
+// GET operational charges for a godown transfer
+router.get('/:id/charges', async (req, res) => {
+  try {
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    const engine = require('../services/operationalChargeEngine');
+    const result = await engine.getOperationalTraceability(activeCompanyId, {
+      sourceModule: 'GODOWN_TRANSFER',
+      sourceTransactionId: req.params.id
+    });
+    res.json({ success: true, charges: result.charges || [], traceability: result });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 

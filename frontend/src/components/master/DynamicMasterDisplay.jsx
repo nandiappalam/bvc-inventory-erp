@@ -111,6 +111,15 @@ export const DynamicMasterDisplay = ({ configKey }) => {
   }, [tableName, location.key]);
 
   const handleDelete = async (row) => {
+    const rowName = row.name || row.title || row.item_code || row.id || 'record';
+    const confirmed = window.__appConfirm ? await window.__appConfirm({
+      title: 'Confirm Record Deletion',
+      message: `Are you sure you want to delete ${rowName} from ${tableName.replace(/_/g, ' ')}?\n\nThis action cannot be undone.`,
+      confirmText: 'Delete Record',
+      confirmColor: 'error'
+    }) : window.confirm(`Are you sure you want to delete this record?`);
+    if (!confirmed) return;
+
     try {
       const rowId = row.id !== undefined && row.id !== null ? row.id : (row.item_code || row.group_code || row.ded_code);
       const result = await deleteMaster(tableName, rowId);

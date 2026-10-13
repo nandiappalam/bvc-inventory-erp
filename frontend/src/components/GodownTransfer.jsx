@@ -223,7 +223,13 @@ const GodownTransfer = () => {
 
   // Handle Delete Transfer
   const handleDelete = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this transfer entry?')) return;
+    const confirmed = window.__appConfirm ? await window.__appConfirm({
+      title: 'Confirm Transfer Deletion',
+      message: 'Are you sure you want to delete this transfer entry?',
+      confirmText: 'Delete Transfer',
+      confirmColor: 'error'
+    }) : window.confirm('Are you sure you want to delete this transfer entry?');
+    if (!confirmed) return;
 
     try {
       const res = await fetch(`/api/godown-transfers/${id}`, { method: 'DELETE' });

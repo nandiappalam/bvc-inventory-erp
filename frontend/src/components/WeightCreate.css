@@ -1,4 +1,5 @@
-body{
+.weight-create-legacy,
+#weight-create-window {
     margin:0;
     font-family:Tahoma, Arial;
     font-size:17px;
@@ -6,7 +7,8 @@ body{
 }
 
 /* TOP HEADER */
-.header{
+.weight-create-legacy .header,
+#weight-create-window .header{
     background:#1f4fa3;
     color:#fff;
     padding:6px 10px;
@@ -15,24 +17,28 @@ body{
 }
 
 /* MENU BAR */
-.menu{
+.weight-create-legacy .menu,
+#weight-create-window .menu{
     background:#f5f8ff;
     padding:6px 10px;
     border-bottom:1px solid #9bb4e0;
 }
-.menu span{
+.weight-create-legacy .menu span,
+#weight-create-window .menu span{
     margin-right:18px;
 }
 
 /* MAIN WINDOW */
-.window{
+.weight-create-legacy .window,
+#weight-create-window .window{
     margin:10px;
     border:1px solid #9bb4e0;
     background:#fff;
 }
 
 /* TITLE */
-.title{
+.weight-create-legacy .title,
+#weight-create-window .title{
     background:#3f6fc0;
     color:#fff;
     padding:6px 10px;
@@ -40,26 +46,30 @@ body{
 }
 
 /* FORM ROW */
-.form-row{
+.weight-create-legacy .form-row,
+#weight-create-window .form-row{
     display:flex;
      
     padding:10px;
     background:#f9fbff;
 }
 
-.form-group{
+.weight-create-legacy .form-group,
+#weight-create-window .form-group{
     display:flex;
     align-items:center;
     margin-bottom:6px;
 	margin-left:25px;
 }
 
-.form-group label{
+.weight-create-legacy .form-group label,
+#weight-create-window .form-group label{
     width:70px;
 	font-size:20px;
 }
 
-input{
+.weight-create-legacy input,
+#weight-create-window input{
     height:20px;
     border:1px solid #9bb4e0;
     padding:4px 8px;
@@ -67,39 +77,45 @@ input{
 }
 
 /* TABLE */
-table{
+.weight-create-legacy table,
+#weight-create-window table{
     width:70%;
     border-collapse:collapse;
     margin-top:5px;
 }
 
-th{
+.weight-create-legacy th,
+#weight-create-window th{
     background:#3f6fc0;
     color:#fff;
     height:24px;
     border:1px solid #9bb4e0;
 }
 
-td{
+.weight-create-legacy td,
+#weight-create-window td{
     height:22px;
     border:1px solid #9bb4e0;
 }
 
 /* FOOTER TABLE */
-.footer-table{
+.weight-create-legacy .footer-table,
+#weight-create-window .footer-table{
     margin-top:205px;
 	
 }
 
 /* SAVE BUTTON */
-.save-bar{
+.weight-create-legacy .save-bar,
+#weight-create-window .save-bar{
     display:flex;
     justify-content:flex-end;
     padding:10px;
 	margin-top:305px;
 }
 
-button{
+.weight-create-legacy button,
+#weight-create-window button{
     padding:6px 25px;
     background:#3f6fc0;
     color:#fff;

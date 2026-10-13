@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 import { printHtml } from '../../utils/printHelper';
+import { printInpassDocument } from '../../utils/movementPrintTemplates';
 
 // Standard MUI Icons consistent with BVC ERP theme
 import RefreshIcon from '@mui/icons-material/Refresh';
@@ -21,6 +22,8 @@ const InpassDisplay = () => {
   const [summary, setSummary] = useState({});
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
 
   // Modals
   const [selectedInpass, setSelectedInpass] = useState(null);
@@ -72,9 +75,13 @@ const InpassDisplay = () => {
   };
 
   const handleDelete = async (id, inpassNo) => {
-    if (!window.confirm(`Are you sure you want to cancel and reverse Inpass ${inpassNo}?\n\nThis will revert received processed goods from factory stock and reopen the linked Outpass.`)) {
-      return;
-    }
+    const confirmed = window.__appConfirm ? await window.__appConfirm({
+      title: 'Confirm Inpass Reversal',
+      message: `Are you sure you want to cancel and reverse Inpass ${inpassNo}?\n\nThis will revert received processed goods from factory stock and reopen the linked Outpass.`,
+      confirmText: 'Delete Inpass',
+      confirmColor: 'error'
+    }) : window.confirm(`Are you sure you want to cancel and reverse Inpass ${inpassNo}?`);
+    if (!confirmed) return;
 
     try {
       const res = await api(`/inpasses/${id}`, { method: 'DELETE' });
@@ -125,101 +132,20 @@ const InpassDisplay = () => {
   };
 
   const handlePrint = (ip) => {
-    const items = ip.items || [];
-    const rowsHtml = items.map((it, idx) => `
-      <tr style="background-color: ${idx % 2 === 0 ? '#ffffff' : '#f8fafc'};">
-        <td style="border: 1px solid #cbd5e1; padding: 7px; text-align: center;">${idx + 1}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 7px; font-weight: bold; color: #1e293b;">${it.item_name}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 7px; font-size: 11px; text-transform: uppercase; color: #047857; font-weight: 600;">${it.output_type}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 7px; font-family: monospace; color: #2563eb;">${it.lot_no || '-'}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 7px; text-align: right; font-weight: bold;">${it.qty || 0}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 7px; text-align: right; font-weight: bold; color: #047857;">${(parseFloat(it.total_weight) || 0).toFixed(2)} kg</td>
-        <td style="border: 1px solid #cbd5e1; padding: 7px; color: #475569;">${it.godown_name || 'PJ'}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 7px; text-align: center;"><span style="color: #047857; font-weight: bold;">${it.qc_status || 'PASS'}</span></td>
-      </tr>
-    `).join('');
-
-    const html = `
-      <div style="font-family: Arial, sans-serif; padding: 20px; color: #1e293b; max-width: 900px; margin: 0 auto;">
-        <!-- Header -->
-        <div style="text-align: center; border-bottom: 2px solid #1f4fb2; padding-bottom: 12px; margin-bottom: 14px;">
-          <h1 style="margin: 0; color: #1f4fb2; font-size: 24px; text-transform: uppercase; letter-spacing: 0.5px;">BHARANI VEL CHEMICALS / BVC AGRO</h1>
-          <p style="margin: 3px 0; font-size: 13px; color: #475569;">Factory Inward Goods Receipt • External Mill Return System</p>
-          <div style="display: inline-block; background: #1f4fb2; color: #ffffff; padding: 4px 20px; border-radius: 4px; font-weight: bold; font-size: 14px; margin-top: 6px; letter-spacing: 1px;">
-            MATERIAL GATE INPASS / PROCESSED INWARD NOTE
-          </div>
-        </div>
-
-        <!-- Metadata Grid -->
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 12px; font-size: 13px;">
-          <div>
-            <p style="margin: 3px 0;"><strong>Inpass No:</strong> <span style="font-family: monospace; font-size: 15px; font-weight: bold; color: #1f4fb2;">${ip.inpass_no}</span></p>
-            <p style="margin: 3px 0;"><strong>Date:</strong> ${ip.date}</p>
-            <p style="margin: 3px 0;"><strong>Linked Outpass:</strong> <span style="font-family: monospace; font-weight: bold; color: #2563eb;">${ip.outpass_no || 'N/A'}</span></p>
-            <p style="margin: 3px 0;"><strong>Reference Module:</strong> ${ip.reference_type} (${ip.reference_no || `#${ip.reference_id || '-'}`})</p>
-            <p style="margin: 3px 0;"><strong>Receiving Godown:</strong> ${ip.to_godown_name || 'PJ Main Factory Godown'}</p>
-          </div>
-          <div>
-            <p style="margin: 3px 0;"><strong>External Mill / Party:</strong> <strong style="color: #0f172a; font-size: 14px;">${ip.party_name}</strong></p>
-            ${ip.mill_area ? `<p style="margin: 3px 0; color: #475569;"><strong>Mill Area / City:</strong> ${ip.mill_area}</p>` : ''}
-            <p style="margin: 3px 0;"><strong>Vehicle No:</strong> <span style="font-family: monospace; font-weight: bold; background: #f1f5f9; padding: 1px 6px; border-radius: 3px;">${ip.vehicle_no || 'N/A'}</span></p>
-            <p style="margin: 3px 0;"><strong>Driver:</strong> ${ip.driver_name || '-'}</p>
-            <p style="margin: 3px 0;"><strong>Received By:</strong> ${ip.received_by || 'Admin'}</p>
-          </div>
-        </div>
-
-        <!-- Mass Balance Card -->
-        <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 12px; margin-bottom: 15px; font-size: 12px;">
-          <h4 style="margin: 0 0 8px 0; color: #065f46; font-size: 13px; text-transform: uppercase;">Mass-Balance & Yield Verification</h4>
-          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;">
-            <div><span style="color: #64748b;">Dispatched Input:</span> <strong style="display: block; font-size: 14px;">${(parseFloat(ip.input_weight) || 0).toFixed(2)} kg</strong></div>
-            <div><span style="color: #64748b;">Processed FG:</span> <strong style="display: block; font-size: 14px; color: #047857;">${(parseFloat(ip.output_weight) || 0).toFixed(2)} kg</strong></div>
-            <div><span style="color: #64748b;">By-product:</span> <strong style="display: block; font-size: 14px; color: #2563eb;">${(parseFloat(ip.byproduct_weight) || 0).toFixed(2)} kg</strong></div>
-            <div><span style="color: #64748b;">Milling Yield:</span> <strong style="display: block; font-size: 14px; color: #047857;">${ip.yield_percent}%</strong></div>
-          </div>
-          ${parseFloat(ip.discrepancy_weight) > 0 ? `
-            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px dashed #cbd5e1; color: #b91c1c;">
-              <strong>Unaccounted Shortage:</strong> ${ip.discrepancy_weight} kg — <em>Reason: ${ip.discrepancy_reason || 'N/A'}</em>
-            </div>
-          ` : ''}
-        </div>
-
-        <!-- Items Table -->
-        <table style="width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 15px;">
-          <thead>
-            <tr style="background: #1f4fb2; color: #ffffff;">
-              <th style="border: 1px solid #cbd5e1; padding: 8px; width: 40px; text-align: center;">S.No</th>
-              <th style="border: 1px solid #cbd5e1; padding: 8px; text-align: left;">Received Material</th>
-              <th style="border: 1px solid #cbd5e1; padding: 8px; text-align: left;">Category</th>
-              <th style="border: 1px solid #cbd5e1; padding: 8px; text-align: left; width: 110px;">Allocated Lot</th>
-              <th style="border: 1px solid #cbd5e1; padding: 8px; text-align: right; width: 65px;">Bags</th>
-              <th style="border: 1px solid #cbd5e1; padding: 8px; text-align: right; width: 95px;">Weight</th>
-              <th style="border: 1px solid #cbd5e1; padding: 8px; text-align: left; width: 80px;">Godown</th>
-              <th style="border: 1px solid #cbd5e1; padding: 8px; text-align: center; width: 70px;">QC Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rowsHtml || '<tr><td colspan="8" style="text-align: center; padding: 10px;">No items registered</td></tr>'}
-          </tbody>
-        </table>
-
-        ${parseFloat(ip.total_processing_charges) > 0 ? `
-          <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; padding: 10px; margin-bottom: 15px; font-size: 12px; display: flex; justify-content: space-between;">
-            <span><strong>Processing Fee Rate:</strong> ₹${ip.processing_charge_per_kg}/kg</span>
-            <span><strong>Total Processing Charges Payable:</strong> ₹${parseFloat(ip.total_processing_charges).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-          </div>
-        ` : ''}
-
-        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; text-align: center; font-size: 11px; margin-top: 40px;">
-          <div style="border-top: 1px solid #64748b; padding-top: 5px;">Security Gate Inward</div>
-          <div style="border-top: 1px solid #64748b; padding-top: 5px;">QC Verification Officer</div>
-          <div style="border-top: 1px solid #64748b; padding-top: 5px;">Godown In-Charge Receipt</div>
-        </div>
-      </div>
-    `;
-
-    printHtml(html, `Inpass - ${ip.inpass_no}`);
+    printInpassDocument(ip, 'ORIGINAL STORE COPY');
   };
+
+  const filteredInpasses = inpasses.filter(row => {
+    if (fromDate || toDate) {
+      const rowDateStr = row.date || row.created_at || '';
+      if (rowDateStr) {
+        const rowDateOnly = String(rowDateStr).substring(0, 10);
+        if (fromDate && rowDateOnly < fromDate) return false;
+        if (toDate && rowDateOnly > toDate) return false;
+      }
+    }
+    return true;
+  });
 
   return (
     <div className="erp-display-page" style={{ padding: '16px', background: '#f0f6ff', minHeight: '100vh', fontFamily: "'Segoe UI', Tahoma, Arial, sans-serif" }}>
@@ -302,8 +228,8 @@ const InpassDisplay = () => {
 
       {/* Filter Section Toolbar */}
       <div style={{ background: '#e9eef7', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #9fb6dd', marginBottom: '14px', borderRadius: '4px', flexWrap: 'wrap', gap: '10px' }}>
-        <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: '8px', alignItems: 'center', flex: 1, minWidth: '260px', maxWidth: '520px' }}>
-          <div style={{ position: 'relative', flex: 1 }}>
+        <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: '8px', alignItems: 'center', flex: 1, minWidth: '260px', flexWrap: 'wrap' }}>
+          <div style={{ position: 'relative', flex: 1, minWidth: '200px' }}>
             <input
               type="text"
               value={searchTerm}
@@ -313,6 +239,33 @@ const InpassDisplay = () => {
             />
             <SearchIcon style={{ position: 'absolute', left: '7px', top: '7px', fontSize: '18px', color: '#64748b' }} />
           </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '13px', color: '#333' }}>
+            <span>From:</span>
+            <input
+              type="date"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+              style={{ padding: '6px', border: '1px solid #7fa1d6', borderRadius: '4px', fontSize: '13px', backgroundColor: '#fff' }}
+            />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '13px', color: '#333' }}>
+            <span>To:</span>
+            <input
+              type="date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+              style={{ padding: '6px', border: '1px solid #7fa1d6', borderRadius: '4px', fontSize: '13px', backgroundColor: '#fff' }}
+            />
+          </div>
+          {(fromDate || toDate) && (
+            <button
+              type="button"
+              onClick={() => { setFromDate(''); setToDate(''); }}
+              style={{ padding: '6px 10px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}
+            >
+              Clear
+            </button>
+          )}
           <button type="submit" className="action-btn update-btn" style={{ padding: '7px 14px' }}>
             Search
           </button>
@@ -358,14 +311,14 @@ const InpassDisplay = () => {
                   Loading Inpass receipt records...
                 </td>
               </tr>
-            ) : inpasses.length === 0 ? (
+            ) : filteredInpasses.length === 0 ? (
               <tr>
                 <td colSpan="13" style={{ padding: '30px', textAlign: 'center', color: '#64748b' }}>
                   No Inpass records found. Click <strong>"+ Receive New Inpass"</strong> to record returned material.
                 </td>
               </tr>
             ) : (
-              inpasses.map((row, idx) => {
+              filteredInpasses.map((row, idx) => {
                 const inWt = parseFloat(row.input_weight) || 0;
                 const outWt = parseFloat(row.output_weight) || 0;
                 const charges = parseFloat(row.total_processing_charges) || 0;

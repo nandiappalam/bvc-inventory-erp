@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
+const recycleBinService = require('../services/RecycleBinService');
 
 const enrichGodown = (row) => {
   if (!row || typeof row !== 'object') return row;
@@ -225,6 +226,24 @@ router.put('/:id', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    const gRes = await db.query('SELECT * FROM godown_master WHERE id = ?', [id]);
+    if (gRes.rows && gRes.rows.length > 0) {
+      const gRow = gRes.rows[0];
+      try {
+        await recycleBinService.saveToRecycleBin({
+          moduleName: 'Godown / Cold Storage',
+          recordId: id,
+          title: `Godown / Cold Storage #${gRow.godown_name || id}`,
+          recordData: {
+            tableName: 'godown_master',
+            record: gRow
+          },
+          deletedBy: req.user?.username || 'admin'
+        });
+      } catch (e) {
+        console.warn('Recycle bin save error in godown delete:', e.message);
+      }
+    }
     await db.run('DELETE FROM godown_master WHERE id = ?', [id]);
     res.json({ success: true, message: 'Godown deleted successfully' });
   } catch (err) {

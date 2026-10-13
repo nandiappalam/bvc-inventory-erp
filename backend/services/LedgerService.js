@@ -118,7 +118,8 @@ async function createEntry({
   transactionType = null,
 }) {
   await ensureLedgerTables();
-  const ledgerId = await resolveLedgerId(ledgerName);
+  const safeLedgerName = ledgerName || 'General Ledger';
+  const ledgerId = await resolveLedgerId(safeLedgerName);
 
   await db.run(`
     INSERT INTO ledger_entries (
@@ -128,12 +129,12 @@ async function createEntry({
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, [
     ledgerId,
-    ledgerName,
-    date,
-    voucherType,
-    voucherNo,
-    debit,
-    credit,
+    safeLedgerName,
+    date || new Date().toISOString().slice(0, 10),
+    voucherType || 'General',
+    voucherNo || '',
+    debit || 0,
+    credit || 0,
     referenceId,
     referenceType,
     particulars,

@@ -1064,9 +1064,22 @@ router.post("/:table", async (req, res) => {
 
     try {
       const result = await db.run(query, values);
+      const createdId = result.lastID || result.lastInsertRowid || result.rows?.[0]?.id;
+
+      // Also auto-sync to ledgermaster if supplier or customer
+      if (tableName === 'supplier_master' || tableName === 'customer_master') {
+        try {
+          const { resolveLedgerId } = require('../utils/ledgerHelper');
+          const partyName = filteredData.name || data.name;
+          if (partyName) {
+            await resolveLedgerId(partyName, tableName === 'customer_master' ? 'Customer' : 'Supplier');
+          }
+        } catch (lErr) {}
+      }
+
       res.json({
         success: true,
-        id: result.lastID || result.lastInsertRowid || result.rows?.[0]?.id,
+        id: createdId,
         message: 'Record created successfully'
       });
     } catch (err) {

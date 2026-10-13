@@ -7,6 +7,7 @@ import { safeArray, normalizeMasterKey } from '../../services/masterservice.js';
 import { DEBUG } from '../../config/debug';
 import ItemDropdownCell from './ItemDropdownCell.jsx';
 import ExistingLotDropdownCell from './ExistingLotDropdownCell.jsx';
+import { InlineMasterModal, getCreateLabel } from '../common/InlineMasterModal.jsx';
 
 const safeNumber = (v) => {
   if (v === null || v === undefined || v === '') return 0;
@@ -32,6 +33,7 @@ const MasterSelectCell = ({
   const normKey = normalizeMasterKey(masterType || cellKey);
   const [options, setOptions] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [inlineModalOpen, setInlineModalOpen] = useState(false);
 
   useEffect(() => {
     const key = normalizeMasterKey(masterType || cellKey);
@@ -61,10 +63,31 @@ const MasterSelectCell = ({
 
   const safeOptions = Array.isArray(options) ? options : [];
 
-  const handleChange = async (e) => {
-    const selectedId = e.target.value;
+  const handleInlineCreated = async (newId, newRecord) => {
+    try {
+      const key = normalizeMasterKey(masterType || cellKey);
+      const table = key.replace('_master', '');
+      const result = await getMasters(table, { forceRefresh: true });
+      const refreshedData = safeArray(result?.data || result);
+      setOptions(refreshedData);
 
-    const selectedItem = safeOptions.find(
+      const targetId = newId !== undefined && newId !== null ? String(newId) : (newRecord?.id ? String(newRecord.id) : '');
+      if (targetId) {
+        await handleChange({ target: { value: targetId } }, newRecord);
+      }
+    } catch (e) {
+      console.error('Error post-creating master inline:', e);
+    }
+  };
+
+  const handleChange = async (e, directRecord = null) => {
+    const selectedId = e.target.value;
+    if (selectedId === '__CREATE_NEW__') {
+      setInlineModalOpen(true);
+      return;
+    }
+
+    const selectedItem = directRecord || safeOptions.find(
       (opt) => String(opt.id) === String(selectedId)
     );
 
@@ -99,6 +122,7 @@ const MasterSelectCell = ({
           const directFields = [
             'kg',
             'weight_kg',
+            'weight_val',
             'per_unit_wt',
             'perUnitWt',
             'weight_value',
@@ -366,27 +390,40 @@ const MasterSelectCell = ({
   }
 
   return (
-    <select
-      value={selectValue}
-      onChange={handleChange}
-      disabled={row?.readOnly || false}
-      style={styles.cellInput}
-      className="table-input"
-    >
-      <option value="">
-        -- Select --
-      </option>
+    <>
+      <select
+        value={selectValue}
+        onChange={handleChange}
+        disabled={row?.readOnly || false}
+        style={styles.cellInput}
+        className="table-input"
+      >
+        <option value="">
+          -- Select --
+        </option>
 
-      {safeOptions.map((opt, idx) => {
-        const optVal = opt.id !== undefined && opt.id !== null ? String(opt.id) : (opt.value !== undefined ? String(opt.value) : String(opt.name || opt));
-        const optLabel = opt.item_name || opt.name || opt.printname || opt.print_name || opt.weight_name || opt.label || String(optVal);
-        return (
-          <option key={`${optVal || 'opt'}-${idx}`} value={optVal}>
-            {optLabel}
-          </option>
-        );
-      })}
-    </select>
+        {safeOptions.map((opt, idx) => {
+          const optVal = opt.id !== undefined && opt.id !== null ? String(opt.id) : (opt.value !== undefined ? String(opt.value) : String(opt.name || opt));
+          const optLabel = opt.item_name || opt.name || opt.printname || opt.print_name || opt.weight_name || opt.label || String(optVal);
+          return (
+            <option key={`${optVal || 'opt'}-${idx}`} value={optVal}>
+              {optLabel}
+            </option>
+          );
+        })}
+
+        <option value="__CREATE_NEW__" style={{ fontWeight: 'bold', color: '#1e3a8a' }}>
+          {getCreateLabel(normKey || masterType || cellKey)}
+        </option>
+      </select>
+
+      <InlineMasterModal
+        open={inlineModalOpen}
+        onClose={() => setInlineModalOpen(false)}
+        masterType={normKey || masterType || cellKey}
+        onSuccess={handleInlineCreated}
+      />
+    </>
   );
 };
 
@@ -499,11 +536,18 @@ const EntryItemsTable = ({
   }, []);
 
   const normalizeColumns = (cols) =>
-    (cols || []).map(col => ({
-      ...col,
-      type: col.type || (col.key?.toLowerCase() === 'item_name' ? 'masterSelect' : undefined),
-      masterType: col.masterType || (col.key?.toLowerCase() === 'item_name' ? 'items' : undefined),
-    }));
+    (cols || []).map(col => {
+      const k = col.key?.toLowerCase() || '';
+      const isWeight = k === 'weight' || k === 'weight_id' || k === 'wt' || col.masterType === 'weights';
+      const isItem = k === 'item_name' || k === 'description' || col.masterType === 'items';
+      const isGodown = k === 'godown' || k === 'godown_id' || col.masterType === 'godowns';
+      const isMaster = col.type === 'masterSelect' || col.masterType || isWeight || isItem || isGodown;
+      return {
+        ...col,
+        type: isMaster ? 'masterSelect' : col.type,
+        masterType: col.masterType || (isWeight ? 'weights' : isItem ? 'items' : isGodown ? 'godowns' : undefined)
+      };
+    });
 
   const cleanedColumns = normalizeColumns(columns);
   validateEntryConfig([], cleanedColumns);

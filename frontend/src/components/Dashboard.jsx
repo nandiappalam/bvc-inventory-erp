@@ -458,6 +458,39 @@ const Dashboard = () => {
         </Alert>
       )}
 
+      {/* Quick Navigation Shortcuts Banner */}
+      <Paper sx={{ p: 2, mb: 3, borderRadius: '8px', background: 'linear-gradient(135deg, #1f2937 0%, #111827 100%)', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2, border: '1px solid #374151' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+          <AccountBalanceIcon sx={{ color: '#38bdf8', fontSize: '32px' }} />
+          <Box>
+            <Typography variant="subtitle1" sx={{ fontWeight: 'bold', color: '#f8fafc', fontSize: '15px' }}>
+              Central Operational Charges & Worker/Driver Payment Hub
+            </Typography>
+            <Typography variant="caption" sx={{ color: '#9ca3af', fontSize: '12px' }}>
+              Manage Loadmen, Drivers, Loading/Unloading rates, Godown Transfers, Inpass/Outpass charges & automatic disbursements.
+            </Typography>
+          </Box>
+        </Box>
+        <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
+          <Button
+            variant="contained"
+            size="small"
+            onClick={() => navigate('/operational-charges')}
+            sx={{ bgcolor: '#0284c7', '&:hover': { bgcolor: '#0369a1' }, textTransform: 'none', fontWeight: 'bold', px: 2, py: 0.8 }}
+          >
+            Open Operational Charges Hub
+          </Button>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={() => navigate('/central-notifications')}
+            sx={{ color: '#e2e8f0', borderColor: '#4b5563', '&:hover': { borderColor: '#9ca3af', bgcolor: 'rgba(255,255,255,0.05)' }, textTransform: 'none', fontWeight: 600, py: 0.8 }}
+          >
+            WhatsApp & Alert Center
+          </Button>
+        </Box>
+      </Paper>
+
       {/* Top 5 Core Application KPI Cards */}
       <Grid container spacing={2.5} sx={{ mb: 3 }}>
         {/* 1. Total Purchases */}

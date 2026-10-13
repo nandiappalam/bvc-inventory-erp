@@ -61,12 +61,24 @@ export default function CentralNotificationsBell() {
 
     if (alert.reference_module === 'COLD_STORAGE') {
       navigate('/cold-storage-intelligence');
+    } else if (alert.reference_module === 'OUTPASS') {
+      navigate('/entry/outpass-display');
+    } else if (alert.reference_module === 'INPASS') {
+      navigate('/entry/inpass-display');
+    } else if (alert.reference_module === 'PURCHASE') {
+      navigate('/entry/purchase-display');
+    } else if (alert.reference_module === 'SALES') {
+      navigate('/entry/sales-display');
+    } else if (alert.reference_module === 'QC') {
+      navigate('/entry/quality-control-list');
     } else if (alert.reference_module === 'ORDERS') {
       navigate('/order-fulfillment');
     } else if (alert.reference_module === 'FINANCE') {
       navigate('/financial-intelligence');
     } else if (alert.reference_module === 'BARCODE_QR') {
       navigate(`/barcode-qr?code=${encodeURIComponent(alert.reference_id)}`);
+    } else {
+      navigate('/central-notifications');
     }
   };
 
@@ -141,6 +153,27 @@ export default function CentralNotificationsBell() {
             );
           })
         )}
+        <Divider sx={{ my: 0.5 }} />
+        <Box sx={{ p: 1, textAlign: 'center' }}>
+          <Button
+            fullWidth
+            size="small"
+            variant="contained"
+            onClick={() => {
+              handleClose();
+              navigate('/central-notifications');
+            }}
+            sx={{
+              backgroundColor: '#1f4fb2',
+              color: '#ffffff',
+              fontWeight: 700,
+              textTransform: 'none',
+              '&:hover': { backgroundColor: '#1e3a8a' }
+            }}
+          >
+            Open Factory Notification Center & WhatsApp Audit →
+          </Button>
+        </Box>
       </Menu>
     </>
   );

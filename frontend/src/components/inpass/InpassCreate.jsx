@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../../services/api';
-import { printHtml } from '../../utils/printHelper';
+import { printInpassDocument } from '../../utils/movementPrintTemplates';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import CallReceivedIcon from '@mui/icons-material/CallReceived';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
@@ -9,15 +9,14 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import PrintIcon from '@mui/icons-material/Print';
 import SaveIcon from '@mui/icons-material/Save';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
-import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import FactCheckIcon from '@mui/icons-material/FactCheck';
 
 const OUTPUT_TYPES = [
-  { value: 'PROCESSED_OUTPUT', label: 'Processed Output (Finished Good)', color: 'text-emerald-700 bg-emerald-50 border-emerald-200' },
-  { value: 'BYPRODUCT', label: 'By-product (Broken/Bran/Husk)', color: 'text-blue-700 bg-blue-50 border-blue-200' },
-  { value: 'PROCESS_LOSS', label: 'Process Loss (Normal Grinding Loss)', color: 'text-amber-700 bg-amber-50 border-amber-200' },
-  { value: 'REJECTED', label: 'Rejected (Quality Rejection)', color: 'text-rose-700 bg-rose-50 border-rose-200' },
-  { value: 'SHORTAGE', label: 'Shortage / Transit Loss', color: 'text-purple-700 bg-purple-50 border-purple-200' }
+  { value: 'PROCESSED_OUTPUT', label: 'Processed Output (Finished Good)', color: '#166534' },
+  { value: 'BYPRODUCT', label: 'By-product (Broken/Bran/Husk)', color: '#0369a1' },
+  { value: 'PROCESS_LOSS', label: 'Process Loss (Normal Grinding Loss)', color: '#b45309' },
+  { value: 'REJECTED', label: 'Rejected (Quality Rejection)', color: '#991b1b' },
+  { value: 'SHORTAGE', label: 'Shortage / Transit Loss', color: '#6b21a8' }
 ];
 
 const InpassCreate = () => {
@@ -143,6 +142,14 @@ const InpassCreate = () => {
     }
   }, [grindIdParam, outpassIdParam]);
 
+  // Fallback godowns deduplication
+  const availableGodowns = godownsList.length > 0
+    ? godownsList
+    : [
+        { id: 1, godown_name: 'PJ Main Factory Godown' },
+        { id: 2, godown_name: 'BTS Cold Storage Facility' }
+      ];
+
   // Apply selected Outpass details
   const applyOutpassData = (op) => {
     if (!op) return;
@@ -150,7 +157,7 @@ const InpassCreate = () => {
 
     const firstItem = (op.items && op.items[0]) || {};
     const inputWeight = parseFloat(op.total_weight) || 0;
-    const ratePerKg = op.processing_rate_kg ? String(op.processing_rate_kg) : '';
+    const ratePerKg = op.processing_rate_kg != null && op.processing_rate_kg !== '' ? String(op.processing_rate_kg) : '';
 
     setFormData(prev => ({
       ...prev,
@@ -158,18 +165,21 @@ const InpassCreate = () => {
       outpass_no: op.outpass_no,
       reference_type: op.reference_type || 'Grind',
       reference_id: op.reference_id || '',
-      reference_no: op.reference_no || '',
+      reference_no: op.reference_no || ('OP-' + op.outpass_no),
+      party_id: op.party_id || '',
       party_name: op.party_name || '',
       vehicle_no: op.vehicle_no || prev.vehicle_no,
       driver_name: op.driver_name || prev.driver_name,
       processing_charge_per_kg: ratePerKg || prev.processing_charge_per_kg,
+      to_godown_id: op.from_godown_id || prev.to_godown_id || 1,
+      to_godown_name: op.from_godown_name || prev.to_godown_name || 'PJ Main Factory Godown',
       remarks: `Received against Outpass #${op.outpass_no} (${op.party_name || 'Outside Mill'})`
     }));
 
     // Pre-populate recommended output split:
-    // 1. Processed Output (e.g. 94% yield)
-    // 2. By-product (e.g. 4% yield)
-    // 3. Process Loss (e.g. 2% yield)
+    // 1. Processed Output (94% yield)
+    // 2. By-product (4% yield)
+    // 3. Process Loss (2% yield)
     const estOutputKg = inputWeight > 0 ? Number((inputWeight * 0.94).toFixed(2)) : 0;
     const estByproductKg = inputWeight > 0 ? Number((inputWeight * 0.04).toFixed(2)) : 0;
     const estLossKg = inputWeight > 0 ? Number((inputWeight * 0.02).toFixed(2)) : 0;
@@ -191,8 +201,8 @@ const InpassCreate = () => {
         rate: '',
         amount: 0,
         qc_status: 'PASS',
-        godown_id: 1,
-        godown_name: 'PJ',
+        godown_id: op.from_godown_id || 1,
+        godown_name: op.from_godown_name || 'PJ',
         remarks: 'Main Processed Yield'
       },
       {
@@ -201,33 +211,33 @@ const InpassCreate = () => {
         original_lot_no: opLotNo,
         lot_no: '',
         output_type: 'BYPRODUCT',
-        qty: estByproductKg > 0 ? String(Math.max(1, Math.round(estByproductKg / 50))) : '1',
+        qty: estByproductKg > 0 ? String(Math.round(estByproductKg / 50)) : '1',
         weight: '40',
         total_weight: estByproductKg > 0 ? estByproductKg : 40,
         uom: 'KG',
         rate: '',
         amount: 0,
         qc_status: 'PASS',
-        godown_id: 1,
-        godown_name: 'PJ',
-        remarks: 'External Mill By-product'
+        godown_id: op.from_godown_id || 1,
+        godown_name: op.from_godown_name || 'PJ',
+        remarks: 'Mill By-product Recovery'
       },
       {
-        item_name: 'Grinding Process Loss',
+        item_name: 'Grinding / Milling Loss',
         original_item_name: opItemName,
         original_lot_no: opLotNo,
-        lot_no: '-',
+        lot_no: 'LOSS',
         output_type: 'PROCESS_LOSS',
-        qty: '1',
-        weight: String(estLossKg || 10),
+        qty: '0',
+        weight: '0',
         total_weight: estLossKg > 0 ? estLossKg : 10,
         uom: 'KG',
         rate: '0',
         amount: 0,
         qc_status: 'PASS',
-        godown_id: 1,
-        godown_name: 'PJ',
-        remarks: 'External Processing Loss'
+        godown_id: op.from_godown_id || 1,
+        godown_name: op.from_godown_name || 'PJ',
+        remarks: 'Normal Process Loss'
       }
     ]);
   };
@@ -236,12 +246,33 @@ const InpassCreate = () => {
     const opId = e.target.value;
     if (!opId) {
       setSelectedOutpassData(null);
-      setFormData(prev => ({ ...prev, outpass_id: '', outpass_no: '' }));
+      setFormData(prev => ({
+        ...prev,
+        outpass_id: '',
+        outpass_no: '',
+        party_name: '',
+        vehicle_no: '',
+        driver_name: '',
+        processing_charge_per_kg: '',
+        remarks: ''
+      }));
       return;
     }
-    const matched = pendingOutpasses.find(op => String(op.id) === String(opId));
-    if (matched) {
-      applyOutpassData(matched);
+
+    // Immediately update outpass_id in formData so select field reflects choice instantly
+    setFormData(prev => ({
+      ...prev,
+      outpass_id: opId
+    }));
+
+    const matchedOp = pendingOutpasses.find(op => String(op.id) === String(opId));
+    if (matchedOp) {
+      applyOutpassData(matchedOp);
+      api(`/outpasses/${matchedOp.id}`).then(res => {
+        if (res?.success && res.data) {
+          applyOutpassData(res.data);
+        }
+      }).catch(() => {});
     }
   };
 
@@ -255,21 +286,17 @@ const InpassCreate = () => {
 
   const handleItemChange = (index, field, value) => {
     setItems(prev => {
-      const updated = [...prev];
-      updated[index] = { ...updated[index], [field]: value };
+      const copy = [...prev];
+      const row = { ...copy[index], [field]: value };
 
-      const q = parseFloat(updated[index].qty) || 0;
-      const w = parseFloat(updated[index].weight) || 50;
-      const r = parseFloat(updated[index].rate) || 0;
-
-      if (field === 'total_weight') {
-        updated[index].total_weight = parseFloat(value) || 0;
-      } else {
-        updated[index].total_weight = Number((q * w).toFixed(2));
+      if (field === 'qty' || field === 'weight') {
+        const q = parseFloat(field === 'qty' ? value : row.qty) || 0;
+        const w = parseFloat(field === 'weight' ? value : row.weight) || 50;
+        row.total_weight = q * w;
       }
-      updated[index].amount = Number((q * r).toFixed(2));
 
-      return updated;
+      copy[index] = row;
+      return copy;
     });
   };
 
@@ -278,8 +305,8 @@ const InpassCreate = () => {
       ...prev,
       {
         item_name: '',
-        original_item_name: selectedOutpassData?.items?.[0]?.item_name || '',
-        original_lot_no: selectedOutpassData?.items?.[0]?.lot_no || '',
+        original_item_name: '',
+        original_lot_no: '',
         lot_no: '',
         output_type: 'PROCESSED_OUTPUT',
         qty: '',
@@ -289,8 +316,8 @@ const InpassCreate = () => {
         rate: '',
         amount: 0,
         qc_status: 'PASS',
-        godown_id: 1,
-        godown_name: 'PJ',
+        godown_id: formData.to_godown_id || 1,
+        godown_name: formData.to_godown_name || 'PJ',
         remarks: ''
       }
     ]);
@@ -298,45 +325,52 @@ const InpassCreate = () => {
 
   const removeRow = (index) => {
     if (items.length <= 1) return;
-    setItems(prev => prev.filter((_, i) => i !== index));
+    setItems(prev => prev.filter((_, idx) => idx !== index));
   };
 
-  // Mass Balance & Processing Calculations
+  // Mass Balance Computations
   const inputWeight = selectedOutpassData ? (parseFloat(selectedOutpassData.total_weight) || 0) : 1000;
-
+  
   const outputWeight = items
     .filter(it => it.output_type === 'PROCESSED_OUTPUT')
-    .reduce((s, it) => s + (parseFloat(it.total_weight) || 0), 0);
+    .reduce((sum, it) => sum + (parseFloat(it.total_weight) || 0), 0);
 
   const byproductWeight = items
     .filter(it => it.output_type === 'BYPRODUCT')
-    .reduce((s, it) => s + (parseFloat(it.total_weight) || 0), 0);
+    .reduce((sum, it) => sum + (parseFloat(it.total_weight) || 0), 0);
 
   const lossWeight = items
-    .filter(it => it.output_type === 'PROCESS_LOSS' || it.output_type === 'SHORTAGE' || it.output_type === 'REJECTED')
-    .reduce((s, it) => s + (parseFloat(it.total_weight) || 0), 0);
+    .filter(it => it.output_type === 'PROCESS_LOSS')
+    .reduce((sum, it) => sum + (parseFloat(it.total_weight) || 0), 0);
 
   const totalAccountedWeight = outputWeight + byproductWeight + lossWeight;
-  const discrepancyWeight = Number(Math.max(0, inputWeight - totalAccountedWeight).toFixed(2));
-  const hasDiscrepancy = discrepancyWeight > 1.0; // 1 kg tolerance
+  const discrepancyWeight = Number((inputWeight - totalAccountedWeight).toFixed(2));
+  const hasDiscrepancy = Math.abs(discrepancyWeight) > 0.05;
 
-  const yieldPercent = inputWeight > 0 ? Number(((outputWeight / inputWeight) * 100).toFixed(2)) : 0;
-  const lossPercent = inputWeight > 0 ? Number((((lossWeight + discrepancyWeight) / inputWeight) * 100).toFixed(2)) : 0;
+  const yieldPercent = inputWeight > 0 ? ((outputWeight / inputWeight) * 100).toFixed(2) : '0.00';
+  const lossPercent = inputWeight > 0 ? ((lossWeight / inputWeight) * 100).toFixed(2) : '0.00';
+
+  const totalBags = items.reduce((sum, it) => sum + (parseFloat(it.qty) || 0), 0);
+  const totalReceivedWeight = items.reduce((sum, it) => sum + (parseFloat(it.total_weight) || 0), 0);
 
   const chargeRate = parseFloat(formData.processing_charge_per_kg) || 0;
-  const totalProcessingCharges = Number((outputWeight * chargeRate).toFixed(2));
+  const totalProcessingCharges = chargeRate * outputWeight;
 
   const handleSave = async (andPrint = false) => {
-    const validItems = items.filter(it => it.item_name && (parseFloat(it.total_weight) > 0 || parseFloat(it.qty) > 0));
-    if (validItems.length === 0) {
-      setMessage('Please enter at least one valid output item.');
-      setMessageType('error');
+    if (!formData.outpass_id && !formData.outpass_no) {
+      if (!window.confirm('No linked Outpass selected. Are you sure you want to issue a standalone Inpass?')) {
+        return;
+      }
+    }
+
+    if (hasDiscrepancy && discrepancyWeight > 0 && !formData.discrepancy_reason) {
+      alert(`Mass balance shortfall of ${discrepancyWeight} KG detected!\n\nPlease enter a mandatory discrepancy reason.`);
       return;
     }
 
-    if (hasDiscrepancy && (!formData.discrepancy_reason || formData.discrepancy_reason.trim() === '')) {
-      setMessage(`Mass Balance Alert: There is an unaccounted shortage of ${discrepancyWeight} KG. Please state the discrepancy reason before saving.`);
-      setMessageType('error');
+    const validItems = items.filter(it => it.item_name && (parseFloat(it.qty) > 0 || parseFloat(it.total_weight) > 0));
+    if (validItems.length === 0) {
+      alert('Please enter at least one received item row with quantity / weight.');
       return;
     }
 
@@ -351,9 +385,10 @@ const InpassCreate = () => {
           output_weight: outputWeight,
           byproduct_weight: byproductWeight,
           loss_weight: lossWeight,
+          total_weight: totalReceivedWeight,
+          total_qty: totalBags,
           discrepancy_weight: discrepancyWeight,
           yield_percent: yieldPercent,
-          loss_percent: lossPercent,
           total_processing_charges: totalProcessingCharges
         },
         items: validItems
@@ -365,26 +400,28 @@ const InpassCreate = () => {
       });
 
       if (res && res.success) {
-        setMessage(res.message || 'Inpass recorded and processed material received into factory stock successfully!');
+        setMessage(res.message || 'Inpass created & stock received successfully!');
         setMessageType('success');
 
+        const savedInpass = {
+          ...payload.formData,
+          inpass_no: res.data?.inpass_no || formData.inpass_no,
+          items: validItems
+        };
+
         if (andPrint) {
-          triggerPrintReceiptNote({
-            ...payload.formData,
-            inpass_no: res.data?.inpass_no || formData.inpass_no,
-            items: validItems
-          });
+          printInpassDocument(savedInpass, 'ORIGINAL STORE COPY');
         }
 
         setTimeout(() => {
           navigate('/entry/inpass-display');
         }, 1200);
       } else {
-        setMessage(res?.message || 'Error recording inpass');
+        setMessage(res?.message || 'Error saving Inpass');
         setMessageType('error');
       }
     } catch (err) {
-      console.error('Error recording inpass:', err);
+      console.error('Error creating inpass:', err);
       setMessage('Error: ' + err.message);
       setMessageType('error');
     } finally {
@@ -392,336 +429,404 @@ const InpassCreate = () => {
     }
   };
 
-  const triggerPrintReceiptNote = (data) => {
-    const rowsHtml = (data.items || []).map((it, idx) => `
-      <tr>
-        <td style="border: 1px solid #cbd5e1; padding: 8px; text-align: center;">${idx + 1}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 8px; font-weight: bold; color: #1e293b;">${it.item_name}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 8px; font-size: 11px; text-transform: uppercase;">${it.output_type}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 8px; font-family: monospace;">${it.lot_no || '-'}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 8px; text-align: right; font-weight: bold;">${it.qty || 0}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 8px; text-align: right; font-weight: bold; color: #047857;">${(parseFloat(it.total_weight) || 0).toFixed(2)} kg</td>
-        <td style="border: 1px solid #cbd5e1; padding: 8px; text-align: center;"><span style="color: #047857; font-weight: bold;">${it.qc_status || 'PASS'}</span></td>
-      </tr>
-    `).join('');
-
-    const html = `
-      <div style="font-family: Arial, sans-serif; padding: 20px; color: #1e293b; max-width: 850px; margin: 0 auto;">
-        <div style="text-align: center; border-bottom: 2px solid #047857; padding-bottom: 12px; margin-bottom: 15px;">
-          <h1 style="margin: 0; color: #047857; font-size: 24px; text-transform: uppercase;">BHARANI VEL CHEMICALS / BVC AGRO</h1>
-          <p style="margin: 3px 0; font-size: 13px; color: #475569;">Factory Inward Goods Receipt • External Mill Return System</p>
-          <div style="display: inline-block; background: #047857; color: #ffffff; padding: 4px 18px; border-radius: 4px; font-weight: bold; font-size: 14px; margin-top: 6px; letter-spacing: 1px;">
-            MATERIAL INPASS / PROCESSED GOODS INWARD NOTE
-          </div>
-        </div>
-
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px; font-size: 13px;">
-          <div>
-            <p style="margin: 3px 0;"><strong>Inpass No:</strong> <span style="font-family: monospace; font-size: 15px; font-weight: bold; color: #047857;">${data.inpass_no}</span></p>
-            <p style="margin: 3px 0;"><strong>Date:</strong> ${data.date}</p>
-            <p style="margin: 3px 0;"><strong>Ref Outpass:</strong> <span style="font-family: monospace; font-weight: bold; color: #2563eb;">${data.outpass_no || 'N/A'}</span></p>
-            <p style="margin: 3px 0;"><strong>Ref Module:</strong> ${data.reference_type} (${data.reference_no || 'N/A'})</p>
-          </div>
-          <div>
-            <p style="margin: 3px 0;"><strong>External Mill / Party:</strong> <strong>${data.party_name}</strong></p>
-            <p style="margin: 3px 0;"><strong>Vehicle No:</strong> <span style="font-family: monospace; font-weight: bold;">${data.vehicle_no || 'N/A'}</span></p>
-            <p style="margin: 3px 0;"><strong>Received By:</strong> ${data.received_by || 'Admin'}</p>
-            <p style="margin: 3px 0;"><strong>Receiving Godown:</strong> ${data.to_godown_name || 'PJ Main Godown'}</p>
-          </div>
-        </div>
-
-        <!-- Mass Balance Summary Box -->
-        <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 12px; margin-bottom: 15px; font-size: 12px;">
-          <h4 style="margin: 0 0 8px 0; color: #065f46; font-size: 13px; text-transform: uppercase;">Mass-Balance & Yield Verification</h4>
-          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;">
-            <div><span style="color: #64748b;">Dispatched Input:</span> <strong style="display: block; font-size: 14px;">${inputWeight.toFixed(2)} kg</strong></div>
-            <div><span style="color: #64748b;">Processed FG:</span> <strong style="display: block; font-size: 14px; color: #047857;">${outputWeight.toFixed(2)} kg</strong></div>
-            <div><span style="color: #64748b;">By-product:</span> <strong style="display: block; font-size: 14px; color: #2563eb;">${byproductWeight.toFixed(2)} kg</strong></div>
-            <div><span style="color: #64748b;">Yield Ratio:</span> <strong style="display: block; font-size: 14px; color: #047857;">${yieldPercent}%</strong></div>
-          </div>
-          ${discrepancyWeight > 0 ? `
-            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px dashed #cbd5e1; color: #b91c1c;">
-              <strong>Unaccounted Shortage:</strong> ${discrepancyWeight} kg — <em>Reason: ${data.discrepancy_reason || 'N/A'}</em>
-            </div>
-          ` : ''}
-        </div>
-
-        <table style="width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 15px;">
-          <thead>
-            <tr style="background: #047857; color: #ffffff;">
-              <th style="border: 1px solid #cbd5e1; padding: 8px; width: 40px;">S.No</th>
-              <th style="border: 1px solid #cbd5e1; padding: 8px; text-align: left;">Received Material</th>
-              <th style="border: 1px solid #cbd5e1; padding: 8px; text-align: left;">Output Category</th>
-              <th style="border: 1px solid #cbd5e1; padding: 8px; text-align: left;">Allocated Lot</th>
-              <th style="border: 1px solid #cbd5e1; padding: 8px; text-align: right; width: 60px;">Bags</th>
-              <th style="border: 1px solid #cbd5e1; padding: 8px; text-align: right; width: 100px;">Weight (kg)</th>
-              <th style="border: 1px solid #cbd5e1; padding: 8px; text-align: center; width: 70px;">QC Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rowsHtml}
-          </tbody>
-        </table>
-
-        ${totalProcessingCharges > 0 ? `
-          <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; padding: 10px; margin-bottom: 15px; font-size: 12px; display: flex; justify-content: space-between;">
-            <span><strong>Processing Fee Rate:</strong> ₹${chargeRate}/kg</span>
-            <span><strong>Total Processing Charges Payable:</strong> ₹${totalProcessingCharges.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-          </div>
-        ` : ''}
-
-        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; text-align: center; font-size: 11px; margin-top: 40px;">
-          <div style="border-top: 1px solid #64748b; padding-top: 5px;">Security Gate Inward</div>
-          <div style="border-top: 1px solid #64748b; padding-top: 5px;">QC Verification Officer</div>
-          <div style="border-top: 1px solid #64748b; padding-top: 5px;">Godown In-Charge Receipt</div>
-        </div>
-      </div>
-    `;
-
-    printHtml(html);
-  };
-
   return (
-    <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-6 bg-slate-50 min-h-screen">
-      {/* Top Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-        <div className="flex items-center gap-3">
+    <div style={{ padding: '16px', background: '#f0f6ff', minHeight: '100vh', fontFamily: "'Segoe UI', Tahoma, Arial, sans-serif" }}>
+      <style>{`
+        .inpass-grid-4 {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 16px;
+          align-items: start;
+        }
+        @media (max-width: 1024px) {
+          .inpass-grid-4 {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+        }
+        @media (max-width: 640px) {
+          .inpass-grid-4 {
+            grid-template-columns: 1fr;
+          }
+        }
+        .inpass-field {
+          display: flex;
+          flex-direction: column;
+          min-width: 0;
+        }
+        .inpass-label {
+          display: block;
+          font-size: 12px;
+          font-weight: 600;
+          color: #334155;
+          margin-bottom: 6px;
+          height: 18px;
+          line-height: 18px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .inpass-input, .inpass-select {
+          box-sizing: border-box !important;
+          width: 100% !important;
+          height: 38px !important;
+          padding: 8px 12px !important;
+          border: 1px solid #cbd5e1 !important;
+          border-radius: 6px !important;
+          font-size: 13px !important;
+          line-height: 1.4 !important;
+          background-color: #ffffff !important;
+          color: #0f172a !important;
+          outline: none;
+          transition: border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+        .inpass-input:focus, .inpass-select:focus {
+          border-color: #059669 !important;
+          box-shadow: 0 0 0 2px rgba(5, 150, 105, 0.15) !important;
+        }
+        .col-span-1 { grid-column: span 1; }
+        .col-span-2 { grid-column: span 2; }
+        .col-span-3 { grid-column: span 3; }
+        .col-span-4 { grid-column: span 4; }
+        @media (max-width: 1024px) {
+          .col-span-3, .col-span-4 { grid-column: span 2; }
+        }
+        @media (max-width: 640px) {
+          .col-span-1, .col-span-2, .col-span-3, .col-span-4 { grid-column: span 1; }
+        }
+      `}</style>
+      
+      {/* Screen Title Header */}
+      <div className="screen-title" style={{
+        background: 'linear-gradient(135deg, #059669 0%, #1f4fb2 100%)',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: '10px',
+        padding: '12px 18px',
+        borderRadius: '6px',
+        marginBottom: '16px'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <button
             type="button"
             onClick={() => navigate('/entry/inpass-display')}
-            className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition"
-            title="Back to Inpass List"
+            style={{ background: 'transparent', border: 'none', color: '#ffffff', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+            title="Back to Inpass Register"
           >
-            <ArrowBackIcon />
+            <ArrowBackIcon style={{ fontSize: '22px' }} />
           </button>
-          <div>
-            <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-              <CallReceivedIcon className="text-emerald-600" />
-              Receive Material Gate Inpass
-            </h1>
-            <p className="text-xs text-slate-500">
-              Receive processed goods from external mill, validate mass-balance, and credit factory stock
-            </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#ffffff' }}>
+            <CallReceivedIcon style={{ fontSize: '24px' }} />
+            <span style={{ fontSize: '18px', fontWeight: 'bold' }}>Receive Material Gate Inpass (Processed Goods Note)</span>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto">
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
           <button
             type="button"
+            className="action-btn"
+            style={{ backgroundColor: '#ffffff', color: '#059669', fontWeight: 'bold', padding: '7px 14px', borderRadius: '4px', border: 'none', cursor: 'pointer' }}
             onClick={() => navigate('/entry/inpass-display')}
-            className="px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition"
           >
             Inpass Register
           </button>
           <button
             type="button"
+            className="action-btn"
+            style={{ backgroundColor: '#0288d1', color: '#ffffff', fontWeight: 'bold', padding: '7px 16px', borderRadius: '4px', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}
             onClick={() => handleSave(true)}
             disabled={loading}
-            className="px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm flex items-center gap-1.5 transition disabled:opacity-50"
           >
-            <PrintIcon fontSize="small" /> Save & Print Goods Note
+            <PrintIcon style={{ fontSize: '16px', marginRight: '5px' }} /> Save & Print Goods Note
           </button>
           <button
             type="button"
+            className="action-btn"
+            style={{ backgroundColor: '#059669', color: '#ffffff', fontWeight: 'bold', padding: '7px 18px', borderRadius: '4px', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}
             onClick={() => handleSave(false)}
             disabled={loading}
-            className="px-4 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm flex items-center gap-1.5 transition disabled:opacity-50"
           >
-            <SaveIcon fontSize="small" /> Receive Into Stock
+            <SaveIcon style={{ fontSize: '16px', marginRight: '5px' }} /> Receive Into Stock
           </button>
         </div>
       </div>
 
+      {/* Alert Banner */}
       {message && (
-        <div className={`p-4 rounded-lg text-sm font-medium ${
-          messageType === 'success' ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'
-        }`}>
+        <div style={{
+          padding: '12px 16px',
+          marginBottom: '16px',
+          borderRadius: '4px',
+          fontWeight: 600,
+          fontSize: '13px',
+          backgroundColor: messageType === 'success' ? '#dcfce7' : '#fee2e2',
+          color: messageType === 'success' ? '#166534' : '#991b1b',
+          border: `1px solid ${messageType === 'success' ? '#86efac' : '#fca5a5'}`
+        }}>
           {message}
         </div>
       )}
 
-      {/* Mass-Balance Validation Card */}
-      <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 space-y-4">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b pb-3">
-          <div className="flex items-center gap-2">
-            <FactCheckIcon className="text-blue-600" />
-            <h2 className="text-sm font-bold text-slate-800 uppercase tracking-wide">
-              Mass-Balance & Processing Validation
-            </h2>
+      {/* Mass-Balance KPI Audit Dashboard */}
+      <div style={{
+        background: '#ffffff',
+        border: '1px solid #cbd5e1',
+        borderRadius: '6px',
+        padding: '16px',
+        marginBottom: '16px',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.06)'
+      }}>
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          borderBottom: '2px solid #059669',
+          paddingBottom: '8px',
+          marginBottom: '14px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#059669', fontWeight: 'bold', fontSize: '14px', textTransform: 'uppercase' }}>
+            <FactCheckIcon style={{ fontSize: '20px' }} />
+            <span>1. Mass-Balance & Processing Yield Audit</span>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-slate-500">Yield %:</span>
-            <span className="px-2 py-0.5 rounded-full text-xs font-extrabold bg-emerald-100 text-emerald-800">
-              {yieldPercent}%
-            </span>
-            <span className="text-xs font-semibold text-slate-500 ml-2">Loss %:</span>
-            <span className="px-2 py-0.5 rounded-full text-xs font-extrabold bg-amber-100 text-amber-800">
-              {lossPercent}%
-            </span>
+          <div style={{ display: 'flex', gap: '12px', fontSize: '12px' }}>
+            <span>Milling Recovery Yield: <strong style={{ color: '#059669', fontSize: '14px' }}>{yieldPercent}%</strong></span>
+            <span>Grinding Loss: <strong style={{ color: '#b45309', fontSize: '14px' }}>{lossPercent}%</strong></span>
           </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs">
-          <div className="bg-slate-50 border rounded-lg p-3">
-            <span className="text-slate-500 block">Outpass Dispatched RM</span>
-            <span className="text-lg font-extrabold text-slate-800 mt-0.5 block">{inputWeight.toFixed(2)} KG</span>
-            <span className="text-[11px] text-slate-400">100% Dispatched</span>
+        {/* 5 Tiles KPI Grid */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+          gap: '12px',
+          fontSize: '12px'
+        }}>
+          <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '4px', padding: '10px' }}>
+            <span style={{ color: '#64748b', fontWeight: 600, display: 'block' }}>Dispatched Outpass RM</span>
+            <span style={{ fontSize: '18px', fontWeight: 'bold', color: '#1e3a8a', marginTop: '2px', display: 'block' }}>
+              {inputWeight.toFixed(2)} <span style={{ fontSize: '12px' }}>KG</span>
+            </span>
+            <span style={{ fontSize: '11px', color: '#64748b' }}>100.00% Dispatched</span>
           </div>
 
-          <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
-            <span className="text-emerald-700 block font-medium">Processed Output FG</span>
-            <span className="text-lg font-extrabold text-emerald-900 mt-0.5 block">{outputWeight.toFixed(2)} KG</span>
-            <span className="text-[11px] text-emerald-600 font-semibold">{yieldPercent}% Recovery</span>
+          <div style={{ background: '#f0fdf4', border: '1px solid #86efac', borderRadius: '4px', padding: '10px' }}>
+            <span style={{ color: '#166534', fontWeight: 600, display: 'block' }}>Processed Output FG</span>
+            <span style={{ fontSize: '18px', fontWeight: 'bold', color: '#15803d', marginTop: '2px', display: 'block' }}>
+              {outputWeight.toFixed(2)} <span style={{ fontSize: '12px' }}>KG</span>
+            </span>
+            <span style={{ fontSize: '11px', color: '#15803d', fontWeight: 'bold' }}>{yieldPercent}% FG Recovery</span>
           </div>
 
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-            <span className="text-blue-700 block font-medium">By-product Received</span>
-            <span className="text-lg font-extrabold text-blue-900 mt-0.5 block">{byproductWeight.toFixed(2)} KG</span>
-            <span className="text-[11px] text-blue-600 font-semibold">Broken / Bran</span>
+          <div style={{ background: '#f0f9ff', border: '1px solid #7dd3fc', borderRadius: '4px', padding: '10px' }}>
+            <span style={{ color: '#0369a1', fontWeight: 600, display: 'block' }}>By-product Received</span>
+            <span style={{ fontSize: '18px', fontWeight: 'bold', color: '#0288d1', marginTop: '2px', display: 'block' }}>
+              {byproductWeight.toFixed(2)} <span style={{ fontSize: '12px' }}>KG</span>
+            </span>
+            <span style={{ fontSize: '11px', color: '#0288d1' }}>Broken / Bran / Husk</span>
           </div>
 
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-            <span className="text-amber-700 block font-medium">Process Loss Accounted</span>
-            <span className="text-lg font-extrabold text-amber-900 mt-0.5 block">{lossWeight.toFixed(2)} KG</span>
-            <span className="text-[11px] text-amber-600 font-semibold">Grinding loss</span>
+          <div style={{ background: '#fffbebfb', border: '1px solid #fde68a', borderRadius: '4px', padding: '10px' }}>
+            <span style={{ color: '#b45309', fontWeight: 600, display: 'block' }}>Process Loss Accounted</span>
+            <span style={{ fontSize: '18px', fontWeight: 'bold', color: '#d97706', marginTop: '2px', display: 'block' }}>
+              {lossWeight.toFixed(2)} <span style={{ fontSize: '12px' }}>KG</span>
+            </span>
+            <span style={{ fontSize: '11px', color: '#b45309' }}>Normal Grinding Loss</span>
           </div>
 
-          <div className={`p-3 rounded-lg border ${
-            hasDiscrepancy
-              ? 'bg-rose-50 border-rose-300 text-rose-900'
-              : 'bg-emerald-50 border-emerald-200 text-emerald-900'
-          }`}>
-            <span className="block font-medium">
+          <div style={{
+            background: hasDiscrepancy ? '#fef2f2' : '#f0fdf4',
+            border: `1px solid ${hasDiscrepancy ? '#fca5a5' : '#86efac'}`,
+            borderRadius: '4px',
+            padding: '10px'
+          }}>
+            <span style={{ color: hasDiscrepancy ? '#991b1b' : '#166534', fontWeight: 600, display: 'block' }}>
               {hasDiscrepancy ? 'Mass Discrepancy' : 'Balance Status'}
             </span>
-            <span className="text-lg font-extrabold mt-0.5 block">
-              {hasDiscrepancy ? `${discrepancyWeight} KG` : 'Balanced'}
+            <span style={{ fontSize: '18px', fontWeight: 'bold', color: hasDiscrepancy ? '#dc2626' : '#15803d', marginTop: '2px', display: 'block' }}>
+              {hasDiscrepancy ? `${discrepancyWeight} KG` : '✓ Balanced'}
             </span>
-            <span className="text-[11px] font-semibold">
+            <span style={{ fontSize: '11px', color: hasDiscrepancy ? '#b91c1c' : '#166534', fontWeight: 600 }}>
               {hasDiscrepancy ? 'Unaccounted Shortage' : 'Input = Output + Loss'}
             </span>
           </div>
         </div>
 
+        {/* Shortage Discrepancy Warning Box */}
         {hasDiscrepancy && (
-          <div className="bg-rose-50 border border-rose-300 rounded-lg p-3 flex items-start gap-3 text-xs text-rose-900">
-            <WarningAmberIcon className="text-rose-600 mt-0.5 flex-shrink-0" fontSize="small" />
-            <div className="flex-1 space-y-1">
-              <span className="font-bold">Mass-Balance Discrepancy Warning ({discrepancyWeight} KG):</span>
-              <p>
-                The returned material ({totalAccountedWeight.toFixed(2)} KG) is less than the outpassed input ({inputWeight.toFixed(2)} KG).
-                A mandatory discrepancy reason / mill explanation is required.
+          <div style={{
+            marginTop: '14px',
+            backgroundColor: '#fef2f2',
+            border: '1px solid #fca5a5',
+            borderRadius: '4px',
+            padding: '12px 14px',
+            color: '#991b1b',
+            fontSize: '12px',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '10px'
+          }}>
+            <WarningAmberIcon style={{ color: '#dc2626', fontSize: '20px', flexShrink: 0 }} />
+            <div style={{ flex: 1 }}>
+              <strong style={{ fontSize: '13px' }}>Mass-Balance Discrepancy Warning ({discrepancyWeight} KG Shortage):</strong>
+              <p style={{ margin: '3px 0 8px 0' }}>
+                Total returned weight ({totalAccountedWeight.toFixed(2)} KG) is less than the outpassed input ({inputWeight.toFixed(2)} KG).
+                A mandatory discrepancy reason / mill explanation is required for approval.
               </p>
-              <div className="pt-1">
-                <input
-                  type="text"
-                  name="discrepancy_reason"
-                  value={formData.discrepancy_reason}
-                  onChange={handleFormChange}
-                  placeholder="Enter reason for shortage (e.g. Excessive moisture loss, transit dust loss, or mill spill)"
-                  className="w-full px-3 py-1.5 border border-rose-300 rounded bg-white font-medium text-rose-900 focus:outline-rose-500"
-                />
-              </div>
+              <input
+                type="text"
+                name="discrepancy_reason"
+                value={formData.discrepancy_reason}
+                onChange={handleFormChange}
+                placeholder="Enter mandatory reason for shortage (e.g. Excessive moisture loss, transit dust loss, or mill spill)"
+                className="inpass-input"
+                style={{
+                  border: '1.5px solid #dc2626 !important',
+                  backgroundColor: '#ffffff !important',
+                  fontWeight: 'bold',
+                  color: '#991b1b !important'
+                }}
+              />
             </div>
           </div>
         )}
       </div>
 
-      {/* Inpass Header Form */}
-      <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 space-y-4">
-        <h2 className="text-sm font-bold text-slate-800 uppercase tracking-wide border-b pb-2">
-          Receipt Details & Outpass Link
-        </h2>
+      {/* Receipt Details Card - Clean 4-Column Aligned Grid */}
+      <div style={{
+        background: '#ffffff',
+        border: '1px solid #cbd5e1',
+        borderRadius: '6px',
+        padding: '16px',
+        marginBottom: '16px',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.06)'
+      }}>
+        <div style={{
+          fontSize: '14px',
+          fontWeight: 'bold',
+          color: '#059669',
+          borderBottom: '2px solid #059669',
+          paddingBottom: '8px',
+          marginBottom: '16px',
+          textTransform: 'uppercase',
+          letterSpacing: '0.5px'
+        }}>
+          2. Receipt Details & Linked Outpass Information
+        </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-xs">
-          <div>
-            <label className="block font-semibold text-slate-700 mb-1">Inpass No</label>
+        <div className="inpass-grid-4">
+          {/* Row 1 */}
+          <div className="inpass-field col-span-1">
+            <label className="inpass-label">Inpass No</label>
             <input
               type="text"
               name="inpass_no"
               value={formData.inpass_no}
               onChange={handleFormChange}
               placeholder="IP-00001"
-              className="w-full px-3 py-2 border rounded-lg bg-slate-50 font-mono font-bold text-emerald-700 focus:outline-emerald-500"
+              className="inpass-input"
+              style={{
+                backgroundColor: '#f8fafc !important',
+                fontFamily: 'monospace',
+                fontWeight: 'bold',
+                color: '#059669 !important'
+              }}
             />
           </div>
 
-          <div>
-            <label className="block font-semibold text-slate-700 mb-1">Receipt Date *</label>
+          <div className="inpass-field col-span-1">
+            <label className="inpass-label">Receipt Date *</label>
             <input
               type="date"
               name="date"
               value={formData.date}
               onChange={handleFormChange}
-              className="w-full px-3 py-2 border rounded-lg focus:outline-emerald-500"
+              className="inpass-input"
             />
           </div>
 
-          <div className="sm:col-span-2">
-            <label className="block font-semibold text-slate-700 mb-1">Reference Outpass *</label>
+          <div className="inpass-field col-span-2">
+            <label className="inpass-label" style={{ color: '#1e3a8a' }}>Reference Dispatched Outpass *</label>
             <select
-              value={formData.outpass_id}
+              value={String(formData.outpass_id || '')}
               onChange={handleOutpassSelect}
-              className="w-full px-3 py-2 border rounded-lg bg-white font-bold text-blue-800 focus:outline-emerald-500"
+              className="inpass-select"
+              style={{
+                border: '1.5px solid #1f4fb2 !important',
+                backgroundColor: '#f0f4ff !important',
+                fontWeight: 'bold',
+                color: '#1e3a8a !important'
+              }}
             >
               <option value="">-- Select Dispatched Outpass --</option>
               {pendingOutpasses.map(op => (
-                <option key={op.id} value={op.id}>
+                <option key={op.id} value={String(op.id)}>
                   {op.outpass_no} • {op.party_name} ({op.total_weight} KG, Pending: {op.pending_weight || op.total_weight} KG)
                 </option>
               ))}
             </select>
           </div>
 
-          <div>
-            <label className="block font-semibold text-slate-700 mb-1">External Mill / Party</label>
+          {/* Row 2 */}
+          <div className="inpass-field col-span-1">
+            <label className="inpass-label">External Mill / Party</label>
             <input
               type="text"
               name="party_name"
               value={formData.party_name}
               onChange={handleFormChange}
               placeholder="External Mill Name"
-              className="w-full px-3 py-2 border rounded-lg bg-slate-50 font-semibold text-slate-800"
+              className="inpass-input"
+              style={{
+                backgroundColor: '#f8fafc !important',
+                fontWeight: 'bold',
+                color: '#0f172a !important'
+              }}
             />
           </div>
 
-          <div>
-            <label className="block font-semibold text-slate-700 mb-1">Receiving Godown</label>
+          <div className="inpass-field col-span-1">
+            <label className="inpass-label">Receiving Godown</label>
             <select
               name="to_godown_id"
-              value={formData.to_godown_id}
+              value={String(formData.to_godown_id || '1')}
               onChange={(e) => {
-                const sel = godownsList.find(g => String(g.id) === e.target.value);
+                const gId = e.target.value;
+                const sel = availableGodowns.find(g => String(g.id) === String(gId));
                 setFormData(prev => ({
                   ...prev,
-                  to_godown_id: e.target.value,
-                  to_godown_name: sel ? sel.godown_name : prev.to_godown_name
+                  to_godown_id: gId,
+                  to_godown_name: sel ? (sel.print_name || sel.godown_name) : prev.to_godown_name
                 }));
               }}
-              className="w-full px-3 py-2 border rounded-lg bg-white focus:outline-emerald-500"
+              className="inpass-select"
             >
-              <option value="1">PJ Main Factory Godown</option>
-              <option value="2">Cold Storage Godown</option>
-              {godownsList.map(g => (
-                <option key={g.id} value={g.id}>{g.godown_name}</option>
+              {availableGodowns.map(g => (
+                <option key={g.id} value={String(g.id)}>
+                  {g.print_name || g.godown_name}
+                </option>
               ))}
             </select>
           </div>
 
-          <div>
-            <label className="block font-semibold text-slate-700 mb-1">Vehicle No</label>
+          <div className="inpass-field col-span-1">
+            <label className="inpass-label">Inward Vehicle No</label>
             <input
               type="text"
               name="vehicle_no"
               value={formData.vehicle_no}
               onChange={handleFormChange}
               placeholder="TN-01-AB-1234"
-              className="w-full px-3 py-2 border rounded-lg font-mono focus:outline-emerald-500"
+              className="inpass-input"
+              style={{
+                fontFamily: 'monospace',
+                fontWeight: 'bold'
+              }}
             />
           </div>
 
-          <div>
-            <label className="block font-semibold text-slate-700 mb-1">Processing Rate (₹ / KG)</label>
+          <div className="inpass-field col-span-1">
+            <label className="inpass-label">Processing Rate (₹ / KG)</label>
             <input
               type="number"
               step="0.01"
@@ -729,174 +834,309 @@ const InpassCreate = () => {
               value={formData.processing_charge_per_kg}
               onChange={handleFormChange}
               placeholder="e.g. 3.00"
-              className="w-full px-3 py-2 border rounded-lg font-bold text-indigo-700 focus:outline-emerald-500"
+              className="inpass-input"
+              style={{
+                fontWeight: 'bold',
+                color: '#059669 !important'
+              }}
             />
           </div>
 
-          <div className="sm:col-span-3">
-            <label className="block font-semibold text-slate-700 mb-1">Remarks / Note</label>
+          {/* Row 3 */}
+          <div className="inpass-field col-span-3">
+            <label className="inpass-label">Inward Remarks / Quality Notes</label>
             <input
               type="text"
               name="remarks"
               value={formData.remarks}
               onChange={handleFormChange}
-              placeholder="Notes on return condition, packing, or test result"
-              className="w-full px-3 py-2 border rounded-lg focus:outline-emerald-500"
+              placeholder="Notes on return condition, packing, or moisture test result"
+              className="inpass-input"
             />
           </div>
 
-          <div className="flex items-center gap-2 pt-5">
-            <input
-              type="checkbox"
-              id="qc_required"
-              name="qc_required"
-              checked={formData.qc_required}
-              onChange={handleFormChange}
-              className="w-4 h-4 text-emerald-600 rounded"
-            />
-            <label htmlFor="qc_required" className="font-semibold text-slate-800">
-              QC Inspection Required
+          <div className="inpass-field col-span-1">
+            <label className="inpass-label" style={{ color: '#059669' }}>Quality Check</label>
+            <label style={{
+              boxSizing: 'border-box',
+              width: '100%',
+              height: '38px',
+              padding: '0 12px',
+              border: '1px solid #a7f3d0',
+              borderRadius: '6px',
+              backgroundColor: '#f0fdf4',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              cursor: 'pointer',
+              margin: 0
+            }}>
+              <input
+                type="checkbox"
+                id="qc_required"
+                name="qc_required"
+                checked={formData.qc_required}
+                onChange={handleFormChange}
+                style={{ width: '16px', height: '16px', accentColor: '#059669', cursor: 'pointer', margin: 0 }}
+              />
+              <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#166534', whiteSpace: 'nowrap' }}>
+                QC Inspection Required
+              </span>
             </label>
           </div>
         </div>
       </div>
 
-      {/* Received Items Table */}
-      <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 space-y-4">
-        <div className="flex justify-between items-center border-b pb-2">
-          <h2 className="text-sm font-bold text-slate-800 uppercase tracking-wide">
-            Received Output, By-Products & Loss Breakdown
-          </h2>
+      {/* Received Output Breakdown Table */}
+      <div style={{
+        background: '#ffffff',
+        border: '1px solid #cbd5e1',
+        borderRadius: '6px',
+        padding: '16px',
+        marginBottom: '16px',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.06)'
+      }}>
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          borderBottom: '2px solid #059669',
+          paddingBottom: '8px',
+          marginBottom: '16px'
+        }}>
+          <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#059669', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            3. Received Output, By-Products & Loss Breakdown
+          </span>
           <button
             type="button"
             onClick={addRow}
-            className="text-xs px-2.5 py-1.5 font-semibold text-emerald-600 bg-emerald-50 hover:bg-emerald-100 rounded-lg flex items-center gap-1 transition"
+            style={{
+              padding: '6px 14px',
+              fontSize: '12px',
+              fontWeight: 'bold',
+              backgroundColor: '#ecfdf5',
+              color: '#059669',
+              border: '1px solid #a7f3d0',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px'
+            }}
           >
-            <AddCircleOutlineIcon fontSize="small" /> Add Output Row
+            <AddCircleOutlineIcon style={{ fontSize: '16px' }} /> Add Output Row
           </button>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs">
+        {/* Table Container */}
+        <div style={{ overflowX: 'auto', marginBottom: '16px' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
             <thead>
-              <tr className="bg-slate-100 text-slate-700 font-semibold border-b">
-                <th className="p-2.5 w-10 text-center">#</th>
-                <th className="p-2.5 min-w-[200px]">Item Description *</th>
-                <th className="p-2.5 min-w-[170px]">Output Classification *</th>
-                <th className="p-2.5 min-w-[120px]">Allocated Lot No</th>
-                <th className="p-2.5 w-24 text-right">Quantity (Bags)</th>
-                <th className="p-2.5 w-24 text-right">Unit Wt (kg)</th>
-                <th className="p-2.5 w-28 text-right">Total Wt (kg)</th>
-                <th className="p-2.5 w-24 text-center">QC Status</th>
-                <th className="p-2.5 min-w-[120px]">Godown</th>
-                <th className="p-2.5 w-12 text-center">Action</th>
+              <tr style={{ background: '#059669', color: '#ffffff' }}>
+                <th style={{ border: '1px solid #cbd5e1', padding: '8px', width: '40px', textAlign: 'center' }}>#</th>
+                <th style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'left', minWidth: '180px' }}>Item Description *</th>
+                <th style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'left', width: '180px' }}>Output Classification *</th>
+                <th style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'left', width: '140px' }}>Allocated Lot No</th>
+                <th style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'right', width: '100px' }}>Bags (Qty)</th>
+                <th style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'right', width: '90px' }}>Unit Wt (kg)</th>
+                <th style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'right', width: '120px' }}>Total Weight</th>
+                <th style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'center', width: '95px' }}>QC Status</th>
+                <th style={{ border: '1px solid #cbd5e1', padding: '8px', textAlign: 'left', width: '150px' }}>Stock Godown</th>
+                <th style={{ border: '1px solid #cbd5e1', padding: '8px', width: '50px', textAlign: 'center' }}>Action</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-200">
+            <tbody>
               {items.map((row, idx) => (
-                <tr key={idx} className="hover:bg-slate-50 transition">
-                  <td className="p-2.5 text-center font-medium text-slate-400">{idx + 1}</td>
-                  <td className="p-2.5">
+                <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#ffffff' : '#f8fafc' }}>
+                  <td style={{ border: '1px solid #cbd5e1', padding: '6px', textAlign: 'center', fontWeight: 'bold', color: '#64748b' }}>
+                    {idx + 1}
+                  </td>
+                  <td style={{ border: '1px solid #cbd5e1', padding: '6px' }}>
                     <input
                       type="text"
                       list={`inpass-items-${idx}`}
                       value={row.item_name}
                       onChange={(e) => handleItemChange(idx, 'item_name', e.target.value)}
                       placeholder="e.g. Processed Flour"
-                      className="w-full px-2 py-1.5 border rounded focus:outline-emerald-500 font-semibold text-slate-800"
+                      style={{
+                        boxSizing: 'border-box',
+                        width: '100%',
+                        height: '32px',
+                        padding: '5px 8px',
+                        border: '1px solid #cbd5e1',
+                        borderRadius: '4px',
+                        fontWeight: 'bold',
+                        color: '#0f172a'
+                      }}
                     />
                     <datalist id={`inpass-items-${idx}`}>
                       {itemsMasterList.map((m, i) => (
-                        <option key={i} value={m.item_name} />
+                        <option key={i} value={m.item_name || m.name} />
                       ))}
                     </datalist>
                   </td>
-                  <td className="p-2.5">
+                  <td style={{ border: '1px solid #cbd5e1', padding: '6px' }}>
                     <select
                       value={row.output_type}
                       onChange={(e) => handleItemChange(idx, 'output_type', e.target.value)}
-                      className="w-full px-2 py-1.5 border rounded bg-white font-semibold text-slate-700 focus:outline-emerald-500"
+                      style={{
+                        boxSizing: 'border-box',
+                        width: '100%',
+                        height: '32px',
+                        padding: '4px 6px',
+                        border: '1px solid #cbd5e1',
+                        borderRadius: '4px',
+                        fontWeight: 'bold',
+                        color: OUTPUT_TYPES.find(o => o.value === row.output_type)?.color || '#0f172a'
+                      }}
                     >
                       {OUTPUT_TYPES.map(ot => (
                         <option key={ot.value} value={ot.value}>{ot.label}</option>
                       ))}
                     </select>
                   </td>
-                  <td className="p-2.5">
+                  <td style={{ border: '1px solid #cbd5e1', padding: '6px' }}>
                     <input
                       type="text"
                       value={row.lot_no}
                       onChange={(e) => handleItemChange(idx, 'lot_no', e.target.value)}
                       placeholder="Auto-Allocated"
-                      className="w-full px-2 py-1.5 border rounded font-mono focus:outline-emerald-500"
+                      style={{
+                        boxSizing: 'border-box',
+                        width: '100%',
+                        height: '32px',
+                        padding: '5px 8px',
+                        border: '1px solid #cbd5e1',
+                        borderRadius: '4px',
+                        fontFamily: 'monospace',
+                        fontWeight: 'bold'
+                      }}
                     />
                   </td>
-                  <td className="p-2.5 text-right">
+                  <td style={{ border: '1px solid #cbd5e1', padding: '6px' }}>
                     <input
                       type="number"
                       step="any"
                       value={row.qty}
                       onChange={(e) => handleItemChange(idx, 'qty', e.target.value)}
                       placeholder="0"
-                      className="w-full px-2 py-1.5 border rounded text-right font-bold focus:outline-emerald-500"
+                      style={{
+                        boxSizing: 'border-box',
+                        width: '100%',
+                        height: '32px',
+                        padding: '5px 8px',
+                        border: '1px solid #cbd5e1',
+                        borderRadius: '4px',
+                        textAlign: 'right',
+                        fontWeight: 'bold'
+                      }}
                     />
                   </td>
-                  <td className="p-2.5 text-right">
+                  <td style={{ border: '1px solid #cbd5e1', padding: '6px' }}>
                     <input
                       type="number"
                       step="any"
                       value={row.weight}
                       onChange={(e) => handleItemChange(idx, 'weight', e.target.value)}
                       placeholder="50"
-                      className="w-full px-2 py-1.5 border rounded text-right focus:outline-emerald-500"
+                      style={{
+                        boxSizing: 'border-box',
+                        width: '100%',
+                        height: '32px',
+                        padding: '5px 8px',
+                        border: '1px solid #cbd5e1',
+                        borderRadius: '4px',
+                        textAlign: 'right'
+                      }}
                     />
                   </td>
-                  <td className="p-2.5 text-right font-bold text-emerald-800">
+                  <td style={{ border: '1px solid #cbd5e1', padding: '6px' }}>
                     <input
                       type="number"
                       step="any"
                       value={row.total_weight}
                       onChange={(e) => handleItemChange(idx, 'total_weight', e.target.value)}
-                      className="w-24 px-1.5 py-1.5 border rounded text-right font-bold text-emerald-800 focus:outline-emerald-500"
+                      style={{
+                        boxSizing: 'border-box',
+                        width: '100%',
+                        height: '32px',
+                        padding: '5px 8px',
+                        border: '1px solid #cbd5e1',
+                        borderRadius: '4px',
+                        textAlign: 'right',
+                        fontWeight: 'bold',
+                        color: '#059669',
+                        fontSize: '13px'
+                      }}
                     />
                   </td>
-                  <td className="p-2.5 text-center">
+                  <td style={{ border: '1px solid #cbd5e1', padding: '6px', textAlign: 'center' }}>
                     <select
                       value={row.qc_status}
                       onChange={(e) => handleItemChange(idx, 'qc_status', e.target.value)}
-                      className="px-2 py-1 border rounded bg-white text-xs font-bold text-emerald-700"
+                      style={{
+                        boxSizing: 'border-box',
+                        height: '32px',
+                        padding: '4px 6px',
+                        border: '1px solid #cbd5e1',
+                        borderRadius: '4px',
+                        fontSize: '11px',
+                        fontWeight: 'bold',
+                        color: '#059669'
+                      }}
                     >
                       <option value="PASS">PASS</option>
                       <option value="PENDING">PENDING</option>
                       <option value="REJECT">REJECT</option>
                     </select>
                   </td>
-                  <td className="p-2.5">
+                  <td style={{ border: '1px solid #cbd5e1', padding: '6px' }}>
                     <select
-                      value={row.godown_id}
+                      value={String(row.godown_id || '1')}
                       onChange={(e) => {
-                        const sel = godownsList.find(g => String(g.id) === e.target.value);
-                        handleItemChange(idx, 'godown_id', e.target.value);
-                        if (sel) handleItemChange(idx, 'godown_name', sel.godown_name);
+                        const gid = e.target.value;
+                        const sel = availableGodowns.find(g => String(g.id) === String(gid));
+                        setItems(prev => {
+                          const copy = [...prev];
+                          copy[idx] = {
+                            ...copy[idx],
+                            godown_id: gid,
+                            godown_name: sel ? (sel.print_name || sel.godown_name) : copy[idx].godown_name
+                          };
+                          return copy;
+                        });
                       }}
-                      className="w-full px-2 py-1.5 border rounded bg-white text-xs"
+                      style={{
+                        boxSizing: 'border-box',
+                        width: '100%',
+                        height: '32px',
+                        padding: '4px 6px',
+                        border: '1px solid #cbd5e1',
+                        borderRadius: '4px',
+                        fontSize: '11px'
+                      }}
                     >
-                      <option value="1">PJ Main Godown</option>
-                      <option value="2">Cold Storage Godown</option>
-                      {godownsList.map(g => (
-                        <option key={g.id} value={g.id}>{g.godown_name}</option>
+                      {availableGodowns.map(g => (
+                        <option key={g.id} value={String(g.id)}>
+                          {g.print_name || g.godown_name}
+                        </option>
                       ))}
                     </select>
                   </td>
-                  <td className="p-2.5 text-center">
+                  <td style={{ border: '1px solid #cbd5e1', padding: '6px', textAlign: 'center' }}>
                     <button
                       type="button"
                       onClick={() => removeRow(idx)}
                       disabled={items.length <= 1}
-                      className="text-slate-400 hover:text-rose-600 disabled:opacity-30 transition"
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: items.length <= 1 ? '#cbd5e1' : '#dc2626',
+                        cursor: items.length <= 1 ? 'not-allowed' : 'pointer'
+                      }}
                       title="Remove row"
                     >
-                      <DeleteOutlineIcon fontSize="small" />
+                      <DeleteOutlineIcon style={{ fontSize: '18px' }} />
                     </button>
                   </td>
                 </tr>
@@ -905,20 +1145,31 @@ const InpassCreate = () => {
           </table>
         </div>
 
-        {/* Financial Charges Calculation */}
+        {/* Financial Processing Charges Note */}
         {totalProcessingCharges > 0 && (
-          <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3.5 flex justify-between items-center text-xs">
+          <div style={{
+            background: '#eff6ff',
+            border: '1px solid #bfdbfe',
+            borderRadius: '4px',
+            padding: '12px 16px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            fontSize: '12px'
+          }}>
             <div>
-              <span className="font-bold text-indigo-900 block">External Processing Charges:</span>
-              <span className="text-slate-600">
+              <strong style={{ color: '#1e40af', fontSize: '13px' }}>External Processing Jobwork Charges:</strong>
+              <span style={{ color: '#475569', marginLeft: '6px' }}>
                 {outputWeight.toFixed(2)} KG Processed Output × ₹{chargeRate}/KG
               </span>
             </div>
-            <div className="text-right">
-              <span className="text-base font-extrabold text-indigo-900">
+            <div style={{ textAlign: 'right' }}>
+              <span style={{ fontSize: '18px', fontWeight: '800', color: '#1f4fb2' }}>
                 ₹{totalProcessingCharges.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
-              <span className="text-[11px] text-slate-500 block">Payable to {formData.party_name || 'Mill'}</span>
+              <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
+                Payable to {formData.party_name || 'Mill'}
+              </span>
             </div>
           </div>
         )}

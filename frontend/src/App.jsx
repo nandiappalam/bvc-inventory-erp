@@ -4,6 +4,7 @@ import { ThemeProvider, createTheme } from '@mui/material/styles'
 import CssBaseline from '@mui/material/CssBaseline'
 import { Box } from '@mui/material'
 import { AuthProvider, useAuth } from './context/AuthContext'
+import { ConfirmProvider } from './context/ConfirmContext'
 import ErrorBoundary from './components/ErrorBoundary'
 import CompanySelection from './components/CompanySelection'
 import LoginPage from './components/LoginPage'
@@ -234,6 +235,8 @@ import RecallManagementCenter from './modules/recallManagement/RecallManagementC
 import BusinessIntelligenceCenter from './modules/businessIntelligence/BusinessIntelligenceCenter'
 import AiIntelligenceCenter from './modules/aiIntelligence/AiIntelligenceCenter'
 import PublicDocumentVerification from './components/documents/PublicDocumentVerification'
+import CentralNotificationCenter from './components/notifications/CentralNotificationCenter'
+import OperationalChargesHub from './components/operations/OperationalChargesHub'
 
 const theme = createTheme({
   palette: {
@@ -295,6 +298,9 @@ const AppLayout = () => {
           <Route path="/order-fulfillment" element={<OrderFulfillmentDashboard />} />
           <Route path="/warehouse-mobile" element={<WarehouseMobileView />} />
           <Route path="/barcode-qr" element={<BarcodeQRManager />} />
+          <Route path="/operational-charges" element={<OperationalChargesHub />} />
+          <Route path="/operations/charges" element={<OperationalChargesHub />} />
+          <Route path="/operations/payments" element={<OperationalChargesHub />} />
           <Route path="/city-update" element={<CityUpdate />} />
           <Route path="/ptrans-update" element={<PTransUpdate />} />
           <Route path="/area-update" element={<AreaUpdate />} />
@@ -586,6 +592,8 @@ const AppLayout = () => {
           <Route path="/recall-management" element={<RecallManagementCenter />} />
           <Route path="/business-intelligence" element={<BusinessIntelligenceCenter />} />
           <Route path="/ai-intelligence" element={<AiIntelligenceCenter />} />
+          <Route path="/central-notifications" element={<CentralNotificationCenter />} />
+          <Route path="/operational-charges" element={<OperationalChargesHub />} />
         </Routes>
       </Box>
     </>
@@ -598,24 +606,26 @@ function App() {
       <ThemeProvider theme={theme}>
         <CssBaseline />
         <AuthProvider>
-          <Router>
-            <Routes>
-              {/* Default & Public Routes */}
-              <Route path="/" element={<Navigate to="/company-select" replace />} />
-              <Route path="/company-select" element={<CompanySelection />} />
-              <Route path="/company-create" element={<CompanyCreate />} />
-              <Route path="/company-alter/:id" element={<CompanyCreate />} />
-              <Route path="/company-display" element={<CompanyDisplay />} />
-              <Route path="/login" element={<LoginPage />} />
-              <Route path="/auth-choice" element={<AuthChoice />} />
-              <Route path="/user/create" element={<UserCreate />} />
-              <Route path="/v/:token" element={<PublicDocumentVerification />} />
-              <Route path="/verify-document/:token" element={<PublicDocumentVerification />} />
-              
-              {/* Protected Routes */}
-              <Route path="*" element={<AppLayout />} />
-            </Routes>
-          </Router>
+          <ConfirmProvider>
+            <Router>
+              <Routes>
+                {/* Default & Public Routes */}
+                <Route path="/" element={<Navigate to="/company-select" replace />} />
+                <Route path="/company-select" element={<CompanySelection />} />
+                <Route path="/company-create" element={<CompanyCreate />} />
+                <Route path="/company-alter/:id" element={<CompanyCreate />} />
+                <Route path="/company-display" element={<CompanyDisplay />} />
+                <Route path="/login" element={<LoginPage />} />
+                <Route path="/auth-choice" element={<AuthChoice />} />
+                <Route path="/user/create" element={<UserCreate />} />
+                <Route path="/v/:token" element={<PublicDocumentVerification />} />
+                <Route path="/verify-document/:token" element={<PublicDocumentVerification />} />
+                
+                {/* Protected Routes */}
+                <Route path="*" element={<AppLayout />} />
+              </Routes>
+            </Router>
+          </ConfirmProvider>
         </AuthProvider>
       </ThemeProvider>
     </ErrorBoundary>

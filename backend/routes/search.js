@@ -435,26 +435,82 @@ router.get('/', async (req, res) => {
         txPromises.push(
           db.query(`
             SELECT 
-              g.id, g.s_no, g.date, g.flour_mill, g.remarks,
+              g.id, g.s_no, g.date, g.flour_mill, g.remarks, g.process_mode, g.outpass_no, g.inpass_no,
               (SELECT GROUP_CONCAT(DISTINCT gi.item_name || ' (' || gi.qty || ' bags, Lot: ' || gi.lot_no || ')') FROM grain_input_items gi WHERE gi.grain_id = g.id) as inputs_summary,
               (SELECT GROUP_CONCAT(DISTINCT go.item_name || ' (' || go.qty || ' bags)') FROM grain_output_items go WHERE go.grain_id = g.id) as outputs_summary
             FROM grains g
             WHERE LOWER(CAST(g.s_no AS TEXT)) LIKE ? OR LOWER(COALESCE(g.flour_mill, '')) LIKE ? OR LOWER(COALESCE(g.remarks, '')) LIKE ?
+               OR LOWER(COALESCE(g.outpass_no, '')) LIKE ? OR LOWER(COALESCE(g.inpass_no, '')) LIKE ?
                OR EXISTS (SELECT 1 FROM grain_input_items gi WHERE gi.grain_id = g.id AND (LOWER(gi.item_name) LIKE ? OR LOWER(gi.lot_no) LIKE ?))
                OR EXISTS (SELECT 1 FROM grain_output_items go WHERE go.grain_id = g.id AND (LOWER(go.item_name) LIKE ? OR LOWER(go.lot_no) LIKE ?))
             ORDER BY g.date DESC, g.id DESC
             LIMIT 5
-          `, [qLike, qLike, qLike, qLike, qLike, qLike, qLike], cId).then(r => (r.rows || []).map(g => ({
-            type: 'Grain Milling (Grind)',
+          `, [qLike, qLike, qLike, qLike, qLike, qLike, qLike, qLike, qLike], cId).then(r => (r.rows || []).map(g => ({
+            type: g.process_mode === 'OUTSIDE_MILL' ? 'Outside Mill Grind' : 'Inside Mill Grind',
             id: g.id,
-            docNo: `GRN-${g.s_no}`,
+            docNo: `GRIND-${g.s_no}`,
             date: g.date,
             party: g.flour_mill || 'In-House Mill',
             amount: 0,
             items: `Input: ${g.inputs_summary || '—'} ➔ Output: ${g.outputs_summary || '—'}`,
-            status: 'Completed',
+            status: g.status || 'Completed',
             statusColor: 'secondary',
-            url: `/entry/grind-display?id=${g.id}`
+            url: `/entry/grind-display?id=${g.id}`,
+            related: { outpassNo: g.outpass_no, inpassNo: g.inpass_no }
+          }))).catch(() => [])
+        );
+      }
+
+      // Outpasses
+      if (await hasTable('outpasses')) {
+        txPromises.push(
+          db.query(`
+            SELECT o.id, o.outpass_no, o.date, o.purpose, o.party_name, o.total_weight, o.returned_weight, o.status, o.vehicle_no, o.reference_type, o.reference_no,
+            (SELECT GROUP_CONCAT(DISTINCT oi.item_name || ' (' || oi.qty || ' bags, Lot: ' || COALESCE(oi.lot_no, 'N/A') || ')') FROM outpass_items oi WHERE oi.outpass_id = o.id) as items_summary
+            FROM outpasses o
+            WHERE LOWER(COALESCE(o.outpass_no, '')) LIKE ? OR LOWER(COALESCE(o.party_name, '')) LIKE ? OR LOWER(COALESCE(o.reference_no, '')) LIKE ? OR LOWER(COALESCE(o.vehicle_no, '')) LIKE ?
+               OR EXISTS (SELECT 1 FROM outpass_items oi WHERE oi.outpass_id = o.id AND (LOWER(oi.item_name) LIKE ? OR LOWER(oi.lot_no) LIKE ?))
+            ORDER BY o.date DESC, o.id DESC
+            LIMIT 5
+          `, [qLike, qLike, qLike, qLike, qLike, qLike], cId).then(r => (r.rows || []).map(o => ({
+            type: 'Outpass Dispatch',
+            id: o.id,
+            docNo: o.outpass_no,
+            date: o.date,
+            party: o.party_name || 'External Mill',
+            amount: parseFloat(o.total_weight || 0),
+            items: o.items_summary || `Outpass to ${o.party_name}`,
+            status: o.status || 'OUTPASSED',
+            statusColor: o.status === 'CLOSED' ? 'success' : 'warning',
+            url: `/entry/outpass-display?id=${o.id}`,
+            related: { referenceNo: o.reference_no, vehicleNo: o.vehicle_no }
+          }))).catch(() => [])
+        );
+      }
+
+      // Inpasses
+      if (await hasTable('inpasses')) {
+        txPromises.push(
+          db.query(`
+            SELECT ip.id, ip.inpass_no, ip.outpass_no, ip.date, ip.party_name, ip.output_weight, ip.yield_percent, ip.status, ip.qc_status, ip.vehicle_no,
+            (SELECT GROUP_CONCAT(DISTINCT ii.item_name || ' (' || ii.qty || ' bags, Lot: ' || COALESCE(ii.lot_no, 'N/A') || ')') FROM inpass_items ii WHERE ii.inpass_id = ip.id) as items_summary
+            FROM inpasses ip
+            WHERE LOWER(COALESCE(ip.inpass_no, '')) LIKE ? OR LOWER(COALESCE(ip.outpass_no, '')) LIKE ? OR LOWER(COALESCE(ip.party_name, '')) LIKE ? OR LOWER(COALESCE(ip.vehicle_no, '')) LIKE ?
+               OR EXISTS (SELECT 1 FROM inpass_items ii WHERE ii.inpass_id = ip.id AND (LOWER(ii.item_name) LIKE ? OR LOWER(ii.lot_no) LIKE ?))
+            ORDER BY ip.date DESC, ip.id DESC
+            LIMIT 5
+          `, [qLike, qLike, qLike, qLike, qLike, qLike], cId).then(r => (r.rows || []).map(ip => ({
+            type: 'Inpass Receipt',
+            id: ip.id,
+            docNo: ip.inpass_no,
+            date: ip.date,
+            party: ip.party_name || 'External Mill',
+            amount: parseFloat(ip.output_weight || 0),
+            items: ip.items_summary || `Inpass from ${ip.party_name}`,
+            status: ip.qc_status || 'PASS',
+            statusColor: 'success',
+            url: `/entry/inpass-display?id=${ip.id}`,
+            related: { outpassNo: ip.outpass_no, yieldPercent: ip.yield_percent }
           }))).catch(() => [])
         );
       }

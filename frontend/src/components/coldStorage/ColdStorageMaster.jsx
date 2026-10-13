@@ -28,6 +28,7 @@ import {
   AcUnit as ColdIcon,
   Add as AddIcon,
   Edit as EditIcon,
+  Delete as DeleteIcon,
   Refresh as RefreshIcon
 } from '@mui/icons-material';
 import { api } from '../../services/api';
@@ -113,6 +114,28 @@ const ColdStorageMaster = () => {
     });
     setMessage('');
     setOpenDialog(true);
+  };
+
+  const handleDelete = async (item) => {
+    const confirmed = window.__appConfirm ? await window.__appConfirm({
+      title: 'Confirm Cold Storage Deletion',
+      message: `Are you sure you want to delete Cold Storage facility "${item.godown_name}"?\n\nThis record will be moved to the Recycle Bin.`,
+      confirmText: 'Delete Facility',
+      confirmColor: 'error'
+    }) : window.confirm(`Are you sure you want to delete "${item.godown_name}"?`);
+
+    if (!confirmed) return;
+
+    try {
+      const res = await api(`/godowns/${item.id}`, { method: 'DELETE' });
+      if (res && res.success) {
+        fetchStorages();
+      } else {
+        alert(res?.message || 'Error deleting facility');
+      }
+    } catch (err) {
+      alert('Error deleting facility: ' + err.message);
+    }
   };
 
   const handleSave = async () => {
@@ -214,8 +237,11 @@ const ColdStorageMaster = () => {
                         <Chip label={row.status || 'Active'} color="success" size="small" />
                       </TableCell>
                       <TableCell align="center">
-                        <IconButton size="small" color="primary" onClick={() => handleEdit(row)}>
+                        <IconButton size="small" color="primary" onClick={() => handleEdit(row)} title="Edit">
                           <EditIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton size="small" color="error" onClick={() => handleDelete(row)} title="Delete">
+                          <DeleteIcon fontSize="small" />
                         </IconButton>
                       </TableCell>
                     </TableRow>

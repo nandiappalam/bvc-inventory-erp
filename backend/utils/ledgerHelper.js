@@ -339,7 +339,8 @@ async function createLedgerEntry({
   ledgerType = null,
 }) {
   try {
-    const ledgerId = await resolveLedgerId(ledgerName, ledgerType)
+    const safeLedgerName = ledgerName || 'General Ledger'
+    const ledgerId = await resolveLedgerId(safeLedgerName, ledgerType)
     const cleanEntryDate = sanitizeDate(date) || new Date().toISOString().slice(0, 10)
 
     await db.run(`
@@ -350,12 +351,12 @@ async function createLedgerEntry({
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       ledgerId,
-      ledgerName,
+      safeLedgerName,
       cleanEntryDate,
-      voucherType,
-      voucherNo,
-      debit,
-      credit,
+      voucherType || 'General',
+      voucherNo || '',
+      debit || 0,
+      credit || 0,
       referenceId,
       referenceType,
       particulars,
@@ -967,6 +968,12 @@ async function createPurchaseReturnVoucherChain(returnData) {
   if (effectiveId) {
     await deletePurchaseReturnVoucherChain(effectiveId)
   }
+  if (returnInvNo) {
+    await deletePurchaseReturnVoucherChain(returnInvNo)
+  }
+  if (sNo) {
+    await deletePurchaseReturnVoucherChain(sNo)
+  }
 
   const resolvedSupplier = await getPartyName(supplier, 'supplier')
   const voucherDate = sanitizeDate(date) || new Date().toISOString().slice(0, 10)
@@ -1099,9 +1106,10 @@ async function createPurchaseReturnVoucherChain(returnData) {
 
 async function deletePurchaseReturnVoucherChain(referenceId) {
   try {
+    const refStr = String(referenceId)
     const voucherRows = await db.query(
-      "SELECT id, voucher_no FROM voucher WHERE reference_no = ? AND (voucher_type = 'Debit Note' OR voucher_type = 'Purchase Return')",
-      [String(referenceId)]
+      "SELECT id, voucher_no FROM voucher WHERE (reference_no = ? OR reference_no LIKE ?) AND (voucher_type = 'Debit Note' OR voucher_type = 'Purchase Return')",
+      [refStr, `%${refStr}%`]
     )
 
     for (const voucher of voucherRows.rows || []) {
@@ -1113,7 +1121,7 @@ async function deletePurchaseReturnVoucherChain(referenceId) {
       await db.run('DELETE FROM voucher WHERE id = ?', [voucher.id])
     }
 
-    await db.run("DELETE FROM ledger_entries WHERE reference_id = ? AND (reference_type = 'purchase_return' OR voucher_type = 'Debit Note' OR voucher_type = 'Purchase Return')", [referenceId])
+    await db.run("DELETE FROM ledger_entries WHERE (reference_id = ? OR transaction_id = ?) AND (reference_type = 'purchase_return' OR transaction_type = 'purchase_return' OR voucher_type = 'Debit Note' OR voucher_type = 'Purchase Return')", [referenceId, referenceId])
     return true
   } catch (error) {
     console.error('Error deleting purchase return voucher chain:', error)
@@ -1358,15 +1366,18 @@ async function syncAllLedgers() {
     console.log(`Rebuilding ledger entries for ${sales.rows?.length || 0} sales...`)
     for (const sale of sales.rows || []) {
       try {
+        const totalAmt = Number(sale.total_amount ?? sale.total_amt ?? sale.grand_total ?? 0)
+        const taxAmt = Number(sale.tax_amount ?? sale.tax_amt ?? 0)
+        const baseAmt = Number(sale.base_amount ?? sale.bill_amt ?? (totalAmt - taxAmt) ?? 0)
         await createSalesVoucherChain({
           customer: sale.customer_id || sale.customer,
           date: sale.date,
           invNo: sale.s_no,
           salesId: sale.id,
-          totalAmount: sale.total_amt || sale.grand_total,
-          taxAmount: sale.tax_amt || 0,
-          discAmount: 0,
-          baseAmount: sale.bill_amt || sale.total_amt,
+          totalAmount: totalAmt,
+          taxAmount: taxAmt,
+          discAmount: Number(sale.disc_amount || 0),
+          baseAmount: baseAmt,
         })
       } catch (err) {
         console.error(`Error syncing sale #${sale.id}:`, err)
@@ -1378,16 +1389,23 @@ async function syncAllLedgers() {
     console.log(`Rebuilding ledger entries for ${purchases.rows?.length || 0} purchases...`)
     for (const pur of purchases.rows || []) {
       try {
+        const baseAmt = Number(pur.base_amount ?? pur.bill_amt ?? pur.total_amount ?? pur.total_amt ?? 0)
+        const taxAmt = Number(pur.tax_amount ?? pur.tax_amt ?? 0)
+        const discAmt = Number(pur.disc_amount ?? 0)
+        const netAmt = Number(pur.grand_total ?? pur.net_amount ?? (baseAmt + taxAmt - discAmt) ?? pur.total_amount ?? pur.total_amt ?? 0)
         await createPurchaseVoucherChain({
           supplier: pur.supplier_id || pur.supplier,
           date: pur.date,
           invNo: pur.s_no,
           purchaseId: pur.id,
-          totalAmount: pur.total_amt || pur.grand_total,
-          baseAmount: pur.bill_amt || pur.total_amt,
-          taxAmount: pur.tax_amt || 0,
-          discAmount: 0,
-          netAmount: pur.total_amt || pur.grand_total,
+          totalAmount: netAmt,
+          baseAmount: baseAmt,
+          taxAmount: taxAmt,
+          discAmount: discAmt,
+          netAmount: netAmt,
+          cgstAmount: Number(pur.cgst_amount || 0),
+          sgstAmount: Number(pur.sgst_amount || 0),
+          igstAmount: Number(pur.igst_amount || 0),
         })
       } catch (err) {
         console.error(`Error syncing purchase #${pur.id}:`, err)

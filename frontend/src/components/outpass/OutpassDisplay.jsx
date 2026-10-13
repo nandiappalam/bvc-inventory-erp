@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 import { printHtml } from '../../utils/printHelper';
+import { printOutpassDocument } from '../../utils/movementPrintTemplates';
 
 // Standard MUI Icons consistent with BVC ERP theme
 import RefreshIcon from '@mui/icons-material/Refresh';
@@ -22,6 +23,8 @@ const OutpassDisplay = () => {
   const [summary, setSummary] = useState({});
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [purposeFilter, setPurposeFilter] = useState('ALL');
 
@@ -80,9 +83,13 @@ const OutpassDisplay = () => {
   };
 
   const handleDelete = async (id, outpassNo) => {
-    if (!window.confirm(`Are you sure you want to delete and cancel Outpass ${outpassNo}?\n\nThis will restore the dispatched materials back to factory Available Stock and unlink related Grinds.`)) {
-      return;
-    }
+    const confirmed = window.__appConfirm ? await window.__appConfirm({
+      title: 'Confirm Outpass Deletion',
+      message: `Are you sure you want to delete and cancel Outpass ${outpassNo}?\n\nThis will restore the dispatched materials back to factory Available Stock and unlink related Grinds.`,
+      confirmText: 'Delete Outpass',
+      confirmColor: 'error'
+    }) : window.confirm(`Are you sure you want to delete and cancel Outpass ${outpassNo}?`);
+    if (!confirmed) return;
 
     try {
       const res = await api(`/outpasses/${id}`, { method: 'DELETE' });
@@ -136,100 +143,20 @@ const OutpassDisplay = () => {
   };
 
   const handlePrint = (op) => {
-    const items = op.items || [];
-    const rowsHtml = items.map((it, idx) => `
-      <tr style="background-color: ${idx % 2 === 0 ? '#ffffff' : '#f8fafc'};">
-        <td style="border: 1px solid #cbd5e1; padding: 7px; text-align: center;">${idx + 1}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 7px; font-weight: bold; color: #1e293b;">${it.item_name}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 7px; font-family: monospace; color: #2563eb;">${it.lot_no || '-'}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 7px; text-align: right; font-weight: bold;">${it.qty || 0}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 7px; text-align: right;">${(parseFloat(it.weight) || 50).toFixed(2)} kg</td>
-        <td style="border: 1px solid #cbd5e1; padding: 7px; text-align: right; font-weight: bold; color: #1e3a8a;">${(parseFloat(it.total_weight) || 0).toFixed(2)} kg</td>
-        <td style="border: 1px solid #cbd5e1; padding: 7px; color: #475569;">${it.godown_name || 'PJ'}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 7px;">${it.reason || op.purpose || 'Outside Processing'}</td>
-      </tr>
-    `).join('');
-
-    const html = `
-      <div style="font-family: Arial, sans-serif; padding: 20px; color: #1e293b; max-width: 900px; margin: 0 auto;">
-        <!-- Header -->
-        <div style="text-align: center; border-bottom: 2px solid #1f4fb2; padding-bottom: 12px; margin-bottom: 14px;">
-          <h1 style="margin: 0; color: #1f4fb2; font-size: 24px; text-transform: uppercase; letter-spacing: 0.5px;">BHARANI VEL CHEMICALS / BVC AGRO</h1>
-          <p style="margin: 3px 0; font-size: 13px; color: #475569;">Factory & Works • Material Movement & Security Gate Control</p>
-          <div style="display: inline-block; background: #1f4fb2; color: #ffffff; padding: 4px 20px; border-radius: 4px; font-weight: bold; font-size: 14px; margin-top: 6px; letter-spacing: 1px;">
-            MATERIAL GATE OUTPASS (DELIVERY CHALLAN)
-          </div>
-        </div>
-
-        <!-- Metadata Grid -->
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 12px; font-size: 13px;">
-          <div>
-            <p style="margin: 3px 0;"><strong>Outpass No:</strong> <span style="font-family: monospace; font-size: 15px; font-weight: bold; color: #1f4fb2;">${op.outpass_no}</span></p>
-            <p style="margin: 3px 0;"><strong>Date:</strong> ${op.date}</p>
-            <p style="margin: 3px 0;"><strong>Purpose:</strong> <span style="background: #e0e7ff; color: #3730a3; padding: 2px 7px; border-radius: 4px; font-weight: bold;">${op.purpose}</span></p>
-            <p style="margin: 3px 0;"><strong>Reference:</strong> ${op.reference_type} (${op.reference_no || `#${op.reference_id || '-'}`})</p>
-            <p style="margin: 3px 0;"><strong>Dispatch From:</strong> ${op.from_godown_name || op.from_location || 'PJ Main Godown'}</p>
-          </div>
-          <div>
-            <p style="margin: 3px 0;"><strong>External Mill / Party:</strong> <strong style="color: #0f172a; font-size: 14px;">${op.party_name}</strong></p>
-            ${op.mill_area ? `<p style="margin: 3px 0; color: #475569;"><strong>Mill Area / City:</strong> ${op.mill_area}</p>` : ''}
-            <p style="margin: 3px 0;"><strong>Destination:</strong> ${op.destination || op.mill_area || '-'}</p>
-            <p style="margin: 3px 0;"><strong>Vehicle No:</strong> <span style="font-family: monospace; font-weight: bold; background: #f1f5f9; padding: 1px 6px; border-radius: 3px;">${op.vehicle_no || 'N/A'}</span></p>
-            <p style="margin: 3px 0;"><strong>Driver:</strong> ${op.driver_name || '-'} ${op.driver_phone ? `(${op.driver_phone})` : ''}</p>
-            <p style="margin: 3px 0;"><strong>Transporter:</strong> ${op.transporter || 'Self / Direct'}</p>
-          </div>
-        </div>
-
-        <!-- Items Table -->
-        <table style="width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 15px;">
-          <thead>
-            <tr style="background: #1f4fb2; color: #ffffff;">
-              <th style="border: 1px solid #cbd5e1; padding: 8px; width: 40px; text-align: center;">S.No</th>
-              <th style="border: 1px solid #cbd5e1; padding: 8px; text-align: left;">Item Description</th>
-              <th style="border: 1px solid #cbd5e1; padding: 8px; text-align: left; width: 110px;">Lot / Batch No</th>
-              <th style="border: 1px solid #cbd5e1; padding: 8px; text-align: right; width: 70px;">Bags</th>
-              <th style="border: 1px solid #cbd5e1; padding: 8px; text-align: right; width: 80px;">Unit Wt</th>
-              <th style="border: 1px solid #cbd5e1; padding: 8px; text-align: right; width: 100px;">Total Weight</th>
-              <th style="border: 1px solid #cbd5e1; padding: 8px; text-align: left; width: 80px;">Godown</th>
-              <th style="border: 1px solid #cbd5e1; padding: 8px; text-align: left;">Process Reason</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rowsHtml || '<tr><td colspan="8" style="text-align: center; padding: 10px;">No items registered</td></tr>'}
-          </tbody>
-          <tfoot>
-            <tr style="background: #f1f5f9; font-weight: bold;">
-              <td colspan="3" style="border: 1px solid #cbd5e1; padding: 8px; text-align: right;">TOTAL DISPATCHED:</td>
-              <td style="border: 1px solid #cbd5e1; padding: 8px; text-align: right; font-size: 13px;">${op.total_qty || 0} Bags</td>
-              <td style="border: 1px solid #cbd5e1; padding: 8px;"></td>
-              <td style="border: 1px solid #cbd5e1; padding: 8px; text-align: right; color: #1f4fb2; font-size: 14px;">${(parseFloat(op.total_weight) || 0).toFixed(2)} kg</td>
-              <td colspan="2" style="border: 1px solid #cbd5e1; padding: 8px;"></td>
-            </tr>
-          </tfoot>
-        </table>
-
-        ${parseFloat(op.processing_rate_kg) > 0 ? `
-          <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 10px; margin-bottom: 15px; font-size: 12px; display: flex; justify-content: space-between;">
-            <span><strong>Processing Rate Agreed:</strong> ₹${op.processing_rate_kg}/kg</span>
-            <span><strong>Estimated Processing Charges:</strong> ₹${(parseFloat(op.estimated_charges) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-          </div>
-        ` : ''}
-
-        <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; padding: 8px 12px; font-size: 11px; color: #1e40af; margin-bottom: 25px;">
-          <strong>Custody Declaration:</strong> Material is dispatched exclusively for outside processing / jobwork. Physical ownership remains strictly with BVC Agro. Processed goods, by-products, and loss reconciliation are mandatory via corresponding Inpass.
-        </div>
-
-        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; text-align: center; font-size: 11px; margin-top: 35px;">
-          <div style="border-top: 1px solid #64748b; padding-top: 5px;">Prepared By (${op.created_by || 'Admin'})</div>
-          <div style="border-top: 1px solid #64748b; padding-top: 5px;">Factory In-Charge</div>
-          <div style="border-top: 1px solid #64748b; padding-top: 5px;">Security Gate Out</div>
-          <div style="border-top: 1px solid #64748b; padding-top: 5px;">Driver / Receiver Signature</div>
-        </div>
-      </div>
-    `;
-
-    printHtml(html, `Outpass - ${op.outpass_no}`);
+    printOutpassDocument(op, 'ORIGINAL STORE COPY');
   };
+
+  const filteredOutpasses = outpasses.filter(row => {
+    if (fromDate || toDate) {
+      const rowDateStr = row.date || row.created_at || '';
+      if (rowDateStr) {
+        const rowDateOnly = String(rowDateStr).substring(0, 10);
+        if (fromDate && rowDateOnly < fromDate) return false;
+        if (toDate && rowDateOnly > toDate) return false;
+      }
+    }
+    return true;
+  });
 
   return (
     <div className="erp-display-page" style={{ padding: '16px', background: '#f0f6ff', minHeight: '100vh', fontFamily: "'Segoe UI', Tahoma, Arial, sans-serif" }}>
@@ -312,8 +239,8 @@ const OutpassDisplay = () => {
 
       {/* Filter Section Toolbar */}
       <div style={{ background: '#e9eef7', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #9fb6dd', marginBottom: '14px', borderRadius: '4px', flexWrap: 'wrap', gap: '10px' }}>
-        <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: '8px', alignItems: 'center', flex: 1, minWidth: '260px', maxWidth: '520px' }}>
-          <div style={{ position: 'relative', flex: 1 }}>
+        <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: '8px', alignItems: 'center', flex: 1, minWidth: '260px', flexWrap: 'wrap' }}>
+          <div style={{ position: 'relative', flex: 1, minWidth: '180px' }}>
             <input
               type="text"
               value={searchTerm}
@@ -323,12 +250,39 @@ const OutpassDisplay = () => {
             />
             <SearchIcon style={{ position: 'absolute', left: '7px', top: '7px', fontSize: '18px', color: '#64748b' }} />
           </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '13px', color: '#333' }}>
+            <span>From:</span>
+            <input
+              type="date"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+              style={{ padding: '6px', border: '1px solid #7fa1d6', borderRadius: '4px', fontSize: '13px', backgroundColor: '#fff' }}
+            />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '13px', color: '#333' }}>
+            <span>To:</span>
+            <input
+              type="date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+              style={{ padding: '6px', border: '1px solid #7fa1d6', borderRadius: '4px', fontSize: '13px', backgroundColor: '#fff' }}
+            />
+          </div>
+          {(fromDate || toDate) && (
+            <button
+              type="button"
+              onClick={() => { setFromDate(''); setToDate(''); }}
+              style={{ padding: '6px 10px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}
+            >
+              Clear
+            </button>
+          )}
           <button type="submit" className="action-btn update-btn" style={{ padding: '7px 14px' }}>
             Search
           </button>
         </form>
 
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
@@ -393,14 +347,14 @@ const OutpassDisplay = () => {
                   Loading Outpass movement records...
                 </td>
               </tr>
-            ) : outpasses.length === 0 ? (
+            ) : filteredOutpasses.length === 0 ? (
               <tr>
                 <td colSpan="12" style={{ padding: '30px', textAlign: 'center', color: '#64748b' }}>
                   No Outpass records found. Click <strong>"+ Issue New Outpass"</strong> to create a dispatch.
                 </td>
               </tr>
             ) : (
-              outpasses.map((row, idx) => {
+              filteredOutpasses.map((row, idx) => {
                 const totalWt = parseFloat(row.total_weight) || 0;
                 const retWt = parseFloat(row.returned_weight) || 0;
                 const pendingWt = Math.max(0, totalWt - retWt);

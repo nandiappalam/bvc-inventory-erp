@@ -39,9 +39,48 @@ export const invalidateMasterCache = (type) => {
     return;
   }
   const key = normalizeMasterKey(type);
+  const raw = String(type).toLowerCase().trim();
   masterCache.delete(key);
-  masterCache.delete(String(type).toLowerCase());
+  masterCache.delete(raw);
   masterCache.delete(`all_${key}`);
+  masterCache.delete(`all_${raw}`);
+
+  if (key === 'weights' || raw === 'weight' || raw === 'weightmaster') {
+    masterCache.delete('weights');
+    masterCache.delete('weightmaster');
+    masterCache.delete('all_weights');
+    masterCache.delete('all_weightmaster');
+  }
+  if (key === 'suppliers' || raw === 'supplier' || raw === 'supplier_master') {
+    masterCache.delete('suppliers');
+    masterCache.delete('supplier_master');
+    masterCache.delete('all_suppliers');
+    masterCache.delete('all_supplier_master');
+  }
+  if (key === 'customers' || raw === 'customer' || raw === 'customer_master') {
+    masterCache.delete('customers');
+    masterCache.delete('customer_master');
+    masterCache.delete('all_customers');
+    masterCache.delete('all_customer_master');
+  }
+  if (key === 'godowns' || raw === 'godown' || raw === 'godown_master') {
+    masterCache.delete('godowns');
+    masterCache.delete('godown_master');
+    masterCache.delete('all_godowns');
+    masterCache.delete('all_godown_master');
+  }
+  if (key === 'transports' || raw === 'transport' || raw === 'transport_master') {
+    masterCache.delete('transports');
+    masterCache.delete('transport_master');
+    masterCache.delete('all_transports');
+    masterCache.delete('all_transport_master');
+  }
+  if (key === 'items' || raw === 'item' || raw === 'item_master') {
+    masterCache.delete('items');
+    masterCache.delete('item_master');
+    masterCache.delete('all_items');
+    masterCache.delete('all_item_master');
+  }
 };
 
 const makeDualArray = (list) => {

@@ -19,6 +19,7 @@ import {
   Switch,
   IconButton,
   Chip,
+  Snackbar,
 } from '@mui/material';
 
 import AddIcon from '@mui/icons-material/Add';
@@ -26,6 +27,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import { useNavigate, Link, useLocation, useParams } from 'react-router-dom';
 import voucherAPI from './voucherService.js';
 import { safeArray } from '../../utils/safeArray.js';
+import { InlineMasterModal } from '../../components/common/InlineMasterModal.jsx';
 
 const VOUCHER_TYPES = ['Payment', 'Receipt', 'Contra', 'Journal'];
 
@@ -86,15 +88,46 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
   const [selectedBills, setSelectedBills] = useState({});
   const [isEditLoaded, setIsEditLoaded] = useState(false);
 
+  // Manual Master Creation Modal State
+  const [inlineMasterOpen, setInlineMasterOpen] = useState(false);
+  const [inlineMasterType, setInlineMasterType] = useState('suppliers');
+
+  const handleInlineMasterCreated = async (newId, newRecord) => {
+    try {
+      const refreshed = await voucherAPI.getLedgers();
+      const updatedLedgers = safeArray(refreshed);
+      setLedgers(updatedLedgers);
+
+      const targetName = newRecord?.name || '';
+      const matched = updatedLedgers.find(l => 
+        (newId && l.id == newId) || 
+        (targetName && l.name.toLowerCase().includes(targetName.toLowerCase()))
+      );
+
+      if (matched) {
+        if (inlineMasterType === 'customers') {
+          setReceiptState(prev => ({ ...prev, party_ledger_id: matched.id }));
+        } else {
+          setPaymentState(prev => ({ ...prev, party_ledger_id: matched.id }));
+        }
+      }
+    } catch (e) {
+      console.error('Error refreshing ledgers after inline create:', e);
+    }
+  };
+
   // Quick Bill / Voucher No search state
   const [searchableBills, setSearchableBills] = useState([]);
   const [selectedQuickBillKey, setSelectedQuickBillKey] = useState('');
   const [manualSearchNo, setManualSearchNo] = useState('');
   const [quickAlert, setQuickAlert] = useState('');
 
+  // Toast state
+  const [toast, setToast] = useState({ open: false, message: '', severity: 'success' });
+
   const cleanLedgerName = (name) => {
     if (!name) return '';
-    return name.replace(/\s*\((Supplier|Customer|Papad Co|Flour Mill)\)$/i, '').trim();
+    return name.replace(/\s*\([^)]*\)$/i, '').trim();
   };
 
   const isPurchaseOrPayable = (bill, currentLedgers = ledgers) => {
@@ -763,24 +796,34 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
     }
 
     // Process double entry rows dynamically depending on the selected specialized form
+    const resolveId = (val) => {
+      if (val === undefined || val === null || val === '') return 1;
+      const n = parseInt(val, 10);
+      return !isNaN(n) && n > 0 ? n : (typeof val === 'string' ? val : 1);
+    };
+
     let finalEntries = [];
     if (formData.voucher_type === 'Payment') {
       const selectedBillList = Object.entries(selectedBills)
         .filter(([_, b]) => b.selected && parseFloat(b.allocated) > 0)
         .map(([invNo, b]) => `${invNo}`);
       const billingRef = selectedBillList.length > 0 ? `Ref: ${selectedBillList.join(', ')}` : '';
+      const partyLedger = ledgers.find(l => l.id == paymentState.party_ledger_id);
+      const cashLedger = ledgers.find(l => l.id == paymentState.cash_ledger_id);
 
       finalEntries = [
         {
           type: 'Dr',
-          ledger_id: parseInt(paymentState.party_ledger_id),
+          ledger_id: resolveId(paymentState.party_ledger_id),
+          ledger_name: partyLedger?.name || '',
           debit: Number(paymentState.amount),
           credit: 0,
           remarks: billingRef || (paymentState.reference_no ? `Ref: ${paymentState.reference_no}` : '')
         },
         {
           type: 'Cr',
-          ledger_id: parseInt(paymentState.cash_ledger_id),
+          ledger_id: resolveId(paymentState.cash_ledger_id),
+          ledger_name: cashLedger?.name || '',
           debit: 0,
           credit: Number(paymentState.amount),
           remarks: paymentState.reference_no ? `Ref: ${paymentState.reference_no}` : ''
@@ -791,35 +834,44 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
         .filter(([_, b]) => b.selected && parseFloat(b.allocated) > 0)
         .map(([invNo, b]) => `${invNo}`);
       const billingRef = selectedBillList.length > 0 ? `Ref: ${selectedBillList.join(', ')}` : '';
+      const partyReceiptLedger = ledgers.find(l => l.id == receiptState.party_ledger_id);
+      const cashReceiptLedger = ledgers.find(l => l.id == receiptState.cash_ledger_id);
 
       finalEntries = [
         {
           type: 'Dr',
-          ledger_id: parseInt(receiptState.cash_ledger_id),
+          ledger_id: resolveId(receiptState.cash_ledger_id),
+          ledger_name: cashReceiptLedger?.name || '',
           debit: Number(receiptState.amount),
           credit: 0,
           remarks: receiptState.reference_no ? `Ref: ${receiptState.reference_no}` : ''
         },
         {
           type: 'Cr',
-          ledger_id: parseInt(receiptState.party_ledger_id),
+          ledger_id: resolveId(receiptState.party_ledger_id),
+          ledger_name: partyReceiptLedger?.name || '',
           debit: 0,
           credit: Number(receiptState.amount),
           remarks: billingRef || (receiptState.reference_no ? `Ref: ${receiptState.reference_no}` : '')
         }
       ];
     } else if (formData.voucher_type === 'Contra') {
+      const toLedger = ledgers.find(l => l.id == contraState.to_ledger_id);
+      const fromLedger = ledgers.find(l => l.id == contraState.from_ledger_id);
+
       finalEntries = [
         {
           type: 'Dr',
-          ledger_id: parseInt(contraState.to_ledger_id),
+          ledger_id: resolveId(contraState.to_ledger_id),
+          ledger_name: toLedger?.name || '',
           debit: Number(contraState.amount),
           credit: 0,
           remarks: contraState.reference_no ? `Ref: ${contraState.reference_no}` : ''
         },
         {
           type: 'Cr',
-          ledger_id: parseInt(contraState.from_ledger_id),
+          ledger_id: resolveId(contraState.from_ledger_id),
+          ledger_name: fromLedger?.name || '',
           debit: 0,
           credit: Number(contraState.amount),
           remarks: contraState.reference_no ? `Ref: ${contraState.reference_no}` : ''
@@ -828,7 +880,8 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
     } else {
       finalEntries = entries.map(e => ({
         type: e.type,
-        ledger_id: parseInt(e.ledger_id),
+        ledger_id: resolveId(e.ledger_id),
+        ledger_name: e.ledger_name || '',
         debit: Number(e.debit) || 0,
         credit: Number(e.credit) || 0,
         remarks: e.remarks
@@ -849,7 +902,6 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
       } else {
         await voucherAPI.create(submitData);
       }
-      alert(actualIsEdit ? 'Voucher updated successfully!' : 'Voucher created successfully!');
       navigate('/entry/voucher-display');
     } catch (err) {
       setError(err.message || 'Save failed');
@@ -964,7 +1016,7 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
                     applyBillToVoucher(found);
                     setQuickAlert(`✓ Auto-filled voucher details for ${found.type === 'Payable' ? 'Purchase Invoice' : 'Sales Bill'} #${found.invoice_no} (${found.ledger_name}). Outstanding Balance: ₹${parseFloat(found.balance).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`);
                   } else {
-                    alert(`No pending bill or invoice found matching "${manualSearchNo}". Please check the number.`);
+                    setQuickAlert(`No pending bill or invoice found matching "${manualSearchNo}". Please check the number.`);
                   }
                 }}
                 sx={{ bgcolor: '#4f46e5', fontWeight: 'bold', px: 3, textTransform: 'none', height: 40 }}
@@ -1063,7 +1115,14 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
                 <Typography variant="body2" sx={{ fontWeight: 'bold', color: '#495057' }}>Paid To (Supplier / Expense Ledger)</Typography>
                 <Select
                   value={paymentState.party_ledger_id}
-                  onChange={(e) => setPaymentState({ ...paymentState, party_ledger_id: e.target.value })}
+                  onChange={(e) => {
+                    if (e.target.value === '__CREATE_NEW_SUPPLIER__') {
+                      setInlineMasterType('suppliers');
+                      setInlineMasterOpen(true);
+                      return;
+                    }
+                    setPaymentState({ ...paymentState, party_ledger_id: e.target.value });
+                  }}
                   size="small"
                   fullWidth
                   displayEmpty
@@ -1072,6 +1131,9 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
                   {ledgers.filter(l => l.ledger_type !== 'Cash' && l.ledger_type !== 'Bank' && !l.name.toLowerCase().includes('cash') && !l.name.toLowerCase().includes('bank') && !l.name.toLowerCase().includes('petty')).map(l => (
                     <MenuItem key={l.id} value={l.id}>{l.name}</MenuItem>
                   ))}
+                  <MenuItem value="__CREATE_NEW_SUPPLIER__" sx={{ fontWeight: 'bold', color: '#1e3a8a', borderTop: '1px solid #e2e8f0', mt: 1 }}>
+                    + Enter Supplier / Party Manually
+                  </MenuItem>
                 </Select>
                 {(() => {
                   const ledger = ledgers.find(l => l.id == paymentState.party_ledger_id);
@@ -1243,7 +1305,14 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
                 <Typography variant="body2" sx={{ fontWeight: 'bold', color: '#495057' }}>Received From (Customer / Ledger)</Typography>
                 <Select
                   value={receiptState.party_ledger_id}
-                  onChange={(e) => setReceiptState({ ...receiptState, party_ledger_id: e.target.value })}
+                  onChange={(e) => {
+                    if (e.target.value === '__CREATE_NEW_CUSTOMER__') {
+                      setInlineMasterType('customers');
+                      setInlineMasterOpen(true);
+                      return;
+                    }
+                    setReceiptState({ ...receiptState, party_ledger_id: e.target.value });
+                  }}
                   size="small"
                   fullWidth
                   displayEmpty
@@ -1252,6 +1321,9 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
                   {ledgers.filter(l => l.ledger_type !== 'Cash' && l.ledger_type !== 'Bank' && !l.name.toLowerCase().includes('cash') && !l.name.toLowerCase().includes('bank') && !l.name.toLowerCase().includes('petty')).map(l => (
                     <MenuItem key={l.id} value={l.id}>{l.name}</MenuItem>
                   ))}
+                  <MenuItem value="__CREATE_NEW_CUSTOMER__" sx={{ fontWeight: 'bold', color: '#1e3a8a', borderTop: '1px solid #e2e8f0', mt: 1 }}>
+                    + Enter Customer Manually
+                  </MenuItem>
                 </Select>
                 {(() => {
                   const ledger = ledgers.find(l => l.id == receiptState.party_ledger_id);
@@ -1540,13 +1612,23 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
                       <FormControl size="small" fullWidth>
                         <Select
                           value={entry.ledger_id || ''}
-                          onChange={(e) => updateEntry(index, 'ledger_id', e.target.value)}
+                          onChange={(e) => {
+                            if (e.target.value === '__CREATE_NEW_LEDGER__') {
+                              setInlineMasterType('suppliers');
+                              setInlineMasterOpen(true);
+                              return;
+                            }
+                            updateEntry(index, 'ledger_id', e.target.value);
+                          }}
                           displayEmpty
                         >
                           <MenuItem value="">-- Select Ledger --</MenuItem>
                           {ledgers.map(ledger => (
                             <MenuItem key={ledger.id} value={ledger.id}>{ledger.name}</MenuItem>
                           ))}
+                          <MenuItem value="__CREATE_NEW_LEDGER__" sx={{ fontWeight: 'bold', color: '#1e3a8a', borderTop: '1px solid #e2e8f0', mt: 1 }}>
+                            + Enter Master / Ledger Manually
+                          </MenuItem>
                         </Select>
                       </FormControl>
                       {entry.ledger_name && (
@@ -1701,6 +1783,29 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
           </Button>
         </Box>
       </Paper>
+
+      <InlineMasterModal
+        open={inlineMasterOpen}
+        onClose={() => setInlineMasterOpen(false)}
+        masterType={inlineMasterType}
+        onSuccess={handleInlineMasterCreated}
+      />
+
+      <Snackbar
+        open={toast.open}
+        autoHideDuration={4000}
+        onClose={() => setToast(prev => ({ ...prev, open: false }))}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={() => setToast(prev => ({ ...prev, open: false }))}
+          severity={toast.severity}
+          variant="filled"
+          sx={{ width: '100%', fontWeight: 'bold' }}
+        >
+          {toast.message}
+        </Alert>
+      </Snackbar>
     </Container>
   );
 };

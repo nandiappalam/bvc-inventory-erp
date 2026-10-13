@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { getMasters } from "../../services/masterservice.js";
 import { MASTER_FIELD_TYPES, FIELD_TYPES, safeArray } from "../../utils/masterFields.js";
+import { InlineMasterModal, getCreateLabel } from "../common/InlineMasterModal.jsx";
 import "./master.css";
 
 export const SmartField = ({ 
@@ -11,6 +12,7 @@ export const SmartField = ({
 }) => {
   const [options, setOptions] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [inlineModalOpen, setInlineModalOpen] = useState(false);
 
   const fieldType = field.type || FIELD_TYPES[field.name] || 'text';
   const resolvedMasterType = field.masterType || MASTER_FIELD_TYPES[field.name];
@@ -55,8 +57,27 @@ export const SmartField = ({
     loadData();
   }, [isMaster]);
 
+  const reloadOptions = async () => {
+    if (!isMaster) return;
+    try {
+      const data = await getMasters(isMaster === 'item' ? 'items' : isMaster, { forceRefresh: true });
+      setOptions(safeArray(data));
+    } catch (e) {}
+  };
+
   const handleChange = (e) => {
-    onChange(field.name, e.target.value);
+    const val = e.target.value;
+    if (val === '__CREATE_NEW__') {
+      setInlineModalOpen(true);
+      return;
+    }
+    onChange(field.name, val);
+  };
+
+  const handleInlineCreated = async (newId, newRecord) => {
+    await reloadOptions();
+    const targetVal = newId !== undefined && newId !== null ? String(newId) : (newRecord?.name || '');
+    onChange(field.name, targetVal);
   };
 
   const labelText = field.label || field.name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
@@ -107,6 +128,11 @@ export const SmartField = ({
               </option>
             );
           })}
+          {isMaster && (
+            <option value="__CREATE_NEW__" style={{ fontWeight: 'bold', color: '#1e3a8a' }}>
+              {getCreateLabel(isMaster)}
+            </option>
+          )}
         </select>
 
       ) : fieldType === 'textarea' ? (
@@ -115,6 +141,15 @@ export const SmartField = ({
         <input type="number" step="0.01" {...inputProps} />
       ) : (
         <input type={fieldType} {...inputProps} />
+      )}
+
+      {isMaster && (
+        <InlineMasterModal
+          open={inlineModalOpen}
+          onClose={() => setInlineModalOpen(false)}
+          masterType={isMaster}
+          onSuccess={handleInlineCreated}
+        />
       )}
     </div>
   );

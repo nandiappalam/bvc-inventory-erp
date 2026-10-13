@@ -197,7 +197,13 @@ const PurchaseRequestDisplay = () => {
   };
 
   const handleDeletePr = async (id, prNo) => {
-    if (!window.confirm(`Are you sure you want to delete Purchase Request ${prNo}?`)) return;
+    const confirmed = window.__appConfirm ? await window.__appConfirm({
+      title: 'Confirm Purchase Request Deletion',
+      message: `Are you sure you want to delete Purchase Request ${prNo}?`,
+      confirmText: 'Delete PR',
+      confirmColor: 'error'
+    }) : window.confirm(`Are you sure you want to delete Purchase Request ${prNo}?`);
+    if (!confirmed) return;
 
     try {
       const data = await api(`/purchase-requests/${id}`, { method: 'DELETE' });

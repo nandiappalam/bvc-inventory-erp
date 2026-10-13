@@ -187,6 +187,9 @@ app.use('/api/warehouse-ops', require('./routes/warehouseOps'))
 app.use('/api/barcode-qr', require('./routes/barcodeQr'))
 app.use('/api/central-notifications', require('./routes/centralNotifications'))
 
+// Reusable Operational Charges, Worker & Driver Payments System
+app.use('/api/operational-charges', require('./routes/operationalCharges'))
+
 // Phases 14–18 Compliance, Complaint, Recall, BI & AI Modules
 app.use('/api/compliance-system', require('./routes/complianceSystem'))
 app.use('/api/complaint-recall', require('./routes/complaintRecall'))
@@ -746,6 +749,15 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
     const { rebuildStockLedger } = require('./utils/stockRebuilder')
     await rebuildStockLedger()
     console.log('✓ Stock lots & stock ledger re-synchronized on startup')
+
+    // Initialize Operational Charges, Payments & Parties Tables
+    try {
+      const { ensureOperationalTables } = require('./services/operationalChargeEngine');
+      await ensureOperationalTables(1);
+      console.log('✓ Operational charges & payment tables verified on startup');
+    } catch (opStartupErr) {
+      console.warn('⚠️ Operational tables startup check warning:', opStartupErr.message);
+    }
   } catch (err) {
     console.error('⚠️ Database initialization error on startup:', err.message)
   }

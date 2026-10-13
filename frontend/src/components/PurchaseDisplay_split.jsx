@@ -43,7 +43,13 @@ const handleDelete = async (id, onSuccess) => {
     alert('Cannot delete: missing record id');
     return;
   }
-  if (!window.confirm('Delete this record?')) return;
+  const confirmed = window.__appConfirm ? await window.__appConfirm({
+    title: 'Confirm Purchase Deletion',
+    message: 'Are you sure you want to delete this purchase record? This action cannot be undone.',
+    confirmText: 'Delete Purchase',
+    confirmColor: 'error'
+  }) : window.confirm('Delete this record?');
+  if (!confirmed) return;
   try {
     const result = await deletePurchase(id);
     if (result && (result.success || result.message)) {

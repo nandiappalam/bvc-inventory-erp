@@ -1502,13 +1502,48 @@ router.get('/trial-balance', async (req, res) => {
     query += ` GROUP BY ledger_name`
     
     const result = await db.query(query, params)
+    let transactionDebit = 0;
+    let transactionCredit = 0;
     for (const row of result.rows || []) {
       const name = row.ledger_name;
       if (!summary[name]) {
         summary[name] = { ledger_name: name, debit: 0, credit: 0 };
       }
-      summary[name].debit += parseFloat(row.deb || 0);
-      summary[name].credit += parseFloat(row.cred || 0);
+      const debVal = parseFloat(row.deb || 0);
+      const credVal = parseFloat(row.cred || 0);
+      summary[name].debit += debVal;
+      summary[name].credit += credVal;
+      transactionDebit += debVal;
+      transactionCredit += credVal;
+    }
+
+    // Account for any asymmetry in opening balances (e.g. unclosed prior financial year)
+    let openingDebit = 0;
+    let openingCredit = 0;
+    for (const l of ledgers) {
+      const opBal = parseFloat(l.openingbalance || 0);
+      if (opBal > 0) {
+        if (l.opening_type === 'Dr') openingDebit += opBal;
+        else openingCredit += opBal;
+      }
+    }
+    const openingDifference = openingDebit - openingCredit;
+    if (Math.abs(openingDifference) > 0.001) {
+      if (openingDifference > 0) {
+        summary['Difference in Opening Balances'] = {
+          ledger_name: 'Difference in Opening Balances',
+          debit: 0,
+          credit: openingDifference,
+          isOpeningDifference: true
+        };
+      } else {
+        summary['Difference in Opening Balances'] = {
+          ledger_name: 'Difference in Opening Balances',
+          debit: Math.abs(openingDifference),
+          credit: 0,
+          isOpeningDifference: true
+        };
+      }
     }
     
     const trialBalanceList = Object.values(summary).filter(item => item.debit > 0 || item.credit > 0);
@@ -1521,6 +1556,10 @@ router.get('/trial-balance', async (req, res) => {
       ledgers: trialBalanceList,
       totalDebit,
       totalCredit,
+      transactionDebit,
+      transactionCredit,
+      isTransactionBalanced: Math.abs(transactionDebit - transactionCredit) < 0.01,
+      openingDifference: Math.abs(openingDifference),
       isBalanced: Math.abs(totalDebit - totalCredit) < 0.01
     })
   } catch (error) {
@@ -1788,13 +1827,13 @@ router.get('/ledger/:ledgerName', async (req, res) => {
     
     // Detect type suffix like " (Supplier)", " (Customer)", " (Papad Company)", etc.
     let detectedType = type || null
-    const suffixMatch = rawLedgerName.match(/\s*\((Supplier|Customer|Papad Company|Flour Mill|Expense|Income|Bank|Cash|Party|Tax|Asset|Liability|General|Creditor|Debtor)\)$/i)
+    const suffixMatch = rawLedgerName.match(/\s*\((Supplier|Customer|Papad Company|Flour Mill|Expense|Income|Bank|Cash|Party|Tax|Asset|Liability|General|Creditor|Debtor|Worker|Driver|Loadman|Loadmen|Transporter|Helper|Artisan|Contractor)\)$/i)
     if (suffixMatch && !detectedType) {
       detectedType = suffixMatch[1]
     }
     
     const cleanName = rawLedgerName
-      .replace(/\s*\((Supplier|Customer|Papad Company|Flour Mill|Expense|Income|Bank|Cash|Party|Tax|Asset|Liability|General|Creditor|Debtor)\)$/i, '')
+      .replace(/\s*\((Supplier|Customer|Papad Company|Flour Mill|Expense|Income|Bank|Cash|Party|Tax|Asset|Liability|General|Creditor|Debtor|Worker|Driver|Loadman|Loadmen|Transporter|Helper|Artisan|Contractor)\)$/i, '')
       .trim()
     
     let officialName = cleanName || rawLedgerName
@@ -1813,6 +1852,9 @@ router.get('/ledger/:ledgerName', async (req, res) => {
     }
     if (cleanName) {
       exactLedgerNames.add(cleanName.trim().toLowerCase())
+    }
+    if (rawLedgerName && rawLedgerName.trim().toLowerCase() !== cleanName.trim().toLowerCase()) {
+      exactLedgerNames.add(rawLedgerName.trim().toLowerCase())
     }
 
     // Helper to calculate signed opening balance
@@ -1967,11 +2009,34 @@ router.get('/ledger/:ledgerName', async (req, res) => {
       } catch (e) {}
     }
 
+    // 6. Look in operational_parties (Workers, Loadmen, Drivers, Transporters, etc.)
+    let operationalPartyIds = new Set()
+    try {
+      const { ensureOperationalTables } = require('../services/operationalChargeEngine');
+      await ensureOperationalTables(1);
+    } catch (_) {}
+
+    try {
+      const opQuery = await db.query(
+        `SELECT id, name, party_code FROM operational_parties 
+         WHERE id = ? OR name = ? OR TRIM(name) = ? OR LOWER(TRIM(name)) = LOWER(?) 
+            OR LOWER(TRIM(name)) = LOWER(?) OR party_code = ?`,
+        [parseInt(cleanName) || -1, cleanName, cleanName, cleanName, rawLedgerName, cleanName]
+      )
+      if (opQuery.rows && opQuery.rows.length > 0) {
+        opQuery.rows.forEach(r => {
+          if (r.id) operationalPartyIds.add(Number(r.id))
+          if (r.name) exactLedgerNames.add(r.name.trim().toLowerCase())
+        })
+      }
+    } catch (e) {}
+
     const lmIdList = Array.from(ledgerMasterIds)
     const nameList = Array.from(exactLedgerNames).filter(Boolean)
     const suppIdList = Array.from(supplierIds)
     const custIdList = Array.from(customerIds)
     const papadIdList = Array.from(papadCompanyIds)
+    const opPartyIdList = Array.from(operationalPartyIds)
 
     if (lmIdList.length === 0 && nameList.length === 0) {
       nameList.push(cleanName.toLowerCase())
@@ -2106,255 +2171,91 @@ router.get('/ledger/:ledgerName', async (req, res) => {
     }
 
     // -------------------------------------------------------------
-    // SOURCE 3: purchases table (Direct purchase invoices)
+    // SOURCE 8: operational_payments & operational_charges
     // -------------------------------------------------------------
-    if (suppIdList.length > 0 || (nameList.length > 0 && (!detectedType || detectedType.toLowerCase() === 'supplier'))) {
+    if (opPartyIdList.length > 0 || (nameList.length > 0)) {
       try {
-        let pConds = []
-        let pParams = []
-        if (suppIdList.length > 0) {
-          pConds.push(`supplier IN (${suppIdList.map(() => '?').join(', ')})`)
-          pParams.push(...suppIdList)
+        const { ensureOperationalTables } = require('../services/operationalChargeEngine');
+        await ensureOperationalTables(1);
+      } catch (_) {}
+
+      try {
+        let opConds = []
+        let opParams = []
+        if (opPartyIdList.length > 0) {
+          opConds.push(`party_id IN (${opPartyIdList.map(() => '?').join(', ')})`)
+          opParams.push(...opPartyIdList)
         }
         if (nameList.length > 0) {
-          pConds.push(`LOWER(TRIM(supplier)) IN (${nameList.map(() => '?').join(', ')})`)
-          pParams.push(...nameList)
+          opConds.push(`LOWER(TRIM(party_name)) IN (${nameList.map(() => '?').join(', ')})`)
+          opParams.push(...nameList)
         }
 
-        if (pConds.length > 0) {
-          const pRes = await db.query(`
-            SELECT id, s_no, inv_no, date, supplier, grand_total, net_amount, remarks 
-            FROM purchases 
-            WHERE (${pConds.join(' OR ')})
-          `, pParams)
+        if (opConds.length > 0) {
+          const payRes = await db.query(`
+            SELECT id, payment_no, payment_date, party_name, paid_amount, reference_no, 
+                   COALESCE(notes, remarks, '') as notes 
+            FROM operational_payments 
+            WHERE (${opConds.join(' OR ')})
+          `, opParams)
 
-          for (const row of pRes.rows || []) {
-            const vNo = `PUR${String(row.s_no).padStart(5, '0')}`
-            const amt = parseFloat(row.grand_total || row.net_amount || 0)
-            const key = `${vNo}_0_${amt}`
-            const altKey = `${row.s_no}_0_${amt}`
-            
-            if (!seenVoucherNos.has(vNo) && !seenVoucherNos.has(String(row.s_no)) && !seenKeys.has(key) && !seenKeys.has(altKey)) {
-              seenKeys.add(key)
-              seenVoucherNos.add(vNo)
-              allTransactions.push({
-                id: 200000 + row.id,
-                date: row.date,
-                voucher_type: 'Purchase',
-                voucher_no: vNo,
-                particulars: `Purchase Invoice #${row.inv_no || row.s_no}${row.remarks ? ' - ' + row.remarks : ''}`,
-                debit: 0,
-                credit: amt,
-                ledger_id: row.supplier,
-                ledger_name: officialName
-              })
-            }
-          }
-        }
-      } catch (e) {
-        console.warn('Error checking purchases table in ledger statement:', e.message)
-      }
-    }
-
-    // -------------------------------------------------------------
-    // SOURCE 4: sales table (Direct sales bills)
-    // -------------------------------------------------------------
-    if (custIdList.length > 0 || (nameList.length > 0 && (!detectedType || detectedType.toLowerCase() === 'customer'))) {
-      try {
-        let sConds = []
-        let sParams = []
-        if (custIdList.length > 0) {
-          sConds.push(`customer IN (${custIdList.map(() => '?').join(', ')})`)
-          sParams.push(...custIdList)
-        }
-        if (nameList.length > 0) {
-          sConds.push(`LOWER(TRIM(customer)) IN (${nameList.map(() => '?').join(', ')})`)
-          sParams.push(...nameList)
-        }
-
-        if (sConds.length > 0) {
-          const sRes = await db.query(`
-            SELECT id, s_no, date, customer, grand_total, total_amt, remarks 
-            FROM sales 
-            WHERE (${sConds.join(' OR ')})
-          `, sParams)
-
-          for (const row of sRes.rows || []) {
-            const vNo = `SAL${String(row.s_no).padStart(5, '0')}`
-            const amt = parseFloat(row.grand_total || row.total_amt || 0)
-            const key = `${vNo}_${amt}_0`
-            const altKey = `${row.s_no}_${amt}_0`
-
-            if (!seenVoucherNos.has(vNo) && !seenVoucherNos.has(String(row.s_no)) && !seenKeys.has(key) && !seenKeys.has(altKey)) {
-              seenKeys.add(key)
-              seenVoucherNos.add(vNo)
-              allTransactions.push({
-                id: 300000 + row.id,
-                date: row.date,
-                voucher_type: 'Sales',
-                voucher_no: vNo,
-                particulars: `Sales Bill #${row.s_no}${row.remarks ? ' - ' + row.remarks : ''}`,
-                debit: amt,
-                credit: 0,
-                ledger_id: row.customer,
-                ledger_name: officialName
-              })
-            }
-          }
-        }
-      } catch (e) {
-        console.warn('Error checking sales table in ledger statement:', e.message)
-      }
-    }
-
-    // -------------------------------------------------------------
-    // SOURCE 5: advances table (Advance payments / receipts)
-    // -------------------------------------------------------------
-    if (papadIdList.length > 0 || (nameList.length > 0 && (!detectedType || detectedType.toLowerCase().includes('papad')))) {
-      try {
-        let aConds = []
-        let aParams = []
-        if (papadIdList.length > 0) {
-          aConds.push(`papad_company IN (${papadIdList.map(() => '?').join(', ')})`)
-          aParams.push(...papadIdList)
-        }
-        if (nameList.length > 0) {
-          aConds.push(`LOWER(TRIM(papad_company)) IN (${nameList.map(() => '?').join(', ')})`)
-          aParams.push(...nameList)
-        }
-
-        if (aConds.length > 0) {
-          const aRes = await db.query(`
-            SELECT id, s_no, date, papad_company, amount, pay_mode, remarks, dr_cr 
-            FROM advances 
-            WHERE (${aConds.join(' OR ')})
-          `, aParams)
-
-          for (const row of aRes.rows || []) {
-            const vNo = `ADV${String(row.s_no).padStart(5, '0')}`
-            const amt = parseFloat(row.amount || 0)
-            const key = `${vNo}_${amt}_0`
-            const altKey = `${row.s_no}_${amt}_0`
-
-            if (!seenVoucherNos.has(vNo) && !seenVoucherNos.has(String(row.s_no)) && !seenKeys.has(key) && !seenKeys.has(altKey)) {
-              seenKeys.add(key)
-              seenVoucherNos.add(vNo)
-              allTransactions.push({
-                id: 400000 + row.id,
-                date: row.date,
-                voucher_type: 'Advance',
-                voucher_no: vNo,
-                particulars: `Advance Payment${row.remarks ? ' - ' + row.remarks : ''}`,
-                debit: amt,
-                credit: 0,
-                ledger_id: row.papad_company,
-                ledger_name: officialName
-              })
-            }
-          }
-        }
-      } catch (e) {
-        console.warn('Error checking advances table in ledger statement:', e.message)
-      }
-    }
-
-    // -------------------------------------------------------------
-    // SOURCE 6: purchase_returns table (Purchase Returns / Debit Notes)
-    // -------------------------------------------------------------
-    if (suppIdList.length > 0 || (nameList.length > 0 && (!detectedType || detectedType.toLowerCase() === 'supplier'))) {
-      try {
-        let prConds = []
-        let prParams = []
-        if (suppIdList.length > 0) {
-          prConds.push(`supplier IN (${suppIdList.map(() => '?').join(', ')})`)
-          prParams.push(...suppIdList)
-        }
-        if (nameList.length > 0) {
-          prConds.push(`LOWER(TRIM(supplier)) IN (${nameList.map(() => '?').join(', ')})`)
-          prParams.push(...nameList)
-        }
-
-        if (prConds.length > 0) {
-          const prRes = await db.query(`
-            SELECT id, s_no, return_inv_no, date, supplier, grand_total, remarks 
-            FROM purchase_returns 
-            WHERE (${prConds.join(' OR ')})
-          `, prParams)
-
-          for (const row of prRes.rows || []) {
-            const vNo = row.return_inv_no || `PR-${row.s_no}`
-            const amt = parseFloat(row.grand_total || 0)
+          for (const row of payRes.rows || []) {
+            const vNo = row.payment_no || `OPP-${row.id}`
+            const amt = parseFloat(row.paid_amount || 0)
             const key = `${vNo}_${amt}_0`
 
             if (!seenVoucherNos.has(vNo) && !seenKeys.has(key)) {
               seenKeys.add(key)
               seenVoucherNos.add(vNo)
               allTransactions.push({
-                id: 500000 + row.id,
-                date: row.date,
-                voucher_type: 'Purchase Return',
+                id: 700000 + row.id,
+                date: row.payment_date,
+                voucher_type: 'Payment',
                 voucher_no: vNo,
-                particulars: `Purchase Return #${row.return_inv_no || row.s_no}${row.remarks ? ' - ' + row.remarks : ''}`,
+                particulars: `Operational Payment to ${row.party_name || cleanName}${row.reference_no ? ' - Ref: ' + row.reference_no : ''}`,
                 debit: amt,
                 credit: 0,
-                ledger_id: row.supplier,
+                ledger_id: row.party_id,
                 ledger_name: officialName
               })
             }
           }
-        }
-      } catch (e) {
-        console.warn('Error checking purchase_returns in ledger statement:', e.message)
-      }
-    }
 
-    // -------------------------------------------------------------
-    // SOURCE 7: sales_return table (Sales Returns / Credit Notes)
-    // -------------------------------------------------------------
-    if (custIdList.length > 0 || (nameList.length > 0 && (!detectedType || detectedType.toLowerCase() === 'customer'))) {
-      try {
-        let srConds = []
-        let srParams = []
-        if (custIdList.length > 0) {
-          srConds.push(`customer IN (${custIdList.map(() => '?').join(', ')})`)
-          srParams.push(...custIdList)
-        }
-        if (nameList.length > 0) {
-          srConds.push(`LOWER(TRIM(customer)) IN (${nameList.map(() => '?').join(', ')})`)
-          srParams.push(...nameList)
-        }
+          const chgRes = await db.query(`
+            SELECT id, charge_no, 
+                   COALESCE(date, charge_date, '') as date, 
+                   party_name, 
+                   COALESCE(final_amount, total_amount, amount, 0) as final_amount, 
+                   operation_type, 
+                   COALESCE(notes, remarks, '') as notes 
+            FROM operational_charges 
+            WHERE (${opConds.join(' OR ')})
+          `, opParams)
 
-        if (srConds.length > 0) {
-          const srRes = await db.query(`
-            SELECT id, s_no, date, customer, grand_total, total_amt, remarks 
-            FROM sales_return 
-            WHERE (${srConds.join(' OR ')})
-          `, srParams)
-
-          for (const row of srRes.rows || []) {
-            const vNo = `SR-${row.s_no || row.id}`
-            const amt = parseFloat(row.grand_total || row.total_amt || 0)
+          for (const row of chgRes.rows || []) {
+            const vNo = row.charge_no || `OPC-${row.id}`
+            const amt = parseFloat(row.final_amount || 0)
             const key = `${vNo}_0_${amt}`
 
             if (!seenVoucherNos.has(vNo) && !seenKeys.has(key)) {
               seenKeys.add(key)
               seenVoucherNos.add(vNo)
               allTransactions.push({
-                id: 600000 + row.id,
+                id: 800000 + row.id,
                 date: row.date,
-                voucher_type: 'Sales Return',
+                voucher_type: 'Journal',
                 voucher_no: vNo,
-                particulars: `Sales Return #${row.s_no || row.id}${row.remarks ? ' - ' + row.remarks : ''}`,
+                particulars: `${row.operation_type || 'Operational'} Charge #${vNo}${row.notes ? ' - ' + row.notes : ''}`,
                 debit: 0,
                 credit: amt,
-                ledger_id: row.customer,
+                ledger_id: row.party_id,
                 ledger_name: officialName
               })
             }
           }
         }
       } catch (e) {
-        console.warn('Error checking sales_return in ledger statement:', e.message)
+        console.warn('Error checking operational payments/charges in ledger statement:', e.message)
       }
     }
 

@@ -433,7 +433,12 @@ router.get('/report', async (req, res) => {
 router.get('/lots', async (req, res) => {
   try {
     const { item_id } = req.query;
-    const cId = req.companyId || req.headers?.['x-company-id'] || req.query?.company_id;
+    const cId = req.companyId || req.headers?.['x-company-id'] || req.query?.company_id || 1;
+
+    try {
+      const { ensureMovementPassesSchema } = require('../utils/movementPassesSchema');
+      await ensureMovementPassesSchema(cId);
+    } catch (_) {}
     
     let query = `
       SELECT 

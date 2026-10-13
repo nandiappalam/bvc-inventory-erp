@@ -240,6 +240,15 @@ const ItemDisplay = () => {
 
   // Robust delete handler with foreign key constraint checks
   const handleDeleteItem = async (item) => {
+    const itemName = item.item_name || item.item_code || 'Item';
+    const confirmed = window.__appConfirm ? await window.__appConfirm({
+      title: 'Confirm Item Deletion',
+      message: `Are you sure you want to delete item "${itemName}"?\n\nThis action cannot be undone.`,
+      confirmText: 'Delete Item',
+      confirmColor: 'error'
+    }) : window.confirm(`Are you sure you want to delete item "${itemName}"?`);
+    if (!confirmed) return;
+
     setDeleting(true);
     try {
       const identifier = item.item_code || item.id;

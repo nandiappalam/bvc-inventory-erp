@@ -59,7 +59,8 @@
 	font-size:20px;
 }
 
-input{
+#weight-conversion-window input,
+.weight-conversion-create input{
     height:20px;
     border:1px solid #9bb4e0;
     padding:4px 8px;
@@ -67,20 +68,23 @@ input{
 }
 
 /* TABLE */
-table{
+#weight-conversion-window table,
+.weight-conversion-create table{
     width:70%;
     border-collapse:collapse;
     margin-top:5px;
 }
 
-th{
+#weight-conversion-window th,
+.weight-conversion-create th{
     background:#3f6fc0;
     color:#fff;
     height:24px;
     border:1px solid #9bb4e0;
 }
 
-td{
+#weight-conversion-window td,
+.weight-conversion-create td{
     height:22px;
     border:1px solid #9bb4e0;
 }
@@ -99,7 +103,8 @@ td{
 	margin-top:305px;
 }
 
-button{
+#weight-conversion-window button,
+.weight-conversion-create button{
     padding:6px 25px;
     background:#3f6fc0;
     color:#fff;

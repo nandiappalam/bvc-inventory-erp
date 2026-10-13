@@ -644,6 +644,39 @@ router.post('/', async (req, res) => {
       console.error('Error creating ledger entries:', ledgerError)
     }
 
+    // Trigger Central Notification & WhatsApp/SMS Alert
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const itemDesc = items && items.length > 0 ? items.map(i => `${i.qty || 0} ${i.item_name || 'Bags'}`).slice(0, 3).join(', ') : 'Raw Material';
+      const purNo = formData.invNo || `PUR-${purchaseId}`;
+      await triggerTransactionNotification({
+        moduleName: 'PURCHASE',
+        referenceNo: purNo,
+        referenceId: purchaseId,
+        companyId: activeCompanyId,
+        title: `🟢 PURCHASE CREATED – ${purNo}`,
+        message: `Supplier: ${formData.supplier || 'Vendor'} | Invoice: ${formData.invNo || purNo} | Items: ${itemDesc} | Total: ${totals.totalQty || 0} Bags (${totals.totalWeight || 0} KG) | Vehicle: ${vehicle_no || 'N/A'} | Status: Awaiting QC`,
+        severity: 'INFO',
+        details: {
+          purchase_no: purNo,
+          date: formData.date,
+          supplier: formData.supplier,
+          invoice_no: formData.invNo || purNo,
+          item_summary: itemDesc,
+          quantity: `${totals.totalWeight || 0} KG`,
+          bags: totals.totalQty || 0,
+          vehicle: vehicle_no || 'N/A',
+          godown: resolvedGodownName || 'Main Godown',
+          qc_status: 'PENDING',
+          iqr_status: 'PENDING',
+          created_by: req.user?.username || 'Store Operator',
+          status: 'PURCHASE CREATED'
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Central Notification Warning for Purchase:', notifErr.message);
+    }
+
     res.status(201).json({ success: true, message: 'Purchase saved successfully!', id: purchaseId })
   } catch (error) {
     console.error('Error saving purchase:', error)

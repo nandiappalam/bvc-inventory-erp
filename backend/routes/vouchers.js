@@ -44,20 +44,26 @@ const validateVoucherData = (data) => {
   return true;
 };
 
-// Generate auto voucher number (robust)
+// Generate auto voucher number (robust & collision-free)
 async function generateVoucherNo(voucher_type) {
   try {
-    const prefix = PREFIX_MAP[voucher_type];
-    if (!prefix) throw new Error('Invalid voucher_type for numbering');
+    const prefix = PREFIX_MAP[voucher_type] || 'VOC';
     const countResult = await db.query(
       'SELECT COUNT(*) as count FROM voucher',
       []
     );
-    const nextNum = (countResult.rows[0].count || 0) + 1;
-    return `${prefix}${nextNum.toString().padStart(3, '0')}`;
+    let nextNum = (countResult.rows?.[0]?.count || 0) + 1;
+    while (true) {
+      const candidate = `${prefix}${nextNum.toString().padStart(3, '0')}`;
+      const check = await db.query('SELECT id FROM voucher WHERE voucher_no = ? LIMIT 1', [candidate]);
+      if (!check.rows || check.rows.length === 0) {
+        return candidate;
+      }
+      nextNum++;
+    }
   } catch (err) {
     console.error('generateVoucherNo ERROR:', err);
-    return `${PREFIX_MAP[voucher_type] || 'VOC'}001`;
+    return `${PREFIX_MAP[voucher_type] || 'VOC'}${Date.now().toString().slice(-5)}`;
   }
 };
 
@@ -385,9 +391,70 @@ async function healPurchaseAndSalesVouchers() {
   }
 }
 
+// Helper to resolve clean ledger name from entry or master tables
+async function resolveLedgerName(entry, pfx = '') {
+  if (entry && entry.ledger_name && typeof entry.ledger_name === 'string' && entry.ledger_name.trim() && entry.ledger_name.trim() !== 'Unknown') {
+    return entry.ledger_name.replace(/\s*\([^)]*\)$/i, '').trim();
+  }
+
+  const id = entry ? entry.ledger_id : null;
+  if (!id) return 'General Ledger';
+
+  try {
+    const lm = await db.query('SELECT name FROM ledgermaster WHERE id = ?', [id]);
+    if (lm.rows && lm.rows[0]?.name) return lm.rows[0].name;
+
+    const sm = await db.query('SELECT name FROM supplier_master WHERE id = ?', [id]);
+    if (sm.rows && sm.rows[0]?.name) return sm.rows[0].name;
+
+    const cm = await db.query('SELECT name FROM customer_master WHERE id = ?', [id]);
+    if (cm.rows && cm.rows[0]?.name) return cm.rows[0].name;
+
+    const pm = await db.query('SELECT name FROM papad_company_master WHERE id = ?', [id]);
+    if (pm.rows && pm.rows[0]?.name) return pm.rows[0].name;
+
+    const op = await db.all(`SELECT name FROM ${pfx}operational_parties WHERE id = ?`, [id]).catch(() => []);
+    if (op && op[0]?.name) return op[0].name;
+
+    const tm = await db.query('SELECT name FROM transport_master WHERE id = ?', [id]);
+    if (tm.rows && tm.rows[0]?.name) return tm.rows[0].name;
+
+    const fm = await db.query('SELECT flourmill FROM flour_mill_master WHERE id = ?', [id]);
+    if (fm.rows && fm.rows[0]?.flourmill) return fm.rows[0].flourmill;
+  } catch (err) {
+    console.warn('resolveLedgerName error:', err.message);
+  }
+
+  return 'General Ledger';
+}
+
 async function healDatabaseVouchers() {
   console.log('Running healDatabaseVouchers migration...');
   try {
+    // Backfill missing ledger_name in voucher_entry from ledger_entries or ledgermaster
+    await db.run(`
+      UPDATE voucher_entry
+      SET ledger_name = (
+        SELECT le.ledger_name
+        FROM ledger_entries le
+        WHERE le.voucher_id = voucher_entry.voucher_id
+          AND le.ledger_id = voucher_entry.ledger_id
+          AND le.ledger_name IS NOT NULL AND le.ledger_name != ''
+        LIMIT 1
+      )
+      WHERE ledger_name IS NULL OR ledger_name = '' OR ledger_name = 'Unknown'
+    `);
+
+    await db.run(`
+      UPDATE voucher_entry
+      SET ledger_name = (
+        SELECT lm.name
+        FROM ledgermaster lm
+        WHERE lm.id = voucher_entry.ledger_id
+      )
+      WHERE ledger_name IS NULL OR ledger_name = '' OR ledger_name = 'Unknown'
+    `);
+
     const numericLedgers = await db.query("SELECT id, name FROM ledgermaster WHERE name GLOB '[0-9]*'", []);
     for (const row of numericLedgers.rows || []) {
       const ledgerId = row.id;
@@ -529,6 +596,37 @@ router.get('/ledgers', async (req, res) => {
       console.warn('Error fetching flourmills:', err);
     }
 
+    // 6. Fetch operational parties (Workers, Loadmen, Drivers, Helpers, Labour)
+    try {
+      const pfx = (req.headers['x-company-id'] && parseInt(req.headers['x-company-id'], 10) > 1) ? `c${req.headers['x-company-id']}_` : '';
+      const opParties = await db.all(`SELECT id, name, COALESCE(category, party_category, 'Worker') as cat FROM ${pfx}operational_parties WHERE is_active = 1`).catch(() => []);
+      for (const row of opParties || []) {
+        const name = row.name;
+        if (name && !seenNames.has(name.toLowerCase())) {
+          seenNames.add(name.toLowerCase());
+          const ledgerId = await resolveLedgerId(name, 'Worker');
+          combinedLedgers.push({ id: ledgerId, name: `${name} (${row.cat || 'Worker'})`, ledger_type: 'Worker' });
+        }
+      }
+    } catch (err) {
+      console.warn('Error fetching operational parties:', err);
+    }
+
+    // 7. Fetch transporters
+    try {
+      const transporters = await db.query('SELECT id, name FROM transport_master', []);
+      for (const row of transporters.rows || []) {
+        const name = row.name;
+        if (name && !seenNames.has(name.toLowerCase())) {
+          seenNames.add(name.toLowerCase());
+          const ledgerId = await resolveLedgerId(name, 'Transporter');
+          combinedLedgers.push({ id: ledgerId, name: `${name} (Transporter)`, ledger_type: 'Transporter' });
+        }
+      }
+    } catch (err) {
+      console.warn('Error fetching transporters:', err);
+    }
+
     // Sort by name
     combinedLedgers.sort((a, b) => a.name.localeCompare(b.name));
 
@@ -546,7 +644,7 @@ router.get('/', async (req, res) => {
       SELECT v.*, 
       COALESCE(SUM(ve.debit), 0) as total_debit,
       COALESCE(SUM(ve.credit), 0) as total_credit,
-      GROUP_CONCAT(lm.name, ', ') as ledger_names
+      GROUP_CONCAT(DISTINCT COALESCE(NULLIF(ve.ledger_name, ''), lm.name, 'Party Account')) as ledger_names
       FROM voucher v 
       LEFT JOIN voucher_entry ve ON v.id = ve.voucher_id
       LEFT JOIN ledgermaster lm ON ve.ledger_id = lm.id
@@ -600,6 +698,22 @@ router.get('/', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const data = req.body;
+
+    // Pre-resolve any string or non-numeric ledger_id (e.g. TM_1, custom names, etc.)
+    const { resolveLedgerId } = require('../utils/ledgerHelper');
+    for (const entry of data.entries || []) {
+      if (!entry.ledger_id || isNaN(Number(entry.ledger_id)) || Number(entry.ledger_id) <= 0) {
+        const nameToResolve = entry.ledger_name || (typeof entry.ledger_id === 'string' && isNaN(Number(entry.ledger_id)) ? entry.ledger_id : 'General Account');
+        const resolvedId = await resolveLedgerId(nameToResolve, data.voucher_type === 'Receipt' ? 'Customer' : 'Supplier');
+        if (resolvedId) {
+          entry.ledger_id = resolvedId;
+          entry.ledger_name = nameToResolve;
+        } else {
+          entry.ledger_id = 1;
+        }
+      }
+    }
+
     validateVoucherData(data);
 
     // Auto generate voucher_no if not provided
@@ -616,43 +730,25 @@ router.post('/', async (req, res) => {
     );
     const voucherId = voucherResult.lastInsertRowid;
 
-    // Insert entries
-    for (const entry of data.entries) {
-      const entryType = entry.type || (Number(entry.debit) > 0 ? 'Dr' : 'Cr');
-      await db.run(
-        'INSERT INTO voucher_entry (voucher_id, type, ledger_id, debit, credit, remarks) VALUES (?, ?, ?, ?, ?, ?)',
-        [voucherId, entryType, entry.ledger_id, entry.debit || 0, entry.credit || 0, entry.remarks || '']
-      );
-    }
+    const companyPrefix = (req.headers['x-company-id'] && parseInt(req.headers['x-company-id'], 10) > 1) ? `c${req.headers['x-company-id']}_` : '';
 
-    // Post to ledger_entries
+    // Insert entries & post to ledger_entries
     const ledgerEntries = [];
     for (const entry of data.entries) {
-      let ledger_name = '';
-      try {
-        const lmResult = await db.query('SELECT name FROM ledgermaster WHERE id = ?', [entry.ledger_id]);
-        if (lmResult.rows && lmResult.rows.length > 0) ledger_name = lmResult.rows[0].name;
-        if (!ledger_name) {
-          const smResult = await db.query('SELECT name FROM supplier_master WHERE id = ?', [entry.ledger_id]);
-          if (smResult.rows && smResult.rows.length > 0) ledger_name = smResult.rows[0].name;
-        }
-        if (!ledger_name) {
-          const cmResult = await db.query('SELECT name FROM customer_master WHERE id = ?', [entry.ledger_id]);
-          if (cmResult.rows && cmResult.rows.length > 0) ledger_name = cmResult.rows[0].name;
-        }
-        if (!ledger_name) {
-          const pmResult = await db.query('SELECT name FROM papad_company_master WHERE id = ?', [entry.ledger_id]);
-          if (pmResult.rows && pmResult.rows.length > 0) ledger_name = pmResult.rows[0].name;
-        }
-      } catch (e) {}
+      const entryType = entry.type || (Number(entry.debit) > 0 ? 'Dr' : 'Cr');
+      const ledger_name = await resolveLedgerName(entry, companyPrefix);
 
-      if (!ledger_name) ledger_name = 'Unknown';
+      await db.run(
+        'INSERT INTO voucher_entry (voucher_id, type, ledger_id, ledger_name, debit, credit, remarks) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [voucherId, entryType, entry.ledger_id, ledger_name, entry.debit || 0, entry.credit || 0, entry.remarks || '']
+      );
 
       const particularsText = (entry.remarks && entry.remarks.trim()) 
         ? entry.remarks.trim() 
         : ((data.reference_no && data.reference_no.trim()) 
             ? data.reference_no.trim() 
             : (data.narration || ''));
+
       ledgerEntries.push(db.run(
         `INSERT INTO ledger_entries (ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit, particulars, voucher_id) 
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -670,7 +766,7 @@ router.post('/', async (req, res) => {
     res.status(201).json(created.rows[0]);
   } catch (err) {
     console.error('POST /vouchers error:', err);
-res.status(400).json({ error: err.message });
+    res.status(400).json({ error: err.message });
   }
 });
 
@@ -686,7 +782,7 @@ router.get('/:id', async (req, res) => {
     if (voucher.rows.length === 0) return res.status(404).json({ error: 'Voucher not found' });
 
     const entries = await db.query(`
-      SELECT ve.*, lm.name as ledger_name 
+      SELECT ve.*, COALESCE(NULLIF(ve.ledger_name, ''), lm.name, 'General Ledger') as ledger_name 
       FROM voucher_entry ve 
       LEFT JOIN ledgermaster lm ON ve.ledger_id = lm.id 
       WHERE ve.voucher_id = ?
@@ -708,45 +804,44 @@ router.put('/:id', async (req, res) => {
     
     // Re-use POST logic (simplified)
     const data = req.body;
+    const { resolveLedgerId } = require('../utils/ledgerHelper');
+    for (const entry of data.entries || []) {
+      if (!entry.ledger_id || isNaN(Number(entry.ledger_id)) || Number(entry.ledger_id) <= 0) {
+        const nameToResolve = entry.ledger_name || (typeof entry.ledger_id === 'string' && isNaN(Number(entry.ledger_id)) ? entry.ledger_id : 'General Account');
+        const resolvedId = await resolveLedgerId(nameToResolve, data.voucher_type === 'Receipt' ? 'Customer' : 'Supplier');
+        if (resolvedId) {
+          entry.ledger_id = resolvedId;
+          entry.ledger_name = nameToResolve;
+        } else {
+          entry.ledger_id = 1;
+        }
+      }
+    }
     const voucher_no = data.voucher_no || await generateVoucherNo(data.voucher_type);
     
     await db.run(`
       UPDATE voucher SET voucher_type = ?, voucher_no = ?, date = ?, reference_no = ?, narration = ?, status = ?, posted = ? WHERE id = ?
     `, [data.voucher_type, voucher_no, data.date, data.reference_no || '', data.narration || '', data.status || 'Approved', data.posted !== undefined ? data.posted : 1, req.params.id]);
 
+    const companyPrefix = (req.headers['x-company-id'] && parseInt(req.headers['x-company-id'], 10) > 1) ? `c${req.headers['x-company-id']}_` : '';
+
     // Insert new entries
     const ledgerEntries = [];
     for (const entry of data.entries) {
-      await db.run(
-        'INSERT INTO voucher_entry (voucher_id, type, ledger_id, debit, credit, remarks) VALUES (?, ?, ?, ?, ?, ?)',
-        [req.params.id, entry.type, entry.ledger_id, entry.debit || 0, entry.credit || 0, entry.remarks || '']
-      );
-      
-      let ledger_name = '';
-      try {
-        const lmResult = await db.query('SELECT name FROM ledgermaster WHERE id = ?', [entry.ledger_id]);
-        if (lmResult.rows && lmResult.rows.length > 0) ledger_name = lmResult.rows[0].name;
-        if (!ledger_name) {
-          const smResult = await db.query('SELECT name FROM supplier_master WHERE id = ?', [entry.ledger_id]);
-          if (smResult.rows && smResult.rows.length > 0) ledger_name = smResult.rows[0].name;
-        }
-        if (!ledger_name) {
-          const cmResult = await db.query('SELECT name FROM customer_master WHERE id = ?', [entry.ledger_id]);
-          if (cmResult.rows && cmResult.rows.length > 0) ledger_name = cmResult.rows[0].name;
-        }
-        if (!ledger_name) {
-          const pmResult = await db.query('SELECT name FROM papad_company_master WHERE id = ?', [entry.ledger_id]);
-          if (pmResult.rows && pmResult.rows.length > 0) ledger_name = pmResult.rows[0].name;
-        }
-      } catch (e) {}
+      const entryType = entry.type || (Number(entry.debit) > 0 ? 'Dr' : 'Cr');
+      const ledger_name = await resolveLedgerName(entry, companyPrefix);
 
-      if (!ledger_name) ledger_name = 'Unknown';
+      await db.run(
+        'INSERT INTO voucher_entry (voucher_id, type, ledger_id, ledger_name, debit, credit, remarks) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [req.params.id, entryType, entry.ledger_id, ledger_name, entry.debit || 0, entry.credit || 0, entry.remarks || '']
+      );
 
       const particularsText = (entry.remarks && entry.remarks.trim()) 
         ? entry.remarks.trim() 
         : ((data.reference_no && data.reference_no.trim()) 
             ? data.reference_no.trim() 
             : (data.narration || ''));
+
       ledgerEntries.push(db.run(
         `INSERT INTO ledger_entries (ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit, particulars, voucher_id) 
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -754,7 +849,7 @@ router.put('/:id', async (req, res) => {
       ));
     }
     await Promise.all(ledgerEntries);
-
+      
     res.json({ message: 'Voucher updated successfully' });
   } catch (err) {
     console.error('PUT /vouchers/:id error:', err);

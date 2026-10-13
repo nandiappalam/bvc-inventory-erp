@@ -66,28 +66,31 @@ async function generateVoucherNumber(voucherType) {
     JOURNAL: 'JNL',
     CONTRA: 'CON',
   };
-  const prefix = prefixMap[normalized] || normalized || 'VOC';
+  const prefix = prefixMap[normalized] || 'VOC';
 
-  const result = await db.query('SELECT voucher_no FROM voucher WHERE voucher_type = ? ORDER BY id DESC LIMIT 1', [normalized === 'PURCHASE' ? 'Purchase' : voucherType]);
-  if (result.rows.length > 0) {
-    const voucherNo = String(result.rows[0].voucher_no || '');
-    const match = voucherNo.match(new RegExp(`${prefix}(\\d+)$`, 'i'));
-    const lastNo = match ? parseInt(match[1], 10) : 0;
-    return `${prefix}${String(lastNo + 1).padStart(5, '0')}`;
+  const countResult = await db.query('SELECT COUNT(*) as cnt FROM voucher');
+  let nextNum = (countResult.rows?.[0]?.cnt || 0) + 1;
+
+  while (true) {
+    const candidate = `${prefix}${String(nextNum).padStart(5, '0')}`;
+    const check = await db.query('SELECT id FROM voucher WHERE voucher_no = ? LIMIT 1', [candidate]);
+    if (!check.rows || check.rows.length === 0) {
+      return candidate;
+    }
+    nextNum++;
   }
-  return `${prefix}00001`;
 }
 
-async function createVoucher({
-  voucherType,
-  voucherNo,
-  date,
-  referenceNo,
-  narration,
-  entries = [],
-}) {
+async function createVoucher(params = {}) {
   await ensureVoucherTables();
-  const voucherNumber = voucherNo || await generateVoucherNumber(voucherType);
+  const voucherType = params.voucherType || params.voucher_type || 'Journal';
+  const voucherNo = params.voucherNo || params.voucher_no || await generateVoucherNumber(voucherType);
+  const date = params.date || params.voucher_date || new Date().toISOString().split('T')[0];
+  const referenceNo = params.referenceNo || params.reference_no || '';
+  const narration = params.narration || '';
+  const entries = params.entries || [];
+
+  const voucherNumber = voucherNo;
   const voucherResult = await db.run(
     'INSERT INTO voucher (voucher_type, voucher_no, date, reference_no, narration) VALUES (?, ?, ?, ?, ?)',
     [voucherType, voucherNumber, date, referenceNo, narration]
@@ -96,41 +99,51 @@ async function createVoucher({
 
   for (const entry of entries) {
     const columns = await getTableColumns('voucher_entry');
-    const ledgerName = entry.ledgerName || entry.ledger_name;
-    const resolvedLedgerId = entry.ledgerId ?? (ledgerName ? await resolveLedgerId(ledgerName) : 0);
+    const debitVal = Number(entry.debit ?? entry.debit_amount ?? 0);
+    const creditVal = Number(entry.credit ?? entry.credit_amount ?? 0);
+    const remarksVal = entry.remarks || entry.narration || '';
+
+    let ledgerName = entry.ledgerName || entry.ledger_name;
+    const resolvedLedgerId = entry.ledgerId ?? entry.ledger_id ?? (ledgerName ? await resolveLedgerId(ledgerName) : 0);
     const safeLedgerId = resolvedLedgerId ?? 0;
+
+    if (!ledgerName && safeLedgerId > 0) {
+      try {
+        const lmRes = await db.query('SELECT name FROM ledgermaster WHERE id = ?', [safeLedgerId]);
+        if (lmRes.rows && lmRes.rows.length > 0) ledgerName = lmRes.rows[0].name;
+      } catch (e) {}
+    }
+    if (!ledgerName) ledgerName = 'General Ledger';
 
     if (columns.has('ledger_name')) {
       await db.run(
         'INSERT INTO voucher_entry (voucher_id, type, ledger_id, ledger_name, debit, credit, remarks) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [voucherId, entry.type || 'Ledger', safeLedgerId, ledgerName || '', entry.debit || 0, entry.credit || 0, entry.remarks || '']
+        [voucherId, entry.type || (debitVal > 0 ? 'Dr' : 'Cr'), safeLedgerId, ledgerName, debitVal, creditVal, remarksVal]
       );
     } else {
       await db.run(
         'INSERT INTO voucher_entry (voucher_id, type, ledger_id, debit, credit, remarks) VALUES (?, ?, ?, ?, ?, ?)',
-        [voucherId, entry.type || 'Ledger', safeLedgerId, entry.debit || 0, entry.credit || 0, entry.remarks || '']
+        [voucherId, entry.type || (debitVal > 0 ? 'Dr' : 'Cr'), safeLedgerId, debitVal, creditVal, remarksVal]
       );
     }
 
-    if (ledgerName) {
-      await createEntry({
-        ledgerName,
-        date,
-        voucherType,
-        voucherNo: voucherNumber,
-        debit: entry.debit || 0,
-        credit: entry.credit || 0,
-        referenceId: entry.referenceId || referenceNo,
-        referenceType: entry.referenceType || 'transaction',
-        particulars: entry.particulars || entry.remarks || '',
-        voucherId,
-        transactionId: entry.transactionId || referenceNo,
-        transactionType: entry.transactionType || 'transaction',
-      });
-    }
+    await createEntry({
+      ledgerName,
+      date,
+      voucherType,
+      voucherNo: voucherNumber,
+      debit: debitVal,
+      credit: creditVal,
+      referenceId: entry.referenceId || referenceNo,
+      referenceType: entry.referenceType || 'transaction',
+      particulars: entry.particulars || remarksVal,
+      voucherId,
+      transactionId: entry.transactionId || referenceNo,
+      transactionType: entry.transactionType || 'transaction',
+    });
   }
 
-  return { voucherId, voucherNo: voucherNumber, voucherType };
+  return { id: voucherId, voucherId, voucherNo: voucherNumber, voucher_no: voucherNumber, voucherType };
 }
 
 async function createPurchaseVoucher({

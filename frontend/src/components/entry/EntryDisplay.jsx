@@ -51,6 +51,8 @@ const EntryDisplay = ({
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("success");
   const [searchTerm, setSearchTerm] = useState(initialSearch);
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
 
   const [confirmModal, setConfirmModal] = useState({
     isOpen: false,
@@ -292,10 +294,20 @@ const EntryDisplay = ({
   };
 
   const filteredData = data.filter(row => {
-    if (!searchTerm) return true;
-    return Object.values(row).some(val => 
+    const matchesSearch = !searchTerm || Object.values(row).some(val => 
       String(val).toLowerCase().includes(searchTerm.toLowerCase())
     );
+    if (!matchesSearch) return false;
+
+    if (fromDate || toDate) {
+      const rowDateStr = row.date || row.created_at || row.invoice_date || row.bill_date || row.createdat || '';
+      if (rowDateStr) {
+        const rowDateOnly = String(rowDateStr).substring(0, 10);
+        if (fromDate && rowDateOnly < fromDate) return false;
+        if (toDate && rowDateOnly > toDate) return false;
+      }
+    }
+    return true;
   });
 
   return (
@@ -334,7 +346,7 @@ const EntryDisplay = ({
       )}
 
       <div style={styles.filterSection}>
-        <div style={styles.filterLeft}>
+        <div style={{ ...styles.filterLeft, display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
           <input
             type="text"
             placeholder="Search..."
@@ -342,6 +354,32 @@ const EntryDisplay = ({
             onChange={(e) => setSearchTerm(e.target.value)}
             style={styles.searchInput}
           />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '13px', color: '#333' }}>
+            <span>From:</span>
+            <input
+              type="date"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+              style={{ padding: '6px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '13px', backgroundColor: '#fff' }}
+            />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '13px', color: '#333' }}>
+            <span>To:</span>
+            <input
+              type="date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+              style={{ padding: '6px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '13px', backgroundColor: '#fff' }}
+            />
+          </div>
+          {(fromDate || toDate) && (
+            <button
+              onClick={() => { setFromDate(''); setToDate(''); }}
+              style={{ padding: '6px 10px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}
+            >
+              Clear
+            </button>
+          )}
         </div>
         <div style={styles.filterRight}>
           <button style={styles.refreshBtn} onClick={fetchData}>Refresh</button>

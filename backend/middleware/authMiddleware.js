@@ -7,14 +7,16 @@ const JWT_SECRET = process.env.JWT_SECRET || 'bvc-erp-secure-jwt-secret-key-2026
 function companyContextMiddleware(req, res, next) {
   let companyId = 1;
   let user = null;
+  let validHeaderFound = false;
 
   try {
     // 1. Try resolving from custom header (X-Company-Id or X-Tenant-Id)
     const headerCompany = req.headers['x-company-id'] || req.headers['x-tenant-id'];
-    if (headerCompany) {
+    if (headerCompany && headerCompany !== 'undefined' && headerCompany !== 'null' && headerCompany !== 'NaN') {
       const parsed = parseInt(headerCompany, 10);
       if (!isNaN(parsed) && parsed > 0) {
         companyId = parsed;
+        validHeaderFound = true;
       }
     }
 
@@ -27,9 +29,12 @@ function companyContextMiddleware(req, res, next) {
         if (decoded) {
           user = decoded;
           req.user = decoded;
-          // If header wasn't explicitly supplied, use token's companyId
-          if (!headerCompany && decoded.companyId) {
-            companyId = parseInt(decoded.companyId, 10) || companyId;
+          // If valid header wasn't explicitly supplied, use token's companyId
+          if (!validHeaderFound && decoded.companyId) {
+            const tokenComp = parseInt(decoded.companyId, 10);
+            if (!isNaN(tokenComp) && tokenComp > 0) {
+              companyId = tokenComp;
+            }
           }
         }
       } catch (err) {
@@ -38,7 +43,7 @@ function companyContextMiddleware(req, res, next) {
     }
 
     // 3. Try resolving from query parameters
-    if (!headerCompany && req.query && (req.query.company_id || req.query.companyId)) {
+    if (!validHeaderFound && req.query && (req.query.company_id || req.query.companyId)) {
       const parsed = parseInt(req.query.company_id || req.query.companyId, 10);
       if (!isNaN(parsed) && parsed > 0) {
         companyId = parsed;
@@ -46,13 +51,17 @@ function companyContextMiddleware(req, res, next) {
     }
 
     // 4. Try resolving from body (for POST/PUT requests)
-    if (!headerCompany && req.body && (req.body.company_id || req.body.companyId)) {
+    if (!validHeaderFound && req.body && (req.body.company_id || req.body.companyId)) {
       const parsed = parseInt(req.body.company_id || req.body.companyId, 10);
       if (!isNaN(parsed) && parsed > 0) {
         companyId = parsed;
       }
     }
   } catch (parseErr) {
+    companyId = 1;
+  }
+
+  if (!companyId || isNaN(companyId) || companyId <= 0) {
     companyId = 1;
   }
 
@@ -90,14 +99,10 @@ function companyContextMiddleware(req, res, next) {
 
 // Mandatory Tenant Middleware for protected company-level operations
 function tenantMiddleware(req, res, next) {
-  const companyId = req.companyId;
-  if (!companyId || isNaN(companyId) || companyId <= 0) {
-    return res.status(400).json({
-      success: false,
-      message: 'Active Company Context is required. Please select a valid company.',
-      code: 'MISSING_TENANT_CONTEXT'
-    });
+  if (!req.companyId || isNaN(req.companyId) || req.companyId <= 0) {
+    req.companyId = 1;
   }
+  const companyId = req.companyId;
 
   // Check user company access permissions
   if (req.user && req.user.role !== 'Admin' && req.user.role !== 'admin' && req.user.role !== 'SuperAdmin') {

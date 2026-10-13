@@ -231,6 +231,14 @@ module.exports = async function autoMigrate() {
     console.log('Notice when running init_db inside autoMigrate:', err.message);
   }
 
+  // Ensure movement passes (outpasses, inpasses) and outside_processing_qty exist
+  try {
+    const { ensureMovementPassesSchema } = require('./utils/movementPassesSchema');
+    await ensureMovementPassesSchema(1);
+  } catch (mvErr) {
+    console.log('Notice ensuring movement passes schema in autoMigrate:', mvErr.message);
+  }
+
   // Ensure core tables exist before running column migrations
   try {
     await db.run(`
@@ -2000,6 +2008,15 @@ module.exports = async function autoMigrate() {
 
   // Sync Item Transfers Stock
   await syncItemTransfersStock();
+
+  // Ensure Factory Operational Charges, Payments & Parties Tables
+  try {
+    const { ensureOperationalTables } = require('./services/operationalChargeEngine');
+    await ensureOperationalTables(1);
+    console.log('✓ Operational charges & payment tables verified in autoMigrate');
+  } catch (opErr) {
+    console.warn('Notice ensuring operational tables in autoMigrate:', opErr.message);
+  }
 
   console.log('✅ Auto-migrations complete');
 };

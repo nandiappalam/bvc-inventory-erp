@@ -450,7 +450,13 @@ const ItemTransfer = ({ initialView = 'create' }) => {
 
   // Handle Delete Transfer
   const handleDeleteTransfer = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this transfer voucher? Stock will be reverted.')) return;
+    const confirmed = window.__appConfirm ? await window.__appConfirm({
+      title: 'Confirm Transfer Deletion',
+      message: 'Are you sure you want to delete this transfer voucher? Stock will be reverted.',
+      confirmText: 'Delete Transfer',
+      confirmColor: 'error'
+    }) : window.confirm('Are you sure you want to delete this transfer voucher? Stock will be reverted.');
+    if (!confirmed) return;
     try {
       const res = await fetch(`/api/item-transfers/${id}`, { method: 'DELETE' });
       const data = await res.json();

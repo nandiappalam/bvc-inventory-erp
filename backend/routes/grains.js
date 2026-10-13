@@ -4,7 +4,7 @@ const db = require('../config/database')
 const { rebuildStockLedger } = require('../utils/stockRebuilder')
 
 // Database auto-migration for grains wastage items and lot_no in output items
-const initSchema = async () => {
+const ensureGrainsSchema = async (companyId = 1) => {
   try {
     await db.run(`
       CREATE TABLE IF NOT EXISTS grain_wastage_items (
@@ -18,56 +18,18 @@ const initSchema = async () => {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (grain_id) REFERENCES grains(id) ON DELETE CASCADE
       )
-    `);
-    
-    // Ensure work_order_id and work_order_no exist in grains table
-    try {
-      await db.run("ALTER TABLE grains ADD COLUMN work_order_id INTEGER");
-    } catch (e) {
-      // already exists
-    }
-
-    try {
-      await db.run("ALTER TABLE grains ADD COLUMN work_order_no TEXT");
-    } catch (e) {
-      // already exists
-    }
-
-    // Add lot_no column to grain_output_items if not exists
-    try {
-      await db.run("ALTER TABLE grain_output_items ADD COLUMN lot_no TEXT");
-    } catch (e) {
-      // already exists
-    }
-
-    // Add rate column to grain_input_items if not exists
-    try {
-      await db.run("ALTER TABLE grain_input_items ADD COLUMN rate REAL DEFAULT 0");
-    } catch (e) {
-      // already exists
-    }
-
-    try {
-      await db.run("ALTER TABLE grain_input_items ADD COLUMN supplier_name TEXT");
-    } catch (e) {
-      // already exists
-    }
-
-    // Add alp_gram column to grind_oprp_monitoring if not exists
-    try {
-      await db.run("ALTER TABLE grind_oprp_monitoring ADD COLUMN alp_gram REAL DEFAULT 0");
-    } catch (e) {
-      // already exists
-    }
-
-    // Add category column to grain_wastage_items if not exists
-    try {
-      await db.run("ALTER TABLE grain_wastage_items ADD COLUMN category TEXT");
-    } catch (e) {
-      // already exists
-    }
+    `, [], companyId);
 
     const grainCols = [
+      'ALTER TABLE grains ADD COLUMN work_order_id INTEGER',
+      'ALTER TABLE grains ADD COLUMN work_order_no TEXT',
+      'ALTER TABLE grains ADD COLUMN total_input_kg REAL DEFAULT 0',
+      'ALTER TABLE grains ADD COLUMN total_output_kg REAL DEFAULT 0',
+      'ALTER TABLE grains ADD COLUMN total_wastage_kg REAL DEFAULT 0',
+      'ALTER TABLE grains ADD COLUMN recovery_percent REAL DEFAULT 0',
+      'ALTER TABLE grains ADD COLUMN operator TEXT',
+      'ALTER TABLE grains ADD COLUMN machine_no TEXT',
+      'ALTER TABLE grains ADD COLUMN shift TEXT',
       'ALTER TABLE grains ADD COLUMN process_mode TEXT DEFAULT "INSIDE_MILL"',
       'ALTER TABLE grains ADD COLUMN mill_type TEXT DEFAULT "Inside Mill"',
       'ALTER TABLE grains ADD COLUMN external_mill_id INTEGER',
@@ -80,18 +42,39 @@ const initSchema = async () => {
       'ALTER TABLE grains ADD COLUMN processing_charge_per_kg REAL DEFAULT 0',
       'ALTER TABLE grains ADD COLUMN total_processing_charges REAL DEFAULT 0',
       'ALTER TABLE grains ADD COLUMN discrepancy_kg REAL DEFAULT 0',
-      'ALTER TABLE grains ADD COLUMN discrepancy_reason TEXT'
+      'ALTER TABLE grains ADD COLUMN discrepancy_reason TEXT',
+      'ALTER TABLE grain_output_items ADD COLUMN lot_no TEXT',
+      'ALTER TABLE grain_input_items ADD COLUMN rate REAL DEFAULT 0',
+      'ALTER TABLE grain_input_items ADD COLUMN supplier_name TEXT',
+      'ALTER TABLE grind_oprp_monitoring ADD COLUMN alp_gram REAL DEFAULT 0',
+      'ALTER TABLE grain_wastage_items ADD COLUMN category TEXT'
     ];
-    for (const sql of grainCols) {
-      try { await db.run(sql); } catch (e) {}
-    }
 
-    console.log("Grains wastage items and outside mill columns initialized successfully.");
+    for (const sql of grainCols) {
+      try {
+        await db.run(sql, [], companyId);
+      } catch (e) {
+        // already exists
+      }
+    }
   } catch (err) {
-    console.error("Failed to initialize grains wastage items table/columns:", err.message);
+    console.error("Error ensuring grains schema:", err.message);
   }
 };
-initSchema();
+
+// Initial startup migration
+ensureGrainsSchema(1);
+
+// Middleware to run schema check for active company request
+router.use(async (req, res, next) => {
+  try {
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    await ensureGrainsSchema(activeCompanyId);
+    const { ensureMovementPassesSchema } = require('../utils/movementPassesSchema');
+    await ensureMovementPassesSchema(activeCompanyId);
+  } catch (e) {}
+  next();
+});
 
 // Auto-generate sequential lot number with in-memory allocated lot tracking to avoid collisions
 async function generateNextLotNo(allocatedLots = []) {
@@ -1032,6 +1015,9 @@ router.post('/', async (req, res) => {
       const autoOutpass = formData.create_outpass !== false;
       if (autoOutpass && activeInputItems.length > 0) {
         try {
+          const { ensureMovementPassesSchema } = require('../utils/movementPassesSchema');
+          await ensureMovementPassesSchema(req.companyId || 1);
+
           const opCountRes = await db.query(`SELECT outpass_no FROM outpasses ORDER BY id DESC LIMIT 1`);
           let lastNum = 0;
           if (opCountRes.rows && opCountRes.rows.length > 0) {
@@ -1289,6 +1275,11 @@ router.post('/:id/generate-outpass', async (req, res) => {
       return res.status(400).json({ success: false, message: 'No input items found for this Grind' });
     }
 
+    try {
+      const { ensureMovementPassesSchema } = require('../utils/movementPassesSchema');
+      await ensureMovementPassesSchema(req.companyId || 1);
+    } catch (_) {}
+
     const opCountRes = await db.query(`SELECT outpass_no FROM outpasses ORDER BY id DESC LIMIT 1`);
     let lastNum = 0;
     if (opCountRes.rows && opCountRes.rows.length > 0) {
@@ -1370,6 +1361,20 @@ router.post('/:id/generate-outpass', async (req, res) => {
     `, [outpassId, outpassNo, estCharges, id]);
 
     try { await rebuildStockLedger(); } catch (e) {}
+
+    // Trigger Central Notification & WhatsApp Alert
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      await triggerTransactionNotification({
+        moduleName: 'OUTPASS',
+        referenceNo: outpassNo,
+        title: `🔵 BVC ERP – Material Outpass (Outside Grind)`,
+        message: `${totalWt.toLocaleString()} KG dispatched to ${grain.external_mill_name || grain.flour_mill || 'Outside Mill'} for outside processing. Outpass: ${outpassNo}. Vehicle: ${vehicle_no || 'N/A'}.`,
+        severity: 'INFO',
+        referenceId: outpassId,
+        companyId: req.companyId || 1
+      });
+    } catch (_) {}
 
     res.json({
       success: true,

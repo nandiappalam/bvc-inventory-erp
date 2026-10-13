@@ -24,15 +24,17 @@ function formatPhoneNumber(phone) {
 }
 
 // Helper to check and create SMTP transporter
-function getSmtpTransporter() {
+function getSmtpTransporter(customConfig = null) {
   if (!nodemailer) {
     return null;
   }
 
-  const host = process.env.SMTP_HOST;
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
-  const service = process.env.SMTP_SERVICE; // e.g. 'gmail'
+  const host = customConfig?.host || process.env.SMTP_HOST;
+  const user = customConfig?.user || process.env.SMTP_USER;
+  const pass = customConfig?.pass || process.env.SMTP_PASS;
+  const service = customConfig?.service || process.env.SMTP_SERVICE; // e.g. 'gmail'
+  const port = customConfig?.port || parseInt(process.env.SMTP_PORT || '587', 10);
+  const secure = customConfig?.secure !== undefined ? customConfig.secure : (port === 465 || process.env.SMTP_SECURE === 'true');
 
   if (!user && !host) {
     return null;
@@ -51,8 +53,8 @@ function getSmtpTransporter() {
 
     return nodemailer.createTransport({
       host: host || 'smtp.gmail.com',
-      port: parseInt(process.env.SMTP_PORT || '587', 10),
-      secure: process.env.SMTP_SECURE === 'true' || process.env.SMTP_PORT === '465',
+      port,
+      secure,
       auth: user && pass ? { user, pass } : undefined,
       tls: {
         rejectUnauthorized: false
@@ -67,16 +69,16 @@ function getSmtpTransporter() {
 /**
  * Send real email alert
  */
-async function sendEmailAlert({ to, subject, text, html }) {
+async function sendEmailAlert({ to, subject, text, html, smtpConfig = null }) {
   if (!to) {
     return { success: false, reason: 'Recipient email is missing' };
   }
 
-  const transporter = getSmtpTransporter();
+  const transporter = getSmtpTransporter(smtpConfig);
   const mailtoUrl = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(text || '')}`;
 
   if (!transporter) {
-    console.log(`[NotificationService] SMTP credentials not set in .env. Prepared client dispatch for: ${to}`);
+    console.log(`[NotificationService] SMTP credentials not set. Prepared client dispatch for: ${to}`);
     return {
       success: true,
       delivered: false,
@@ -84,11 +86,11 @@ async function sendEmailAlert({ to, subject, text, html }) {
       method: 'CLIENT_DISPATCH',
       recipient: to,
       mailtoUrl,
-      note: 'SMTP not configured in server environment. Use Direct Client Dispatch or set SMTP_USER / SMTP_PASS.'
+      note: 'SMTP credentials not configured. Configure in Gateways & Providers or set SMTP_USER / SMTP_PASS.'
     };
   }
 
-  const fromAddress = process.env.SMTP_FROM || `"BVC ERP Stock Alerts" <${process.env.SMTP_USER}>`;
+  const fromAddress = smtpConfig?.from || smtpConfig?.user || process.env.SMTP_FROM || `"BVC ERP Notifications" <${process.env.SMTP_USER || 'alerts@bvcagro.com'}>`;
 
   try {
     const info = await transporter.sendMail({

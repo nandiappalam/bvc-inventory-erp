@@ -46,7 +46,9 @@ body{
 	font-weight:bold;
 }
 
-input{
+.stock-adjust-container input,
+.stock-adjust-window input,
+#stock-adjust-window input{
     height:22px;
     border:1px solid #6c8f8a;
     background:#fff;
@@ -63,7 +65,9 @@ input{
     height:700px;
 }
 
-table{
+.stock-adjust-container table,
+.stock-adjust-window table,
+#stock-adjust-window table{
     width:100%;
     border:1px;
     font-size:15px;

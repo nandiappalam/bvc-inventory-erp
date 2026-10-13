@@ -466,6 +466,50 @@ router.post('/', async (req, res) => {
       console.error('Error rebuilding stock after purchase:', e);
     }
 
+    // Create linked operational charges if provided in request
+    if (Array.isArray(req.body.operational_charges) && req.body.operational_charges.length > 0) {
+      const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+      const engine = require('../services/operationalChargeEngine');
+      for (const ch of req.body.operational_charges) {
+        try {
+          await engine.createOperationalCharge(activeCompanyId, {
+            ...ch,
+            source_module: 'PURCHASE',
+            source_transaction_type: 'PURCHASE',
+            source_transaction_id: purchaseId,
+            source_transaction_no: formData.invNo || formData.inv_no || `PUR-${purchaseId}`,
+            charge_date: formData.date || new Date().toISOString().slice(0, 10),
+            item_name: items[0]?.item_name || 'Raw Material',
+            lot_no: items[0]?.lot_no || '',
+            from_location: formData.supplier || 'Supplier Facility',
+            to_location: resolvedGodownName || 'Main Godown',
+            vehicle_no: ch.vehicle_no || formData.lorry_no || formData.vehicle_no || '',
+            driver_name: ch.driver_name || formData.driver || '',
+            quantity: ch.quantity !== undefined ? ch.quantity : (parseFloat(totals.totalWeight) || 0)
+          });
+        } catch (chErr) {
+          console.warn('[Purchase Operational Charge Error]:', chErr.message);
+        }
+      }
+    }
+
+    // Trigger Central Notification & WhatsApp Alert
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const invNum = formData.invNo || formData.inv_no || `PUR-${purchaseId}`;
+      await triggerTransactionNotification({
+        moduleName: 'PURCHASE',
+        referenceNo: invNum,
+        title: `🔵 BVC ERP – New Purchase Arrived`,
+        message: `Purchase invoice ${invNum} from supplier ${formData.supplier || 'N/A'} successfully loaded into ${resolvedGodownName}. Total Weight: ${(parseFloat(totals.totalWeight) || 0).toLocaleString()} KG, Amount: ₹${(parseFloat(totals.grandTotal) || 0).toLocaleString()}.`,
+        severity: 'INFO',
+        referenceId: purchaseId,
+        companyId: req.companyId || 1
+      });
+    } catch (notifErr) {
+      console.warn('Error triggering purchase notification:', notifErr.message);
+    }
+
     res.status(201).json({
       success: true,
       message: 'Purchase saved successfully!',
@@ -817,5 +861,20 @@ router.delete('/:id', async (req, res) => {
   }
 });
  
+// GET operational charges for a purchase
+router.get('/:id/charges', async (req, res) => {
+  try {
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    const engine = require('../services/operationalChargeEngine');
+    const result = await engine.getOperationalTraceability(activeCompanyId, {
+      sourceModule: 'PURCHASE',
+      sourceTransactionId: req.params.id
+    });
+    res.json({ success: true, charges: result.charges || [], traceability: result });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;
  
