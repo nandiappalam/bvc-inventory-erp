@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { EntryDisplay } from './entry';
-import { deletePurchase } from '../utils/api';
+import { api, deletePurchase } from '../utils/api';
 import { printHtml } from '../utils/printHelper';
 import { generateVehicleInPassHtml } from '../utils/vehiclePassPrint';
 import { generatePurchasePrintHtml } from '../utils/purchasePrintHelper';
@@ -29,10 +29,16 @@ const columns = [
     }
   },
   { key: 'supplier_name', title: 'Supplier Name', render: (val, row) => row.supplier_name || row.supplier || '—' },
+  { key: 'stock_type', title: 'Stock Type', render: (val, row) => row.stock_type || row.stockType || 'RM' },
+  { key: 'gross_weight', title: 'Cross Weight (KG)', render: (val, row) => row.gross_weight ?? row.cross_weight ?? '—' },
+  { key: 'tare_weight', title: 'Tare Weight (KG)', render: (val, row) => row.tare_weight ?? '—' },
+  { key: 'net_weight', title: 'Net Weight (KG)', render: (val, row) => row.net_weight ?? '—' },
   { key: 'item_name', title: 'Item Name', render: (val, row) => row.item_name || row.item || '—' },
   { key: 'lot_no', title: 'Lot No', render: (val, row) => row.lot_no || '—' },
   { key: 'weight', title: 'Qty / Wt', render: (val, row) => row.weight ?? row.qty ?? '—' },
   { key: 'rate', title: 'Rate', render: (val, row) => (row.rate !== undefined && row.rate !== null ? `₹${row.rate}` : '—') },
+  { key: 'disc_percent', title: 'Disc %', render: (val, row) => `${row.disc_percent ?? 0}%` },
+  { key: 'tax_percent', title: 'Tax Rate %', render: (val, row) => `${row.tax_percent ?? 0}%` },
   { key: 'amount', title: 'Amount', render: (val, row) => (row.amount !== undefined && row.amount !== null ? `₹${Number(row.amount).toLocaleString('en-IN')}` : '—') },
   { key: 'tax_amount', title: 'Tax Amt', render: (val, row) => (row.tax_amount !== undefined && row.tax_amount !== null ? `₹${Number(row.tax_amount).toLocaleString('en-IN')}` : '0') },
   { key: 'grand_total', title: 'Total', render: (val, row) => {
@@ -71,18 +77,15 @@ const handleDelete = async (id, onSuccess) => {
 // Handle standard Purchase Invoice print with clear itemized table and voucher details
 const handlePrint = async (row, selectedCompany) => {
   let fullData = { ...row };
-  
   if (row.id) {
     try {
-      const resp = await fetch(`/api/purchases/${row.id}`);
-      if (resp.ok) {
-        const fetched = await resp.json();
-        if (fetched) {
-          fullData = { ...row, ...fetched };
-        }
-      }
-    } catch (e) {
-      console.warn('Could not fetch full purchase details for print, using row data:', e);
+      const response = await api(`/purchases/${row.id}`);
+      const fetched = response?.data || response;
+      if (!fetched?.id) throw new Error('Purchase details were not returned by the server.');
+      fullData = { ...row, ...fetched };
+    } catch (error) {
+      alert(`Could not load purchase details for printing: ${error.message}`);
+      return;
     }
   }
 
@@ -91,9 +94,23 @@ const handlePrint = async (row, selectedCompany) => {
 };
 
 // Handle In-Pass Print for Vehicle Gate Entry with full Vehicle / Driver / Lot details
-const handleInPassPrint = (row, selectedCompany) => {
-  const html = generateVehicleInPassHtml(row, selectedCompany);
-  printHtml(html, `Vehicle_InPass_${row.vehicle_no || row.lorry_no || row.lot_no || 'GatePass'}`);
+const handleInPassPrint = async (row, selectedCompany) => {
+  let fullData = { ...row };
+  if (row.id) {
+    try {
+      const response = await api(`/purchases/${row.id}`);
+      const fetched = response?.data || response;
+      if (!fetched?.id) throw new Error('Purchase details were not returned by the server.');
+      fullData = { ...row, ...fetched };
+    } catch (err) {
+      alert(`Could not load purchase details for InPass: ${err.message}`);
+      return;
+    }
+  }
+  fullData.transporter_name = fullData.transporter_name || row.transporter_name || row.transporter;
+  fullData.transporter = fullData.transporter_name || row.transporter_name || row.transporter || row.transport;
+  const html = generateVehicleInPassHtml(fullData, selectedCompany);
+  printHtml(html, `Vehicle_InPass_${fullData.vehicle_no || fullData.lorry_no || fullData.lot_no || 'GatePass'}`);
 };
 
 // Handle edit (navigate)
@@ -270,4 +287,3 @@ const PurchaseDisplay = () => {
 };
 
 export default PurchaseDisplay;
-

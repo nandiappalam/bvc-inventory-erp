@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
 const { rebuildStockLedger } = require('../utils/stockRebuilder');
+const { syncGodownTransfersToColdStorage } = require('../services/coldStorageTransferSync');
 
 // Initialize item_transfers table
 const initTable = async () => {
@@ -567,12 +568,23 @@ router.post('/', async (req, res) => {
 
     await rebuildStockLedger();
 
+    let coldStorageSyncWarning;
+    try {
+      await syncGodownTransfersToColdStorage();
+    } catch (syncError) {
+      coldStorageSyncWarning = syncError.message;
+      console.error('Item transfer saved, but cold-storage voucher sync failed:', syncError);
+    }
+
     res.status(201).json({
       success: true,
-      message: 'Item Transfer recorded successfully',
+      message: coldStorageSyncWarning
+        ? `Transfer saved. Cold-storage voucher sync is pending: ${coldStorageSyncWarning}`
+        : 'Item Transfer recorded successfully',
       transfer_no: trfNo,
       ids: createdIds,
-      id: createdIds[0]
+      id: createdIds[0],
+      ...(coldStorageSyncWarning ? { warning: coldStorageSyncWarning } : {})
     });
   } catch (err) {
     console.error('Error creating item transfer:', err);
@@ -584,77 +596,44 @@ router.post('/', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-
-    // Fetch transfer detail before deletion to revert stock
     const trfRes = await db.query('SELECT * FROM item_transfers WHERE id = ?', [id]);
-    if (trfRes.rows && trfRes.rows.length > 0) {
-      const trf = trfRes.rows[0];
-      const trfQty = parseFloat(trf.transfer_qty) || 0;
-      const trfWt = parseFloat(trf.weight) || 1;
-      const totWt = trfQty * trfWt;
+    const trf = trfRes.rows?.[0];
+    if (!trf) {
+      return res.status(404).json({ message: 'Item transfer record not found' });
+    }
 
-      // Revert stock: Add back to From Godown, Deduct from To Godown
-      try {
-        await db.run(`
-          INSERT INTO stock (date, item_id, item_name, lot_no, type, qty, weight, rate, godown, godown_id, remarks)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [
-          new Date().toISOString().split('T')[0],
-          trf.item_id || null,
-          trf.item_name,
-          trf.lot_no,
-          'Transfer Delete Reversal',
-          trfQty,
-          totWt,
-          trf.rate || 0,
-          trf.from_godown_name,
-          trf.from_godown_id,
-          `Reversal of Transfer ${trf.transfer_no}`
-        ]);
-
-        await db.run(`
-          INSERT INTO stock (date, item_id, item_name, lot_no, type, qty, weight, rate, godown, godown_id, remarks)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [
-          new Date().toISOString().split('T')[0],
-          trf.item_id || null,
-          trf.item_name,
-          trf.lot_no,
-          'Transfer Delete Reversal',
-          -trfQty,
-          -totWt,
-          trf.rate || 0,
-          trf.to_godown_name,
-          trf.to_godown_id,
-          `Reversal of Transfer ${trf.transfer_no}`
-        ]);
-
-        // Revert stock_lots
-        if (trf.lot_no) {
-          // Re-add to source
-          await db.run(`
-            UPDATE stock_lots
-            SET remaining_quantity = remaining_quantity + ?
-            WHERE LOWER(item_name) = LOWER(?) AND LOWER(lot_no) = LOWER(?) AND (godown_id = ? OR godown_id = CAST(? AS INTEGER) OR godown_id IS NULL)
-          `, [trfQty, trf.item_name, trf.lot_no, trf.from_godown_id, trf.from_godown_id]);
-
-          // Deduct from destination
-          await db.run(`
-            UPDATE stock_lots
-            SET remaining_quantity = MAX(0, remaining_quantity - ?)
-            WHERE LOWER(item_name) = LOWER(?) AND LOWER(lot_no) = LOWER(?) AND (godown_id = ? OR godown_id = CAST(? AS INTEGER))
-          `, [trfQty, trf.item_name, trf.lot_no, trf.to_godown_id, trf.to_godown_id]);
-        }
-      } catch (revErr) {
-        console.error('Error recording stock reversal on transfer delete:', revErr);
-      }
+    const transferVoucherRemarks = `Auto-created from Godown Transfer ${trf.transfer_no} (ID ${id})`;
+    const voucherResult = await db.query(
+      'SELECT id FROM cold_storage_vouchers WHERE remarks = ?',
+      [transferVoucherRemarks]
+    );
+    for (const voucher of voucherResult.rows || []) {
+      await db.run('DELETE FROM cold_storage_items WHERE voucher_id = ?', [voucher.id]);
+      await db.run('DELETE FROM cold_storage_vouchers WHERE id = ?', [voucher.id]);
     }
 
     await db.run('DELETE FROM item_transfers WHERE id = ?', [id]);
-    await db.run('DELETE FROM godown_transfers WHERE id = ?', [id]);
+    await db.run(`
+      DELETE FROM godown_transfers
+      WHERE s_no = ?
+        AND COALESCE(transfer_date, '') = COALESCE(?, '')
+        AND LOWER(TRIM(COALESCE(item_name, ''))) = LOWER(TRIM(COALESCE(?, '')))
+        AND LOWER(TRIM(COALESCE(lot_no, ''))) = LOWER(TRIM(COALESCE(?, '')))
+        AND COALESCE(from_godown_id, 0) = COALESCE(?, 0)
+        AND COALESCE(to_godown_id, 0) = COALESCE(?, 0)
+        AND COALESCE(qty, 0) = COALESCE(?, 0)
+    `, [
+      trf.transfer_no,
+      trf.date,
+      trf.item_name,
+      trf.lot_no,
+      trf.from_godown_id,
+      trf.to_godown_id,
+      trf.transfer_qty
+    ]);
     await rebuildStockLedger();
 
-    res.json({ success: true, message: 'Item transfer deleted successfully' });
+    res.json({ success: true, message: `Item transfer ${trf.transfer_no} deleted and stock rebuilt successfully` });
   } catch (err) {
     console.error('Error deleting item transfer:', err);
     res.status(500).json({ message: 'Error deleting item transfer', error: err.message });

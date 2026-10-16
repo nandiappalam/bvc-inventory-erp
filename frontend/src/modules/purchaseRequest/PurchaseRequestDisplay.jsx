@@ -65,6 +65,18 @@ const DEPARTMENTS = [
 
 const STATUSES = ['Draft', 'Submitted', 'Approved', 'Rejected', 'Returned', 'Converted'];
 const PRIORITIES = ['Low', 'Medium', 'High', 'Urgent'];
+const APPROVED_REQUEST_STATUSES = new Set(['approved', 'partially converted', 'converted', 'pending po']);
+
+const getDisplayTotalQty = (request) => {
+  if (!Array.isArray(request.items) || request.items.length === 0) {
+    return Number(request.total_qty) || 0;
+  }
+  const useApprovedQty = APPROVED_REQUEST_STATUSES.has(String(request.status || '').trim().toLowerCase());
+  return request.items.reduce((total, item) => {
+    const qty = useApprovedQty ? (item.approved_qty ?? item.requested_qty) : item.requested_qty;
+    return total + (parseFloat(qty) || 0);
+  }, 0);
+};
 
 const PurchaseRequestDisplay = () => {
   const navigate = useNavigate();
@@ -121,7 +133,10 @@ const PurchaseRequestDisplay = () => {
 
       const data = await api(`/purchase-requests?${queryParams.toString()}`);
       if (Array.isArray(data)) {
-        setRequests(data);
+        setRequests(data.map(request => ({
+          ...request,
+          total_qty: getDisplayTotalQty(request)
+        })));
       } else {
         setRequests([]);
       }
@@ -301,7 +316,7 @@ const PurchaseRequestDisplay = () => {
                   <td style="text-align: center;">${it.weight || '—'}</td>
                   <td>${it.description || '—'}</td>
                   <td style="text-align: right; font-weight: 600; color: #0284c7;">${it.requested_qty}</td>
-                  <td style="text-align: right; font-weight: bold; color: #16a34a;">${it.approved_qty || it.requested_qty}</td>
+                  <td style="text-align: right; font-weight: bold; color: #16a34a;">${it.approved_qty ?? it.requested_qty}</td>
                   <td style="text-align: center;">${it.unit || 'kg'}</td>
                   <td style="text-align: right;">₹${(it.estimated_rate || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
                   <td style="text-align: right; font-weight: bold;">₹${(it.estimated_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
@@ -767,7 +782,7 @@ const PurchaseRequestDisplay = () => {
                         <TableCell sx={{ fontSize: '13px', color: '#334155' }}>{it.weight || '—'}</TableCell>
                         <TableCell sx={{ fontSize: '13px', color: '#475569' }}>{it.description || '—'}</TableCell>
                         <TableCell sx={{ fontWeight: '600', color: '#0284c7', fontSize: '13px' }}>{it.requested_qty}</TableCell>
-                        <TableCell sx={{ fontWeight: 'bold', color: '#16a34a', fontSize: '13px' }}>{it.approved_qty || it.requested_qty}</TableCell>
+                        <TableCell sx={{ fontWeight: 'bold', color: '#16a34a', fontSize: '13px' }}>{it.approved_qty ?? it.requested_qty}</TableCell>
                         <TableCell sx={{ fontSize: '13px', color: '#334155' }}>{it.unit || 'kg'}</TableCell>
                         <TableCell sx={{ fontSize: '13px', color: '#334155' }}>₹{(it.estimated_rate || 0).toFixed(2)}</TableCell>
                         <TableCell sx={{ fontWeight: 'bold', color: '#0284c7', fontSize: '13px' }}>₹{(it.estimated_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</TableCell>

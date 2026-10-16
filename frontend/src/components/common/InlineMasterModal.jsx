@@ -212,6 +212,48 @@ export const MASTER_CONFIGS = {
       { name: 'driver_name', label: 'Driver Name', required: false },
       { name: 'phone', label: 'Contact Phone', required: false }
     ]
+  },
+  deductions: {
+    title: 'Create New Deduction Master',
+    table: 'deduction_purchase',
+    key: 'deductions',
+    labelField: 'ded_name',
+    fields: [
+      { name: 'ded_name', label: 'Deduction Name', required: true, fullWidth: true, placeholder: 'e.g. Moisture Deduction, Brokerage, Quality Cut' },
+      { name: 'ded_code', label: 'Deduction Code', required: false, placeholder: 'Auto-generated or e.g. DED-01' },
+      { name: 'type', label: 'Type (Add / Less)', required: true, type: 'select', options: ['Less', 'Add'], defaultValue: 'Less' },
+      { name: 'calc_type', label: 'Calculation Type', required: true, type: 'select', options: ['Percentage', 'Amount'], defaultValue: 'Percentage' },
+      { name: 'ded_value', label: 'Default Value', required: false, type: 'number', defaultValue: '0', placeholder: 'e.g. 1.5% or ₹100' },
+      { name: 'account_head', label: 'Account Head / Remarks', required: false, fullWidth: true }
+    ]
+  },
+  deduction_purchase: {
+    title: 'Create New Purchase Deduction Master',
+    table: 'deduction_purchase',
+    key: 'deduction_purchase',
+    labelField: 'ded_name',
+    fields: [
+      { name: 'ded_name', label: 'Deduction Name', required: true, fullWidth: true, placeholder: 'e.g. Moisture Deduction, Brokerage, Quality Cut' },
+      { name: 'ded_code', label: 'Deduction Code', required: false, placeholder: 'Auto-generated or e.g. DED-01' },
+      { name: 'type', label: 'Type (Add / Less)', required: true, type: 'select', options: ['Less', 'Add'], defaultValue: 'Less' },
+      { name: 'calc_type', label: 'Calculation Type', required: true, type: 'select', options: ['Percentage', 'Amount'], defaultValue: 'Percentage' },
+      { name: 'ded_value', label: 'Default Value', required: false, type: 'number', defaultValue: '0', placeholder: 'e.g. 1.5% or ₹100' },
+      { name: 'account_head', label: 'Account Head / Remarks', required: false, fullWidth: true }
+    ]
+  },
+  deduction_sales: {
+    title: 'Create New Sales Deduction Master',
+    table: 'deduction_sales',
+    key: 'deduction_sales',
+    labelField: 'ded_name',
+    fields: [
+      { name: 'ded_name', label: 'Deduction Name', required: true, fullWidth: true, placeholder: 'e.g. Cash Discount, Trade Rebate' },
+      { name: 'ded_code', label: 'Deduction Code', required: false, placeholder: 'Auto-generated or e.g. DED-S01' },
+      { name: 'ded_type', label: 'Type (Add / Less)', required: true, type: 'select', options: ['Less', 'Add'], defaultValue: 'Less' },
+      { name: 'calc_type', label: 'Calculation Type', required: true, type: 'select', options: ['Percentage', 'Amount'], defaultValue: 'Percentage' },
+      { name: 'ded_value', label: 'Default Value', required: false, type: 'number', defaultValue: '0' },
+      { name: 'account_head', label: 'Account Head / Remarks', required: false, fullWidth: true }
+    ]
   }
 };
 
@@ -235,6 +277,8 @@ export const normalizeMasterType = (rawType) => {
   if (k === 'city' || k === 'cities') return 'cities';
   if (k === 'item_group' || k === 'item_groups') return 'item_groups';
   if (k === 'vehicle' || k === 'vehicles') return 'vehicles';
+  if (k === 'deduction' || k === 'deductions' || k === 'deduction_purchase' || k === 'purchase_deductions') return 'deductions';
+  if (k === 'deduction_sales' || k === 'sales_deductions') return 'deduction_sales';
   return k;
 };
 
@@ -256,6 +300,7 @@ export const getCreateLabel = (rawType) => {
   if (norm === 'cities' || norm === 'city') return '+ Enter City Manually';
   if (norm === 'item_groups' || norm === 'item_group') return '+ Enter Item Group Manually';
   if (norm === 'vehicles' || norm === 'vehicle') return '+ Enter Vehicle Manually';
+  if (norm === 'deductions' || norm === 'deduction' || norm === 'deduction_purchase' || norm === 'deduction_sales') return '+ Enter Deduction Manually';
   const pretty = norm.replace(/_/g, ' ').replace(/s$/, '');
   const capitalized = pretty.charAt(0).toUpperCase() + pretty.slice(1);
   return `+ Enter ${capitalized} Manually`;
@@ -344,6 +389,29 @@ export const InlineMasterModal = ({ open, onClose, masterType, initialName = '',
           createdRecord = res.data || { id: newId, name: formState.name, category: payload.category };
         } else {
           throw new Error(res?.error || res?.message || 'Failed to save worker/driver master');
+        }
+      } else if (normType === 'deductions' || normType === 'deduction_purchase' || normType === 'deduction_sales') {
+        const dedName = formState.ded_name || formState.name || 'New Deduction';
+        const payload = {
+          ...formState,
+          ded_code: formState.ded_code || `DED-${Date.now().toString().slice(-5)}`,
+          ded_name: dedName,
+          name: dedName,
+          print_name: formState.print_name || dedName,
+          type: formState.type || formState.ded_type || 'Less',
+          ded_type: formState.type || formState.ded_type || 'Less',
+          calc_type: formState.calc_type || 'Percentage',
+          calculation_type: formState.calc_type || 'Percentage',
+          ded_value: parseFloat(formState.ded_value || formState.deduction_value || 0),
+          deduction_value: parseFloat(formState.ded_value || formState.deduction_value || 0),
+          status: 'Active'
+        };
+        const res = await createMaster(config.table, payload);
+        if (res && (res.id || res.success)) {
+          newId = res.id;
+          createdRecord = res.data || { id: newId, idVal: newId, ...payload, ded_name: dedName, name: dedName, label: dedName, value: newId };
+        } else {
+          throw new Error(res?.message || res?.error || 'Failed to save deduction master');
         }
       } else {
         // Standard master table POST

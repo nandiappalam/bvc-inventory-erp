@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import './PurchaseReturn.css';
 import { getMasters } from '../services/masterservice.js';
 import api from '../services/api.js';
+import { InlineMasterModal, getCreateLabel } from './common/InlineMasterModal.jsx';
+import TaxDropdownCell from './entry/TaxDropdownCell.jsx';
 
 // Predefined return reasons for business compliance & audit trail
 const RETURN_REASONS = [
@@ -100,6 +102,7 @@ const PurchaseReturn = () => {
   // Deductions
   const [masterDeductions, setMasterDeductions] = useState([]);
   const [selectedDeductions, setSelectedDeductions] = useState([]);
+  const [inlineDeductionOpen, setInlineDeductionOpen] = useState(false);
 
   // Totals
   const [totals, setTotals] = useState({
@@ -778,6 +781,70 @@ const PurchaseReturn = () => {
     const updated = selectedDeductions.filter((_, i) => i !== idx);
     setSelectedDeductions(updated);
     recalculateAll(items, updated);
+  };
+
+  const handleDeductionAdd = (dedId) => {
+    if (dedId === '__CREATE_NEW__' || dedId === 'create_new' || dedId === 'manual') {
+      setInlineDeductionOpen(true);
+      return;
+    }
+    if (!dedId) return;
+    const master = masterDeductions.find(d => String(d.id) === String(dedId));
+    if (!master) return;
+    if (selectedDeductions.some(d => String(d.deduction_id) === String(dedId))) {
+      alert('This deduction has already been added.');
+      return;
+    }
+    const dedValue = parseFloat(master.deduction_value || master.ded_value || 0) || 0;
+    const calcType = master.calculation_type || master.calc_type || 'Percentage';
+    const isPct = String(calcType).toLowerCase().includes('percent');
+    const base = totals.totalAmount || 0;
+    const amt = isPct ? (base * (dedValue / 100)) : dedValue;
+
+    const newDed = {
+      deduction_id: master.id,
+      name: master.ded_name || master.name || master.deduction_name || 'Deduction',
+      type: String(master.type || master.ded_type || master.deduction_type || 'LESS').toUpperCase(),
+      calculation_type: calcType,
+      percent: isPct ? dedValue : 0,
+      amount: amt
+    };
+    const updated = [...selectedDeductions, newDed];
+    setSelectedDeductions(updated);
+    recalculateAll(items, updated);
+  };
+
+  const handleInlineDeductionCreated = async (newId, newRecord) => {
+    try {
+      const res = await getMasters('deduction_purchase');
+      const list = Array.isArray(res) ? res : [];
+      setMasterDeductions(list);
+      const targetId = newId || newRecord?.id;
+      const created = list.find(d => String(d.id) === String(targetId)) || newRecord;
+      if (created) {
+        const dedValue = parseFloat(created.deduction_value || created.ded_value || 0) || 0;
+        const calcType = created.calculation_type || created.calc_type || 'Percentage';
+        const isPct = String(calcType).toLowerCase().includes('percent');
+        const base = totals.totalAmount || 0;
+        const amt = isPct ? (base * (dedValue / 100)) : dedValue;
+
+        setSelectedDeductions(prev => {
+          if (prev.some(d => String(d.deduction_id) === String(targetId))) return prev;
+          const updated = [...prev, {
+            deduction_id: targetId,
+            name: created.ded_name || created.name || created.deduction_name || 'Deduction',
+            type: String(created.type || created.ded_type || created.deduction_type || 'LESS').toUpperCase(),
+            calculation_type: calcType,
+            percent: isPct ? dedValue : 0,
+            amount: amt
+          }];
+          recalculateAll(items, updated);
+          return updated;
+        });
+      }
+    } catch (err) {
+      console.error('Failed to handle newly created deduction:', err);
+    }
   };
 
   // Filtered Candidates for Method A Search & Category Tabs
@@ -1615,14 +1682,10 @@ const PurchaseReturn = () => {
                         </td>
 
                         {/* Tax % */}
-                        <td style={{ width: '85px', minWidth: '85px' }}>
-                          <input
-                            type="number"
-                            step="0.01"
+                        <td style={{ width: '135px', minWidth: '135px' }}>
+                          <TaxDropdownCell
                             value={row.tax}
-                            onChange={(e) => handleItemFieldChange(idx, 'tax', e.target.value)}
-                            className="pr-table-input"
-                            style={{ textAlign: 'right' }}
+                            onChange={(val) => handleItemFieldChange(idx, 'tax', val)}
                           />
                         </td>
 
@@ -1684,14 +1747,32 @@ const PurchaseReturn = () => {
             <div className="pr-section-title" style={{ margin: 0 }}>
               <span>5. Debit Note Deductions & Transport / Handling Adjustments</span>
             </div>
-            <button
-              type="button"
-              onClick={addDeductionRow}
-              className="pr-btn pr-btn-secondary"
-              style={{ height: '36px', fontSize: '13px' }}
-            >
-              + Add Deduction / Surcharge
-            </button>
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+              <select
+                value=""
+                onChange={(e) => handleDeductionAdd(e.target.value)}
+                className="pr-table-select"
+                style={{ width: '220px', height: '36px', fontWeight: 'bold' }}
+              >
+                <option value="">+ Add Deduction</option>
+                {masterDeductions.map((d, idx) => (
+                  <option key={`${d.id || 'ded'}-${idx}`} value={d.id}>
+                    {d.ded_name || d.name || d.deduction_name}
+                  </option>
+                ))}
+                <option value="__CREATE_NEW__" style={{ fontWeight: 'bold', color: '#1e3a8a' }}>
+                  {getCreateLabel('deductions')}
+                </option>
+              </select>
+              <button
+                type="button"
+                onClick={addDeductionRow}
+                className="pr-btn pr-btn-secondary"
+                style={{ height: '36px', fontSize: '13px' }}
+              >
+                + Add Deduction Row
+              </button>
+            </div>
           </div>
 
           {selectedDeductions.length === 0 ? (
@@ -1716,6 +1797,56 @@ const PurchaseReturn = () => {
                     <tr key={idx}>
                       <td style={{ textAlign: 'center', fontWeight: 'bold' }}>{idx + 1}</td>
                       <td>
+                        <select
+                          value={ded.deduction_id || ''}
+                          onChange={(e) => {
+                            const nextId = e.target.value;
+                            if (nextId === '__CREATE_NEW__' || nextId === 'create_new' || nextId === 'manual') {
+                              setInlineDeductionOpen(true);
+                              return;
+                            }
+                            const updated = [...selectedDeductions];
+                            const master = masterDeductions.find(d => String(d.id) === String(nextId));
+                            if (master) {
+                              const calcType = master.calculation_type || master.calc_type || 'Percentage';
+                              const dedValue = parseFloat(master.deduction_value || master.ded_value || 0) || 0;
+                              const isPct = String(calcType).toLowerCase().includes('percent');
+                              const base = totals.totalAmount || 0;
+                              updated[idx] = {
+                                ...updated[idx],
+                                deduction_id: master.id,
+                                name: master.ded_name || master.name || master.deduction_name,
+                                calculation_type: calcType,
+                                percent: isPct ? dedValue : 0,
+                                amount: isPct ? (base * (dedValue / 100)) : dedValue,
+                                type: String(master.type || master.ded_type || master.deduction_type || 'LESS').toUpperCase()
+                              };
+                            } else {
+                              updated[idx] = {
+                                ...updated[idx],
+                                deduction_id: nextId,
+                                name: nextId
+                              };
+                            }
+                            setSelectedDeductions(updated);
+                            recalculateAll(items, updated);
+                          }}
+                          className="pr-table-select"
+                          style={{ marginBottom: '4px' }}
+                        >
+                          <option value="">Select Master Deduction</option>
+                          {masterDeductions.map((d, dIdx) => (
+                            <option key={`${d.id || 'ded'}-${dIdx}`} value={d.id}>
+                              {d.ded_name || d.name}
+                            </option>
+                          ))}
+                          {ded.name && !masterDeductions.some(d => String(d.id) === String(ded.deduction_id) || (d.ded_name || d.name) === ded.name) && (
+                            <option value={ded.deduction_id || ded.name}>{ded.name}</option>
+                          )}
+                          <option value="__CREATE_NEW__" style={{ fontWeight: 'bold', color: '#1e3a8a' }}>
+                            {getCreateLabel('deductions')}
+                          </option>
+                        </select>
                         <input
                           type="text"
                           value={ded.name}
@@ -1725,6 +1856,7 @@ const PurchaseReturn = () => {
                             setSelectedDeductions(updated);
                           }}
                           className="pr-table-input"
+                          placeholder="Deduction Name"
                         />
                       </td>
                       <td>
@@ -1802,8 +1934,20 @@ const PurchaseReturn = () => {
             </div>
 
             <div>
-              <span style={{ fontSize: '12px', color: '#64748b', display: 'block' }}>Tax Amount</span>
+              <span style={{ fontSize: '12px', color: '#64748b', display: 'block' }}>Tax Rate %</span>
+              <strong style={{ fontSize: '15px', color: '#1d4ed8' }}>
+                {parseFloat(items[0]?.tax || 0)}% ({((parseFloat(items[0]?.tax || 0))/2).toFixed(1)}% + {((parseFloat(items[0]?.tax || 0))/2).toFixed(1)}%)
+              </strong>
+            </div>
+
+            <div>
+              <span style={{ fontSize: '12px', color: '#64748b', display: 'block' }}>Tax Amount (CGST + SGST)</span>
               <strong style={{ fontSize: '18px', color: '#0f172a' }}>₹{totals.taxAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+              {totals.taxAmount > 0 && (
+                <div style={{ fontSize: '11px', color: '#0284c7' }}>
+                  CGST: ₹{(totals.taxAmount / 2).toFixed(2)} | SGST: ₹{(totals.taxAmount / 2).toFixed(2)}
+                </div>
+              )}
             </div>
 
             {totals.lessDeductions > 0 && (
@@ -1864,6 +2008,13 @@ const PurchaseReturn = () => {
             {loading ? 'Saving Return...' : isEditMode ? '✓ Update Purchase Return' : '✓ Save & Post Return'}
           </button>
         </div>
+
+      <InlineMasterModal
+        open={inlineDeductionOpen}
+        onClose={() => setInlineDeductionOpen(false)}
+        masterType="deduction_purchase"
+        onSuccess={handleInlineDeductionCreated}
+      />
 
       </div>
     </div>

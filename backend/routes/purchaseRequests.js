@@ -5,9 +5,30 @@ const db = require('../config/database');
 const itemNamesAggregate = db.isPostgres
   ? "STRING_AGG(item_name::text, ', ')"
   : "GROUP_CONCAT(item_name, ', ')";
+const qualifiedItemNamesAggregate = db.isPostgres
+  ? "STRING_AGG(pri.item_name::text, ', ')"
+  : "GROUP_CONCAT(pri.item_name, ', ')";
 const descriptionsAggregate = db.isPostgres
   ? "STRING_AGG(NULLIF(description, '')::text, ', ')"
   : "GROUP_CONCAT(NULLIF(description, ''), ', ')";
+const approvedRequestStatusList = ['approved', 'partially converted', 'converted', 'pending po'];
+const approvedRequestStatuses = `(${approvedRequestStatusList.map(status => `'${status}'`).join(', ')})`;
+const requestQuantityAggregate = (statusExpression) => `
+  SUM(CASE
+    WHEN LOWER(TRIM(COALESCE(${statusExpression}, ''))) IN ${approvedRequestStatuses}
+      AND pri.approved_qty IS NOT NULL THEN pri.approved_qty
+    ELSE pri.requested_qty
+  END)
+`;
+const getRequestItemTotalQty = (request, items) => {
+  const useApprovedQty = approvedRequestStatusList.includes(String(request.status || '').trim().toLowerCase());
+  return items.reduce((total, item) => {
+    const qty = useApprovedQty && item.approved_qty !== null && item.approved_qty !== undefined
+      ? item.approved_qty
+      : item.requested_qty;
+    return total + (parseFloat(qty) || 0);
+  }, 0);
+};
 
 const nullableInteger = (value) => {
   if (value === null || value === undefined || String(value).trim() === '') return null;
@@ -246,10 +267,14 @@ router.get('/approved-list', async (req, res) => {
       FROM purchase_requests pr
       LEFT JOIN supplier_master sm ON CAST(pr.supplier_id AS TEXT) = CAST(sm.id AS TEXT)
       LEFT JOIN (
-        SELECT purchase_request_id, COUNT(*) as total_items, SUM(requested_qty) as total_qty, SUM(estimated_amount) as total_amount, ${itemNamesAggregate} as item_names
-        FROM purchase_request_items GROUP BY purchase_request_id
+        SELECT pri.purchase_request_id, COUNT(*) as total_items,
+          ${requestQuantityAggregate('pqa.status')} as total_qty,
+          SUM(pri.estimated_amount) as total_amount, ${qualifiedItemNamesAggregate} as item_names
+        FROM purchase_request_items pri
+        JOIN purchase_requests pqa ON pqa.id = pri.purchase_request_id
+        GROUP BY pri.purchase_request_id
       ) pri_agg ON pr.id = pri_agg.purchase_request_id
-      WHERE LOWER(COALESCE(pr.status, 'approved')) IN ('approved', 'partially converted', 'converted', 'pending po', 'submitted', 'active')
+      WHERE LOWER(TRIM(COALESCE(pr.status, 'approved'))) IN ('approved', 'partially converted', 'converted', 'pending po', 'submitted', 'active')
       ORDER BY pr.id DESC
     `);
     
@@ -319,7 +344,7 @@ const getDashboardMetricsHandler = async (req, res) => {
     const recentRes = await db.query(`
       SELECT pr.*, 
         (SELECT COUNT(*) FROM purchase_request_items WHERE purchase_request_id = pr.id) as total_items,
-        (SELECT COALESCE(SUM(requested_qty), 0) FROM purchase_request_items WHERE purchase_request_id = pr.id) as total_qty,
+        (SELECT ${requestQuantityAggregate('pr.status')} FROM purchase_request_items pri WHERE pri.purchase_request_id = pr.id) as total_qty,
         (SELECT COALESCE(SUM(estimated_amount), 0) FROM purchase_request_items WHERE purchase_request_id = pr.id) as total_amount,
         (SELECT ${itemNamesAggregate} FROM purchase_request_items WHERE purchase_request_id = pr.id) as item_names
       FROM purchase_requests pr
@@ -434,8 +459,12 @@ router.get('/reports', async (req, res) => {
           COALESCE(SUM(pri_agg.total_amount), 0) as total_amount
         FROM purchase_requests pr
         LEFT JOIN (
-          SELECT purchase_request_id, COUNT(*) as total_items, SUM(requested_qty) as total_qty, SUM(estimated_amount) as total_amount
-          FROM purchase_request_items GROUP BY purchase_request_id
+          SELECT pri.purchase_request_id, COUNT(*) as total_items,
+            ${requestQuantityAggregate('pr.status')} as total_qty,
+            SUM(pri.estimated_amount) as total_amount
+          FROM purchase_request_items pri
+          JOIN purchase_requests pr ON pr.id = pri.purchase_request_id
+          GROUP BY pri.purchase_request_id
         ) pri_agg ON pr.id = pri_agg.purchase_request_id
         ${whereClause}
         GROUP BY COALESCE(pr.department, 'Unassigned')
@@ -490,8 +519,12 @@ router.get('/reports', async (req, res) => {
         pri_agg.item_names as item_names
       FROM purchase_requests pr
       LEFT JOIN (
-        SELECT purchase_request_id, COUNT(*) as total_items, SUM(requested_qty) as total_qty, SUM(estimated_amount) as total_amount, ${itemNamesAggregate} as item_names
-        FROM purchase_request_items GROUP BY purchase_request_id
+        SELECT pri.purchase_request_id, COUNT(*) as total_items,
+          ${requestQuantityAggregate('pr.status')} as total_qty,
+          SUM(pri.estimated_amount) as total_amount, ${qualifiedItemNamesAggregate} as item_names
+        FROM purchase_request_items pri
+        JOIN purchase_requests pr ON pr.id = pri.purchase_request_id
+        GROUP BY pri.purchase_request_id
       ) pri_agg ON pr.id = pri_agg.purchase_request_id
       ${whereClause}
       ORDER BY pr.request_date DESC, pr.id DESC
@@ -594,8 +627,13 @@ router.get('/', async (req, res) => {
         pri_agg.descriptions as descriptions
       FROM purchase_requests pr
       LEFT JOIN (
-        SELECT purchase_request_id, COUNT(*) as total_items, SUM(requested_qty) as total_qty, SUM(estimated_amount) as total_amount, ${itemNamesAggregate} as item_names, ${descriptionsAggregate} as descriptions
-        FROM purchase_request_items GROUP BY purchase_request_id
+        SELECT pri.purchase_request_id, COUNT(*) as total_items,
+          ${requestQuantityAggregate('pr.status')} as total_qty,
+          SUM(pri.estimated_amount) as total_amount,
+          ${itemNamesAggregate} as item_names, ${descriptionsAggregate} as descriptions
+        FROM purchase_request_items pri
+        JOIN purchase_requests pr ON pr.id = pri.purchase_request_id
+        GROUP BY pri.purchase_request_id
       ) pri_agg ON pr.id = pri_agg.purchase_request_id
       WHERE 1=1
     `;
@@ -650,9 +688,7 @@ router.get('/', async (req, res) => {
         if (!request.total_items || Number(request.total_items) === 0) {
           request.total_items = request.items.length;
         }
-        if (!request.total_qty || Number(request.total_qty) === 0) {
-          request.total_qty = request.items.reduce((s, it) => s + (parseFloat(it.requested_qty) || 0), 0);
-        }
+        request.total_qty = getRequestItemTotalQty(request, request.items);
         if (!request.total_amount || Number(request.total_amount) === 0) {
           request.total_amount = request.items.reduce((s, it) => s + (parseFloat(it.estimated_amount) || 0), 0);
         }
@@ -701,9 +737,7 @@ router.get('/:id', async (req, res) => {
     if (!pr.total_items || Number(pr.total_items) === 0) {
       pr.total_items = resolvedItems.length;
     }
-    if (!pr.total_qty || Number(pr.total_qty) === 0) {
-      pr.total_qty = resolvedItems.reduce((s, it) => s + (parseFloat(it.requested_qty) || 0), 0);
-    }
+    pr.total_qty = getRequestItemTotalQty(pr, resolvedItems);
     if (!pr.total_amount || Number(pr.total_amount) === 0) {
       pr.total_amount = resolvedItems.reduce((s, it) => s + (parseFloat(it.estimated_amount) || 0), 0);
     }

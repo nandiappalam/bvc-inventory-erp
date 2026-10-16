@@ -929,7 +929,21 @@ function getCompanyDatabaseInstance(companyId = 1) {
       'ALTER TABLE grains ADD COLUMN discrepancy_kg REAL DEFAULT 0',
       'ALTER TABLE grains ADD COLUMN discrepancy_reason TEXT',
       'ALTER TABLE stock_lots ADD COLUMN outside_processing_qty REAL DEFAULT 0',
-      'ALTER TABLE stock_lots ADD COLUMN custody_status TEXT DEFAULT "AVAILABLE"'
+      'ALTER TABLE stock_lots ADD COLUMN custody_status TEXT DEFAULT "AVAILABLE"',
+      'ALTER TABLE purchases ADD COLUMN gross_weight REAL DEFAULT 0',
+      'ALTER TABLE purchases ADD COLUMN tare_weight REAL DEFAULT 0',
+      'ALTER TABLE purchases ADD COLUMN net_weight REAL DEFAULT 0',
+      'ALTER TABLE purchases ADD COLUMN stock_type TEXT',
+      'ALTER TABLE purchases ADD COLUMN taxable_amount REAL DEFAULT 0',
+      'ALTER TABLE purchases ADD COLUMN exempt_amount REAL DEFAULT 0',
+      'ALTER TABLE godown_master ADD COLUMN storage_duration INTEGER DEFAULT 10',
+      'ALTER TABLE godown_master ADD COLUMN duration_unit TEXT DEFAULT "Days"',
+      'ALTER TABLE godown_master ADD COLUMN rate_per_kg REAL DEFAULT 0',
+      'ALTER TABLE godown_master ADD COLUMN rate_per_ton REAL DEFAULT 0',
+      'ALTER TABLE godown_master ADD COLUMN billing_basis TEXT DEFAULT "Per KG"',
+      'ALTER TABLE godown_master ADD COLUMN billing_method TEXT DEFAULT "Fixed Period"',
+      'ALTER TABLE godown_master ADD COLUMN min_billable_days INTEGER DEFAULT 10',
+      'ALTER TABLE godown_master ADD COLUMN cold_storage_remarks TEXT'
     ];
     for (const sql of extraCols) {
       instance.run(sql, () => {});

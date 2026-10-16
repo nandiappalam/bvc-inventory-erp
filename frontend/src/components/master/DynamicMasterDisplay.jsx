@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { MASTER_CONFIG } from "../../utils/masterConfig.js";
 import { safeArray } from "../../utils/safeArray.js";
-import { getAllMasters, deleteMaster, api } from "../../services/masterservice.js";
+import { getAllMasters, deleteMaster, updateMaster, api } from "../../services/masterservice.js";
 import { printHtml } from "../../utils/printHelper";
 import MasterTableLayout from "./MasterTableLayout";
 import "./master.css";
@@ -26,8 +26,12 @@ export const DynamicMasterDisplay = ({ configKey }) => {
       });
     });
 
-    // Take first 12 visible fields
-    const displayFields = allFields.filter((f) => !f.hidden).slice(0, 12);
+    const configuredDisplayFields = safeArray(config.displayFields)
+      .map((fieldName) => allFields.find((field) => field.name === fieldName))
+      .filter(Boolean);
+    const displayFields = (configuredDisplayFields.length > 0
+      ? configuredDisplayFields
+      : allFields.filter((f) => !f.hidden).slice(0, 12));
     displayFields.forEach((field) => {
       cols.push({
         key: field.name,
@@ -47,10 +51,10 @@ export const DynamicMasterDisplay = ({ configKey }) => {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  const loadData = async () => {
+  const loadData = async (forceRefresh = false) => {
     try {
       setLoading(true);
-      let result = await getAllMasters(tableName);
+      let result = await getAllMasters(tableName, { forceRefresh });
 
       // Dedicated fallback for papad company master to ensure entries and custom properties load
       if ((!result || (Array.isArray(result) && result.length === 0)) && (tableName === 'papad_company_master' || tableName === 'papad_company')) {
@@ -112,19 +116,24 @@ export const DynamicMasterDisplay = ({ configKey }) => {
 
   const handleDelete = async (row) => {
     const rowName = row.name || row.title || row.item_code || row.id || 'record';
+    const isTermsMaster = tableName === 'terms_master';
     const confirmed = window.__appConfirm ? await window.__appConfirm({
-      title: 'Confirm Record Deletion',
-      message: `Are you sure you want to delete ${rowName} from ${tableName.replace(/_/g, ' ')}?\n\nThis action cannot be undone.`,
-      confirmText: 'Delete Record',
+      title: isTermsMaster ? 'Confirm Terms Deactivation' : 'Confirm Record Deletion',
+      message: isTermsMaster
+        ? `Are you sure you want to deactivate ${rowName}? Existing transactions will retain this term.`
+        : `Are you sure you want to delete ${rowName} from ${tableName.replace(/_/g, ' ')}?\n\nThis action cannot be undone.`,
+      confirmText: isTermsMaster ? 'Deactivate Term' : 'Delete Record',
       confirmColor: 'error'
     }) : window.confirm(`Are you sure you want to delete this record?`);
     if (!confirmed) return;
 
     try {
       const rowId = row.id !== undefined && row.id !== null ? row.id : (row.item_code || row.group_code || row.ded_code);
-      const result = await deleteMaster(tableName, rowId);
+      const result = isTermsMaster
+        ? await updateMaster(tableName, rowId, { status: 'Inactive' })
+        : await deleteMaster(tableName, rowId);
       if (result && result.success) {
-        loadData();
+        await loadData(true);
       } else {
         const errMsg = result?.message || result?.error || "Unknown error";
         throw new Error(errMsg);

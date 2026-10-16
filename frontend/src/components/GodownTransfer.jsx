@@ -18,6 +18,7 @@ const GodownTransfer = () => {
   const [transfers, setTransfers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loadingItems, setLoadingItems] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [message, setMessage] = useState({ type: '', text: '' });
 
@@ -162,6 +163,7 @@ const GodownTransfer = () => {
   // Handle Submit Form
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (submitting) return;
     setMessage({ type: '', text: '' });
 
     if (!formData.from_godown_id || !formData.to_godown_id) {
@@ -184,6 +186,7 @@ const GodownTransfer = () => {
       return;
     }
 
+    setSubmitting(true);
     try {
       const res = await fetch('/api/godown-transfers', {
         method: 'POST',
@@ -193,7 +196,10 @@ const GodownTransfer = () => {
 
       const data = await res.json();
       if (res.ok) {
-        setMessage({ type: 'success', text: 'Godown transfer recorded successfully!' });
+        setMessage({
+          type: data.warning ? 'error' : 'success',
+          text: data.message || 'Godown transfer recorded successfully!'
+        });
         // Reset form
         setFormData({
           s_no: '',
@@ -218,6 +224,8 @@ const GodownTransfer = () => {
     } catch (err) {
       console.error('Error submitting godown transfer:', err);
       setMessage({ type: 'error', text: 'Network error recording transfer' });
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -454,8 +462,8 @@ const GodownTransfer = () => {
                       ? 'No items found in this Godown' 
                       : '-- Select Item to Transfer --'}
                 </option>
-                {godownItems.map((item, idx) => (
-                  <option key={idx} value={`${item.item_name}||${item.lot_no}`}>
+                {godownItems.map(item => (
+                  <option key={`${item.item_name}||${item.lot_no}`} value={`${item.item_name}||${item.lot_no}`}>
                     📦 {item.item_name} | Lot: {item.lot_no} | Available Qty: {item.balance_qty} | Wt: {item.total_weight} Kg
                   </option>
                 ))}
@@ -481,7 +489,15 @@ const GodownTransfer = () => {
                 type="number"
                 step="any"
                 value={formData.qty}
-                onChange={(e) => setFormData(prev => ({ ...prev, qty: e.target.value }))}
+                onChange={(e) => {
+                  const nextQty = e.target.value;
+                  const unitWeight = Number(selectedItemDetails?.unit_weight) || 0;
+                  setFormData(prev => ({
+                    ...prev,
+                    qty: nextQty,
+                    weight: nextQty === '' ? '' : String(Number(nextQty) * unitWeight)
+                  }));
+                }}
                 placeholder="Qty"
                 className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-bold"
                 required
@@ -519,10 +535,11 @@ const GodownTransfer = () => {
             <div>
               <button
                 type="submit"
-                className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm rounded-lg shadow-sm transition-colors flex items-center justify-center gap-2"
+                disabled={submitting}
+                className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed text-white font-semibold text-sm rounded-lg shadow-sm transition-colors flex items-center justify-center gap-2"
               >
                 <TransferIcon className="w-5 h-5" />
-                Submit Stock Transfer
+                {submitting ? 'Recording Transfer...' : 'Submit Stock Transfer'}
               </button>
             </div>
           </div>

@@ -317,6 +317,7 @@ const ItemTransfer = ({ initialView = 'create' }) => {
   // Save Transfer Submission
   const handleSaveTransfer = async (e) => {
     if (e) e.preventDefault();
+    if (saving) return;
     setMessage({ type: '', text: '' });
 
     if (!formData.from_godown_id || !formData.to_godown_id) {

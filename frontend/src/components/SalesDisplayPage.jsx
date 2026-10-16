@@ -6,85 +6,50 @@ import { useAuth } from '../context/AuthContext';
 import api from '../services/api.js';
 import DigitalDocumentModal from './documents/DigitalDocumentModal';
 
+import { printFormalSalesBill } from '../utils/formalBillPrinter';
+
 // Column definitions for Sales Display
 const columns = [
   { key: 'sno', title: 'S.No', render: (_val, row, idx) => idx !== undefined ? idx + 1 : (row.s_no || '') },
-  { key: 's_no', title: 'Bill No' },
-  { key: 'date', title: 'Date', render: (val) => val ? val.substring(0, 10) : '' },
-  { key: 'customer', title: 'Customer' },
+  { key: 's_no', title: 'Doc No', render: (val, row) => row.bill_no || row.s_no || val || '' },
+  { key: 'date', title: 'Date', render: (val) => val ? String(val).substring(0, 10) : '' },
+  { key: 'customer', title: 'Customer', render: (val, row) => row.customer_name || row.customer || val || '' },
   { key: 'item_name', title: 'Item Name' },
   { key: 'lot_no', title: 'Lot No' },
-  { key: 'qty', title: 'Qty' },
-  { key: 'weight', title: 'Weight' },
-  { key: 'total_wt', title: 'Total Wt' },
-  { key: 'rate', title: 'Rate' },
-  { key: 'disc_perc', title: 'Disc %' },
-  { key: 'tax_perc', title: 'Tax %' },
+  { key: 'qty', title: 'Qty', render: (val) => val ? Number(val).toLocaleString() : '0' },
+  { key: 'rate', title: 'Rate', render: (val) => val ? `₹${Number(val).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '-' },
+  { key: 'disc_perc', title: 'Disc %', render: (val) => val ? `${val}%` : '-' },
+  { 
+    key: 'tax_perc', 
+    title: 'Tax %', 
+    render: (val, row) => {
+      const rate = parseFloat(val !== undefined && val !== null ? val : (row.tax_rate || row.tax_percent || 0));
+      if (!rate) return '0%';
+      const half = (rate / 2).toFixed(1).replace(/\.0$/, '');
+      return `${rate}% (${half}%+${half}%)`;
+    }
+  },
   { 
     key: 'total_amt', 
-    title: 'Amount', 
+    title: 'Total Amount', 
     render: (_val, row) => {
       const amt = (row.grand_total !== undefined && row.grand_total !== null && Number(row.grand_total) > 0) 
         ? Number(row.grand_total) 
         : Number(row.total_amt || 0);
-      return `₹${amt.toLocaleString()}`;
+      return (
+        <span style={{ fontWeight: '800', color: '#1e3a8a' }}>
+          ₹{amt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        </span>
+      );
     } 
   },
 ];
-
-// Handle delete - using centralized api client
-const handleDelete = async (id, onSuccess) => {
-  if (!id) {
-    alert('Cannot delete: missing record id');
-    return;
-  }
-  const confirmed = window.__appConfirm ? await window.__appConfirm({
-    title: 'Confirm Sales Deletion',
-    message: 'Are you sure you want to delete this sales record? This action cannot be undone.',
-    confirmText: 'Delete Sale',
-    confirmColor: 'error'
-  }) : window.confirm('Delete this record?');
-  if (!confirmed) return;
-  try {
-    const result = await api(`/sales/${id}`, { method: 'DELETE' });
-    if (result && (result.success || result.message)) {
-      alert('Record deleted successfully');
-      if (onSuccess) onSuccess();
-    } else {
-      alert('Delete failed: ' + (result?.message || 'Unknown error'));
-    }
-  } catch (err) {
-    console.error('Delete error:', err);
-    alert('Delete failed: ' + err.message);
-  }
-};
-
-// Handle print
-const handlePrint = (row) => {
-  const html = `
-    <div style="font-family: Arial, sans-serif; padding: 20px;">
-      <h2 style="color: #1f4fb2; border-bottom: 2px solid #1f4fb2; padding-bottom: 10px;">Sales Invoice Details</h2>
-      <table style="border-collapse: collapse; width: 100%; margin-top: 15px;">
-        <tr><th style="border: 1px solid #ccc; padding: 10px; text-align: left; background: #1f4fb2; color: white; width: 150px;">Bill No</th><td style="border: 1px solid #ccc; padding: 10px;">${row.s_no||''}</td></tr>
-        <tr><th style="border: 1px solid #ccc; padding: 10px; text-align: left; background: #1f4fb2; color: white;">Date</th><td style="border: 1px solid #ccc; padding: 10px;">${row.date ? row.date.substring(0,10) : ''}</td></tr>
-        <tr><th style="border: 1px solid #ccc; padding: 10px; text-align: left; background: #1f4fb2; color: white;">Customer</th><td style="border: 1px solid #ccc; padding: 10px;">${row.customer||''}</td></tr>
-        <tr><th style="border: 1px solid #ccc; padding: 10px; text-align: left; background: #1f4fb2; color: white;">Item Name</th><td style="border: 1px solid #ccc; padding: 10px;">${row.item_name||''}</td></tr>
-        <tr><th style="border: 1px solid #ccc; padding: 10px; text-align: left; background: #1f4fb2; color: white;">Lot No</th><td style="border: 1px solid #ccc; padding: 10px;">${row.lot_no||''}</td></tr>
-        <tr><th style="border: 1px solid #ccc; padding: 10px; text-align: left; background: #1f4fb2; color: white;">Qty</th><td style="border: 1px solid #ccc; padding: 10px;">${row.qty||0}</td></tr>
-        <tr><th style="border: 1px solid #ccc; padding: 10px; text-align: left; background: #1f4fb2; color: white;">Weight</th><td style="border: 1px solid #ccc; padding: 10px;">${row.weight||0}</td></tr>
-        <tr><th style="border: 1px solid #ccc; padding: 10px; text-align: left; background: #1f4fb2; color: white;">Rate</th><td style="border: 1px solid #ccc; padding: 10px;">${row.rate||0}</td></tr>
-        <tr><th style="border: 1px solid #ccc; padding: 10px; text-align: left; background: #1f4fb2; color: white;">Total Amount</th><td style="border: 1px solid #ccc; padding: 10px;">₹${row.total_amt||0}</td></tr>
-      </table>
-    </div>
-  `;
-  printHtml(html, `Sales_${row.s_no || row.id}`);
-};
 
 // Custom actions for Sales
 const SalesDisplayPage = () => {
   const navigate = useNavigate();
   const isOrder = window.location.pathname.includes('order');
-  const { isAdmin, hasPermission } = useAuth();
+  const { isAdmin, hasPermission, selectedCompany } = useAuth();
   const [activeDoc, setActiveDoc] = useState(null);
 
   const moduleName = isOrder ? 'Sales Order' : 'Sales';
@@ -97,6 +62,30 @@ const SalesDisplayPage = () => {
       navigate(`/entry/sales-order-create?id=${row.id}`);
     } else {
       navigate(`/entry/sales-create?id=${row.id}`);
+    }
+  };
+
+  const handlePrint = async (row) => {
+    try {
+      let fullRecord = row;
+      if (!row.items || row.items.length === 0) {
+        const fetched = await api(`/sales/${row.id}`).catch(() => null);
+        if (fetched) fullRecord = fetched;
+      }
+      printFormalSalesBill({
+        documentType: isOrder ? 'SALES ORDER' : 'TAX INVOICE',
+        record: fullRecord,
+        company: selectedCompany,
+        items: fullRecord.items || []
+      });
+    } catch (e) {
+      console.error('Print sales error:', e);
+      printFormalSalesBill({
+        documentType: isOrder ? 'SALES ORDER' : 'TAX INVOICE',
+        record: row,
+        company: selectedCompany,
+        items: row.items || []
+      });
     }
   };
 

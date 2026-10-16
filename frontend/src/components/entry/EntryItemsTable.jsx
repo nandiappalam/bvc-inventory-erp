@@ -7,7 +7,9 @@ import { safeArray, normalizeMasterKey } from '../../services/masterservice.js';
 import { DEBUG } from '../../config/debug';
 import ItemDropdownCell from './ItemDropdownCell.jsx';
 import ExistingLotDropdownCell from './ExistingLotDropdownCell.jsx';
+import TaxDropdownCell from './TaxDropdownCell.jsx';
 import { InlineMasterModal, getCreateLabel } from '../common/InlineMasterModal.jsx';
+import { calculateLineTax } from '../../services/taxService.js';
 
 const safeNumber = (v) => {
   if (v === null || v === undefined || v === '') return 0;
@@ -443,6 +445,7 @@ const EntryItemsTable = ({
   lotMode = 'select',
   taxType = 'Exclusive',
   taxRate = 18,
+  isInterState = false,
 }) => {
   // Support both 'data' and 'items' seamlessly
   const activeData = (Array.isArray(items) && items.length > 0)
@@ -541,11 +544,12 @@ const EntryItemsTable = ({
       const isWeight = k === 'weight' || k === 'weight_id' || k === 'wt' || col.masterType === 'weights';
       const isItem = k === 'item_name' || k === 'description' || col.masterType === 'items';
       const isGodown = k === 'godown' || k === 'godown_id' || col.masterType === 'godowns';
+      const isTax = k === 'tax' || k === 'tax_rate' || k === 'tax_perc' || k === 'tax_percent' || col.masterType === 'taxes' || col.masterType === 'tax' || col.type === 'taxSelect';
       const isMaster = col.type === 'masterSelect' || col.masterType || isWeight || isItem || isGodown;
       return {
         ...col,
-        type: isMaster ? 'masterSelect' : col.type,
-        masterType: col.masterType || (isWeight ? 'weights' : isItem ? 'items' : isGodown ? 'godowns' : undefined)
+        type: isTax ? 'taxSelect' : (isMaster ? 'masterSelect' : col.type),
+        masterType: col.masterType || (isWeight ? 'weights' : isItem ? 'items' : isGodown ? 'godowns' : isTax ? 'taxes' : undefined)
       };
     });
 
@@ -659,30 +663,37 @@ const EntryItemsTable = ({
       const numericWeight = (() => {
         if (rawWeight && typeof rawWeight === 'object') {
           const cand = rawWeight.weight ?? rawWeight.value ?? rawWeight.per_unit_wt ?? rawWeight.perUnitWt ?? rawWeight.wt ?? rawWeight.id ?? rawWeight.name;
-          return parseNumber(cand);
+          const num = parseFloat(String(cand || '').replace(/[^\d.]/g, ''));
+          return Number.isFinite(num) && num > 0 ? num : 1;
         }
-        return parseNumber(rawWeight);
+        const str = String(rawWeight || '');
+        const num = parseFloat(str.replace(/[^\d.]/g, ''));
+        return Number.isFinite(num) && num > 0 ? num : (safeQty > 0 ? 1 : 0);
       })();
 
       const safeWeight = numericWeight;
 
-      const base = safeQty * safeRate;
-      const discAmt = base * (safeDisc / 100);
-      const taxable = base - discAmt;
       const rowTaxRate = currentRow.tax_rate !== undefined ? parseNumber(currentRow.tax_rate) : (currentRow.tax !== undefined ? parseNumber(currentRow.tax) : (currentRow.tax_percent !== undefined ? parseNumber(currentRow.tax_percent) : taxRate));
-      const effectiveTaxRate = (taxType === 'Without Tax') ? 0 : rowTaxRate;
-      const taxAmt = (taxable * effectiveTaxRate) / 100;
-
       const totalWt = safeQty * safeWeight;
+      const lineTax = calculateLineTax({
+        qty: safeQty,
+        rate: safeRate,
+        discPercent: safeDisc,
+        taxType: currentRow.tax_type || (rowTaxRate === 0 ? 'Nil Rated' : 'Taxable'),
+        taxMode: taxType,
+        gstRate: rowTaxRate,
+        hsnCode: currentRow.hsn_code || ''
+      });
 
       Object.assign(updates, {
-        base_amount: Number(base.toFixed(2)),
-        disc_amount: Number(discAmt.toFixed(2)),
-        tax_amount: Number(taxAmt.toFixed(2)),
+        base_amount: lineTax.grossAmount,
+        disc_amount: lineTax.discAmount,
+        taxable_amount: lineTax.taxableAmount,
+        tax_amount: lineTax.totalTax,
         tot_wt: totalWt > 0 ? totalWt.toFixed(2) : (totalWt === 0 && safeQty > 0 ? '0.00' : (currentRow.tot_wt || '')),
         total_wt: totalWt > 0 ? totalWt : (currentRow.total_wt || totalWt),
         total_weight: totalWt > 0 ? totalWt : (currentRow.total_weight || totalWt),
-        amount: (taxable + taxAmt).toFixed(2),
+        amount: lineTax.totalAmount.toFixed(2),
       });
 
       if (typeof onRowChange === 'function') {
@@ -807,6 +818,31 @@ const EntryItemsTable = ({
                         lotMode={lotMode}
                         taxRate={taxRate}
                         data={activeData}
+                      />
+                    ) : col.type === 'taxSelect' ? (
+                      <TaxDropdownCell
+                        value={row[col.key]}
+                        onChange={(val, taxMeta) => {
+                          const numVal = parseFloat(val) || 0;
+                          let updates = {
+                            [col.key]: numVal,
+                            tax_rate: numVal,
+                            tax: numVal,
+                            tax_percent: numVal,
+                            tax_perc: numVal,
+                            gst_rate: numVal,
+                            tax_type: taxMeta?.tax_type || (numVal === 0 ? 'Nil Rated' : 'Taxable')
+                          };
+                          if (taxMeta && taxMeta.hsn_code) {
+                            updates.hsn_code = taxMeta.hsn_code;
+                          }
+                          handleCellChange(rowIndex, '__batch__', updates);
+                        }}
+                        rowIndex={rowIndex}
+                        row={row}
+                        cellKey={col.key}
+                        readOnly={col.readOnly}
+                        isInterState={isInterState}
                       />
                     ) : (
                       <input

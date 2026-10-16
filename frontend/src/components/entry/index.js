@@ -9,5 +9,6 @@ export { default as EntryActions } from './EntryActions';
 export { default as EntryDisplay } from './EntryDisplay';
 export { default as EntryHeader } from './EntryHeader';
 export { default as EntryFilterSection } from './EntryFilterSection';
-export { default as EntryDisplayTable } from './EntryDisplayTable';
 export { default as EntryDisplayActions } from './EntryDisplayActions';
+export { default as TaxDropdownCell } from './TaxDropdownCell';
+export { default as EntryTaxBillDetails } from './EntryTaxBillDetails';

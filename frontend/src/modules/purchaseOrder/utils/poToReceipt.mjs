@@ -11,7 +11,7 @@ export const buildReceiptDraftFromPurchaseOrder = (order = {}) => {
       inv_date: order.inv_date || order.invDate || '',
       pay_type: order.pay_type || order.payType || 'Cash',
       tax_type: order.tax_type || order.taxType || 'Exclusive',
-      tax_rate: order.tax_percent || order.tax_rate || 5,
+      tax_rate: order.tax_percent ?? order.tax_rate ?? 0,
       type: order.type || 'Urad',
       godown_id: order.godown_id || order.godownId || '',
       remarks: order.remarks || '',
@@ -21,12 +21,12 @@ export const buildReceiptDraftFromPurchaseOrder = (order = {}) => {
       po_no: order.inv_no || order.invNo || order.orderNo || ''
     },
     tableData: items.map((item, idx) => {
-      const qty = Number(item.qty || 0);
+      const qty = Number(item.approved_qty ?? item.qty ?? 0);
       const rate = Number(item.rate || item.purc_rate || 0);
       const weight = Number(item.weight || item.per_unit_weight || item.perUnitWeight || 0);
       const totWt = Number(item.tot_wt || item.total_weight || (qty * (weight || 1)));
       const disc = Number(item.discount_percent || item.disc_percent || 0);
-      const tax = Number(item.tax_percent ?? order.tax_percent ?? order.tax_rate ?? 5);
+      const tax = Number(item.tax_percent ?? order.tax_percent ?? order.tax_rate ?? 0);
       const baseAmt = qty * rate;
       const discAmt = baseAmt * (disc / 100);
       const taxable = baseAmt - discAmt;

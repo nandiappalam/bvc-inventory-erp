@@ -151,7 +151,7 @@ const DEBUG = false;
 
 const validateEntryConfig = (fields, columns) => true;
 
-export const EntryTopFrame = ({ fields = [], data = {}, onChange = () => {}, columns: colCount = 3, taxType, taxRate, onTaxChange, nextSnoEndpoint, hideStockType = false }) => {
+export const EntryTopFrame = ({ fields = [], data = {}, onChange = () => {}, columns: colCount = 3, taxType, taxRate, onTaxChange, nextSnoEndpoint, hideStockType = false, fieldAddon }) => {
   const generateSno = () => '1';
 
   // Check if we are in Edit / Update mode so existing records are never wiped
@@ -410,6 +410,7 @@ export const EntryTopFrame = ({ fields = [], data = {}, onChange = () => {}, col
               autoFillFields={field.autoFillFields || []}
               generateSno={generateSno}
               api={api}
+              fieldAddon={fieldAddon}
             />
           ))}
         </div>
@@ -418,7 +419,7 @@ export const EntryTopFrame = ({ fields = [], data = {}, onChange = () => {}, col
   );
 };
 
-const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], generateSno, api: apiProp }) => { 
+const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], generateSno, api: apiProp, fieldAddon }) => {
   const normKey = normalizeMasterKey(field.masterType || field.name);
   const masterKeyFromTypes = MASTER_FIELD_TYPES[field.name] || MASTER_FIELD_TYPES[String(field.name || '').toLowerCase()];
   const isMasterField = field.type === 'master' || field.type === 'masterSelect' || !!field.masterType || !!masterKeyFromTypes;
@@ -525,6 +526,10 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
             onChange('supplierName', partyName);
             onChange('supplier_name', partyName);
           }
+          if (isSupplier) {
+            onChange('supplier_state', record.state || record.supplier_state || 'Tamil Nadu');
+            onChange('supplier_state_code', record.state_code || record.supplier_state_code || '33');
+          }
           if (isCustomer && partyName) {
             onChange('customerName', partyName);
             onChange('customer_name', partyName);
@@ -623,9 +628,15 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
         selectValue = getOptionValue(match);
       }
     }
+    const selectedOption = effectiveOptions.find(opt => String(getOptionValue(opt)) === String(selectValue));
+    const addon = fieldAddon?.(field, {
+      value: selectValue,
+      label: selectedOption ? getOptionLabel(selectedOption) : '',
+      option: selectedOption
+    });
 
     return (
-      <div className="entry-top-field-group" style={styles.fieldGroup}>
+      <div className="entry-top-field-group" style={{ ...styles.fieldGroup, ...(addon ? { position: 'relative' } : {}) }}>
         <label style={styles.label}>{field.label}</label>
         <span style={styles.colon}>:</span>
         <select
@@ -662,6 +673,7 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
             </option>
           )}
         </select>
+        {addon}
         {(isMasterField || field.masterType || MASTER_FIELD_TYPES[field.name]) && (
           <InlineMasterModal
             open={inlineModalOpen}
@@ -721,6 +733,9 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
         value={rawInputValue || ''}
         onChange={(e) => onChange(field.name, e.target.value)}
         readOnly={field.readOnly}
+        min={field.min}
+        max={field.max}
+        step={field.step}
         style={field.readOnly ? { ...styles.input, backgroundColor: '#f4f6fa', color: '#1f3f67' } : styles.input}
       />
     </div>

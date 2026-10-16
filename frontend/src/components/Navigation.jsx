@@ -92,6 +92,7 @@ const modulePermissionMap = {
   'Transport': 'Transport',
   'Godown': 'Godown',
   'Tax': 'Tax',
+  'Terms': 'Terms',
   'Deduction Sales': 'Deduction Sales',
   'Deduction Purchase': 'Deduction Purchase',
 };
@@ -417,7 +418,7 @@ const Navigation = () => {
     },
     {
       groupTitle: 'Accounts & Deductions',
-      modules: ['Ledger Group', 'Ledger', 'Deduction Sales', 'Deduction Purchase']
+      modules: ['Ledger Group', 'Ledger', 'Deduction Sales', 'Deduction Purchase', 'Terms']
     }
   ];
 

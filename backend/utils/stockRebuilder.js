@@ -147,6 +147,8 @@ async function rebuildStockLedger() {
         FROM cold_storage_items csi
         JOIN cold_storage_vouchers csv ON csi.voucher_id = csv.id
         WHERE csv.voucher_type = 'IN'
+          AND COALESCE(csv.remarks, '') NOT LIKE 'Auto-sync from Stock Lot CS-%'
+          AND COALESCE(csv.remarks, '') NOT LIKE 'Auto-created from Godown Transfer%'
         ORDER BY csv.voucher_date ASC, csi.id ASC
       `);
     } catch (e) {}
@@ -198,17 +200,41 @@ async function rebuildStockLedger() {
       `);
     } catch (e) {}
 
-    // M. Item Transfers & Godown Transfers
+    // M. Item Transfers and Godown Transfers, excluding legacy mirror rows.
     let itemTransfers = { rows: [] };
     try {
-      const trf1 = await db.query(`SELECT id, transfer_no, date, from_godown_id, from_godown_name, to_godown_id, to_godown_name, item_name, lot_no, transfer_qty, weight, rate, amount FROM item_transfers ORDER BY date ASC, id ASC`);
-      if (trf1.rows && trf1.rows.length > 0) {
-        itemTransfers = trf1;
-      } else {
-        const trf2 = await db.query(`SELECT id, s_no as transfer_no, transfer_date as date, from_godown_id, from_godown_name, to_godown_id, to_godown_name, item_name, lot_no, qty as transfer_qty, weight, 0 as rate, 0 as amount FROM godown_transfers ORDER BY transfer_date ASC, id ASC`);
-        itemTransfers = trf2;
-      }
-    } catch (e) {}
+      const itemTransferRows = await db.query(`
+        SELECT id, transfer_no, date, from_godown_id, from_godown_name, to_godown_id,
+               to_godown_name, item_name, lot_no, transfer_qty, weight, rate, amount
+        FROM item_transfers
+      `);
+      const godownTransferRows = await db.query(`
+        SELECT gt.id, gt.s_no AS transfer_no, gt.transfer_date AS date,
+               gt.from_godown_id, gt.from_godown_name, gt.to_godown_id,
+               gt.to_godown_name, gt.item_name, gt.lot_no, gt.qty AS transfer_qty,
+               CASE WHEN COALESCE(gt.qty, 0) > 0 THEN COALESCE(gt.weight, 0) / gt.qty ELSE 0 END AS weight,
+               0 AS rate, 0 AS amount
+        FROM godown_transfers gt
+        WHERE NOT EXISTS (
+          SELECT 1
+          FROM item_transfers it
+          WHERE CAST(it.transfer_no AS TEXT) = CAST(gt.s_no AS TEXT)
+            AND COALESCE(it.date, '') = COALESCE(gt.transfer_date, '')
+            AND LOWER(TRIM(COALESCE(it.item_name, ''))) = LOWER(TRIM(COALESCE(gt.item_name, '')))
+            AND LOWER(TRIM(COALESCE(it.lot_no, ''))) = LOWER(TRIM(COALESCE(gt.lot_no, '')))
+            AND COALESCE(it.from_godown_id, 0) = COALESCE(gt.from_godown_id, 0)
+            AND COALESCE(it.to_godown_id, 0) = COALESCE(gt.to_godown_id, 0)
+            AND COALESCE(it.transfer_qty, 0) = COALESCE(gt.qty, 0)
+        )
+      `);
+      itemTransfers.rows = [
+        ...(itemTransferRows.rows || []),
+        ...(godownTransferRows.rows || [])
+      ].sort((left, right) => String(left.date || '').localeCompare(String(right.date || '')) || Number(left.id) - Number(right.id));
+    } catch (transferQueryError) {
+      console.error('Error loading godown transfer stock movements:', transferQueryError.message);
+      throw transferQueryError;
+    }
 
     // Map of lots: key = UPPER(itemName):::UPPER(lotNo):::godownId
     const lotMap = new Map();
@@ -803,11 +829,14 @@ async function rebuildStockLedger() {
           toGodownName = defaultGodown.godown_name;
         }
 
-        getOrCreateLot(row.item_name, row.lot_no || 'TRF-LOT', qty, row.rate || 0, row.date, 'Item Transfer In', row.id, toGodownId, toGodownName);
+        const destinationLotNo = destIsColdStorage && !/^CS-/i.test(row.lot_no || '')
+          ? `CS-${row.lot_no || 'TRF-LOT'}`
+          : row.lot_no || 'TRF-LOT';
+        getOrCreateLot(row.item_name, destinationLotNo, qty, row.rate || 0, row.date, 'Item Transfer In', row.id, toGodownId, toGodownName);
         await db.run(`
           INSERT INTO stock (date, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, godown_id, remarks)
           VALUES (?, ?, ?, ?, ?, ?, ?, 'Item Transfer In', ?, ?, ?, ?)
-        `, [row.date, row.item_name, row.lot_no || '', qty, wt, row.rate || 0, row.amount || 0, row.id, toGodownName, toGodownId, `Transferred from ${fromGodownName}`]);
+        `, [row.date, row.item_name, destinationLotNo, qty, wt, row.rate || 0, row.amount || 0, row.id, toGodownName, toGodownId, `Transferred from ${fromGodownName}`]);
       }
     } catch (e) {}
 

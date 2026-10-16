@@ -5,6 +5,67 @@ const db = require('../config/database')
 const { createPurchaseLedgerEntries, deleteLedgerEntries } = require('../utils/ledgerHelper')
 const { rebuildStockLedger } = require('../utils/stockRebuilder')
 const { reserveNextLotNumber, recordLotNumber } = require('../utils/lotHelper')
+const { calculateLineTax, calculateInvoiceTax } = require('../services/taxEngine')
+
+const calculatePurchaseTotals = (formData = {}, items = [], deductions = []) => calculateInvoiceTax({
+  items: items.map((item) => {
+    const calculationItem = { ...item };
+    delete calculationItem.disc_amount;
+    delete calculationItem.discAmount;
+    return calculationItem;
+  }),
+  deductions: Array.isArray(deductions) ? deductions : [],
+  taxMode: formData.tax_mode || formData.taxType || formData.tax_type || 'Exclusive',
+  companyState: formData.company_state || formData.companyState || 'Tamil Nadu',
+  partyState: formData.supplier_state || formData.party_state || 'Tamil Nadu',
+  companyStateCode: formData.company_state_code || '33',
+  partyStateCode: formData.supplier_state_code || formData.party_state_code || '33'
+})
+
+const validatePurchaseLines = (items, deductions) => {
+  if (!Array.isArray(items) || items.length === 0) {
+    return 'At least one purchase item is required.';
+  }
+  const invalidItem = items.find((item) => {
+    const qty = Number(item.qty);
+    const rate = Number(item.rate);
+    const discountPercent = Number(item.disc_percent ?? item.discPercent ?? 0);
+    const taxRate = Number(item.tax_percent ?? item.tax_rate ?? item.gst_rate ?? 0);
+    return !item.item_name || !Number.isFinite(qty) || qty <= 0 ||
+      !Number.isFinite(rate) || rate <= 0 ||
+      !Number.isFinite(discountPercent) || discountPercent < 0 || discountPercent > 100 ||
+      !Number.isFinite(taxRate) || taxRate < 0;
+  });
+  if (invalidItem) {
+    return 'Each item must have a name, positive quantity and rate, valid discount, and non-negative tax rate.';
+  }
+  if (Array.isArray(deductions) && deductions.some((deduction) =>
+    !Number.isFinite(Number(deduction.amount)) || Number(deduction.amount) < 0
+  )) {
+    return 'Purchase deduction and addition amounts must be valid non-negative numbers.';
+  }
+  return null;
+};
+
+const getPurchaseWeights = (formData = {}) => {
+  const grossInput = formData.gross_weight ?? formData.cross_weight;
+  const tareInput = formData.tare_weight;
+  const grossWeight = grossInput === '' || grossInput === null || grossInput === undefined ? 0 : Number(grossInput);
+  const tareWeight = tareInput === '' || tareInput === null || tareInput === undefined ? 0 : Number(tareInput);
+  if (!Number.isFinite(grossWeight) || !Number.isFinite(tareWeight) || grossWeight < 0 || tareWeight < 0) {
+    return { error: 'Cross Weight and Tare Weight must be valid non-negative numbers.' };
+  }
+  const netWeight = Number((grossWeight - tareWeight).toFixed(2));
+  if (netWeight < 0) {
+    return { error: 'Tare Weight cannot exceed Cross Weight.' };
+  }
+  const suppliedNet = formData.net_weight;
+  if (suppliedNet !== '' && suppliedNet !== null && suppliedNet !== undefined &&
+      (!Number.isFinite(Number(suppliedNet)) || Math.abs(Number(suppliedNet) - netWeight) > 0.01)) {
+    return { error: 'Net Weight must equal Cross Weight minus Tare Weight.' };
+  }
+  return { grossWeight, tareWeight, netWeight };
+};
  
 // GET all purchases
 router.get('/', async (req, res) => {
@@ -68,6 +129,7 @@ router.get('/purchase-list', async (req, res) => {
       COALESCE(s.address1, p.address, '') AS address,
       COALESCE(s.gst_number, '') AS supplier_gstin,
       COALESCE(s.phone_off, s.mobile1, '') AS supplier_phone,
+      COALESCE(s.contact_person, p.contact_person, '') AS supplier_contact_person,
       COALESCE(im.item_name, pi.item_name, '') AS item_name,
       pi.item_id,
       pi.lot_no,
@@ -86,10 +148,17 @@ router.get('/purchase-list', async (req, res) => {
       COALESCE(pi.amount, (COALESCE(pi.qty, 1) * COALESCE(pi.rate, 0)), 0) AS grand_total,
       p.payment_mode,
       p.tax_type,
+      COALESCE(p.tax_percent, 5) AS purchase_tax_percent,
+      COALESCE(p.stock_type, 'RM') AS stock_type,
+      COALESCE(p.gross_weight, p.total_weight, 0) AS gross_weight,
+      COALESCE(p.tare_weight, 0) AS tare_weight,
+      COALESCE(p.net_weight, p.total_weight, 0) AS net_weight,
       p.vehicle_no,
       p.driver_name,
       p.driver_phone,
       p.transport,
+      COALESCE(tm.print_name, tm.name, p.transporter, p.transport, '') AS transporter,
+      COALESCE(tm.print_name, tm.name, p.transporter, p.transport, '') AS transporter_name,
       p.lr_no,
       p.lr_date,
       p.remarks,
@@ -100,6 +169,7 @@ router.get('/purchase-list', async (req, res) => {
     LEFT JOIN purchase_items pi ON CAST(pi.purchase_id AS TEXT) = CAST(p.id AS TEXT)
     LEFT JOIN item_master im ON (CAST(im.id AS TEXT) = CAST(pi.item_id AS TEXT) OR im.item_name = CAST(pi.item_name AS TEXT))
     LEFT JOIN godown_master gm ON (CAST(gm.id AS TEXT) = CAST(p.godown AS TEXT) OR gm.godown_name = CAST(p.godown AS TEXT))
+    LEFT JOIN transport_master tm ON (CAST(tm.id AS TEXT) = CAST(p.transporter AS TEXT) OR CAST(tm.id AS TEXT) = CAST(p.transport AS TEXT) OR tm.name = CAST(p.transporter AS TEXT) OR tm.name = CAST(p.transport AS TEXT))
     LEFT JOIN qc_inspections qi ON (qi.rm_lot_no = pi.lot_no OR CAST(qi.purchase_id AS TEXT) = CAST(p.id AS TEXT) OR CAST(qi.purchase_id AS TEXT) = ('PUR-' || CAST(p.id AS TEXT)))
     ORDER BY p.id DESC`;
  
@@ -149,13 +219,38 @@ router.get('/:id', async (req, res) => {
     }
 
     let supplierName = purchaseData.supplier_name;
-    if (!supplierName && purchaseData.supplier) {
+    let supplierDetails = {};
+    if (purchaseData.supplier) {
       try {
-        const sRes = await db.query('SELECT name, print_name FROM supplier_master WHERE id = ?', [purchaseData.supplier]);
-        if (sRes.rows.length > 0) {
-          supplierName = sRes.rows[0].print_name || sRes.rows[0].name;
-        }
-      } catch (e) {}
+        const sRes = await db.query(
+          `SELECT name, print_name, contact_person, address1, address2, address3, address4,
+                  gst_number, phone_off, phone_res, mobile1, mobile2, email, state, state_code
+           FROM supplier_master
+           WHERE CAST(id AS TEXT) = ? OR name = ? OR print_name = ?
+           LIMIT 1`,
+          [String(purchaseData.supplier), String(purchaseData.supplier), String(purchaseData.supplier)]
+        );
+        supplierDetails = sRes.rows?.[0] || {};
+        supplierName = supplierName || supplierDetails.print_name || supplierDetails.name;
+      } catch (e) {
+        console.error('Could not resolve purchase supplier details:', e.message);
+      }
+    }
+
+    let transporterName = '';
+    const transporterRef = purchaseData.transporter || purchaseData.transport;
+    if (transporterRef) {
+      try {
+        const tRes = await db.query(
+          `SELECT name, print_name FROM transport_master
+           WHERE CAST(id AS TEXT) = ? OR name = ? OR print_name = ?
+           LIMIT 1`,
+          [String(transporterRef), String(transporterRef), String(transporterRef)]
+        );
+        transporterName = tRes.rows?.[0]?.print_name || tRes.rows?.[0]?.name || '';
+      } catch (e) {
+        console.error('Could not resolve purchase transporter:', e.message);
+      }
     }
 
     let godownName = purchaseData.godown_name;
@@ -170,6 +265,11 @@ router.get('/:id', async (req, res) => {
 
     purchaseData.supplier_name = supplierName || purchaseData.supplier;
     purchaseData.godown_name = godownName || purchaseData.godown;
+    purchaseData.supplier_gstin = supplierDetails.gst_number || purchaseData.gst_no || '';
+    purchaseData.supplier_contact_person = supplierDetails.contact_person || purchaseData.contact_person || '';
+    purchaseData.supplier_phone = supplierDetails.phone_off || supplierDetails.mobile1 || supplierDetails.phone_res || '';
+    purchaseData.supplier_email = supplierDetails.email || purchaseData.email || '';
+    purchaseData.transporter_name = transporterName || (typeof transporterRef === 'string' && !/^\d+$/.test(transporterRef) ? transporterRef : '');
 
     const purchase = {
       ...purchaseData,
@@ -188,22 +288,19 @@ router.get('/:id', async (req, res) => {
 // POST create new purchase
 router.post('/', async (req, res) => {
   try {
-    const { formData, items, totals, deductions } = req.body
+    const { formData, items, deductions } = req.body
  
     // Validation
-    if (!formData.date || !formData.supplier || !items || items.length === 0) {
+    if (!formData?.date || !formData?.supplier) {
       return res.status(400).json({ message: 'Date, supplier, and at least one item are required' })
     }
- 
-    const invalidItem = items.find(
-      (item) => !item.item_name || Number(item.qty) <= 0 || Number(item.rate) <= 0
-    );
- 
-    if (invalidItem) {
-      return res.status(400).json({
-        message: "All items must have a name, positive quantity, and positive rate",
-      });
-    }
+
+    const lineValidationError = validatePurchaseLines(items, deductions);
+    if (lineValidationError) return res.status(400).json({ message: lineValidationError });
+    const purchaseWeights = getPurchaseWeights(formData);
+    if (purchaseWeights.error) return res.status(400).json({ message: purchaseWeights.error });
+
+    const calculatedTotals = calculatePurchaseTotals(formData, items, deductions);
  
     const rawGodown = formData.godown || formData.godown_id || '';
     let resolvedGodownId = null;
@@ -242,6 +339,14 @@ router.post('/', async (req, res) => {
       if (!resolvedGodownName) resolvedGodownName = 'Main Godown';
     }
 
+    const grossWt = purchaseWeights.grossWeight;
+    const tareWt = purchaseWeights.tareWeight;
+    const netWt = purchaseWeights.netWeight;
+    const stockType = formData.stock_type || formData.stockType || 'RM';
+    const transporterVal = formData.transporter || formData.transport || '';
+    const vehicleNoVal = formData.vehicle_no || formData.lorry_no || '';
+    const driverNameVal = formData.driver_name || formData.driver || '';
+
     const insertValues = [
       parseInt(formData.sno) || 1,
       formData.date || new Date().toISOString().slice(0, 10),
@@ -257,25 +362,45 @@ router.post('/', async (req, res) => {
       formData.gst_no || '',
       formData.email || '',
       formData.taxType || formData.tax_type || 'Exclusive',
-      formData.tax_percent || formData.tax_rate || 0,
+      formData.tax_percent !== undefined ? formData.tax_percent : (formData.tax_rate || 0),
       resolvedGodownName,
       resolvedGodownId,
       formData.remarks || '',
-      parseFloat(totals.totalQty) || 0,
-      parseFloat(totals.totalWeight) || 0,
-      parseFloat(totals.totalAmount) || 0,
-      parseFloat(totals.baseAmount) || 0,
-      parseFloat(totals.discAmount) || 0,
-      parseFloat(totals.taxAmount) || 0,
-      parseFloat(totals.netAmount) || 0,
-      parseFloat(totals.deductionAmount || totals.deduction_amount) || 0,
-      parseFloat(totals.grandTotal) || 0
+      calculatedTotals.totalQty,
+      calculatedTotals.totalWeight,
+      Number(calculatedTotals.items.reduce((sum, item) => sum + item.classifiedAmount, 0).toFixed(2)),
+      calculatedTotals.grossAmount,
+      calculatedTotals.discAmount,
+      calculatedTotals.taxAmount,
+      calculatedTotals.netAmount,
+      Number((calculatedTotals.grandTotal - calculatedTotals.netAmount).toFixed(2)),
+      calculatedTotals.grandTotal,
+      grossWt,
+      tareWt,
+      netWt,
+      stockType,
+      transporterVal,
+      transporterVal,
+      vehicleNoVal,
+      vehicleNoVal,
+      driverNameVal,
+      formData.company_state || formData.companyState || 'Tamil Nadu',
+      formData.supplier_state || formData.party_state || 'Tamil Nadu',
+      formData.company_state_code || '33',
+      formData.supplier_state_code || formData.party_state_code || '33',
+      formData.tax_mode || formData.taxType || formData.tax_type || 'Exclusive',
+      calculatedTotals.cgstAmount,
+      calculatedTotals.sgstAmount,
+      calculatedTotals.igstAmount,
+      calculatedTotals.cessAmount
     ];
  
     const purchaseResult = await db.run(`
       INSERT INTO purchases (
-        s_no, date, inv_no, supplier, pay_type, inv_date, type, contact_person, address, area, phone, gst_no, email, tax_type, tax_percent, godown, godown_id, remarks, total_qty, total_weight, total_amount, base_amount, disc_amount, tax_amount, net_amount, deduction_amount, grand_total
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        s_no, date, inv_no, supplier, pay_type, inv_date, type, contact_person, address, area, phone, gst_no, email, tax_type, tax_percent, godown, godown_id, remarks, total_qty, total_weight, total_amount, base_amount, disc_amount, tax_amount, net_amount, deduction_amount, grand_total,
+        gross_weight, tare_weight, net_weight, stock_type, transporter, transport, vehicle_no, lorry_no, driver_name,
+        company_state, party_state, company_state_code, party_state_code, tax_mode, cgst_amount, sgst_amount, igst_amount, cess_amount
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, insertValues)
  
     const purchaseId = purchaseResult.lastID;
@@ -298,17 +423,26 @@ router.post('/', async (req, res) => {
       const qty = parseFloat(item.qty) || 0
       const rate = parseFloat(item.rate) || 0
       const discPercent = parseFloat(item.disc_percent) || 0
-      const taxPercent = parseFloat(item.tax_percent) || 0
+      const taxPercent = parseFloat(item.gst_rate ?? item.tax_rate ?? item.tax_percent) || 0
       const perUnitWeight = parseFloat(item.per_unit_weight) || 0
-      const totalWt = Number((item.total_weight || qty * perUnitWeight).toFixed(3));
+      const totalWt = Number((parseFloat(item.total_weight) || qty * perUnitWeight).toFixed(3));
 
-      const baseAmount = Number((qty * rate).toFixed(2));
-      const discountAmount = Number((item.disc_amount || (baseAmount * discPercent / 100)).toFixed(2));
-      const taxableAmount = Number((baseAmount - discountAmount).toFixed(2));
-      const taxMode = (formData.taxType || formData.tax_type || 'Without Tax');
-      const effectiveTaxPercent = taxMode === 'Exclusive' ? taxPercent : 0;
-      // If tax type is `Without Tax`, GST must be zero (even if frontend sends a tax_amount)
-      const taxAmount = effectiveTaxPercent === 0 ? 0 : Number((item.tax_amount || (taxableAmount * effectiveTaxPercent / 100)).toFixed(2));
+      const lineTax = calculateLineTax({
+        qty,
+        rate,
+        discPercent,
+        taxType: item.tax_type || item.taxType,
+        taxMode: formData.tax_mode || formData.taxType || formData.tax_type || 'Exclusive',
+        gstRate: taxPercent,
+        cessRate: item.cess_rate || 0,
+        hsnCode: item.hsn_code || '',
+        companyState: formData.company_state || formData.companyState || 'Tamil Nadu',
+        partyState: formData.supplier_state || formData.party_state || 'Tamil Nadu',
+        companyStateCode: formData.company_state_code || '33',
+        partyStateCode: formData.supplier_state_code || formData.party_state_code
+      });
+      const discountAmount = lineTax.discAmount;
+      const lineAmount = lineTax.classifiedAmount;
 
       let lotNo = item.lot_no || item.lotNo || '';
       if (!lotNo) {
@@ -321,11 +455,16 @@ router.post('/', async (req, res) => {
  
       await db.run(`
         INSERT INTO purchase_items (
-          purchase_id, item_id, item_name, lot_no, per_unit_weight, qty, total_weight, rate, disc_percent, disc_amount, tax_percent, tax_amount, amount
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          purchase_id, item_id, item_name, lot_no, per_unit_weight, qty, total_weight, rate,
+          disc_percent, disc_amount, tax_percent, tax_amount, amount, hsn_code, tax_type, gst_rate,
+          cgst_rate, cgst_amount, sgst_rate, sgst_amount, igst_rate, igst_amount, cess_rate, cess_amount
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
         purchaseId, item.item_id, item.item_name, lotNo, perUnitWeight, qty, totalWt,
-        rate, discPercent, discountAmount, taxPercent, taxAmount, Number(taxableAmount.toFixed(2))
+        rate, discPercent, discountAmount, lineTax.gstRate, lineTax.totalTax, lineAmount,
+        lineTax.hsnCode, lineTax.taxType, lineTax.gstRate,
+        lineTax.cgstRate, lineTax.cgstAmount, lineTax.sgstRate, lineTax.sgstAmount,
+        lineTax.igstRate, lineTax.igstAmount, lineTax.cessRate, lineTax.cessAmount
       ])
  
       // Resolve item_id if not numeric
@@ -351,7 +490,7 @@ router.post('/', async (req, res) => {
       await db.run(`
         INSERT INTO stock (date, item_id, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, godown_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Purchase', ?, ?, ?)
-      `, [formData.date, itemId, item.item_name, lotNo, qty, totalWt, rate, Number(taxableAmount.toFixed(2)), purchaseId, resolvedGodownName, resolvedGodownId])
+      `, [formData.date, itemId, item.item_name, lotNo, qty, totalWt, rate, Number(lineAmount.toFixed(2)), purchaseId, resolvedGodownName, resolvedGodownId])
     }
 
     // If destination godown is a Cold Storage, automatically generate Cold Storage IN (CSI) voucher
@@ -392,8 +531,8 @@ router.post('/', async (req, res) => {
           resolvedGodownName,
           supplierName ? `Direct Inward - Supplier: ${supplierName}` : 'Direct Purchase Inward',
           `Auto-inward from Purchase #${formData.invNo || formData.inv_no || purchaseId}${supplierName ? ` | Supplier: ${supplierName}` : ''}`,
-          parseFloat(totals.totalQty) || 0,
-          parseFloat(totals.totalWeight) || 0,
+          calculatedTotals.totalQty,
+          calculatedTotals.totalWeight,
           formData.createdBy || 'System / Purchase Auto-Inward'
         ]);
 
@@ -450,10 +589,10 @@ router.post('/', async (req, res) => {
         date: formData.date,
         invNo: formData.invNo || formData.inv_no || '',
         purchaseId: purchaseId,
-        baseAmount: parseFloat(totals.baseAmount) || 0,
-        taxAmount: parseFloat(totals.taxAmount) || 0,
-        discAmount: parseFloat(totals.discAmount) || 0,
-        netAmount: parseFloat(totals.grandTotal) || 0
+        baseAmount: calculatedTotals.grossAmount,
+        taxAmount: calculatedTotals.taxAmount,
+        discAmount: calculatedTotals.discAmount,
+        netAmount: calculatedTotals.grandTotal
       })
       console.log('Ledger entries created for purchase:', purchaseId)
     } catch (ledgerError) {
@@ -485,7 +624,7 @@ router.post('/', async (req, res) => {
             to_location: resolvedGodownName || 'Main Godown',
             vehicle_no: ch.vehicle_no || formData.lorry_no || formData.vehicle_no || '',
             driver_name: ch.driver_name || formData.driver || '',
-            quantity: ch.quantity !== undefined ? ch.quantity : (parseFloat(totals.totalWeight) || 0)
+            quantity: ch.quantity !== undefined ? ch.quantity : calculatedTotals.totalWeight
           });
         } catch (chErr) {
           console.warn('[Purchase Operational Charge Error]:', chErr.message);
@@ -501,7 +640,7 @@ router.post('/', async (req, res) => {
         moduleName: 'PURCHASE',
         referenceNo: invNum,
         title: `🔵 BVC ERP – New Purchase Arrived`,
-        message: `Purchase invoice ${invNum} from supplier ${formData.supplier || 'N/A'} successfully loaded into ${resolvedGodownName}. Total Weight: ${(parseFloat(totals.totalWeight) || 0).toLocaleString()} KG, Amount: ₹${(parseFloat(totals.grandTotal) || 0).toLocaleString()}.`,
+        message: `Purchase invoice ${invNum} from supplier ${formData.supplier || 'N/A'} successfully loaded into ${resolvedGodownName}. Total Weight: ${calculatedTotals.totalWeight.toLocaleString()} KG, Amount: ₹${calculatedTotals.grandTotal.toLocaleString()}.`,
         severity: 'INFO',
         referenceId: purchaseId,
         companyId: req.companyId || 1
@@ -524,8 +663,30 @@ router.post('/', async (req, res) => {
 // PUT update purchase
 router.put('/:id', async (req, res) => {
   try {
-    const { formData, items, totals, deductions } = req.body
-    const purchaseId = req.params.id
+    const { formData, items, deductions } = req.body
+    const routeId = String(req.params.id || '');
+    let purchaseId = routeId;
+    const purchaseById = await db.query('SELECT id FROM purchases WHERE CAST(id AS TEXT) = ? LIMIT 1', [routeId]);
+    if (purchaseById.rows?.length) {
+      purchaseId = purchaseById.rows[0].id;
+    } else {
+      const purchaseByReference = await db.query(
+        'SELECT id FROM purchases WHERE CAST(s_no AS TEXT) = ? OR inv_no = ? LIMIT 1',
+        [routeId, routeId]
+      );
+      if (!purchaseByReference.rows?.length) {
+        return res.status(404).json({ success: false, message: 'Purchase not found' });
+      }
+      purchaseId = purchaseByReference.rows[0].id;
+    }
+    if (!formData || !formData.date || !formData.supplier) {
+      return res.status(400).json({ message: 'Purchase details and at least one item are required' });
+    }
+    const lineValidationError = validatePurchaseLines(items, deductions);
+    if (lineValidationError) return res.status(400).json({ message: lineValidationError });
+    const purchaseWeights = getPurchaseWeights(formData);
+    if (purchaseWeights.error) return res.status(400).json({ message: purchaseWeights.error });
+    const calculatedTotals = calculatePurchaseTotals(formData, items, deductions);
 
     const rawGodown = formData.godown || formData.godown_id || '';
     let resolvedGodownId = null;
@@ -564,23 +725,51 @@ router.put('/:id', async (req, res) => {
       if (!resolvedGodownName) resolvedGodownName = 'Main Godown';
     }
  
-    await db.run(`
+    const grossWt = purchaseWeights.grossWeight;
+    const tareWt = purchaseWeights.tareWeight;
+    const netWt = purchaseWeights.netWeight;
+    const stockType = formData.stock_type || formData.stockType || 'RM';
+    const transporterVal = formData.transporter || formData.transport || '';
+    const vehicleNoVal = formData.vehicle_no || formData.lorry_no || '';
+    const driverNameVal = formData.driver_name || formData.driver || '';
+
+    const purchaseUpdate = await db.run(`
       UPDATE purchases SET
         s_no = ?, date = ?, inv_no = ?, supplier = ?, pay_type = ?,
         inv_date = ?, type = ?, contact_person = ?, address = ?, area = ?, phone = ?, gst_no = ?, email = ?, tax_type = ?, tax_percent = ?, godown = ?, godown_id = ?,
         remarks = ?, total_qty = ?, total_weight = ?, total_amount = ?,
         base_amount = ?, disc_amount = ?, tax_amount = ?, net_amount = ?,
         deduction_amount = ?, grand_total = ?,
+        gross_weight = ?, tare_weight = ?, net_weight = ?, stock_type = ?,
+        transporter = ?, transport = ?, vehicle_no = ?, lorry_no = ?, driver_name = ?,
+        company_state = ?, party_state = ?, company_state_code = ?, party_state_code = ?, tax_mode = ?,
+        cgst_amount = ?, sgst_amount = ?, igst_amount = ?, cess_amount = ?,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `, [
       formData.sno || formData.s_no, formData.date, formData.invNo || formData.inv_no, formData.supplier || formData.supplier_id, formData.payType || formData.pay_type,
       formData.invDate || formData.inv_date, formData.type, formData.contact_person, formData.address, formData.area, formData.phone, formData.gst_no, formData.email,
-      formData.taxType || formData.tax_type, formData.tax_percent || formData.tax_rate || 0, resolvedGodownName, resolvedGodownId,
-      formData.remarks, totals.totalQty, totals.totalWeight, totals.totalAmount,
-      totals.baseAmount, totals.discAmount, totals.taxAmount, totals.netAmount,
-      totals.deductionAmount, totals.grandTotal, purchaseId
+      formData.taxType || formData.tax_type, formData.tax_percent !== undefined ? formData.tax_percent : (formData.tax_rate || 0), resolvedGodownName, resolvedGodownId,
+      formData.remarks, calculatedTotals.totalQty, calculatedTotals.totalWeight,
+      Number(calculatedTotals.items.reduce((sum, item) => sum + item.classifiedAmount, 0).toFixed(2)),
+      calculatedTotals.grossAmount, calculatedTotals.discAmount, calculatedTotals.taxAmount, calculatedTotals.netAmount,
+      Number((calculatedTotals.grandTotal - calculatedTotals.netAmount).toFixed(2)), calculatedTotals.grandTotal,
+      grossWt, tareWt, netWt, stockType,
+      transporterVal, transporterVal, vehicleNoVal, vehicleNoVal, driverNameVal,
+      formData.company_state || formData.companyState || 'Tamil Nadu',
+      formData.supplier_state || formData.party_state || 'Tamil Nadu',
+      formData.company_state_code || '33',
+      formData.supplier_state_code || formData.party_state_code || '33',
+      formData.tax_mode || formData.taxType || formData.tax_type || 'Exclusive',
+      calculatedTotals.cgstAmount,
+      calculatedTotals.sgstAmount,
+      calculatedTotals.igstAmount,
+      calculatedTotals.cessAmount,
+      purchaseId
     ])
+    if (purchaseUpdate?.changes === 0) {
+      return res.status(404).json({ success: false, message: 'Purchase was not updated because it no longer exists' });
+    }
  
     // Preserve existing stock lot statuses before deletion
     const existingLotsResult = await db.query(`
@@ -608,16 +797,26 @@ router.put('/:id', async (req, res) => {
       const qty = parseFloat(item.qty) || 0
       const rate = parseFloat(item.rate) || 0
       const discPercent = parseFloat(item.disc_percent) || 0
-      const taxPercent = parseFloat(item.tax_percent) || 0
+      const taxPercent = parseFloat(item.tax_percent ?? item.tax_rate ?? item.gst_rate) || 0
       const perUnitWeight = parseFloat(item.per_unit_weight) || 0
       const totalWt = parseFloat(item.total_weight || qty * perUnitWeight) || qty * perUnitWeight
 
-      const baseAmount = qty * rate
-      const discountAmount = item.disc_amount || (baseAmount * discPercent / 100)
-      const taxableAmount = baseAmount - discountAmount
-      // If tax type is `Without Tax`, GST must be zero (even if frontend sends tax_amount)
-      const effectiveTaxPercent = (formData.taxType === 'Exclusive' || formData.tax_type === 'Exclusive') ? taxPercent : 0;
-      const taxAmount = effectiveTaxPercent === 0 ? 0 : (item.tax_amount || (taxableAmount * effectiveTaxPercent / 100));
+      const lineTax = calculateLineTax({
+        qty,
+        rate,
+        discPercent,
+        taxType: item.tax_type || item.taxType,
+        taxMode: formData.tax_mode || formData.taxType || formData.tax_type || 'Exclusive',
+        gstRate: taxPercent,
+        cessRate: item.cess_rate || 0,
+        hsnCode: item.hsn_code || '',
+        companyState: formData.company_state || formData.companyState || 'Tamil Nadu',
+        partyState: formData.supplier_state || formData.party_state || 'Tamil Nadu',
+        companyStateCode: formData.company_state_code || '33',
+        partyStateCode: formData.supplier_state_code || formData.party_state_code
+      });
+      const discountAmount = lineTax.discAmount;
+      const lineAmount = lineTax.classifiedAmount;
 
       let lotNo = item.lot_no || item.lotNo || '';
       if (!lotNo) {
@@ -628,11 +827,16 @@ router.put('/:id', async (req, res) => {
  
       await db.run(`
         INSERT INTO purchase_items (
-          purchase_id, item_id, item_name, lot_no, per_unit_weight, qty, total_weight, rate, disc_percent, disc_amount, tax_percent, tax_amount, amount
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          purchase_id, item_id, item_name, lot_no, per_unit_weight, qty, total_weight, rate,
+          disc_percent, disc_amount, tax_percent, tax_amount, amount, hsn_code, tax_type, gst_rate,
+          cgst_rate, cgst_amount, sgst_rate, sgst_amount, igst_rate, igst_amount, cess_rate, cess_amount
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
         purchaseId, item.item_id, item.item_name, lotNo, perUnitWeight, qty, totalWt,
-        rate, discPercent, discountAmount, taxPercent, taxAmount, Number(taxableAmount.toFixed(2))
+        rate, discPercent, discountAmount, lineTax.gstRate, lineTax.totalTax, lineAmount,
+        lineTax.hsnCode, lineTax.taxType, lineTax.gstRate,
+        lineTax.cgstRate, lineTax.cgstAmount, lineTax.sgstRate, lineTax.sgstAmount,
+        lineTax.igstRate, lineTax.igstAmount, lineTax.cessRate, lineTax.cessAmount
       ])
  
       let itemId = item.item_id
@@ -679,7 +883,7 @@ router.put('/:id', async (req, res) => {
       await db.run(`
         INSERT INTO stock (date, item_id, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, godown_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Purchase', ?, ?, ?)
-      `, [formData.date, itemId, item.item_name, lotNo, qty, totalWt, rate, Number(taxableAmount.toFixed(2)), purchaseId, resolvedGodownName, resolvedGodownId])
+      `, [formData.date, itemId, item.item_name, lotNo, qty, totalWt, rate, Number(lineAmount.toFixed(2)), purchaseId, resolvedGodownName, resolvedGodownId])
     }
 
     // If destination godown is a Cold Storage, automatically generate or update Cold Storage IN (CSI) voucher
@@ -731,8 +935,8 @@ router.put('/:id', async (req, res) => {
             resolvedGodownName,
             supplierName ? `Direct Inward - Supplier: ${supplierName}` : 'Direct Purchase Inward',
             `Auto-inward from Purchase #${formData.invNo || formData.inv_no || purchaseId}${supplierName ? ` | Supplier: ${supplierName}` : ''}`,
-            parseFloat(totals.totalQty) || 0,
-            parseFloat(totals.totalWeight) || 0,
+            calculatedTotals.totalQty,
+            calculatedTotals.totalWeight,
             formData.createdBy || 'System / Purchase Auto-Inward'
           ]);
           csVoucherId = csVoucherRes.lastID;
@@ -746,8 +950,8 @@ router.put('/:id', async (req, res) => {
             formData.date || new Date().toISOString().slice(0, 10),
             resolvedGodownId,
             resolvedGodownName,
-            parseFloat(totals.totalQty) || 0,
-            parseFloat(totals.totalWeight) || 0,
+            calculatedTotals.totalQty,
+            calculatedTotals.totalWeight,
             csVoucherId
           ]);
           await db.run(`DELETE FROM cold_storage_items WHERE voucher_id = ?`, [csVoucherId]);
@@ -782,7 +986,6 @@ router.put('/:id', async (req, res) => {
       } catch (csErr) {
         console.error('Error auto-managing Cold Storage voucher on update purchase:', csErr.message);
       }
-    }
     }
  
     for (const ded of (deductions || [])) {

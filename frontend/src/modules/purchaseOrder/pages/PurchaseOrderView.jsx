@@ -67,14 +67,14 @@ const PurchaseOrderView = () => {
 
   const rows = form?.items ?? [];
   const summary = {
-    grossAmount: rows.reduce((sum, r) => sum + (Number(r.qty || 0) * Number(r.rate || 0)), 0),
-    discount: rows.reduce((sum, r) => sum + (Number(r.qty || 0) * Number(r.rate || 0) * (Number(r.discountPercent || 0) / 100)), 0),
+    grossAmount: rows.reduce((sum, r) => sum + (Number(r.approved_qty ?? r.qty ?? 0) * Number(r.rate || 0)), 0),
+    discount: rows.reduce((sum, r) => sum + (Number(r.approved_qty ?? r.qty ?? 0) * Number(r.rate || 0) * (Number(r.discountPercent || 0) / 100)), 0),
     taxableAmount: rows.reduce((sum, r) => {
-      const gross = Number(r.qty || 0) * Number(r.rate || 0);
+      const gross = Number(r.approved_qty ?? r.qty ?? 0) * Number(r.rate || 0);
       return sum + (gross - (gross * (Number(r.discountPercent || 0) / 100)));
     }, 0),
     gst: rows.reduce((sum, r) => {
-      const gross = Number(r.qty || 0) * Number(r.rate || 0);
+      const gross = Number(r.approved_qty ?? r.qty ?? 0) * Number(r.rate || 0);
       const taxable = gross - (gross * (Number(r.discountPercent || 0) / 100));
       return sum + (taxable * (Number(r.taxPercent || 0) / 100));
     }, 0),
@@ -139,7 +139,7 @@ const PurchaseOrderView = () => {
                   <TableCell>{idx + 1}</TableCell>
                   <TableCell>{r.itemName}</TableCell>
                   <TableCell>{r.uom}</TableCell>
-                  <TableCell>{r.qty}</TableCell>
+                  <TableCell>{r.approved_qty ?? r.qty}</TableCell>
                   <TableCell>{r.rate}</TableCell>
                   <TableCell>{r.discountPercent}</TableCell>
                   <TableCell>{r.taxPercent}</TableCell>
@@ -232,4 +232,3 @@ const PurchaseOrderView = () => {
 };
 
 export default PurchaseOrderView;
-

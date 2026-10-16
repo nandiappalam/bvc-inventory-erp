@@ -765,7 +765,15 @@ router.get('/lots', async (req, res) => {
         }
       } catch (e) {}
 
-      lifecycle.sort((a, b) => new Date(a.date) - new Date(b.date));
+      const uniqueLifecycleMap = new Map();
+      for (const h of lifecycle) {
+        const sig = `${h.module}::${h.reference_no || h.reference_id || ''}::${h.qty}::${String(h.date || '').substring(0, 10)}`;
+        if (!uniqueLifecycleMap.has(sig)) {
+          uniqueLifecycleMap.set(sig, h);
+        }
+      }
+      const dedupedLifecycle = Array.from(uniqueLifecycleMap.values());
+      dedupedLifecycle.sort((a, b) => new Date(a.date) - new Date(b.date));
 
       // Processing details for RM (where it was processed and what FG/Wastage was created)
       let processingDetails = null;
@@ -911,7 +919,7 @@ router.get('/lots', async (req, res) => {
         returned_weight: returnedWeight,
         actual_sold_qty: Math.max(0, (row.purchased_qty - row.remaining_quantity - returnedQty)),
         category,
-        lifecycle_history: lifecycle,
+        lifecycle_history: dedupedLifecycle,
         processing_details: processingDetails,
         source_details: sourceDetails
       };

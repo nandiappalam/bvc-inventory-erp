@@ -6,6 +6,7 @@ import api from '../utils/api';
 import './PurchaseCreationPage.css';
 import { safeArray } from './entry/safeArray';
 import { getMasters } from '../services/api';
+import { InlineMasterModal, getCreateLabel } from './common/InlineMasterModal.jsx';
 
 const PurchaseCreationPage = () => {
   const { id } = useParams();
@@ -32,6 +33,7 @@ const PurchaseCreationPage = () => {
   const [tableData, setTableData] = useState([]);
   const [deductions, setDeductions] = useState([]);
   const [selectedDeductions, setSelectedDeductions] = useState([]);
+  const [inlineDeductionOpen, setInlineDeductionOpen] = useState(false);
   const [loading, setLoading] = useState(false);
 
   // Debug: watch raw table rows as user selects Qty/Weight
@@ -274,6 +276,11 @@ const PurchaseCreationPage = () => {
 
   const handleDeductionAdd = (dedIdOrEvent) => {
     const dedId = dedIdOrEvent?.target ? dedIdOrEvent.target.value : dedIdOrEvent;
+    if (dedId === '__CREATE_NEW__' || dedId === 'create_new' || dedId === 'manual') {
+      if (dedIdOrEvent?.target) dedIdOrEvent.target.value = '';
+      setInlineDeductionOpen(true);
+      return;
+    }
     const master = deductions.find(d => String(d.id) === String(dedId));
     if (!master) return;
 
@@ -296,6 +303,37 @@ const PurchaseCreationPage = () => {
     ]);
 
     if (dedIdOrEvent?.target) dedIdOrEvent.target.value = '';
+  };
+
+  const handleInlineDeductionCreated = async (newId, newRecord) => {
+    try {
+      const res = await getMasters('deduction_purchase');
+      const list = res?.data || res || [];
+      if (Array.isArray(list)) setDeductions(list);
+      const targetId = newId || newRecord?.id;
+      const created = (Array.isArray(list) ? list : []).find(d => String(d.id) === String(targetId)) || newRecord;
+      if (created) {
+        const baseTaxable = erpTotals.taxable;
+        const amt = created.calc_type === 'Percent'
+          ? (baseTaxable * (parseFloat(created.deduction_value || created.ded_value) || 0)) / 100
+          : parseFloat(created.deduction_value || created.ded_value) || 0;
+
+        setSelectedDeductions(prev => [
+          ...prev,
+          {
+            id: targetId,
+            name: created.ded_name || created.name || created.deduction_name || 'Unnamed',
+            amount: amt,
+            type: created.type || created.ded_type || 'Less',
+            calculation_type: created.calculation_type || created.calc_type || 'Percentage',
+            percentage: (created.calculation_type || created.calc_type) === 'Percentage' ? parseFloat(created.deduction_value || created.ded_value || 0) : 0,
+            remarks: ''
+          }
+        ]);
+      }
+    } catch (e) {
+      console.error('Failed refreshing deductions:', e);
+    }
   };
 
   const topFields = [
@@ -389,9 +427,10 @@ const PurchaseCreationPage = () => {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h4>Deductions</h4>
               <select
+                value=""
                 onChange={(e) => handleDeductionAdd(e.target.value)}
                 className="table-input"
-                style={{ width: '200px' }}
+                style={{ width: '220px', fontWeight: 'bold' }}
               >
                 <option value="">+ Add Deduction</option>
                 {deductions.map((d, idx) => (
@@ -399,6 +438,9 @@ const PurchaseCreationPage = () => {
                     {d.ded_name || d.name}
                   </option>
                 ))}
+                <option value="__CREATE_NEW__" style={{ fontWeight: 'bold', color: '#1e3a8a' }}>
+                  {getCreateLabel('deductions')}
+                </option>
               </select>
             </div>
 
@@ -469,6 +511,14 @@ const PurchaseCreationPage = () => {
           </button>
         </div>
       </form>
+
+      {/* Inline Master Modal for Deductions */}
+      <InlineMasterModal
+        open={inlineDeductionOpen}
+        onClose={() => setInlineDeductionOpen(false)}
+        masterType="deduction_purchase"
+        onSuccess={handleInlineDeductionCreated}
+      />
     </div>
   );
 };

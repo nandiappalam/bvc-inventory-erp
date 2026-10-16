@@ -10,8 +10,11 @@ import {
   EntryItemsTable, 
   EntryTotalsRow, 
   EntryBottomSummary, 
-  EntryActions 
+  EntryActions,
+  EntryTaxBillDetails 
 } from './entry';
+import { InlineMasterModal, getCreateLabel } from './common/InlineMasterModal.jsx';
+import SalesDistributionWorkflow from './common/SalesDistributionWorkflow.jsx';
 
 /**
  * SalesCreate - Sales Creation Entry Page
@@ -28,6 +31,7 @@ const SalesCreate = () => {
     pay_type: 'Credit',
     tax_type: 'Exclusive',
     tax_percent: 5,
+    tax_percent_display: '5% (2.5% + 2.5%)',
     lorry_no: '',
     p_o_no: '',
     driver: '',
@@ -41,6 +45,10 @@ const SalesCreate = () => {
     godown_from_id: '',
     bill_amt: 0,
     tax_amt: 0,
+    cgst_amt: 0,
+    sgst_amt: 0,
+    igst_amt: 0,
+    rate_summaries: [],
     total_amt: 0,
     deduction: '',
     deduction_remarks: '',
@@ -54,6 +62,7 @@ const SalesCreate = () => {
     { deduction_id: '', name: '', type: 'LESS', percent: '', amount: '', remarks: '' }
   ])
   const [selectedDeductionId, setSelectedDeductionId] = useState('')
+  const [inlineDeductionOpen, setInlineDeductionOpen] = useState(false)
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -223,14 +232,70 @@ const SalesCreate = () => {
 
   // Recalculate invoice totals when items or tax type change
   useEffect(() => {
-    const newTotals = calculateTotals(rows, formData.tax_type, formData.tax_percent || 5)
+    const newTotals = calculateTotals(rows, formData.tax_type, formData.tax_percent || 5, formData.address || 'Tamil Nadu');
     setFormData(prev => ({
       ...prev,
+      gross_amt: newTotals.grossAmount || newTotals.baseAmount || 0,
+      disc_percent: newTotals.discPercent || 0,
+      disc_amount: newTotals.discAmount || 0,
       bill_amt: newTotals.taxableAmount,
       tax_amt: newTotals.taxAmount,
-      total_amt: newTotals.totalAmount
-    }))
-  }, [rows, formData.tax_type, formData.tax_percent])
+      total_amt: newTotals.totalAmount,
+      cgst_amt: newTotals.cgstAmount || 0,
+      sgst_amt: newTotals.sgstAmount || 0,
+      igst_amt: newTotals.igstAmount || 0,
+      tax_percent_display: newTotals.taxPercentDisplay || '5%',
+      rate_summaries: newTotals.rateSummaries || []
+    }));
+  }, [rows, formData.tax_type, formData.tax_percent, formData.address]);
+
+  // Workflow import handler to pull items and customer from quotation or sales order
+  const handleWorkflowImport = useCallback((sourceRecord) => {
+    if (!sourceRecord) return;
+    const custId = sourceRecord.customer_id || sourceRecord.customer || '';
+    setFormData(prev => ({
+      ...prev,
+      customer_id: custId,
+      address: sourceRecord.address || prev.address,
+      tax_type: sourceRecord.tax_type || prev.tax_type,
+      tax_percent: sourceRecord.tax_percent !== undefined ? sourceRecord.tax_percent : prev.tax_percent,
+      remarks: `Ref: ${sourceRecord.bill_no || sourceRecord.s_no || ''}. ${sourceRecord.remarks || ''}`.trim()
+    }));
+
+    let itemsToImport = [];
+    if (Array.isArray(sourceRecord.items) && sourceRecord.items.length > 0) {
+      itemsToImport = sourceRecord.items;
+    } else if (sourceRecord.item_name) {
+      itemsToImport = [{
+        item_name: sourceRecord.item_name,
+        lot_no: sourceRecord.lot_no || '',
+        qty: sourceRecord.qty || 1,
+        weight: sourceRecord.weight || '',
+        rate: sourceRecord.rate || sourceRecord.amount || '',
+        disc: sourceRecord.disc || sourceRecord.disc_perc || 0,
+        tax: sourceRecord.tax || sourceRecord.tax_rate || sourceRecord.tax_percent || 5,
+        amount: sourceRecord.amount || sourceRecord.total_amt || ''
+      }];
+    }
+
+    if (itemsToImport.length > 0) {
+      const mappedRows = itemsToImport.map(it => ({
+        item_name: it.item_name || it.description || '',
+        lot_no: it.lot_no || sourceRecord.lot_no || '',
+        qty: String(it.qty !== undefined ? it.qty : ''),
+        weight: String(it.weight || it.per_unit_wt || '1'),
+        per_unit_wt: String(it.weight || it.per_unit_wt || '1'),
+        total_wt: String(it.total_wt || it.total_weight || (Number(it.qty || 0) * Number(it.weight || 1))),
+        rate: String(it.rate !== undefined ? it.rate : ''),
+        disc: String(it.disc ?? it.disc_perc ?? 0),
+        tax_rate: String(it.tax_rate ?? it.tax ?? it.tax_perc ?? sourceRecord.tax_percent ?? 5),
+        amount: String(it.amount || it.total_amt || '')
+      }));
+      setRows(mappedRows);
+    }
+    setSuccess('Record details successfully imported into workflow!');
+    setTimeout(() => setSuccess(''), 3000);
+  }, []);
 
   // Recalculate deductions and grand total when bill totals or deductions change
   useEffect(() => {
@@ -281,7 +346,45 @@ const SalesCreate = () => {
     }))
   }, [formData.total_amt, formData.bill_amt, formData.deduction, selectedDeductions, deductionOptions])
 
+  const handleInlineDeductionCreated = async (newId, newRecord) => {
+    try {
+      const res = await api('/masters/deduction_sales');
+      const list = res?.data || res || [];
+      if (Array.isArray(list)) setDeductionOptions(list);
+      const targetId = newId || newRecord?.id;
+      const found = (Array.isArray(list) ? list : []).find(d => String(d.id) === String(targetId)) || newRecord;
+      if (found) {
+        const dVal = parseFloat(found.ded_value) || 0;
+        const billAmt = parseFloat(formData.bill_amt) || 0;
+        const optType = String(found.ded_type || found.type || found.deduction_type || '').toUpperCase();
+        const isAdd = optType === 'ADD' || optType === 'ADDITION' || (found.ded_name && found.ded_name.toLowerCase().includes('tcs'));
+        const isPct = found.ded_type === 'Percentage' || found.ded_type === 'percent' || found.calc_type === 'Percentage';
+        setSelectedDeductions(prev => {
+          const filtered = prev.filter(r => r.deduction_id || r.name);
+          return [
+            ...filtered,
+            {
+              deduction_id: targetId,
+              id: targetId,
+              name: found.ded_name || '',
+              type: isAdd ? 'ADD' : 'LESS',
+              percent: isPct ? String(dVal) : '',
+              amount: isPct ? ((billAmt * dVal) / 100).toFixed(2) : String(dVal),
+              remarks: ''
+            }
+          ];
+        });
+      }
+    } catch (err) {
+      console.error('Error refreshing sales deductions:', err);
+    }
+  };
+
   const handleDeductionRowChange = (index, field, value) => {
+    if (field === 'deduction_id' && (value === '__CREATE_NEW__' || value === 'create_new' || value === 'manual')) {
+      setInlineDeductionOpen(true);
+      return;
+    }
     setSelectedDeductions(prev => {
       const updated = [...prev]
       let val = value
@@ -544,7 +647,7 @@ const SalesCreate = () => {
     { key: 'total_wt', title: 'Total Wt', type: 'number', readOnly: true },
     { key: 'rate', title: 'Rate', type: 'number' },
     { key: 'disc', title: 'Disc%', type: 'number' },
-    { key: 'tax_rate', title: 'Tax%', type: 'number' },
+    { key: 'tax_rate', title: 'Tax%', type: 'taxSelect' },
     { key: 'amount', title: 'Amount', readOnly: true }
   ] : [
     { key: 's_no', title: 'S.No', readOnly: true },
@@ -555,7 +658,7 @@ const SalesCreate = () => {
     { key: 'total_wt', title: 'Total Wt', type: 'number', readOnly: true },
     { key: 'rate', title: 'Rate', type: 'number' },
     { key: 'disc', title: 'Disc%', type: 'number' },
-    { key: 'tax_rate', title: 'Tax%', type: 'number' },
+    { key: 'tax_rate', title: 'Tax%', type: 'taxSelect' },
     { key: 'amount', title: 'Amount', readOnly: true }
   ]
 
@@ -574,6 +677,12 @@ const SalesCreate = () => {
 
   return (
     <div className="window">
+      <SalesDistributionWorkflow 
+        currentModule={isOrder ? 'sales_order' : 'sales'} 
+        onImportRecord={handleWorkflowImport}
+        importButtonText={isOrder ? 'Import from Quotation' : 'Import from Sales Order'}
+      />
+
       <div className="screen-title">{isOrder ? 'Sales Order Creation' : 'Sales Creation'}</div>
 
       {error && <div className="alert error">{error}</div>}
@@ -601,25 +710,80 @@ const SalesCreate = () => {
           taxRate={formData.tax_percent}
         />
 
-        <EntryTotalsRow 
-          totals={[
-            { label: 'Total Qty', value: rows.reduce((sum, r) => sum + (parseFloat(r.qty) || 0), 0), isAmount: false },
-            { label: 'Bill Amt', value: formData.bill_amt, isAmount: true },
-            { label: 'Tax Amt', value: formData.tax_amt, isAmount: true },
-            { label: 'Total', value: formData.total_amt, isAmount: true }
-          ]} 
+        <EntryTaxBillDetails 
+          title={isOrder ? "Sales Order Bill & GST Breakdown" : "Sales Invoice Bill & GST Breakdown"}
+          grossAmt={formData.gross_amt || 0}
+          discPercent={formData.disc_percent || 0}
+          discAmt={formData.disc_amount || 0}
+          billAmt={formData.bill_amt}
+          taxAmt={formData.tax_amt}
+          totalAmt={formData.total_amt}
+          grandTotal={formData.grand_total || formData.total_amt}
+          taxPercent={formData.tax_percent}
+          cgstAmt={formData.cgst_amt}
+          sgstAmt={formData.sgst_amt}
+          igstAmt={formData.igst_amt}
+          rateSummaries={formData.rate_summaries}
+          deductionsAmt={formData.deduction_amount}
+          taxType={formData.tax_type}
+          isInterState={Boolean(formData.address && !formData.address.toLowerCase().includes('tamil nadu') && !formData.address.toLowerCase().includes('tn'))}
         />
 
         <div style={{ marginTop: '24px', padding: '24px', backgroundColor: '#f8fafc', borderRadius: '10px', border: '2px solid #cbd5e1', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', borderBottom: '2px solid #cbd5e1', paddingBottom: '10px' }}>
             <div style={{ fontSize: '15px', fontWeight: '800', color: '#1e293b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Deductions & Final Summary</div>
-            <button
-              type="button"
-              onClick={addDeductionRow}
-              style={{ backgroundColor: '#2563eb', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: '6px', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer' }}
-            >
-              + Add Deduction Row
-            </button>
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+              <select
+                value=""
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === '__CREATE_NEW__' || val === 'create_new' || val === 'manual') {
+                    setInlineDeductionOpen(true);
+                    return;
+                  }
+                  if (val) {
+                    const ded = deductionOptions.find(d => String(d.id) === String(val));
+                    if (ded) {
+                      const dVal = parseFloat(ded.ded_value) || 0;
+                      const billAmt = parseFloat(formData.bill_amt) || 0;
+                      const optType = String(ded.ded_type || ded.type || ded.deduction_type || '').toUpperCase();
+                      const isAdd = optType === 'ADD' || optType === 'ADDITION' || (ded.ded_name && ded.ded_name.toLowerCase().includes('tcs'));
+                      const isPct = ded.ded_type === 'Percentage' || ded.ded_type === 'percent' || ded.calc_type === 'Percentage';
+                      setSelectedDeductions(prev => [
+                        ...prev.filter(r => r.deduction_id || r.name),
+                        {
+                          deduction_id: ded.id,
+                          id: ded.id,
+                          name: ded.ded_name || '',
+                          type: isAdd ? 'ADD' : 'LESS',
+                          percent: isPct ? String(dVal) : '',
+                          amount: isPct ? ((billAmt * dVal) / 100).toFixed(2) : String(dVal),
+                          remarks: ''
+                        }
+                      ]);
+                    }
+                  }
+                }}
+                style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', backgroundColor: '#fff' }}
+              >
+                <option value="">+ Add Deduction</option>
+                {deductionOptions.map((opt) => (
+                  <option key={opt.id} value={opt.id}>
+                    {opt.ded_name} ({opt.ded_type === 'Percentage' ? `${opt.ded_value}%` : `₹${opt.ded_value}`})
+                  </option>
+                ))}
+                <option value="__CREATE_NEW__" style={{ fontWeight: 'bold', color: '#1e3a8a' }}>
+                  {getCreateLabel('deduction_sales')}
+                </option>
+              </select>
+              <button
+                type="button"
+                onClick={addDeductionRow}
+                style={{ backgroundColor: '#2563eb', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: '6px', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer' }}
+              >
+                + Add Deduction Row
+              </button>
+            </div>
           </div>
           
           {selectedDeductions.length > 0 && (
@@ -639,7 +803,13 @@ const SalesCreate = () => {
               <div>
                 <select 
                   value={dRow.deduction_id || ''} 
-                  onChange={(e) => handleDeductionRowChange(dIdx, 'deduction_id', e.target.value)}
+                  onChange={(e) => {
+                    if (e.target.value === '__CREATE_NEW__' || e.target.value === 'create_new' || e.target.value === 'manual') {
+                      setInlineDeductionOpen(true);
+                      return;
+                    }
+                    handleDeductionRowChange(dIdx, 'deduction_id', e.target.value);
+                  }}
                   style={{ width: '100%', height: '38px', padding: '6px 10px', border: '1px solid #94a3b8', borderRadius: '6px', fontSize: '13px', backgroundColor: '#fff', color: '#0f172a', boxSizing: 'border-box' }}
                 >
                   <option value="">-- Select Master --</option>
@@ -648,6 +818,9 @@ const SalesCreate = () => {
                       {opt.ded_name} ({opt.ded_type === 'Percentage' ? `${opt.ded_value}%` : `₹${opt.ded_value}`})
                     </option>
                   ))}
+                  <option value="__CREATE_NEW__" style={{ fontWeight: 'bold', color: '#1e3a8a' }}>
+                    {getCreateLabel('deduction_sales')}
+                  </option>
                 </select>
               </div>
 
@@ -757,6 +930,14 @@ const SalesCreate = () => {
           saveText={isOrder ? 'Save Sales Order' : 'Save Sales'}
         />
       </form>
+
+      {/* Inline Master Modal for Deductions */}
+      <InlineMasterModal
+        open={inlineDeductionOpen}
+        onClose={() => setInlineDeductionOpen(false)}
+        masterType="deduction_sales"
+        onSuccess={handleInlineDeductionCreated}
+      />
     </div>
   )
 }

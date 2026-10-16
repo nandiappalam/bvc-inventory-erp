@@ -1,11 +1,25 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import './QuotationCreate.css';
 import api from "../services/api.js";
-import { EntryTopFrame, EntryItemsTable, EntryTotalsRow, EntryBottomSummary, EntryActions, EntrySection } from './entry';
+import { calculateTotals } from '../utils/taxCalc';
+import { 
+  EntryTopFrame, 
+  EntryItemsTable, 
+  EntryTotalsRow, 
+  EntryBottomSummary, 
+  EntryActions, 
+  EntrySection,
+  EntryTaxBillDetails 
+} from './entry';
+import { InlineMasterModal, getCreateLabel } from './common/InlineMasterModal.jsx';
+import SalesDistributionWorkflow from './common/SalesDistributionWorkflow.jsx';
 
 const QuotationCreate = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const editId = searchParams.get('id');
+
   const [formData, setFormData] = useState({
     bill_no: '',
     date: new Date().toISOString().split('T')[0],
@@ -16,10 +30,19 @@ const QuotationCreate = () => {
     customer: '',
     address: '',
     tax_percent: '0',
+    tax_percent_display: '0%',
     amount: '0.00',
+    gross_amt: '0.00',
+    disc_percent: '0',
+    disc_amount: '0.00',
     bill_amt: '0.00',
     tax_amt: '0.00',
+    cgst_amt: '0.00',
+    sgst_amt: '0.00',
+    igst_amt: '0.00',
     total_amt: '0.00',
+    grand_total: '0.00',
+    rate_summaries: [],
     deduction: '',
     percent: '',
     deduction_amount: '0.00',
@@ -34,13 +57,50 @@ const QuotationCreate = () => {
   const [selectedDeductions, setSelectedDeductions] = useState([
     { deduction_id: '', name: '', type: 'LESS', percent: '', amount: '', remarks: '' }
   ]);
+  const [inlineDeductionOpen, setInlineDeductionOpen] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState('success');
 
-  const searchParams = new URLSearchParams(window.location.search);
-  const editId = searchParams.get('id');
+  // Recalculate quotation financial totals using centralized tax service
+  const recalculateTotals = (updatedItems, updatedDeductions, taxPercentVal, customDeduction, customPercent) => {
+    const formattedDeductions = (updatedDeductions || []).map(d => ({
+      amount: parseFloat(d.amount) || 0,
+      type: (d.type || 'LESS').toUpperCase()
+    }));
+    if (parseFloat(customDeduction) > 0) {
+      formattedDeductions.push({ amount: parseFloat(customDeduction), type: 'LESS' });
+    }
+
+    const calcResult = calculateTotals(
+      updatedItems || [],
+      formData.tax_type || 'Exclusive',
+      parseFloat(taxPercentVal !== undefined && taxPercentVal !== null ? taxPercentVal : formData.tax_percent) || 0,
+      formData.address || 'Tamil Nadu',
+      'Tamil Nadu',
+      formattedDeductions
+    );
+
+    setFormData(prev => ({
+      ...prev,
+      gross_amt: (calcResult.grossAmount || calcResult.baseAmount || 0).toFixed(2),
+      disc_percent: String(calcResult.discPercent || 0),
+      disc_amount: (calcResult.discAmount || 0).toFixed(2),
+      amount: calcResult.baseAmount.toFixed(2),
+      bill_amt: calcResult.taxableAmount.toFixed(2),
+      tax_amt: calcResult.taxAmount.toFixed(2),
+      cgst_amt: (calcResult.cgstAmount || 0).toFixed(2),
+      sgst_amt: (calcResult.sgstAmount || 0).toFixed(2),
+      igst_amt: (calcResult.igstAmount || 0).toFixed(2),
+      total_amt: calcResult.totalAmount.toFixed(2),
+      grand_total: calcResult.grandTotal.toFixed(2),
+      deduction_amount: calcResult.deductionAmount.toFixed(2),
+      tax_percent: String(calcResult.primaryTaxRate || 0),
+      tax_percent_display: calcResult.taxPercentDisplay || '0%',
+      rate_summaries: calcResult.rateSummaries || []
+    }));
+  };
 
   // Fetch initial data & edit record if present
   useEffect(() => {
@@ -49,16 +109,20 @@ const QuotationCreate = () => {
         if (editId) {
           const res = await api(`/quotations/${editId}`);
           if (res) {
-            setFormData({
+            const customerVal = res.customer_name || res.customer || res.customer_id || '';
+            const initialTaxRate = String(res.tax_percent !== undefined && res.tax_percent !== null ? res.tax_percent : '0');
+
+            setFormData(prev => ({
+              ...prev,
               bill_no: String(res.bill_no || res.s_no || ''),
               date: res.date ? res.date.substring(0, 10) : new Date().toISOString().split('T')[0],
               pay_type: res.pay_type || 'Cash',
               tax_type: res.tax_type || 'Exclusive',
               type: res.type || 'Urad',
               remarks: res.remarks || '',
-              customer: res.customer || '',
+              customer: customerVal,
               address: res.address || '',
-              tax_percent: String(res.tax_percent !== undefined && res.tax_percent !== null ? res.tax_percent : '0'),
+              tax_percent: initialTaxRate,
               amount: String(res.amount || '0.00'),
               bill_amt: String(res.bill_amt || '0.00'),
               tax_amt: String(res.tax_amt || '0.00'),
@@ -67,19 +131,53 @@ const QuotationCreate = () => {
               percent: String(res.percent || ''),
               deduction_amount: String(res.deduction_amount || '0.00'),
               deduction_remarks: res.deduction_remarks || ''
-            });
+            }));
+
+            let mappedItems = [];
             if (Array.isArray(res.items) && res.items.length > 0) {
-              setItems(res.items.map(it => ({
+              mappedItems = res.items.map(it => ({
                 item_name: it.item_name || '',
                 lot_no: it.lot_no || '',
-                qty: String(it.qty || ''),
-                box: String(it.box || ''),
-                rate: String(it.rate || ''),
-                disc: String(it.disc || ''),
-                tax: String(it.tax || ''),
-                amount: String(it.amount || '')
-              })));
+                qty: String(it.qty !== undefined ? it.qty : ''),
+                box: String(it.box !== undefined ? it.box : ''),
+                rate: String(it.rate !== undefined ? it.rate : ''),
+                disc: String(it.disc !== undefined ? it.disc : ''),
+                tax: String(it.tax !== undefined ? it.tax : ''),
+                amount: String(it.amount !== undefined ? it.amount : '')
+              }));
+            } else if (res.item_name) {
+              mappedItems = [{
+                item_name: res.item_name || '',
+                lot_no: res.lot_no || '',
+                qty: String(res.qty || ''),
+                box: String(res.box || ''),
+                rate: String(res.rate || ''),
+                disc: String(res.disc || ''),
+                tax: String(res.tax || ''),
+                amount: String(res.amount || '')
+              }];
+            } else {
+              mappedItems = [{ item_name: '', lot_no: '', qty: '', box: '', rate: '', disc: '', tax: '', amount: '' }];
             }
+            setItems(mappedItems);
+
+            let initialDeds = [{ deduction_id: '', name: '', type: 'LESS', percent: '', amount: '', remarks: '' }];
+            if (Array.isArray(res.deductions) && res.deductions.length > 0) {
+              initialDeds = res.deductions;
+            } else if (parseFloat(res.deduction_amount) > 0 || res.deduction) {
+              initialDeds = [{
+                deduction_id: '',
+                name: res.deduction || 'Deduction',
+                type: 'LESS',
+                percent: String(res.percent || ''),
+                amount: String(res.deduction_amount || ''),
+                remarks: res.deduction_remarks || ''
+              }];
+            }
+            setSelectedDeductions(initialDeds);
+
+            // Immediately trigger totals calculation for loaded data
+            recalculateTotals(mappedItems, initialDeds, initialTaxRate, res.deduction, res.percent);
           }
         } else {
           const nextRes = await api('/quotations/next-bill-no');
@@ -103,63 +201,6 @@ const QuotationCreate = () => {
     };
     fetchInitialData();
   }, [editId]);
-
-  // Recalculate quotation financial totals
-  const recalculateTotals = (updatedItems, updatedDeductions, taxPercentVal, customDeduction, customPercent) => {
-    let totalGrossAmount = 0;
-    let totalTaxAmount = 0;
-
-    updatedItems.forEach(item => {
-      const qty = parseFloat(item.qty) || 0;
-      const rate = parseFloat(item.rate) || 0;
-      const discPct = parseFloat(item.disc) || 0;
-      const taxPct = parseFloat(item.tax) || 0;
-
-      const base = qty * rate;
-      const discVal = base * (discPct / 100);
-      const afterDisc = base - discVal;
-      const taxVal = afterDisc * (taxPct / 100);
-
-      totalGrossAmount += base;
-      totalTaxAmount += taxVal;
-    });
-
-    let netDeductionsAmt = 0;
-    updatedDeductions.forEach(d => {
-      const pct = parseFloat(d.percent) || 0;
-      let amt = parseFloat(d.amount) || 0;
-      if (pct > 0 && totalGrossAmount > 0) {
-        amt = (totalGrossAmount * pct) / 100;
-        d.amount = amt.toFixed(2);
-      }
-      const dedType = (d.type || 'LESS').toUpperCase();
-      if (dedType === 'ADD') {
-        netDeductionsAmt -= amt; // Adding increases bill amount
-      } else {
-        netDeductionsAmt += amt; // Less decreases bill amount
-      }
-    });
-
-    const manualDedVal = parseFloat(customDeduction) || 0;
-    const manualPctVal = parseFloat(customPercent) || 0;
-    const manualPctAmt = (totalGrossAmount * manualPctVal) / 100;
-
-    const finalTotalDeductions = netDeductionsAmt + manualDedVal + manualPctAmt;
-    const billAmt = Math.max(0, totalGrossAmount - finalTotalDeductions);
-
-    const taxRate = parseFloat(taxPercentVal) || 0;
-    const calculatedTaxAmt = totalTaxAmount > 0 ? totalTaxAmount : billAmt * (taxRate / 100);
-    const totalAmt = billAmt + calculatedTaxAmt;
-
-    setFormData(prev => ({
-      ...prev,
-      amount: totalGrossAmount.toFixed(2),
-      bill_amt: billAmt.toFixed(2),
-      tax_amt: calculatedTaxAmt.toFixed(2),
-      total_amt: totalAmt.toFixed(2),
-      deduction_amount: finalTotalDeductions.toFixed(2)
-    }));
-  };
 
   const handleInputChange = (nameOrEvent, maybeValue) => {
     let fieldName = '';
@@ -235,7 +276,47 @@ const QuotationCreate = () => {
     });
   };
 
+  const handleInlineDeductionCreated = async (newId, newRecord) => {
+    try {
+      const res = await api('/masters/deduction_sales');
+      const list = res?.data || res || [];
+      if (Array.isArray(list)) setDeductionsList(list);
+      const targetId = newId || newRecord?.id;
+      const found = (Array.isArray(list) ? list : []).find(d => String(d.id) === String(targetId)) || newRecord;
+      if (found) {
+        setSelectedDeductions(prev => {
+          const filtered = prev.filter(r => r.deduction_id || r.name);
+          const updated = [
+            ...filtered,
+            {
+              deduction_id: targetId,
+              name: found.name || found.deduction_name || found.ded_name || '',
+              type: (found.type || found.deduction_type || 'LESS').toUpperCase(),
+              percent: found.deduction_value || found.ded_value || '',
+              amount: '',
+              remarks: ''
+            }
+          ];
+          recalculateTotals(
+            items,
+            updated,
+            formData.tax_percent,
+            formData.deduction,
+            formData.percent
+          );
+          return updated;
+        });
+      }
+    } catch (err) {
+      console.error('Error refreshing quotation deductions:', err);
+    }
+  };
+
   const handleDeductionRowChange = (index, field, value) => {
+    if (field === 'deduction_id' && (value === '__CREATE_NEW__' || value === 'create_new' || value === 'manual')) {
+      setInlineDeductionOpen(true);
+      return;
+    }
     setSelectedDeductions(prev => {
       const updated = [...prev];
       updated[index] = { ...updated[index], [field]: value };
@@ -411,16 +492,17 @@ const QuotationCreate = () => {
     { key: 'box', title: 'Box', type: 'number' },
     { key: 'rate', title: 'Rate', type: 'number' },
     { key: 'disc', title: 'Disc %', type: 'number' },
-    { key: 'tax', title: 'Tax %', type: 'number' },
+    { key: 'tax', title: 'Tax %', type: 'taxSelect' },
     { key: 'amount', title: 'Amount', readOnly: true }
   ];
 
   const totals = [
-    { name: 'tax_percent', label: 'Tax %', value: formData.tax_percent },
-    { name: 'amount', label: 'Amount', value: formData.amount },
-    { name: 'bill_amt', label: 'Bill Amt', value: formData.bill_amt },
-    { name: 'tax_amt', label: 'Tax Amt', value: formData.tax_amt },
-    { name: 'total_amt', label: 'Total Amt', value: formData.total_amt },
+    { name: 'tax_percent', label: 'Tax %', value: formData.tax_percent_display || (formData.tax_percent ? `${formData.tax_percent}%` : '0%'), isAmount: false },
+    { name: 'bill_amt', label: 'Bill Amt', value: formData.bill_amt, isAmount: true },
+    { name: 'cgst_amt', label: 'CGST', value: formData.cgst_amt || '0.00', isAmount: true },
+    { name: 'sgst_amt', label: 'SGST', value: formData.sgst_amt || '0.00', isAmount: true },
+    { name: 'tax_amt', label: 'Tax Amt', value: formData.tax_amt, isAmount: true },
+    { name: 'total_amt', label: 'Total Amt', value: formData.total_amt, isAmount: true },
   ];
 
   const summaryFields = [
@@ -432,6 +514,7 @@ const QuotationCreate = () => {
 
   return (
     <div className="window">
+      <SalesDistributionWorkflow currentModule="quotation" />
       <div className="screen-title">Quotation Creation</div>
 
       {message && <div className={`message ${messageType}`}>{message}</div>}
@@ -479,6 +562,9 @@ const QuotationCreate = () => {
                       {deductionsList.map((d, dIdx) => (
                         <option key={`${d.id || 'ded'}-${dIdx}`} value={d.id}>{d.name || d.deduction_name || d.ded_name}</option>
                       ))}
+                      <option value="__CREATE_NEW__" style={{ fontWeight: 'bold', color: '#1e3a8a' }}>
+                        {getCreateLabel('deductions')}
+                      </option>
                     </select>
                   </td>
                   <td style={{ padding: '4px', border: '1px solid #ccc', textAlign: 'center' }}>
@@ -539,17 +625,71 @@ const QuotationCreate = () => {
               ))}
             </tbody>
           </table>
-          <button
-            type="button"
-            onClick={addDeductionRow}
-            style={{ marginTop: '8px', background: '#1f4fb2', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer' }}
-          >
-            + Add Deduction
-          </button>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginTop: '8px' }}>
+            <select
+              value=""
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val === '__CREATE_NEW__' || val === 'create_new' || val === 'manual') {
+                  setInlineDeductionOpen(true);
+                  return;
+                }
+                if (val) {
+                  const master = deductionsList.find(d => String(d.id) === String(val));
+                  if (master) {
+                    setSelectedDeductions(prev => [
+                      ...prev.filter(r => r.deduction_id || r.name),
+                      {
+                        deduction_id: master.id,
+                        name: master.name || master.deduction_name || master.ded_name || '',
+                        type: (master.type || master.deduction_type || 'LESS').toUpperCase(),
+                        percent: master.deduction_value || master.ded_value || '',
+                        amount: '',
+                        remarks: ''
+                      }
+                    ]);
+                  }
+                }
+              }}
+              style={{ padding: '6px 12px', borderRadius: '4px', border: '1px solid #1f4fb2', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', backgroundColor: '#fff' }}
+            >
+              <option value="">+ Add Deduction</option>
+              {deductionsList.map((d, dIdx) => (
+                <option key={`${d.id || 'ded'}-${dIdx}`} value={d.id}>{d.name || d.deduction_name || d.ded_name}</option>
+              ))}
+              <option value="__CREATE_NEW__" style={{ fontWeight: 'bold', color: '#1e3a8a' }}>
+                {getCreateLabel('deductions')}
+              </option>
+            </select>
+            <button
+              type="button"
+              onClick={addDeductionRow}
+              style={{ background: '#1f4fb2', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+            >
+              + Add Deduction Row
+            </button>
+          </div>
         </div>
       </EntrySection>
 
-      <EntryTotalsRow totals={totals} />
+      <EntryTaxBillDetails 
+        title="Quotation Bill & GST Tax Breakdown"
+        grossAmt={formData.gross_amt || formData.amount || 0}
+        discPercent={formData.disc_percent || 0}
+        discAmt={formData.disc_amount || 0}
+        billAmt={formData.bill_amt}
+        taxAmt={formData.tax_amt}
+        totalAmt={formData.total_amt}
+        grandTotal={formData.grand_total || formData.total_amt}
+        taxPercent={formData.tax_percent}
+        cgstAmt={formData.cgst_amt}
+        sgstAmt={formData.sgst_amt}
+        igstAmt={formData.igst_amt}
+        rateSummaries={formData.rate_summaries}
+        deductionsAmt={formData.deduction_amount}
+        taxType={formData.tax_type}
+        isInterState={Boolean(formData.address && !formData.address.toLowerCase().includes('tamil nadu') && !formData.address.toLowerCase().includes('tn'))}
+      />
 
       <EntryBottomSummary 
         summaryFields={summaryFields}
@@ -560,7 +700,15 @@ const QuotationCreate = () => {
       <EntryActions 
         onSave={handleSave}
         saving={loading}
-        saveText="Save"
+        saveText={editId ? "Update Quotation" : "Save Quotation"}
+      />
+
+      {/* Inline Master Modal for Deductions */}
+      <InlineMasterModal
+        open={inlineDeductionOpen}
+        onClose={() => setInlineDeductionOpen(false)}
+        masterType="deduction_sales"
+        onSuccess={handleInlineDeductionCreated}
       />
     </div>
   );

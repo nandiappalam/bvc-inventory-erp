@@ -113,6 +113,7 @@ app.use('/api/sales-returns', salesReturnsRouter)
 app.use('/api/masters', mastersRouter)
 app.use('/api/taxes', require('./routes/taxMaster'))
 app.use('/api/tax-master', require('./routes/taxMaster'))
+app.use('/api/terms', require('./routes/terms'))
 app.use('/api/advances', advancesRouter)
 // Alias for advance (without 's') - used by some frontend components
 app.use('/api/advance', advancesRouter)

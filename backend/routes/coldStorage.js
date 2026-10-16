@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../config/database');
 const { rebuildStockLedger } = require('../utils/stockRebuilder');
 const recycleBinService = require('../services/RecycleBinService');
+const { syncGodownTransfersToColdStorage } = require('../services/coldStorageTransferSync');
 
 // Initialize cold storage tables if not created
 const initTables = async () => {
@@ -61,20 +62,27 @@ const syncColdStorageStock = async (dbInstance = db, companyId = 1) => {
       FROM stock_lots sl
       LEFT JOIN purchases p ON sl.purchase_id = p.id
       LEFT JOIN godown_master g ON sl.godown_id = g.id OR LOWER(sl.godown_name) = LOWER(g.godown_name)
-      WHERE LOWER(COALESCE(sl.godown_name, '')) LIKE '%cold%' 
-         OR sl.godown_id = 2 
-         OR LOWER(COALESCE(g.godown_type, '')) LIKE '%cold%'
-         OR LOWER(COALESCE(g.storage_location, '')) LIKE '%outside%'
+      WHERE (
+        LOWER(COALESCE(sl.godown_name, '')) LIKE '%cold%'
+        OR sl.godown_id = 2
+        OR LOWER(COALESCE(g.godown_type, '')) LIKE '%cold%'
+        OR LOWER(COALESCE(g.storage_location, '')) LIKE '%outside%'
+      )
+        AND UPPER(COALESCE(sl.lot_no, '')) NOT LIKE 'CS-%'
     `, [], cId);
 
-    for (const lot of (coldLots.rows || [])) {
+    const sourceLots = (coldLots.rows || []).filter(lot => !String(lot.lot_no || '').toUpperCase().startsWith('CS-'));
+
+    for (const lot of sourceLots) {
       const lotNo = lot.lot_no;
       if (!lotNo) continue;
 
       const existingCs = await db.query(`
         SELECT csi.id FROM cold_storage_items csi 
         WHERE UPPER(TRIM(csi.purchase_lot_no)) = UPPER(TRIM(?))
-      `, [lotNo], cId);
+           OR UPPER(TRIM(csi.cold_storage_lot_no)) = UPPER(TRIM(?))
+           OR UPPER(TRIM(csi.cold_storage_lot_no)) = UPPER(TRIM(?))
+      `, [lotNo, lotNo, `CS-${lotNo}`], cId);
 
       if (!existingCs.rows || existingCs.rows.length === 0) {
         let gId = lot.godown_id || lot.g_id || 2;
@@ -298,6 +306,7 @@ router.get('/available-lots', async (req, res) => {
 // GET Cold Storage Stock (Lot breakdown in Cold Storages)
 router.get('/stock', async (req, res) => {
   try {
+    await syncGodownTransfersToColdStorage();
     const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
     await syncColdStorageStock(db, activeCompanyId);
 
@@ -319,7 +328,7 @@ router.get('/stock', async (req, res) => {
         csi.unit
       FROM cold_storage_items csi
       JOIN cold_storage_vouchers csv ON csi.voucher_id = csv.id
-      WHERE 1=1
+      WHERE COALESCE(csv.remarks, '') NOT LIKE 'Auto-sync from Stock Lot CS-%'
     `;
     const params = [];
 
@@ -403,7 +412,8 @@ router.get('/cs-lots', async (req, res) => {
         csi.unit
       FROM cold_storage_items csi
       JOIN cold_storage_vouchers csv ON csi.voucher_id = csv.id
-      WHERE csv.cold_storage_id = ? OR CAST(csv.cold_storage_id AS TEXT) = ?
+      WHERE (csv.cold_storage_id = ? OR CAST(csv.cold_storage_id AS TEXT) = ?)
+        AND COALESCE(csv.remarks, '') NOT LIKE 'Auto-sync from Stock Lot CS-%'
       GROUP BY csi.item_name, csi.purchase_lot_no, csi.cold_storage_lot_no, csv.cold_storage_id, csv.cold_storage_name, csi.unit
       HAVING (SUM(CASE WHEN csv.voucher_type = 'IN' THEN csi.quantity ELSE 0 END) - SUM(CASE WHEN csv.voucher_type = 'OUT' THEN csi.quantity ELSE 0 END)) > 0
       ORDER BY csi.item_name, csi.cold_storage_lot_no
@@ -682,6 +692,7 @@ router.post('/out', async (req, res) => {
         WHERE (csv.cold_storage_id = ? OR csv.cold_storage_name = ?)
           AND csi.item_name = ? 
           AND csi.cold_storage_lot_no = ?
+          AND COALESCE(csv.remarks, '') NOT LIKE 'Auto-sync from Stock Lot CS-%'
       `, [cold_storage_id || 0, cold_storage_name || '', item.item_name, item.cold_storage_lot_no]);
 
       const availQty = parseFloat((stockRes.rows[0] || {}).available_qty || 0);
@@ -819,8 +830,9 @@ router.post('/out', async (req, res) => {
 // GET list of Cold Storage vouchers
 router.get('/vouchers', async (req, res) => {
   try {
+    await syncGodownTransfersToColdStorage();
     const { voucher_type, date_from, date_to, cold_storage_id } = req.query;
-    let query = `SELECT * FROM cold_storage_vouchers WHERE 1=1`;
+    let query = `SELECT * FROM cold_storage_vouchers WHERE COALESCE(remarks, '') NOT LIKE 'Auto-sync from Stock Lot CS-%'`;
     const params = [];
 
     if (voucher_type) {

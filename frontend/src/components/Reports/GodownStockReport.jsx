@@ -42,6 +42,7 @@ import * as XLSX from 'xlsx';
 import { printHtml } from '../../utils/printHelper';
 import api from '../../services/api.js';
 import ItemStockDetailsModal from '../common/ItemStockDetailsModal';
+import { getStockCategory } from '../entry/godownStockData.mjs';
 
 const GodownStockReport = () => {
   const [data, setData] = useState([]);
@@ -179,19 +180,8 @@ const GodownStockReport = () => {
         const rate = parseFloat(item.rate || item.purchase_rate || item.cost || 0);
         const stockValue = availQty * rate;
 
-        const nameLower = (item.item_name || '').toLowerCase();
-        const catLower = (item.category || item.type || '').toLowerCase();
-        let cat = 'RM';
-        if (nameLower.includes('wastage') || nameLower.includes('rejection') || nameLower.includes('scrap') || nameLower.includes('loss') || catLower.includes('wastage')) {
-          cat = 'Wastage';
-        } else if (
-          nameLower.includes('papad') || nameLower.includes('atta') || nameLower.includes('bgf') || nameLower.includes('brf') || nameLower.includes('10 rs pack') || nameLower.includes('pack') ||
-          catLower === 'fg' || catLower.includes('finished') || catLower.includes('flour') || catLower.includes('papad')
-        ) {
-          cat = 'FG';
-        } else {
-          cat = 'RM';
-        }
+        const stockCategory = getStockCategory(item);
+        const cat = stockCategory === 'Waste' ? 'Wastage' : stockCategory;
 
         // Find alert configuration
         const specificKey = `${item.item_name}_${item.godown_id}`;
@@ -209,20 +199,11 @@ const GodownStockReport = () => {
           stockStatus = 'REORDER';
         }
 
-        const lotNorm = (item.lot_no || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-        const itemNorm = (item.item_name || '').toUpperCase();
-        let finalGodownName = item.godown_name || item.godown || 'PJ';
-        let finalGodownId = item.godown_id;
-        if (lotNorm === 'LOT0003' || lotNorm === 'LOT003' || lotNorm === 'LOT3' || itemNorm.includes('URAD')) {
-          finalGodownName = 'PJ';
-          finalGodownId = 1;
-        }
-
         return {
           id: item.id || idx + 1,
           s_no: idx + 1,
-          godown_id: finalGodownId,
-          godown_name: finalGodownName,
+          godown_id: item.godown_id,
+          godown_name: item.godown_name || item.godown || 'PJ',
           item_code: item.item_code || `ITM-${100 + idx}`,
           item_name: item.item_name || 'N/A',
           category: cat,
@@ -301,7 +282,7 @@ const GodownStockReport = () => {
     fetchGodownStock();
   };
 
-  const [selectedBlock, setSelectedBlock] = useState('all'); // 'all', 'RM', 'FG', 'Wastage'
+  const [selectedBlock, setSelectedBlock] = useState('all');
 
   // Filtered dataset for Category, Block, and Stock Status selection
   const filteredData = useMemo(() => {
@@ -319,6 +300,7 @@ const GodownStockReport = () => {
   const rmData = useMemo(() => filteredData.filter((d) => d.category === 'RM'), [filteredData]);
   const fgData = useMemo(() => filteredData.filter((d) => d.category === 'FG'), [filteredData]);
   const wastageData = useMemo(() => filteredData.filter((d) => d.category === 'Wastage'), [filteredData]);
+  const vacuumData = useMemo(() => filteredData.filter((d) => d.category === 'Vacuum'), [filteredData]);
 
   // KPI Calculations
   const totalGodownsCount = useMemo(() => {
@@ -355,7 +337,7 @@ const GodownStockReport = () => {
       'Godown Name': row.godown_name,
       'Item Code': row.item_code,
       'Item Name': row.item_name,
-      'Block / Category': row.category === 'RM' ? 'Raw Material (RM)' : row.category === 'FG' ? 'Finished Goods (FG)' : 'Wastage Details',
+      'Block / Category': row.category === 'RM' ? 'Raw Material (RM)' : row.category === 'FG' ? 'Finished Goods (FG)' : row.category === 'Vacuum' ? 'Vacuum' : 'Wastage Details',
       'Lot Number': row.lot_no,
       'Unit Weight': `${row.unit_weight} ${row.unit}`,
       'Opening Qty': row.opening_qty,
@@ -470,6 +452,7 @@ const GodownStockReport = () => {
     const rmBlockHtml = (selectedBlock === 'all' || selectedBlock === 'RM') ? renderBlockHtml('🌾 RAW MATERIAL (RM) DETAILS BLOCK', rmData, '#fef3c7') : '';
     const fgBlockHtml = (selectedBlock === 'all' || selectedBlock === 'FG') ? renderBlockHtml('📦 FINISHED GOODS (FG) DETAILS BLOCK', fgData, '#dcfce7') : '';
     const wastageBlockHtml = (selectedBlock === 'all' || selectedBlock === 'Wastage') ? renderBlockHtml('🗑️ WASTAGE & REJECTION DETAILS BLOCK', wastageData, '#fee2e2') : '';
+    const vacuumBlockHtml = (selectedBlock === 'all' || selectedBlock === 'Vacuum') ? renderBlockHtml('VACUUM STOCK DETAILS BLOCK', vacuumData, '#e0e7ff') : '';
 
     const htmlContent = `
       <div style="font-family: Arial, sans-serif; padding: 20px; color: #1e293b;">
@@ -481,6 +464,7 @@ const GodownStockReport = () => {
         ${rmBlockHtml}
         ${fgBlockHtml}
         ${wastageBlockHtml}
+        ${vacuumBlockHtml}
 
         <div style="background-color: #0f172a; color: #ffffff; padding: 12px 16px; border-radius: 6px; font-weight: bold; font-size: 13px; display: flex; justify-content: space-between; margin-top: 15px;">
           <span>TOTAL GRAND STOCK INVENTORY:</span>
@@ -655,6 +639,7 @@ const GodownStockReport = () => {
                 <MenuItem value="RM">🌾 RM Details</MenuItem>
                 <MenuItem value="FG">📦 FG Details</MenuItem>
                 <MenuItem value="Wastage">🗑️ Wastage Details</MenuItem>
+                <MenuItem value="Vacuum">Vacuum Details</MenuItem>
               </TextField>
             </Grid>
 
@@ -823,7 +808,8 @@ const GodownStockReport = () => {
           {[
             { key: 'RM', title: '🌾 RAW MATERIAL (RM) DETAILS BLOCK', data: rmData, bg: '#fffbe3', headerColor: '#b45309', borderColor: '#fef08a' },
             { key: 'FG', title: '📦 FINISHED GOODS (FG) DETAILS BLOCK', data: fgData, bg: '#f0fdf4', headerColor: '#15803d', borderColor: '#bbf7d0' },
-            { key: 'Wastage', title: '🗑️ WASTAGE & REJECTION DETAILS BLOCK', data: wastageData, bg: '#fef2f2', headerColor: '#b91c1c', borderColor: '#fecaca' }
+            { key: 'Wastage', title: '🗑️ WASTAGE & REJECTION DETAILS BLOCK', data: wastageData, bg: '#fef2f2', headerColor: '#b91c1c', borderColor: '#fecaca' },
+            { key: 'Vacuum', title: 'VACUUM STOCK DETAILS BLOCK', data: vacuumData, bg: '#eef2ff', headerColor: '#4338ca', borderColor: '#c7d2fe' }
           ]
             .filter((block) => (selectedBlock === 'all' || selectedBlock === block.key) && block.data.length > 0)
             .map((block) => {

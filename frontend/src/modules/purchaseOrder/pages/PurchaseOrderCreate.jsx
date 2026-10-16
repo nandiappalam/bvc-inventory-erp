@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams, useParams, useLocation } from 'react-router-dom';
-import { EntryTopFrame, EntryItemsTable, EntryTotalsRow, EntryActions } from '../../../components/entry';
+import { EntryTopFrame, EntryItemsTable, EntryActions, EntryTaxBillDetails } from '../../../components/entry';
+import { calculateInvoiceTax } from '../../../services/taxService';
 import purchaseOrderService from '../services/purchaseOrderService';
 import api from '../../../utils/api';
 import { saveModuleDraft, loadModuleDraft, clearModuleDraft } from '../../../utils/draftHelper';
+import { InlineMasterModal, getCreateLabel } from '../../../components/common/InlineMasterModal.jsx';
 
 const PurchaseOrderCreate = () => {
   const navigate = useNavigate();
@@ -61,8 +63,13 @@ const PurchaseOrderCreate = () => {
 
   const [deductionsList, setDeductionsList] = useState([]);
   const [selectedDeductions, setSelectedDeductions] = useState([]);
+  const [inlineDeductionOpen, setInlineDeductionOpen] = useState(false);
 
   const handleDeductionAdd = (dedId) => {
+    if (dedId === '__CREATE_NEW__' || dedId === 'create_new' || dedId === 'manual') {
+      setInlineDeductionOpen(true);
+      return;
+    }
     if (!dedId) return;
     const found = deductionsList.find(d => String(d.id) === String(dedId));
     if (!found) return;
@@ -79,6 +86,37 @@ const PurchaseOrderCreate = () => {
     };
     const updated = [...selectedDeductions, newRow];
     recalculateAllTotals(items, updated, formData.taxPercent);
+  };
+
+  const handleInlineDeductionCreated = async (newId, newRecord) => {
+    try {
+      const res = await api('/masters/deduction_purchase', { method: 'GET' });
+      const list = res?.data || res || [];
+      if (Array.isArray(list)) {
+        setDeductionsList(list);
+      }
+      const targetId = newId || newRecord?.id;
+      const found = (Array.isArray(list) ? list : []).find(d => String(d.id) === String(targetId)) || newRecord;
+      if (found) {
+        const rawType = (found.ded_type || found.deduction_type || found.type || 'less').toLowerCase();
+        const newRow = {
+          id: targetId,
+          deduction: found.ded_name || found.deduction_name || found.name || '',
+          type: rawType.includes('add') ? 'add' : 'less',
+          percent: found.ded_value || found.deduction_value || '',
+          amount: '',
+          remarks: ''
+        };
+        setSelectedDeductions(prev => {
+          if (prev.some(d => String(d.id) === String(targetId))) return prev;
+          const updated = [...prev, newRow];
+          recalculateAllTotals(items, updated, formData.taxPercent);
+          return updated;
+        });
+      }
+    } catch (err) {
+      console.error('Error refreshing deductions after inline create:', err);
+    }
   };
 
   const handleDeductionChange = (index, field, value) => {
@@ -211,9 +249,10 @@ const PurchaseOrderCreate = () => {
     if (prItems.length > 0) {
       const mappedItems = prItems.map((it, idx) => {
         const itemName = it.resolved_item_name || it.item_name || '';
+        const hasApprovedQty = it.approved_qty !== null && it.approved_qty !== undefined && it.approved_qty !== '';
         const appQty = parseFloat(it.approved_qty);
-        const reqQty = parseFloat(it.requested_qty || it.qty || 0);
-        const qty = (!isNaN(appQty) && appQty > 0) ? appQty : (reqQty > 0 ? reqQty : (parseFloat(it.qty) || 0));
+        const reqQty = parseFloat(it.requested_qty ?? it.qty ?? 0);
+        const qty = hasApprovedQty && Number.isFinite(appQty) ? appQty : (reqQty > 0 ? reqQty : (parseFloat(it.qty) || 0));
 
         let weightVal = it.weight || it.unit_weight || it.per_unit_weight || it.master_weight || '';
         let weight = parseFloat(String(weightVal).replace(/[^\d.]/g, '')) || 0;
@@ -238,7 +277,7 @@ const PurchaseOrderCreate = () => {
         const totWt = (qty * weight).toFixed(2);
         const rate = parseFloat(it.estimated_rate || it.rate || it.purc_rate || it.purchase_rate || 0) || 0;
         const disc = parseFloat(it.disc_percent || it.discount_percent || 0) || 0;
-        const tax = parseFloat(it.tax_rate || it.tax_percent || 5) || 5;
+        const tax = parseFloat(it.tax_rate ?? it.tax_percent ?? 0) || 0;
         const baseAmt = qty * rate;
         const discAmt = baseAmt * (disc / 100);
         const taxAmt = ((baseAmt - discAmt) * tax) / 100;
@@ -252,7 +291,7 @@ const PurchaseOrderCreate = () => {
           weight: String(weight),
           weight_id: String(it.weight_id || it.weight || weight),
           per_unit_wt: weight,
-          qty: String(qty || ''),
+          qty: String(qty),
           tot_wt: String(totWt || ''),
           total_wt: parseFloat(totWt) || 0,
           purc_rate: String(rate || ''),
@@ -517,25 +556,14 @@ const PurchaseOrderCreate = () => {
 
   // Compute and update totals across items and deductions
   const recalculateAllTotals = (updatedItems, updatedDeductions, formTaxPct) => {
-    let totalAmount = 0;
-    let totalItemTax = 0;
-
-    updatedItems.forEach(item => {
-      const qty = parseFloat(item.qty) || 0;
-      const rate = parseFloat(item.purc_rate) || 0;
-      const disc = parseFloat(item.disc_percent) || 0;
-      const itemTax = parseFloat(item.tax_percent) || 0;
-
-      const baseAmt = qty * rate;
-      const amt = baseAmt - (baseAmt * disc / 100);
-      totalAmount += amt;
-      if (itemTax > 0) {
-        totalItemTax += (amt * itemTax / 100);
-      }
+    const invoiceResult = calculateInvoiceTax({
+      items: updatedItems,
+      taxMode: formData.taxType || 'Exclusive',
+      defaultTaxType: formData.taxType || 'Exclusive',
+      companyState: 'Tamil Nadu',
+      partyState: formData.address || 'Tamil Nadu',
+      deductions: updatedDeductions
     });
-
-    const taxRate = parseFloat(formTaxPct);
-    const computedTaxAmt = (!isNaN(taxRate) && taxRate > 0) ? (totalAmount * taxRate / 100) : (totalItemTax > 0 ? totalItemTax : 0);
 
     let totalDedLess = 0;
     let totalDedAdd = 0;
@@ -543,8 +571,8 @@ const PurchaseOrderCreate = () => {
     const newSelectedDeductions = updatedDeductions.map(d => {
       const pct = parseFloat(d.percent);
       let dAmt = parseFloat(d.amount) || 0;
-      if (!isNaN(pct) && pct > 0 && totalAmount > 0) {
-        dAmt = parseFloat(((totalAmount * pct) / 100).toFixed(2));
+      if (!isNaN(pct) && pct > 0 && invoiceResult.taxableAmount > 0) {
+        dAmt = parseFloat(((invoiceResult.taxableAmount * pct) / 100).toFixed(2));
       }
       const isAdd = (d.type || '').toLowerCase() === 'add';
       if (isAdd) {
@@ -558,14 +586,19 @@ const PurchaseOrderCreate = () => {
       };
     });
 
-    const totAmt = totalAmount + computedTaxAmt - totalDedLess + totalDedAdd;
+    const grandTotal = invoiceResult.grandTotal - totalDedLess + totalDedAdd;
 
     setFormData(prev => ({
       ...prev,
-      amount: totalAmount.toFixed(2),
-      billAmt: totalAmount.toFixed(2),
-      taxAmt: computedTaxAmt.toFixed(2),
-      totAmt: Math.max(0, totAmt).toFixed(2)
+      amount: invoiceResult.taxableAmount.toFixed(2),
+      billAmt: invoiceResult.taxableAmount.toFixed(2),
+      exemptAmt: invoiceResult.exemptAmount ? invoiceResult.exemptAmount.toFixed(2) : '0.00',
+      taxAmt: invoiceResult.taxAmount.toFixed(2),
+      cgstAmt: invoiceResult.cgstAmount.toFixed(2),
+      sgstAmt: invoiceResult.sgstAmount.toFixed(2),
+      igstAmt: invoiceResult.igstAmount.toFixed(2),
+      rateSummaries: invoiceResult.rateSummaries,
+      totAmt: Math.max(0, grandTotal).toFixed(2)
     }));
 
     setSelectedDeductions(newSelectedDeductions);
@@ -777,7 +810,7 @@ const PurchaseOrderCreate = () => {
       { value: 'Others', label: 'Others' }
     ], col: 1 },
 
-    // Col 2
+    // Column 2
     { name: 'invNo', label: 'Inv. No', type: 'text', col: 2 },
     { name: 'invDate', label: 'Inv. Date', type: 'date', col: 2 },
     { name: 'taxType', label: 'Tax Type', type: 'select', options: [
@@ -785,18 +818,15 @@ const PurchaseOrderCreate = () => {
       { value: 'Inclusive', label: 'Inclusive' },
       { value: 'Without Tax', label: 'Without Tax' }
     ], col: 2 },
+    { name: 'terms', label: 'Terms', type: 'masterSelect', masterType: 'terms', col: 2 },
     { name: 'poDate', label: 'P.O. Date', type: 'date', col: 2 },
 
-    // Col 3
-    { name: 'terms', label: 'Terms', type: 'text', col: 3 },
-    { name: 'fob', label: 'F.O.B', type: 'text', col: 3 },
-    { name: 'shipVia', label: 'Ship Via', type: 'text', col: 3 },
+    // Column 3
     { name: 'sign', label: 'Sign', type: 'text', col: 3 },
 
-    // Col 4
-    { name: 'supplierId', label: 'Supplier', type: 'masterSelect', masterType: 'suppliers', col: 4 },
-    { name: 'address', label: 'Address', type: 'textarea', col: 4 },
-    { name: 'sender', label: 'Sender', type: 'masterSelect', masterType: 'senders', col: 4 }
+    { name: 'supplierId', label: 'Supplier', type: 'masterSelect', masterType: 'suppliers', col: 3 },
+    { name: 'address', label: 'Address', type: 'textarea', col: 3 },
+    { name: 'sender', label: 'Sender', type: 'masterSelect', masterType: 'senders', col: 3 }
   ];
 
   const itemColumns = [
@@ -806,17 +836,9 @@ const PurchaseOrderCreate = () => {
     { key: 'tot_wt', title: 'Tot Wt', readOnly: true },
     { key: 'purc_rate', title: 'Purc Rate', type: 'number' },
     { key: 'disc_percent', title: 'Disc %', type: 'number' },
-    { key: 'tax_percent', title: 'Tax %', type: 'number' },
+    { key: 'tax_percent', title: 'Tax %', type: 'taxSelect' },
     { key: 'ed_percent', title: 'ED %', type: 'number' },
     { key: 'amount', title: 'Amount', readOnly: true }
-  ];
-
-  const totals = [
-    { name: 'taxPercent', label: 'Tax %', value: formData.taxPercent },
-    { name: 'amount', label: 'Amount', value: formData.amount },
-    { name: 'billAmt', label: 'Bill Amt', value: formData.billAmt },
-    { name: 'taxAmt', label: 'Tax Amt', value: formData.taxAmt },
-    { name: 'totAmt', label: 'Tot Amt', value: formData.totAmt }
   ];
 
   return (
@@ -900,7 +922,7 @@ const PurchaseOrderCreate = () => {
           fields={topFrameFields} 
           data={formData} 
           onChange={handleFormChange}
-          columns={4}
+          columns={3}
           nextSnoEndpoint="/purchase-orders/next-sno"
         />
 
@@ -914,21 +936,44 @@ const PurchaseOrderCreate = () => {
           lotMode="none"
         />
 
-        <EntryTotalsRow totals={totals} />
+        <EntryTaxBillDetails
+          title="Purchase Order Bill & GST Tax Breakdown"
+          grossAmt={parseFloat(formData.amount || 0)}
+          discAmt={0}
+          billAmt={parseFloat(formData.billAmt || 0)}
+          exemptAmt={parseFloat(formData.exemptAmt || 0)}
+          taxAmt={parseFloat(formData.taxAmt || 0)}
+          totalAmt={parseFloat(formData.totAmt || 0)}
+          grandTotal={parseFloat(formData.totAmt || 0)}
+          taxPercent={parseFloat(formData.taxPercent ?? 0) || 0}
+          cgstAmt={parseFloat(formData.cgstAmt || 0)}
+          sgstAmt={parseFloat(formData.sgstAmt || 0)}
+          igstAmt={parseFloat(formData.igstAmt || 0)}
+          rateSummaries={formData.rateSummaries || []}
+          deductionsAmt={selectedDeductions.reduce((s, d) => s + (parseFloat(d.amount) || 0), 0)}
+          taxType={formData.taxType || 'Exclusive'}
+          isInterState={Boolean(formData.address && !formData.address.toLowerCase().includes('tamil nadu') && !formData.address.toLowerCase().includes('tn'))}
+        />
 
         {/* Deduction Details Table */}
         <div style={{ margin: '15px 0', background: '#f8fafc', padding: '12px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
             <h3 style={{ margin: 0, fontSize: '14px', color: '#1e4fa8', fontWeight: 'bold' }}>Deduction Details</h3>
-            <select 
-              onChange={(e) => { handleDeductionAdd(e.target.value); e.target.value = ''; }} 
-              defaultValue=""
-              style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '12px', outline: 'none' }}
+            <select
+              value=""
+              onChange={(e) => {
+                const val = e.target.value;
+                handleDeductionAdd(val);
+              }}
+              style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '12px', outline: 'none', fontWeight: 'bold' }}
             >
               <option value="" disabled>+ Add Deduction</option>
               {deductionsList.map(d => (
                 <option key={d.id} value={d.id}>{d.ded_name || d.deduction_name || d.name}</option>
               ))}
+              <option value="__CREATE_NEW__" style={{ fontWeight: 'bold', color: '#1e3a8a' }}>
+                {getCreateLabel('deductions')}
+              </option>
             </select>
           </div>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
@@ -1160,6 +1205,14 @@ const PurchaseOrderCreate = () => {
           </div>
         </div>
       )}
+
+      {/* Inline Master Modal for Deductions */}
+      <InlineMasterModal
+        open={inlineDeductionOpen}
+        onClose={() => setInlineDeductionOpen(false)}
+        masterType="deduction_purchase"
+        onSuccess={handleInlineDeductionCreated}
+      />
     </div>
   );
 };

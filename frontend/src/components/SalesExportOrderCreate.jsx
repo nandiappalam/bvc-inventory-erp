@@ -8,8 +8,10 @@ import {
   EntryTopFrame, 
   EntryItemsTable, 
   EntryTotalsRow, 
-  EntryActions 
+  EntryActions,
+  EntryTaxBillDetails 
 } from './entry';
+import SalesDistributionWorkflow from './common/SalesDistributionWorkflow.jsx';
 
 /**
  * SalesExportOrderCreate - Sales Export Order Creation
@@ -305,12 +307,41 @@ const SalesExportOrderCreate = () => {
     { key: 'mfdExpDt', title: 'MFD/Exp Dt', type: 'date' },
     { key: 'usdRate', title: 'USD Rate', type: 'number' },
     { key: 'convRate', title: 'Conv Rate', type: 'number' },
+    { key: 'disc', title: 'Disc %', type: 'number' },
+    { key: 'tax_rate', title: 'Tax %', type: 'taxSelect' },
     { key: 'usdAmt', title: 'USD Amt', readOnly: true },
     { key: 'inrAmt', title: 'INR Amt', readOnly: true }
   ];
 
+  const totalGrossInr = items.reduce((sum, r) => {
+    const q = parseFloat(r.qty) || 0;
+    const u = parseFloat(r.usdRate) || 0;
+    const c = parseFloat(r.convRate) || 0;
+    const base = q * u * c;
+    return sum + (base || parseFloat(r.inr_amt || r.inrAmt) || 0);
+  }, 0);
+
+  const totalDiscAmt = items.reduce((sum, r) => {
+    const q = parseFloat(r.qty) || 0;
+    const u = parseFloat(r.usdRate) || 0;
+    const c = parseFloat(r.convRate) || 0;
+    const d = parseFloat(r.disc) || 0;
+    return sum + (q * u * c * (d / 100));
+  }, 0);
+
+  const totalInr = Math.max(0, totalGrossInr - totalDiscAmt);
+  const overallDiscPct = totalGrossInr > 0 ? Number(((totalDiscAmt / totalGrossInr) * 100).toFixed(2)) : 0;
+
+  const totalTaxAmt = items.reduce((sum, r) => {
+    const inr = parseFloat(r.inr_amt || r.inrAmt) || 0;
+    const t = parseFloat(r.tax_rate || 0);
+    return sum + (inr * t / 100);
+  }, 0);
+
   return (
     <div className="window">
+      <SalesDistributionWorkflow currentModule="sales_export_order" />
+
       <div className="screen-title">{editId ? 'Edit Export Sales Order' : 'Export Sales Order Creation'}</div>
 
       {message && <div className={`alert ${messageType}`}>{message}</div>}
@@ -332,12 +363,17 @@ const SalesExportOrderCreate = () => {
         lotMode="select"
       />
 
-      <EntryTotalsRow 
-        totals={[
-          { label: 'Total Qty', value: items.reduce((sum, r) => sum + (parseFloat(r.qty) || 0), 0), isAmount: false },
-          { label: 'Total USD', value: items.reduce((sum, r) => sum + (parseFloat(r.usdAmt) || 0), 0), isAmount: true },
-          { label: 'Total INR', value: items.reduce((sum, r) => sum + (parseFloat(r.inr_amt || r.inrAmt) || 0), 0), isAmount: true }
-        ]} 
+      <EntryTaxBillDetails 
+        grossAmt={totalGrossInr}
+        discPercent={overallDiscPct}
+        discAmt={totalDiscAmt}
+        billAmt={totalInr}
+        taxAmt={totalTaxAmt}
+        totalAmt={totalInr + totalTaxAmt}
+        grandTotal={totalInr + totalTaxAmt}
+        taxPercent={0}
+        taxType="Zero Rated"
+        title="Export Order Estimated Bill & GST Zero-Rated Breakdown"
       />
 
       <EntryActions 

@@ -6,9 +6,13 @@ import { buildReceiptDraftFromPurchaseOrder } from '../modules/purchaseOrder/uti
 import { saveModuleDraft, loadModuleDraft, clearModuleDraft } from '../utils/draftHelper';
 
 import EntryTopFrame from './entry/EntryTopFrame';
+import GodownStockPopover from './entry/GodownStockPopover';
 import EntryItemsTable from './entry/EntryItemsTable';
 import EntryBottomSummary from './entry/EntryBottomSummary';
 import EntryActions from './entry/EntryActions';
+import EntryTaxBillDetails from './entry/EntryTaxBillDetails';
+import { calculateInvoiceTax, calculateLineTax } from '../services/taxService';
+import { InlineMasterModal, getCreateLabel } from './common/InlineMasterModal.jsx';
 import './SalesCreate.css';
 
 /**
@@ -35,6 +39,8 @@ const PurchaseCreation = () => {
     // Supplier formatted details (auto-filled)
     supplier_details: '',
     address: '',
+    supplier_state: 'Tamil Nadu',
+    supplier_state_code: '33',
 
     // Transport & Vehicle fields
     transporter: '',
@@ -43,6 +49,9 @@ const PurchaseCreation = () => {
     lorry_no: '',
     driver_name: '',
     driver: '',
+    gross_weight: '',
+    tare_weight: '',
+    net_weight: '',
 
     tax_type: 'Exclusive',
     tax_rate: 5,
@@ -72,14 +81,29 @@ const PurchaseCreation = () => {
       invDate: formData.inv_date,
       godown: formData.godown_id,
       taxType: formData.tax_type, // Use actual tax_type from form
+      stock_type: formData.stock_type || 'RM',
       transporter: formData.transporter || formData.transport || '',
       transport: formData.transporter || formData.transport || '',
       vehicle_no: formData.vehicle_no || formData.lorry_no || '',
       lorry_no: formData.vehicle_no || formData.lorry_no || '',
       driver_name: formData.driver_name || formData.driver || '',
       driver: formData.driver_name || formData.driver || '',
+      contact_person: formData.contact_person || '',
+      area: formData.area || '',
+      phone: formData.phone || '',
+      gst_no: formData.gst_no || '',
+      email: formData.email || '',
+      gross_weight: formData.gross_weight,
+      cross_weight: formData.gross_weight,
+      tare_weight: formData.tare_weight,
+      net_weight: formData.net_weight,
 
       tax_percent: formData.tax_rate,
+      tax_mode: formData.tax_type,
+      company_state: 'Tamil Nadu',
+      company_state_code: '33',
+      supplier_state: formData.supplier_state || 'Tamil Nadu',
+      supplier_state_code: formData.supplier_state_code || '33',
       type: formData.type, // purchase_type
       sno: formData.s_no || 1,
       remarks: formData.remarks,
@@ -95,8 +119,22 @@ const PurchaseCreation = () => {
   const [tableData, setTableData] = useState([]);
   const [deductions, setDeductions] = useState([]);
   const [selectedDeductions, setSelectedDeductions] = useState([]);
+  const [inlineDeductionOpen, setInlineDeductionOpen] = useState(false);
   const deductionsRef = React.useRef(deductions);
   deductionsRef.current = deductions;
+
+  const loadDeductions = useCallback(async () => {
+    try {
+      const res = await getMasters('deduction_purchase', { forceRefresh: true });
+      const data = res?.data || res;
+      const arr = Array.isArray(data) ? data : [];
+      setDeductions(arr);
+      return arr;
+    } catch (err) {
+      console.error('Deduction load failed', err);
+      return [];
+    }
+  }, []);
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -199,7 +237,7 @@ const PurchaseCreation = () => {
       const weight = Number(it.weight || it.per_unit_weight || it.perUnitWeight || 0);
       const totWt = Number(it.tot_wt || it.total_wt || it.total_weight || (qty * (weight || 1)));
       const disc = Number(it.discount_percent || it.disc_percent || it.disc || 0);
-      const tax = Number(it.tax_percent ?? it.tax_rate ?? order.tax_percent ?? order.tax_rate ?? 5);
+      const tax = Number(it.tax_percent ?? it.tax_rate ?? order.tax_percent ?? order.tax_rate ?? 0);
       const baseAmt = qty * rate;
       const discAmt = baseAmt * (disc / 100);
       const taxable = baseAmt - discAmt;
@@ -251,9 +289,10 @@ const PurchaseCreation = () => {
           deduction: matchedDed ? (matchedDed.ded_name || matchedDed.name) : (d.deduction || d.deduction_name || d.name || ''),
           amount: parseFloat(d.amount) || 0,
           type: (d.type || matchedDed?.type || 'LESS').toUpperCase(),
-          calculation_type: d.calculation_type || matchedDed?.calculation_type || 'Percentage',
           percentage: parseFloat(d.percent || d.percentage || d.value || 0),
           percent: parseFloat(d.percent || d.percentage || d.value || 0),
+          calculation_type: d.calculation_type || d.calc_type || matchedDed?.calculation_type || (d.percent || d.percentage ? 'Percentage' : 'Fixed'),
+          manual_amount: false,
           remarks: d.remarks || ''
         };
       }));
@@ -294,6 +333,9 @@ const PurchaseCreation = () => {
         }
 
         const result = await api(`/purchases/${id}`);
+        if (!result || result.success === false) {
+          throw new Error(result?.message || 'The purchase could not be loaded.');
+        }
         const data = result?.data || result;
         if (data && (data.id || data.s_no)) {
           const formatDate = (d) => d ? String(d).split('T')[0].split(' ')[0] : '';
@@ -308,12 +350,20 @@ const PurchaseCreation = () => {
             supplierName: suppName,
             supplier_details: data.address || data.supplier_details || '',
             address: data.address || data.supplier_details || '',
+            supplier_state: data.supplier_state || data.party_state || data.state || 'Tamil Nadu',
+            supplier_state_code: data.supplier_state_code || data.party_state_code || data.state_code || '33',
             transporter: data.transporter || data.transport || '',
             transport: data.transporter || data.transport || '',
             vehicle_no: data.vehicle_no || data.lorry_no || '',
             lorry_no: data.vehicle_no || data.lorry_no || '',
             driver_name: data.driver_name || data.driver || '',
             driver: data.driver_name || data.driver || '',
+            contact_person: data.supplier_contact_person || data.contact_person || '',
+            area: data.area || '',
+            phone: data.supplier_phone || data.phone || '',
+            gross_weight: data.gross_weight ?? data.cross_weight ?? '',
+            tare_weight: data.tare_weight ?? '',
+            net_weight: data.net_weight ?? '',
             date: formatDate(data.date),
             inv_no: data.inv_no || data.invNo || '',
             invNo: data.inv_no || data.invNo || '',
@@ -322,10 +372,11 @@ const PurchaseCreation = () => {
             godown_id: String(data.godown || data.godown_id || data.godownId || ''),
             godownId: String(data.godown || data.godown_id || data.godownId || ''),
             pay_type: data.pay_type || data.payType || 'Cash',
+            stock_type: data.stock_type || data.stockType || 'RM',
             tax_type: data.tax_type || data.taxType || 'Exclusive',
-            tax_rate: data.tax_percent !== undefined ? data.tax_percent : (data.tax_rate || 5),
-            gst_no: data.gst_no || '',
-            email: data.email || '',
+            tax_rate: data.tax_percent ?? data.tax_rate ?? 0,
+            gst_no: data.gst_no || data.supplier_gstin || '',
+            email: data.email || data.supplier_email || '',
             type: data.type || 'Urad',
             remarks: data.remarks || '',
             source_order_no: data.source_order_no || data.po_no || '',
@@ -339,16 +390,29 @@ const PurchaseCreation = () => {
               const qty = Number(it.qty || 0);
               const rate = Number(it.rate || it.purc_rate || 0);
               const disc_percent = Number(it.disc_percent ?? it.discount_percent ?? 0);
-              const tax_percent = Number(it.tax_percent ?? 5);
+              const tax_percent = Number(it.tax_percent ?? it.tax_rate ?? it.gst_rate ?? 0);
 
               const per_unit_wt = Number(it.per_unit_weight ?? it.weight ?? 0);
               const total_weight = Number(it.total_weight ?? it.total_wt ?? (qty * per_unit_wt));
-
-              const base_amount = qty * rate;
-              const disc_amount = base_amount * (disc_percent / 100);
-              const taxable_amount = base_amount - disc_amount;
-              const tax_amount = (taxable_amount * tax_percent) / 100;
-              const amount = base_amount - disc_amount + tax_amount;
+              const lineTax = calculateLineTax({
+                qty,
+                rate,
+                discPercent: disc_percent,
+                discAmount: it.disc_amount,
+                taxType: it.tax_type,
+                taxMode: data.tax_mode || data.tax_type || 'Exclusive',
+                gstRate: tax_percent,
+                cessRate: it.cess_rate || 0,
+                hsnCode: it.hsn_code || '',
+                companyState: data.company_state || 'Tamil Nadu',
+                partyState: data.supplier_state || data.party_state || 'Tamil Nadu',
+                companyStateCode: data.company_state_code || '33',
+                partyStateCode: data.supplier_state_code || data.party_state_code || '33'
+              });
+              const base_amount = lineTax.grossAmount;
+              const disc_amount = lineTax.discAmount;
+              const tax_amount = lineTax.taxAmount;
+              const amount = lineTax.totalAmount;
 
               const matchedWeight = weightsList.find(w => Number(w.weight) === per_unit_wt);
               const weight_id = matchedWeight ? matchedWeight.id : (it.weight_id || '');
@@ -368,8 +432,11 @@ const PurchaseCreation = () => {
                 purc_rate: rate,
                 disc: disc_percent,
                 disc_percent,
-                tax_rate: tax_percent,
-                tax_percent,
+                tax_rate: lineTax.gstRate,
+                tax_percent: lineTax.gstRate,
+                gst_rate: lineTax.gstRate,
+                tax_type: lineTax.taxType,
+                hsn_code: lineTax.hsnCode,
                 base_amount,
                 disc_amount,
                 tax_amount,
@@ -393,9 +460,12 @@ const PurchaseCreation = () => {
               remarks: d.remarks || ''
             })));
           }
+        } else {
+          throw new Error('The requested purchase was not found.');
         }
       } catch (err) {
         console.error('Failed to load purchase details for edit:', err);
+        setError(`Could not load purchase details: ${err.message}`);
       } finally {
         setLoading(false);
       }
@@ -507,7 +577,18 @@ const PurchaseCreation = () => {
       return;
     }
 
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    setFormData(prev => {
+      if (name !== 'gross_weight' && name !== 'tare_weight') {
+        return { ...prev, [name]: value };
+      }
+      const currentGross = Number(name === 'gross_weight' ? value : prev.gross_weight) || 0;
+      const currentTare = Number(name === 'tare_weight' ? value : prev.tare_weight) || 0;
+      return {
+        ...prev,
+        [name]: value,
+        net_weight: (currentGross - currentTare).toFixed(2)
+      };
+    });
   }, []);
 
   const handleRowChange = useCallback((index, key, value) => {
@@ -555,71 +636,71 @@ const PurchaseCreation = () => {
   // Net Total    = Taxable + Tax
   // Grand Total  = Net Total + ADD deductions − LESS deductions
   const erpTotals = useMemo(() => {
-    const rows = validItems || [];
+    const invoiceResult = calculateInvoiceTax({
+      items: validItems,
+      taxMode: formData.tax_type,
+      defaultTaxType: 'Taxable',
+      companyState: 'Tamil Nadu',
+      partyState: formData.supplier_state || 'Tamil Nadu',
+      partyStateCode: formData.supplier_state_code || undefined
+    });
 
-    const totalQty = rows.reduce((s, r) => s + Number(r.qty || 0), 0);
-    const totalWeight = rows.reduce(
-      (s, r) => s + Number(r.total_wt || r.total_weight || (Number(r.qty || 0) * Number(r.weight || r.per_unit_wt || 0))),
-      0
-    );
+    const calculatedDeductions = selectedDeductions.map(d => {
+      const percentage = Number(d.percentage ?? d.percent ?? 0) || 0;
+      const calculationType = String(d.calculation_type || d.calc_type || '').toLowerCase();
+      const isPercentage = calculationType.includes('percent') || percentage > 0;
+      const amount = isPercentage && !d.manual_amount
+        ? Number((invoiceResult.taxableAmount * percentage / 100).toFixed(2))
+        : Number(d.amount || 0) || 0;
+      return { ...d, amount };
+    });
 
-    const baseAmount = rows.reduce((s, r) => {
-      const b = Number(r.base_amount);
-      if (!isNaN(b) && b > 0) return s + b;
-      const q = Number(r.qty || 0);
-      const rt = Number(r.rate || r.purc_rate || 0);
-      return s + (q * rt);
-    }, 0);
-
-    const discountAmount = rows.reduce((s, r) => {
-      const d = Number(r.disc_amount);
-      if (!isNaN(d) && d > 0) return s + d;
-      const q = Number(r.qty || 0);
-      const rt = Number(r.rate || r.purc_rate || 0);
-      const dp = Number(r.disc || r.disc_percent || r.discount_percent || 0);
-      return s + (q * rt * (dp / 100));
-    }, 0);
-
-    const taxableAmount = Number((baseAmount - discountAmount).toFixed(2));
-
-    const taxAmount = Number(rows.reduce((s, r) => {
-      const t = Number(r.tax_amount);
-      if (!isNaN(t) && t > 0) return s + t;
-      const q = Number(r.qty || 0);
-      const rt = Number(r.rate || r.purc_rate || 0);
-      const dp = Number(r.disc || r.disc_percent || r.discount_percent || 0);
-      const tp = Number(r.tax_rate ?? r.tax_percent ?? (formData.tax_type === 'Without Tax' ? 0 : (formData.tax_rate || 5)));
-      const base = q * rt;
-      const disc = base * (dp / 100);
-      const taxable = base - disc;
-      return s + ((taxable * tp) / 100);
-    }, 0).toFixed(2));
-
-    const netAmount = Number((taxableAmount + taxAmount).toFixed(2));
-
-    const addDeductions = selectedDeductions
-      .filter(d => String(d.type || '').toUpperCase() === 'ADD')
+    const addDeductions = calculatedDeductions
+      .filter(d => String(d.type || d.calculation || '').toUpperCase() === 'ADD')
       .reduce((s, d) => s + (Number(d.amount || 0) || 0), 0);
 
-    const lessDeductions = selectedDeductions
-      .filter(d => String(d.type || '').toUpperCase() === 'LESS')
+    const lessDeductions = calculatedDeductions
+      .filter(d => String(d.type || d.calculation || '').toUpperCase() === 'LESS')
       .reduce((s, d) => s + (Number(d.amount || 0) || 0), 0);
 
     const totalDeductions = addDeductions - lessDeductions;
-    const grandTotal = Number((netAmount + totalDeductions).toFixed(2));
+    const grandTotal = Number((invoiceResult.netAmount + totalDeductions).toFixed(2));
+
+    const activeTaxRate = Number(invoiceResult.rateSummaries
+      .find(rate => Number(rate.gstRate) > 0)?.gstRate || 0);
 
     return {
-      totalQty,
-      totalWeight,
-      baseAmount,
-      discountAmount,
-      taxable: taxableAmount,
-      taxAmount,
-      netAmount,
+      totalQty: invoiceResult.totalQty,
+      totalWeight: invoiceResult.totalWeight,
+      baseAmount: invoiceResult.baseAmount,
+      discountAmount: invoiceResult.discAmount,
+      discountPercent: (() => {
+        const rates = [...new Set(validItems
+          .map(item => Number(item.disc_percent ?? item.disc ?? 0))
+          .filter(rate => rate > 0))];
+        return rates.length === 1 ? rates[0] : 0;
+      })(),
+      taxable: invoiceResult.taxableAmount,
+      exemptAmount: invoiceResult.exemptAmount || 0,
+      nilRatedAmount: invoiceResult.nilRatedAmount || 0,
+      zeroRatedAmount: invoiceResult.zeroRatedAmount || 0,
+      nonGstAmount: invoiceResult.nonGstAmount || 0,
+      withoutTaxAmount: invoiceResult.withoutTaxAmount || 0,
+      taxAmount: invoiceResult.taxAmount,
+      cgstAmount: invoiceResult.cgstAmount,
+      sgstAmount: invoiceResult.sgstAmount,
+      igstAmount: invoiceResult.igstAmount,
+      cessAmount: invoiceResult.cessAmount,
+      rateSummaries: invoiceResult.rateSummaries,
+      hsnSummaries: invoiceResult.hsnSummaries,
+      taxRate: activeTaxRate,
+      isInterState: invoiceResult.isInterState,
+      netAmount: invoiceResult.netAmount,
       totalDeductions,
-      grandTotal
+      grandTotal,
+      calculatedDeductions
     };
-  }, [validItems, formData.tax_type, formData.tax_rate, selectedDeductions]);
+  }, [validItems, formData.tax_type, formData.tax_rate, formData.tax_percent, formData.supplier_state, formData.supplier_state_code, selectedDeductions]);
 
 
   const totals = useMemo(() => {
@@ -654,10 +735,12 @@ const PurchaseCreation = () => {
       total_weight: Number(row.total_weight || row.total_wt || 0),
 
       rate: Number(row.rate || 0),
-      disc_percent: Number(row.disc_percent || row.disc || 0),
+      disc_percent: Number(row.disc_percent ?? row.disc ?? 0),
       disc_amount: Number(row.disc_amount || 0),
 
-      tax_percent: Number(row.tax_percent || row.tax_rate || 0),
+      tax_percent: Number(row.tax_percent ?? row.tax_rate ?? row.gst_rate ?? 0),
+      gst_rate: Number(row.tax_percent ?? row.tax_rate ?? row.gst_rate ?? 0),
+      tax_type: row.tax_type || (Number(row.tax_percent ?? row.tax_rate ?? row.gst_rate ?? 0) === 0 ? 'Nil Rated' : 'Taxable'),
       tax_amount: Number(row.tax_amount || 0),
 
       amount: Number(row.amount || 0)
@@ -684,6 +767,19 @@ const PurchaseCreation = () => {
       if (!formData?.date || !formData?.supplier_id || validItems.length === 0) {
         setError('Date, Supplier, and at least one item required')
         return
+      }
+      const hasGrossWeight = formData.gross_weight !== '' && formData.gross_weight !== null && formData.gross_weight !== undefined;
+      const hasTareWeight = formData.tare_weight !== '' && formData.tare_weight !== null && formData.tare_weight !== undefined;
+      const grossWeight = Number(formData.gross_weight || 0);
+      const tareWeight = Number(formData.tare_weight || 0);
+      if ((hasGrossWeight && (!Number.isFinite(grossWeight) || grossWeight < 0)) ||
+          (hasTareWeight && (!Number.isFinite(tareWeight) || tareWeight < 0))) {
+        setError('Cross Weight and Tare Weight must be valid non-negative kilograms.');
+        return;
+      }
+      if ((hasGrossWeight || hasTareWeight) && grossWeight - tareWeight < 0) {
+        setError('Tare Weight cannot exceed Cross Weight.');
+        return;
       }
 
       // Ensure inv_date exists (backend may require it depending on schema)
@@ -746,23 +842,30 @@ const PurchaseCreation = () => {
             disc_percent: it.disc_percent,
             disc_amount: it.disc_amount,
             tax_percent: it.tax_percent,
+            tax_type: it.tax_type,
             tax_amount: it.tax_amount,
             amount: it.amount,
           })),
           totals: {
             totalQty: totals.totalQty,
             totalWeight: totals.totalWeight,
-            totalAmount: totals.taxable, // This is the taxable amount
+            totalAmount: totals.baseAmount - totals.discountAmount,
             baseAmount: totals.baseAmount,
             discAmount: totals.discountAmount,
             taxAmount: totals.taxAmount,
+            cgstAmount: totals.cgstAmount,
+            sgstAmount: totals.sgstAmount,
+            igstAmount: totals.igstAmount,
+            cessAmount: totals.cessAmount || 0,
             netAmount: totals.netAmount,
+            taxableAmount: totals.taxable,
+            exemptAmount: totals.exemptAmount,
             deductionAmount: totals.totalDeductions, // backend expects deductionAmount
             grandTotal: totals.grandTotal,
             // keep backend-expected container
             deductions: { autoWages: 0, vatPercent: 0, vat: 0 },
           },
-          deductions: selectedDeductions.map(d => ({ // Pass full deduction details
+          deductions: totals.calculatedDeductions.map(d => ({ // Pass full deduction details
             deduction_id: d.id,
             deduction_name: d.name,
             type: d.type,
@@ -794,6 +897,10 @@ const PurchaseCreation = () => {
   }
 
   const handleDeductionAdd = (dedId) => {
+    if (dedId === '__CREATE_NEW__' || dedId === 'create_new' || dedId === 'manual') {
+      setInlineDeductionOpen(true);
+      return;
+    }
     const master = deductions.find(d => String(d.id) === String(dedId));
     if (!master) return;
 
@@ -804,7 +911,7 @@ const PurchaseCreation = () => {
     }
 
     const calcType = master.calculation_type || master.calc_type || 'Percentage';
-    const dedValue = parseFloat(master.deduction_value || master.deduction_value || master.ded_value || 0) || 0;
+    const dedValue = parseFloat(master.deduction_value || master.ded_value || 0) || 0;
 
     // Required: deduction amount based on ERP taxable base (we keep it simple: Percentage of erpTotals taxable base)
     let amt = 0;
@@ -816,14 +923,51 @@ const PurchaseCreation = () => {
 
     setSelectedDeductions(prev => [...prev, {
       id: master.id,
+      deduction_id: master.id,
       name: master.ded_name || master.name || master.deduction_name || 'Unnamed',
       amount: amt,
-      type: String(master.type || master.deduction_type || 'LESS').toUpperCase(),
+      manual_amount: false,
+      type: String(master.type || master.ded_type || master.deduction_type || 'LESS').toUpperCase(),
       calculation_type: calcType,
       percentage: calcType === 'Percentage' ? dedValue : 0,
       affect_gst: String(master.affect_gst || master.affect_cost_of_goods || 'NO').toUpperCase(),
       remarks: ''
     }]);
+  };
+
+  const handleInlineDeductionCreated = async (newId, newRecord) => {
+    try {
+      const refreshed = await loadDeductions();
+      const targetId = newId || newRecord?.id;
+      const created = (refreshed || []).find(d => String(d.id) === String(targetId)) || newRecord;
+      if (created) {
+        const calcType = created.calculation_type || created.calc_type || 'Percentage';
+        const dedValue = parseFloat(created.deduction_value || created.ded_value || 0) || 0;
+        let amt = 0;
+        if (String(calcType).toLowerCase().includes('percent')) {
+          amt = Number(erpTotals.taxable || 0) * (dedValue / 100);
+        } else {
+          amt = dedValue;
+        }
+        setSelectedDeductions(prev => {
+          if (prev.some(d => String(d.id) === String(targetId))) return prev;
+          return [...prev, {
+            id: targetId,
+            deduction_id: targetId,
+            name: created.ded_name || created.name || created.deduction_name || 'Unnamed',
+            amount: amt,
+            manual_amount: false,
+            type: String(created.type || created.ded_type || created.deduction_type || 'LESS').toUpperCase(),
+            calculation_type: calcType,
+            percentage: calcType === 'Percentage' ? dedValue : 0,
+            affect_gst: String(created.affect_gst || created.affect_cost_of_goods || 'NO').toUpperCase(),
+            remarks: ''
+          }];
+        });
+      }
+    } catch (err) {
+      console.error('Failed to handle newly created deduction:', err);
+    }
   };
 
   const formatNumber = (num) => Number(num || 0).toLocaleString('en-IN', {
@@ -860,6 +1004,9 @@ const PurchaseCreation = () => {
     { name: 'type', label: 'Type', type: 'select', options: [
       {value: 'Urad', label: 'Urad'}, {value: 'Rice', label: 'Rice'}, {value: 'Flour', label: 'Flour'}, {value: 'Other', label: 'Other'}
     ], col: 3 },
+    { name: 'gross_weight', label: 'Cross Weight (KG)', type: 'number', min: 0, step: '0.01', col: 3 },
+    { name: 'tare_weight', label: 'Tare Weight (KG)', type: 'number', min: 0, step: '0.01', col: 3 },
+    { name: 'net_weight', label: 'Net Weight (KG)', type: 'number', readOnly: true, step: '0.01', col: 3 },
     { name: 'address', label: 'Address', type: 'textarea', readOnly: true, col: 3 },
     { name: 'remarks', label: 'Remarks', type: 'textarea', col: 3 },
   ];
@@ -874,7 +1021,7 @@ const PurchaseCreation = () => {
     { key: 'total_wt', title: 'Total Wt', readOnly: true },
     { key: 'rate', title: 'Rate', type: 'number' }, // Manual entry
     { key: 'disc', title: 'Disc%', type: 'number' },
-    { key: 'tax_rate', title: 'Tax%', type: 'number' },
+    { key: 'tax_rate', title: 'Tax%', type: 'taxSelect' },
     { key: 'amount', title: 'Amount', readOnly: true } // Taxable/net amount
   ];
 
@@ -899,7 +1046,20 @@ const PurchaseCreation = () => {
   const handleCancel = () => {
     if (window.confirm('Are you sure you want to cancel? Any unsaved changes will be discarded.')) {
       clearModuleDraft('purchase_create');
-      navigate('/purchase/display');
+      navigate('/entry/purchase-display');
+    }
+  };
+
+  const handleBack = () => {
+    if ((formData.supplier_id || validItems.length > 0) &&
+      !window.confirm('Leave this purchase form? Unsaved changes may be lost.')) {
+      return;
+    }
+    const historyIndex = window.history.state?.idx;
+    if (Number.isInteger(historyIndex) && historyIndex > 0) {
+      navigate(-1);
+    } else {
+      navigate('/entry/purchase-display', { replace: true });
     }
   };
 
@@ -922,12 +1082,20 @@ const PurchaseCreation = () => {
             supplierName: suppName,
             supplier_details: data.address || data.supplier_details || '',
             address: data.address || data.supplier_details || '',
+            supplier_state: data.supplier_state || data.party_state || data.state || 'Tamil Nadu',
+            supplier_state_code: data.supplier_state_code || data.party_state_code || data.state_code || '33',
             transporter: data.transporter || data.transport || '',
             transport: data.transporter || data.transport || '',
             vehicle_no: data.vehicle_no || data.lorry_no || '',
             lorry_no: data.vehicle_no || data.lorry_no || '',
             driver_name: data.driver_name || data.driver || '',
             driver: data.driver_name || data.driver || '',
+            contact_person: data.supplier_contact_person || data.contact_person || '',
+            area: data.area || '',
+            phone: data.supplier_phone || data.phone || '',
+            gross_weight: data.gross_weight ?? data.cross_weight ?? '',
+            tare_weight: data.tare_weight ?? '',
+            net_weight: data.net_weight ?? '',
             date: formatDate(data.date),
             inv_no: data.inv_no || data.invNo || '',
             invNo: data.inv_no || data.invNo || '',
@@ -936,10 +1104,11 @@ const PurchaseCreation = () => {
             godown_id: String(data.godown || data.godown_id || data.godownId || ''),
             godownId: String(data.godown || data.godown_id || data.godownId || ''),
             pay_type: data.pay_type || data.payType || 'Cash',
+            stock_type: data.stock_type || data.stockType || 'RM',
             tax_type: data.tax_type || data.taxType || 'Exclusive',
-            tax_rate: data.tax_percent !== undefined ? data.tax_percent : (data.tax_rate || 5),
-            gst_no: data.gst_no || '',
-            email: data.email || '',
+            tax_rate: data.tax_percent ?? data.tax_rate ?? 0,
+            gst_no: data.gst_no || data.supplier_gstin || '',
+            email: data.email || data.supplier_email || '',
             type: data.type || 'Urad',
             remarks: data.remarks || '',
             source_order_no: data.source_order_no || data.po_no || '',
@@ -953,14 +1122,28 @@ const PurchaseCreation = () => {
               const qty = Number(it.qty || 0);
               const rate = Number(it.rate || it.purc_rate || 0);
               const disc_percent = Number(it.disc_percent ?? it.discount_percent ?? 0);
-              const tax_percent = Number(it.tax_percent ?? 5);
+              const tax_percent = Number(it.tax_percent ?? it.tax_rate ?? it.gst_rate ?? 0);
               const per_unit_wt = Number(it.per_unit_weight ?? it.weight ?? 0);
               const total_weight = Number(it.total_weight ?? it.total_wt ?? (qty * per_unit_wt));
-              const base_amount = qty * rate;
-              const disc_amount = base_amount * (disc_percent / 100);
-              const taxable_amount = base_amount - disc_amount;
-              const tax_amount = (taxable_amount * tax_percent) / 100;
-              const amount = base_amount - disc_amount + tax_amount;
+              const lineTax = calculateLineTax({
+                qty,
+                rate,
+                discPercent: disc_percent,
+                discAmount: it.disc_amount,
+                taxType: it.tax_type,
+                taxMode: data.tax_mode || data.tax_type || 'Exclusive',
+                gstRate: tax_percent,
+                cessRate: it.cess_rate || 0,
+                hsnCode: it.hsn_code || '',
+                companyState: data.company_state || 'Tamil Nadu',
+                partyState: data.supplier_state || data.party_state || 'Tamil Nadu',
+                companyStateCode: data.company_state_code || '33',
+                partyStateCode: data.supplier_state_code || data.party_state_code || '33'
+              });
+              const base_amount = lineTax.grossAmount;
+              const disc_amount = lineTax.discAmount;
+              const tax_amount = lineTax.taxAmount;
+              const amount = lineTax.totalAmount;
 
               return {
                 ...it,
@@ -976,8 +1159,11 @@ const PurchaseCreation = () => {
                 purc_rate: rate,
                 disc: disc_percent,
                 disc_percent,
-                tax_rate: tax_percent,
-                tax_percent,
+                tax_rate: lineTax.gstRate,
+                tax_percent: lineTax.gstRate,
+                gst_rate: lineTax.gstRate,
+                tax_type: lineTax.taxType,
+                hsn_code: lineTax.hsnCode,
                 base_amount,
                 disc_amount,
                 tax_amount,
@@ -1005,12 +1191,17 @@ const PurchaseCreation = () => {
           supplierName: '',
           supplier_details: '',
           address: '',
+          supplier_state: 'Tamil Nadu',
+          supplier_state_code: '33',
           transporter: '',
           transport: '',
           vehicle_no: '',
           lorry_no: '',
           driver_name: '',
           driver: '',
+          gross_weight: '',
+          tare_weight: '',
+          net_weight: '',
           date: new Date().toISOString().split('T')[0],
           inv_no: '',
           invNo: '',
@@ -1019,6 +1210,7 @@ const PurchaseCreation = () => {
           godown_id: '',
           godownId: '',
           pay_type: 'Cash',
+          stock_type: 'RM',
           tax_type: 'Exclusive',
           tax_rate: 5,
           gst_no: '',
@@ -1196,6 +1388,13 @@ const PurchaseCreation = () => {
           data={formData}
           onChange={handleTopFrameChange}
           columns={3}
+          fieldAddon={(field, selected) => field.name === 'godown_id' ? (
+            <GodownStockPopover
+              godownId={formData.godown_id}
+              godownName={selected.label}
+              godownType={selected.option?.godown_type || ''}
+            />
+          ) : null}
         />
 
         <EntryItemsTable
@@ -1208,6 +1407,7 @@ const PurchaseCreation = () => {
           lotMode="auto"
           taxType={formData.tax_type}
           taxRate={formData.tax_rate}
+          isInterState={erpTotals.isInterState}
         />
 
         {/* Table Footer for Qty and Weight */}
@@ -1220,6 +1420,30 @@ const PurchaseCreation = () => {
           <div className="footer-line"></div>
         </div>
 
+        <EntryTaxBillDetails
+          title="Purchase Bill & GST Tax Breakdown"
+          grossAmt={erpTotals.baseAmount || 0}
+          discPercent={erpTotals.discountPercent || 0}
+          discAmt={erpTotals.discountAmount || 0}
+          billAmt={erpTotals.taxable || 0}
+          exemptAmt={erpTotals.exemptAmount || 0}
+          nilRatedAmt={erpTotals.nilRatedAmount || 0}
+          zeroRatedAmt={erpTotals.zeroRatedAmount || 0}
+          nonGstAmt={erpTotals.nonGstAmount || 0}
+          withoutTaxAmt={erpTotals.withoutTaxAmount || 0}
+          taxAmt={erpTotals.taxAmount || 0}
+          totalAmt={erpTotals.netAmount || 0}
+          grandTotal={erpTotals.grandTotal || 0}
+          taxPercent={erpTotals.taxRate ?? 0}
+          cgstAmt={erpTotals.cgstAmount || 0}
+          sgstAmt={erpTotals.sgstAmount || 0}
+          igstAmt={erpTotals.igstAmount || 0}
+          rateSummaries={erpTotals.rateSummaries || []}
+          deductionsAmt={erpTotals.totalDeductions || 0}
+          taxType={formData.tax_type}
+          isInterState={erpTotals.isInterState}
+        />
+
         <div className="erp-bottom-layout">
 
           {/* (ERP layout) LEFT -> Deduction Table | RIGHT -> ERP Totals */}
@@ -1230,14 +1454,18 @@ const PurchaseCreation = () => {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
               <h3 style={{ margin: 0 }}>Deductions</h3>
               <select 
+                value=""
                 onChange={(e) => handleDeductionAdd(e.target.value)} 
                 className="table-input" 
-                style={{ width: '200px', height: '30px' }}
+                style={{ width: '220px', height: '30px', fontWeight: 'bold' }}
               >
                 <option value="">+ Add Deduction</option>
                 {deductions.map((d, idx) => (
                   <option key={`${d.id || 'ded'}-${idx}`} value={d.id}>{d.ded_name || d.name || d.deduction_name}</option>
                 ))}
+                <option value="__CREATE_NEW__" style={{ fontWeight: 'bold', color: '#1e3a8a' }}>
+                  {getCreateLabel('deductions')}
+                </option>
               </select>
             </div>
 
@@ -1265,8 +1493,12 @@ const PurchaseCreation = () => {
                           (row.deduction_id || row.id || row.name || '')
                         }
                         onChange={(e) => {
-                          const updated = [...selectedDeductions];
                           const nextId = e.target.value;
+                          if (nextId === '__CREATE_NEW__' || nextId === 'create_new' || nextId === 'manual') {
+                            setInlineDeductionOpen(true);
+                            return;
+                          }
+                          const updated = [...selectedDeductions];
                           const master = deductions.find(d => String(d.id) === String(nextId));
                           if (master) {
                             const calcType = master.calculation_type || master.calc_type || 'Percentage';
@@ -1282,6 +1514,7 @@ const PurchaseCreation = () => {
                               percentage: isPct ? dedValue : 0,
                               percent: isPct ? dedValue : 0,
                               amount: isPct ? (base * (dedValue / 100)) : dedValue,
+                              manual_amount: false,
                               type: String(master.type || master.deduction_type || updated[index].type || 'LESS').toUpperCase(),
                             };
                           } else {
@@ -1303,6 +1536,9 @@ const PurchaseCreation = () => {
                         {row.name && !deductions.some(d => String(d.id) === String(row.deduction_id || row.id) || (d.ded_name || d.name) === row.name) && (
                           <option value={row.deduction_id || row.id || row.name}>{row.name}</option>
                         )}
+                        <option value="__CREATE_NEW__" style={{ fontWeight: 'bold', color: '#1e3a8a' }}>
+                          {getCreateLabel('deductions')}
+                        </option>
                       </select>
                     </td>
 
@@ -1318,6 +1554,7 @@ const PurchaseCreation = () => {
                           updated[index].percentage = pct;
                           const base = Number(erpTotals.taxable || 0);
                           updated[index].amount = base * (pct / 100);
+                          updated[index].manual_amount = false;
                           setSelectedDeductions(updated);
                         }}
                       />
@@ -1327,10 +1564,11 @@ const PurchaseCreation = () => {
                       <input
                         type="number"
                         style={{ width: '100%' }}
-                        value={Number(row.amount || 0)}
+                        value={Number(erpTotals.calculatedDeductions?.[index]?.amount ?? row.amount ?? 0)}
                         onChange={(e) => {
                           const updated = [...selectedDeductions];
                           updated[index].amount = parseFloat(e.target.value) || 0;
+                          updated[index].manual_amount = true;
                           setSelectedDeductions(updated);
                         }}
                       />
@@ -1381,43 +1619,23 @@ const PurchaseCreation = () => {
 
           {/* RIGHT : ERP TOTALS */}
           <div className="erp-summary-panel">
-
+            <div style={{ marginBottom: '10px', fontWeight: 'bold', color: '#1e293b' }}>Summary & Weight</div>
             <div>Total Qty : {formatNumber(erpTotals.totalQty)}</div>
-
-            <div>
-              Total Weight : {formatNumber(erpTotals.totalWeight)} KG
-            </div>
-
-            <hr />
-
-            <div>
-              Base Amount : ₹{formatNumber(erpTotals.baseAmount)}
-            </div>
-
-            <div>
-              Discount : ₹{formatNumber(erpTotals.discountAmount)}
-            </div>
-
-            <div>
-              Taxable : ₹{formatNumber(erpTotals.taxable)}
-            </div>
-
-            <div>
-              Tax : ₹{formatNumber(erpTotals.taxAmount)}
-            </div>
-
-            <div>
-              Net Total : ₹{formatNumber(erpTotals.netAmount)}
-            </div>
-
-            <div>
-              Deductions : ₹{formatNumber(erpTotals.totalDeductions)}
-            </div>
-
-            <div className="grand-total">
+            <div>Total Weight : {formatNumber(erpTotals.totalWeight)} KG</div>
+            <hr style={{ margin: '12px 0', borderColor: '#cbd5e1' }} />
+            <div>Base Amount : ₹{formatNumber(erpTotals.baseAmount)}</div>
+            <div>Discount : ₹{formatNumber(erpTotals.discountAmount)}</div>
+            <div>Taxable Amt : ₹{formatNumber(erpTotals.taxable)}</div>
+            <div>Exempt Amt : ₹{formatNumber(erpTotals.exemptAmount)}</div>
+            {erpTotals.nilRatedAmount > 0 && <div>Nil Rated Amt : ₹{formatNumber(erpTotals.nilRatedAmount)}</div>}
+            {erpTotals.zeroRatedAmount > 0 && <div>Zero Rated Amt : ₹{formatNumber(erpTotals.zeroRatedAmount)}</div>}
+            {erpTotals.nonGstAmount > 0 && <div>Non-GST Amt : ₹{formatNumber(erpTotals.nonGstAmount)}</div>}
+            {erpTotals.withoutTaxAmount > 0 && <div>Without Tax Amt : ₹{formatNumber(erpTotals.withoutTaxAmount)}</div>}
+            <div>Total Tax : ₹{formatNumber(erpTotals.taxAmount)}</div>
+            <div>Deductions : ₹{formatNumber(erpTotals.totalDeductions)}</div>
+            <div className="grand-total" style={{ marginTop: '12px', fontSize: '15px', fontWeight: 'bold', color: '#1e3a8a' }}>
               Grand Total : ₹{formatNumber(erpTotals.grandTotal)}
             </div>
-
           </div>
 
         </div>
@@ -1427,7 +1645,7 @@ const PurchaseCreation = () => {
           onSave={handleSubmit}
           onCancel={handleCancel}
           onRefresh={handleRefresh}
-          onBack={() => navigate('/purchase/display')}
+          onBack={handleBack}
           saving={loading}
           saveText={id ? 'Update' : 'Save'}
         />
@@ -1593,6 +1811,14 @@ const PurchaseCreation = () => {
           </div>
         </div>
       )}
+
+      {/* Inline Master Modal for Deductions */}
+      <InlineMasterModal
+        open={inlineDeductionOpen}
+        onClose={() => setInlineDeductionOpen(false)}
+        masterType="deduction_purchase"
+        onSuccess={handleInlineDeductionCreated}
+      />
     </div>
   )
 }

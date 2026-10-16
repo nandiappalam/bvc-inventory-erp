@@ -253,6 +253,12 @@ const normalizeMasterData = async (tableName, rawData) => {
   // This prevents "invalid input syntax for type numeric" errors
   // ========================================================================
   const isPg = typeof db.isPostgres === 'function' ? db.isPostgres() : db.isPostgres;
+  const godownBillingNumericFields = ['storage_duration', 'rate_per_kg', 'rate_per_ton', 'min_billable_days'];
+  for (const field of godownBillingNumericFields) {
+    if (field in filteredData && filteredData[field] === '') {
+      filteredData[field] = null;
+    }
+  }
   if (isPg) {
     const numericFields = ['tax', 'gst_rate', 'rate', 'weight', 'qty', 'amount', 'value',
       'opening_balance', 'wages_kg', 'ed_percent', 'minimum_qty', 'reorder_level',
@@ -267,6 +273,62 @@ const normalizeMasterData = async (tableName, rawData) => {
   }
 
   return filteredData;
+};
+
+const validateAndPrepareMasterData = async (tableName, data, recordId = null) => {
+  if (tableName === 'terms_master') {
+    for (const field of ['term_code', 'name']) {
+      const value = String(data[field] || '').trim();
+      if (!value) continue;
+      const duplicate = await db.query(
+        `SELECT id FROM terms_master WHERE LOWER(TRIM(${field})) = LOWER(TRIM(?)) AND id <> ? LIMIT 1`,
+        [value, recordId || -1]
+      );
+      if (duplicate.rows?.length) {
+        return `A term with this ${field === 'term_code' ? 'code' : 'name'} already exists.`;
+      }
+      data[field] = value;
+    }
+  }
+
+  if (tableName === 'godown_master' && String(data.godown_type || '').toLowerCase() === 'cold storage') {
+    const duration = Number(data.storage_duration);
+    const minimumDays = Number(data.min_billable_days);
+    const ratePerKg = Number(data.rate_per_kg || 0);
+    const ratePerTon = Number(data.rate_per_ton || 0);
+    const billingBasis = data.billing_basis || 'Per KG';
+
+    if (!Number.isFinite(duration) || duration <= 0 ||
+        !Number.isFinite(minimumDays) || minimumDays <= 0) {
+      return 'Storage duration and minimum billable days must be positive numbers.';
+    }
+    if (!Number.isFinite(ratePerKg) || ratePerKg < 0 ||
+        !Number.isFinite(ratePerTon) || ratePerTon < 0) {
+      return 'Cold storage rates must be valid non-negative numbers.';
+    }
+    if (!['Per KG', 'Per Ton'].includes(billingBasis)) {
+      return 'Billing basis must be Per KG or Per Ton.';
+    }
+    if (!['Days', 'Months'].includes(data.duration_unit || 'Days')) {
+      return 'Duration unit must be Days or Months.';
+    }
+    if (!['Fixed Period', 'Per Day'].includes(data.billing_method || 'Fixed Period')) {
+      return 'Billing method must be Fixed Period or Per Day.';
+    }
+
+    data.storage_duration = duration;
+    data.min_billable_days = minimumDays;
+    data.billing_basis = billingBasis;
+    if (billingBasis === 'Per KG') {
+      data.rate_per_kg = ratePerKg;
+      data.rate_per_ton = Number((ratePerKg * 1000).toFixed(6));
+    } else {
+      data.rate_per_ton = ratePerTon;
+      data.rate_per_kg = Number((ratePerTon / 1000).toFixed(6));
+    }
+  }
+
+  return null;
 };
 
 // Master type aliases mapping
@@ -345,6 +407,9 @@ const masterTypeAliases = {
   tax: { table: 'tax_master', displayField: 'tax_name', hasStatus: true },
   taxes: { table: 'tax_master', displayField: 'tax_name', hasStatus: true },
   tax_master: { table: 'tax_master', displayField: 'tax_name', hasStatus: true },
+  terms: { table: 'terms_master', displayField: 'name', hasStatus: true, uniqueField: 'term_code' },
+  term: { table: 'terms_master', displayField: 'name', hasStatus: true, uniqueField: 'term_code' },
+  terms_master: { table: 'terms_master', displayField: 'name', hasStatus: true, uniqueField: 'term_code' },
 }
 
 // Master tables mapping with fields
@@ -483,10 +548,21 @@ const masterTables = {
       'id', 'godown_name', 'name', 'print_name', 'printname', 'godown_type', 'storage_location',
       'external_company', 'capacity', 'capacity_unit', 'temperature_range', 'contact_person',
       'address', 'address1', 'phone_off', 'phone', 'mobile1', 'mobile', 'email', 'website',
-      'area', 'location', 'gst_number', 'gst_no', 'status'
+      'area', 'location', 'gst_number', 'gst_no', 'status',
+      'storage_duration', 'duration_unit', 'rate_per_kg', 'rate_per_ton', 'billing_basis', 'billing_method', 'min_billable_days', 'cold_storage_remarks'
     ],
     uniqueField: 'godown_name',
     displayField: 'godown_name'
+  },
+  terms_master: {
+    table: 'terms_master',
+    fields: [
+      'id', 'term_code', 'name', 'term_name', 'category', 'term_type',
+      'description', 'credit_days', 'due_days', 'payment_terms', 'delivery_terms',
+      'storage_terms', 'business_conditions', 'remarks', 'status'
+    ],
+    uniqueField: 'term_code',
+    displayField: 'name'
   }
 }
 
@@ -1029,6 +1105,10 @@ router.post("/:table", async (req, res) => {
     }
 
     const filteredData = await normalizeMasterData(tableName, data);
+    const validationError = await validateAndPrepareMasterData(tableName, filteredData);
+    if (validationError) {
+      return res.status(400).json({ success: false, message: validationError });
+    }
     const keys = Object.keys(filteredData);
     const values = Object.values(filteredData);
 
@@ -1119,6 +1199,10 @@ router.post('/record/:table', async (req, res) => {
 
     const data = req.body
     const filteredData = await normalizeMasterData(tableName, data);
+    const validationError = await validateAndPrepareMasterData(tableName, filteredData, req.params.id);
+    if (validationError) {
+      return res.status(400).json({ success: false, message: validationError });
+    }
     const keys = Object.keys(filteredData);
     const values = Object.values(filteredData);
 
@@ -1201,6 +1285,10 @@ router.put('/:table/:id', async (req, res) => {
 
     const data = req.body
     const filteredData = await normalizeMasterData(tableName, data);
+    const validationError = await validateAndPrepareMasterData(tableName, filteredData, req.params.id);
+    if (validationError) {
+      return res.status(400).json({ success: false, message: validationError });
+    }
     const keys = Object.keys(filteredData);
     const values = Object.values(filteredData);
 
@@ -1277,6 +1365,10 @@ router.put('/record/:table/:id', async (req, res) => {
 
     const data = req.body
     const filteredData = await normalizeMasterData(tableName, data);
+    const validationError = await validateAndPrepareMasterData(tableName, filteredData, req.params.id);
+    if (validationError) {
+      return res.status(400).json({ success: false, message: validationError });
+    }
     const keys = Object.keys(filteredData);
     const values = Object.values(filteredData);
 
@@ -1508,5 +1600,3 @@ router.get('/lots/next', async (req, res) => {
 });
 
 module.exports = router
-
-

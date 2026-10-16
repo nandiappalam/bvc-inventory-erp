@@ -267,9 +267,9 @@ const StockReport = () => {
       if (!itemId) {
         responseData = responseData.filter(r => r.item_name === row.item_name);
       }
-      setFgLotDetails(responseData.filter(r => r.category === 'FG'));
+      setFgLotDetails(responseData.filter(r => !row.item_name || r.item_name === row.item_name));
     } catch (err) {
-      console.error('Error fetching FG lot details:', err);
+      console.error('Error fetching item lot details:', err);
     } finally {
       setModalLoading(false);
     }
@@ -618,17 +618,13 @@ const StockReport = () => {
                               </span>
                             </td>
                             <td style={{...styles.td, fontWeight: 'bold'}}>
-                              {row.category === 'FG' ? (
-                                <span 
-                                  onClick={() => handleFGClick(row)} 
-                                  title="Click to view full traceability & process log"
-                                  style={{ color: '#2563eb', cursor: 'pointer', textDecoration: 'underline' }}
-                                >
-                                  {row.item_name}
-                                </span>
-                              ) : (
-                                row.item_name
-                              )}
+                              <span 
+                                onClick={() => handleFGClick(row)} 
+                                title="Click to view full traceability & stock details"
+                                style={{ color: '#2563eb', cursor: 'pointer', textDecoration: 'underline' }}
+                              >
+                                {row.item_name}
+                              </span>
                               {row.lot_no && (
                                 <span style={{
                                   fontSize: '11px', 
@@ -887,7 +883,7 @@ const StockReport = () => {
         <div style={styles.modalOverlay}>
           <div style={styles.modalContent}>
             <div style={styles.modalHeader}>
-              <h3 style={styles.modalTitle}>📦 Finished Goods (FG) Traceability Details</h3>
+              <h3 style={styles.modalTitle}>📦 Item & Lot Stock Traceability Details</h3>
               <button onClick={() => setIsFGModalOpen(false)} style={styles.modalCloseBtn}>×</button>
             </div>
             

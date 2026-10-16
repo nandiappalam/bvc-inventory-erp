@@ -563,6 +563,8 @@ const AppLayout = () => {
           <Route path="/master/transport-display" element={<DynamicMasterDisplay configKey="transport" key="transport" />} />
           <Route path="/master/godown-create" element={<DynamicMasterForm configKey="godown" key="godown" />} />
           <Route path="/master/godown-display" element={<DynamicMasterDisplay configKey="godown" key="godown" />} />
+          <Route path="/master/terms-create" element={<DynamicMasterForm configKey="terms" key="terms" />} />
+          <Route path="/master/terms-display" element={<DynamicMasterDisplay configKey="terms" key="terms" />} />
 
           {/* Tax Master Routes */}
           <Route path="/master/tax-create" element={<TaxMasterCreate />} />

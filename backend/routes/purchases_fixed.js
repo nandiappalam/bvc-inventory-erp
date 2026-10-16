@@ -10,6 +10,7 @@ const db = require('../config/database')
 const recycleBinService = require('../services/RecycleBinService')
 const { createPurchaseLedgerEntries, deleteLedgerEntries } = require('../utils/ledgerHelper')
 const { reserveNextLotNumber, recordLotNumber } = require('../utils/lotHelper')
+const { calculateLineTax } = require('../services/taxEngine')
 
 const normalizePurchaseItem = (item) => {
   return {
@@ -21,12 +22,27 @@ const normalizePurchaseItem = (item) => {
     qty: Number(item.qty ?? item.quantity ?? 0) || 0,
     rate: Number(item.rate ?? item.price ?? 0) || 0,
     disc_percent: Number(item.disc_percent ?? item.disc ?? 0) || 0,
-    tax_percent: Number(item.tax_percent ?? item.tax ?? 0) || 0,
+    tax_percent: Number(item.tax_percent ?? item.tax_rate ?? item.gst_rate ?? item.tax ?? 0) || 0,
+    tax_type: item.tax_type || item.taxType || '',
+    hsn_code: item.hsn_code || item.hsnCode || '',
     disc_amount: Number(item.disc_amount ?? item.discAmount ?? 0) || 0,
     tax_amount: Number(item.tax_amount ?? item.taxAmount ?? 0) || 0,
     amount: Number(item.amount ?? item.totalAmount ?? item.total ?? 0) || 0,
   }
 }
+
+const getPurchaseWeights = (formData = {}) => {
+  const grossInput = formData.gross_weight ?? formData.cross_weight;
+  const tareInput = formData.tare_weight;
+  const grossWeight = grossInput === '' || grossInput === null || grossInput === undefined ? 0 : Number(grossInput);
+  const tareWeight = tareInput === '' || tareInput === null || tareInput === undefined ? 0 : Number(tareInput);
+  if (!Number.isFinite(grossWeight) || !Number.isFinite(tareWeight) || grossWeight < 0 || tareWeight < 0) {
+    return { error: 'Cross Weight and Tare Weight must be valid non-negative numbers.' };
+  }
+  const netWeight = Number((grossWeight - tareWeight).toFixed(2));
+  if (netWeight < 0) return { error: 'Tare Weight cannot exceed Cross Weight.' };
+  return { grossWeight, tareWeight, netWeight };
+};
 
 // Ensure purchase deductions table and transport/vehicle columns exist for ERP purchase structure
 const initializedCompanyDbs = new Set();
@@ -61,6 +77,10 @@ const ensurePurchaseDeductions = async (companyId = 1) => {
       'ALTER TABLE purchases ADD COLUMN lorry_no TEXT',
       'ALTER TABLE purchases ADD COLUMN driver_name TEXT',
       'ALTER TABLE purchases ADD COLUMN driver TEXT',
+      'ALTER TABLE purchases ADD COLUMN gross_weight REAL DEFAULT 0',
+      'ALTER TABLE purchases ADD COLUMN tare_weight REAL DEFAULT 0',
+      'ALTER TABLE purchases ADD COLUMN net_weight REAL DEFAULT 0',
+      'ALTER TABLE purchases ADD COLUMN stock_type TEXT',
       'ALTER TABLE purchases ADD COLUMN purchase_order_id INTEGER',
       'ALTER TABLE purchases ADD COLUMN po_no TEXT',
       'ALTER TABLE purchases ADD COLUMN source_order_id INTEGER',
@@ -69,6 +89,17 @@ const ensurePurchaseDeductions = async (companyId = 1) => {
       'ALTER TABLE purchases ADD COLUMN deduction_amount REAL DEFAULT 0'
     ];
     for (const sql of extraCols) {
+      try {
+        await compDb.run(sql);
+      } catch {
+        // column may already exist
+      }
+    }
+    for (const sql of [
+      'ALTER TABLE purchase_items ADD COLUMN tax_type TEXT DEFAULT "Taxable"',
+      'ALTER TABLE purchase_items ADD COLUMN gst_rate REAL DEFAULT 0',
+      'ALTER TABLE purchase_items ADD COLUMN hsn_code TEXT'
+    ]) {
       try {
         await compDb.run(sql);
       } catch {
@@ -169,9 +200,14 @@ router.get(['/', '/list', '/purchase-list'], async (req, res) => {
       pi.disc_amount AS disc_amount,
       pi.disc_amount AS discount_amount,
       pi.tax_percent,
+      pi.tax_type,
+      COALESCE(pi.gst_rate, pi.tax_percent, 0) AS gst_rate,
       pi.tax_amount,
       pi.tax_amount AS tax_amount,
       pi.amount,
+      COALESCE(NULLIF(p.gross_weight, 0), NULLIF(vm.gross_weight, 0)) AS gross_weight,
+      COALESCE(NULLIF(p.tare_weight, 0), NULLIF(vm.tare_weight, 0)) AS tare_weight,
+      COALESCE(NULLIF(p.net_weight, 0), NULLIF(vm.net_weight, 0)) AS net_weight,
 
       -- Deductions are stored in purchase_deductions table
       COALESCE(pad.add_deduction_amount, 0) AS add_deduction_amount,
@@ -246,17 +282,31 @@ router.get('/:id', async (req, res) => {
       // ALWAYS select only columns known by your runtime schema migrations.
       // Some DBs may still be legacy and throw `no such column: name`.
       supplierRow = (await db.query(
-        'SELECT print_name, address1 FROM supplier_master WHERE id = ?',
-        [purchaseData.supplier]
+        `SELECT name, print_name, address1, address2, address3, address4, gst_number,
+                contact_person, phone_off, phone_res, mobile1, mobile2, email
+         FROM supplier_master
+         WHERE CAST(id AS TEXT) = ? OR name = ? OR print_name = ?
+         LIMIT 1`,
+        [String(purchaseData.supplier), purchaseData.supplier, purchaseData.supplier]
       )).rows[0] || null
     }
 
     console.log('HEADER QUERY RESULT (supplier) =', supplierRow)
 
     const supplierName = purchaseData.supplier
-      ? (supplierRow?.print_name ?? purchaseData.supplier)
+      ? (supplierRow?.print_name || supplierRow?.name || purchaseData.supplier)
       : purchaseData.supplier
 
+    const rawTransporter = purchaseData.transporter || purchaseData.transport || ''
+    let transporterRow = null
+    if (rawTransporter) {
+      transporterRow = (await db.query(
+        `SELECT name, print_name FROM transport_master
+         WHERE CAST(id AS TEXT) = ? OR name = ? OR print_name = ?
+         LIMIT 1`,
+        [String(rawTransporter), rawTransporter, rawTransporter]
+      )).rows[0] || null
+    }
 
     let godownRow = null
     if (purchaseData.godown) {
@@ -276,6 +326,18 @@ router.get('/:id', async (req, res) => {
 
 
     purchaseData.supplier_name = supplierName
+    purchaseData.supplier_address = [
+      supplierRow?.address1,
+      supplierRow?.address2,
+      supplierRow?.address3,
+      supplierRow?.address4,
+    ].filter(Boolean).join(', ')
+    purchaseData.supplier_gstin = purchaseData.gst_no || supplierRow?.gst_number || ''
+    purchaseData.supplier_contact_person = purchaseData.contact_person || supplierRow?.contact_person || ''
+    purchaseData.supplier_phone = purchaseData.phone || supplierRow?.mobile1 || supplierRow?.phone_off || supplierRow?.phone_res || supplierRow?.mobile2 || ''
+    purchaseData.supplier_email = purchaseData.email || supplierRow?.email || ''
+    purchaseData.stock_type = purchaseData.stock_type || purchaseData.stockType || 'RM'
+    purchaseData.transporter_name = transporterRow?.print_name || transporterRow?.name || rawTransporter
     purchaseData.godown_name = godownName
     purchaseData.transporter = purchaseData.transporter || purchaseData.transport || ''
     purchaseData.transport = purchaseData.transport || purchaseData.transporter || ''
@@ -315,6 +377,10 @@ router.post('/', async (req, res) => {
       return res.status(400).json({
         message: "All items must have a name, positive quantity, and positive rate",
       });
+    }
+    const purchaseWeights = getPurchaseWeights(formData);
+    if (purchaseWeights.error) {
+      return res.status(400).json({ success: false, message: purchaseWeights.error });
     }
 
     const purchase_order_id = formData.purchase_order_id || formData.purchaseOrderId || formData.po_id || formData.source_order_id || null;
@@ -395,6 +461,7 @@ router.post('/', async (req, res) => {
       formData.payType || formData.pay_type || 'Credit',
       formData.invDate || formData.inv_date || null,
       formData.type || 'Urad',
+      formData.stock_type || formData.stockType || 'RM',
       formData.contact_person || '',
       formData.address || '',
       formData.area || '',
@@ -420,6 +487,9 @@ router.post('/', async (req, res) => {
       parseFloat(totals.netAmount) || 0,
       parseFloat(totals.deductionAmount || totals.deduction_amount) || 0,
       parseFloat(totals.grandTotal) || 0,
+      purchaseWeights.grossWeight,
+      purchaseWeights.tareWeight,
+      purchaseWeights.netWeight,
       purchase_order_id,
       po_no,
       purchase_order_id,
@@ -428,11 +498,12 @@ router.post('/', async (req, res) => {
 
     const purchaseResult = await db.run(`
       INSERT INTO purchases (
-        s_no, date, inv_no, supplier, pay_type, inv_date, type, contact_person, address, area, phone, gst_no, email, tax_type, tax_percent, godown, remarks,
+        s_no, date, inv_no, supplier, pay_type, inv_date, type, stock_type, contact_person, address, area, phone, gst_no, email, tax_type, tax_percent, godown, remarks,
         transporter, transport, vehicle_no, lorry_no, driver_name, driver,
         total_qty, total_weight, total_amount, base_amount, disc_amount, tax_amount, net_amount, deduction_amount, grand_total,
+        gross_weight, tare_weight, net_weight,
         purchase_order_id, po_no, source_order_id, source_order_no
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, insertValues)
 
     const purchaseId = purchaseResult.lastID
@@ -461,16 +532,20 @@ router.post('/', async (req, res) => {
       const perUnitWeight = normalizedItem.per_unit_weight
       const totalWt = Number((normalizedItem.total_weight || (qty * perUnitWeight)).toFixed(3));
 
-      const baseAmount = Number((qty * rate).toFixed(2)); // Base amount is qty * rate
-      const discountAmount = Number((normalizedItem.disc_amount || (baseAmount * discPercent / 100)).toFixed(2)); // Discount based on baseAmount
-      const taxableAmount = Number((baseAmount - discountAmount).toFixed(2)); // Taxable is base - discount
-
-
-      const taxAmount = normalizedItem.tax_amount
-        ? Number(normalizedItem.tax_amount)
-        : Number((((taxableAmount * taxPercent) / 100)).toFixed(2));
-
-      const amount = Number((baseAmount + taxAmount).toFixed(2));
+      const lineTax = calculateLineTax({
+        qty,
+        rate,
+        discPercent,
+        discAmount: normalizedItem.disc_amount,
+        taxType: normalizedItem.tax_type || (taxPercent === 0 ? 'Nil Rated' : 'Taxable'),
+        taxMode: formData.tax_mode || formData.taxType || formData.tax_type || 'Exclusive',
+        gstRate: taxPercent,
+        hsnCode: normalizedItem.hsn_code
+      });
+      const baseAmount = lineTax.grossAmount;
+      const discountAmount = lineTax.discAmount;
+      const taxAmount = lineTax.totalTax;
+      const amount = lineTax.totalAmount;
       const netAmount = amount;
 
       let lotNo = normalizedItem.lot_no
@@ -483,8 +558,8 @@ router.post('/', async (req, res) => {
       await db.run(`
         INSERT INTO purchase_items (
           purchase_id, item_id, item_name, lot_no, per_unit_weight, qty, total_weight, rate,
-          disc_percent, disc_amount, tax_percent, tax_amount, amount
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          disc_percent, disc_amount, tax_percent, gst_rate, tax_type, hsn_code, tax_amount, amount
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
         purchaseId,
         normalizedItem.item_id,
@@ -496,7 +571,10 @@ router.post('/', async (req, res) => {
         rate,
         discPercent,
         discountAmount,
-        taxPercent,
+        lineTax.gstRate,
+        lineTax.gstRate,
+        lineTax.taxType,
+        lineTax.hsnCode,
         taxAmount,
         amount
       ])
@@ -729,16 +807,21 @@ router.put('/:id', async (req, res) => {
 
     const sanitizedDate = sanitizeDate(formData.date) || new Date().toISOString().slice(0, 10);
     const sanitizedInvDate = sanitizeDate(formData.invDate || formData.inv_date);
+    const purchaseWeights = getPurchaseWeights(formData);
+    if (purchaseWeights.error) {
+      return res.status(400).json({ success: false, message: purchaseWeights.error });
+    }
 
-    await db.run(`
+    const updateResult = await db.run(`
       UPDATE purchases SET
         s_no = ?, date = ?, inv_no = ?, supplier = ?, pay_type = ?,
-        inv_date = ?, type = ?, contact_person = ?, address = ?, area = ?, phone = ?, gst_no = ?, email = ?,
+        inv_date = ?, type = ?, stock_type = ?, contact_person = ?, address = ?, area = ?, phone = ?, gst_no = ?, email = ?,
         tax_type = ?, tax_percent = ?, godown = ?,
         remarks = ?, transporter = ?, transport = ?, vehicle_no = ?, lorry_no = ?, driver_name = ?, driver = ?,
         total_qty = ?, total_weight = ?, total_amount = ?,
         base_amount = ?, disc_amount = ?, tax_amount = ?, net_amount = ?,
         deduction_amount = ?, grand_total = ?,
+        gross_weight = ?, tare_weight = ?, net_weight = ?,
         purchase_order_id = ?, po_no = ?, source_order_id = ?, source_order_no = ?,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
@@ -750,6 +833,7 @@ router.put('/:id', async (req, res) => {
       formData.payType || formData.pay_type,
       sanitizedInvDate,
       formData.type,
+      formData.stock_type || formData.stockType || 'RM',
       formData.contact_person,
       formData.address,
       formData.area,
@@ -775,12 +859,18 @@ router.put('/:id', async (req, res) => {
       totals.netAmount,
       totals.deductionAmount || totals.deduction_amount,
       totals.grandTotal,
+      purchaseWeights.grossWeight,
+      purchaseWeights.tareWeight,
+      purchaseWeights.netWeight,
       purchase_order_id,
       po_no,
       purchase_order_id,
       po_no,
       purchaseId
     ])
+    if (updateResult?.changes === 0) {
+      return res.status(404).json({ success: false, message: 'Purchase not found; no details were updated.' });
+    }
 
     // Preserve existing stock lot statuses before deletion
     const existingLotsResult = await db.query(`
@@ -811,13 +901,20 @@ router.put('/:id', async (req, res) => {
       const perUnitWeight = normalizedItem.per_unit_weight
       const totalWt = Number((normalizedItem.total_weight || (qty * perUnitWeight)).toFixed(3));
 
-      const baseAmount = Number((qty * rate).toFixed(2));
-      const discountAmount = Number((normalizedItem.disc_amount || (baseAmount * discPercent / 100)).toFixed(2));
-      const taxableAmount = Number((baseAmount - discountAmount).toFixed(2));
-      const taxAmount = normalizedItem.tax_amount
-        ? Number(normalizedItem.tax_amount)
-        : Number((((taxableAmount * taxPercent) / 100)).toFixed(2))
-      const amount = Number((baseAmount + taxAmount).toFixed(2));
+      const lineTax = calculateLineTax({
+        qty,
+        rate,
+        discPercent,
+        discAmount: normalizedItem.disc_amount,
+        taxType: normalizedItem.tax_type || (taxPercent === 0 ? 'Nil Rated' : 'Taxable'),
+        taxMode: formData.tax_mode || formData.taxType || formData.tax_type || 'Exclusive',
+        gstRate: taxPercent,
+        hsnCode: normalizedItem.hsn_code
+      });
+      const baseAmount = lineTax.grossAmount;
+      const discountAmount = lineTax.discAmount;
+      const taxAmount = lineTax.totalTax;
+      const amount = lineTax.totalAmount;
 
 
       let lotNo = normalizedItem.lot_no
@@ -830,8 +927,8 @@ router.put('/:id', async (req, res) => {
       await db.run(`
         INSERT INTO purchase_items (
           purchase_id, item_id, item_name, lot_no, per_unit_weight, qty, total_weight, rate,
-          disc_percent, disc_amount, tax_percent, tax_amount, amount
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          disc_percent, disc_amount, tax_percent, gst_rate, tax_type, hsn_code, tax_amount, amount
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
         purchaseId,
         normalizedItem.item_id,
@@ -843,7 +940,10 @@ router.put('/:id', async (req, res) => {
         rate,
         discPercent,
         discountAmount,
-        taxPercent,
+        lineTax.gstRate,
+        lineTax.gstRate,
+        lineTax.taxType,
+        lineTax.hsnCode,
         taxAmount,
         amount
       ])

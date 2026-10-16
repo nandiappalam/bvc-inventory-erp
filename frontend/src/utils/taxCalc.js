@@ -68,15 +68,50 @@ export const calculateTotals = (rows, taxType, taxRate, partyState, companyState
     deductions: deductions
   });
 
+  const isWithoutTax = String(taxType || '').toLowerCase().includes('without');
+  const rates = (invoice.rateSummaries || []).map(r => parseFloat(r.gstRate)).filter(r => !isNaN(r) && r > 0);
+  const primaryRate = rates.length > 0 ? rates[0] : (parseFloat(taxRate) || 0);
+
+  let taxPercentDisplay = '0% (Exempt)';
+  if (isWithoutTax) {
+    taxPercentDisplay = '0% (Without Tax)';
+  } else if (invoice.rateSummaries && invoice.rateSummaries.length > 0) {
+    taxPercentDisplay = invoice.rateSummaries.map(rs => {
+      const r = parseFloat(rs.gstRate || 0);
+      const half = (r / 2).toFixed(1).replace(/\.0$/, '');
+      return invoice.isInterState ? `${r}% (IGST ${r}%)` : `${r}% (${half}% + ${half}%)`;
+    }).join(', ');
+  } else if (primaryRate > 0) {
+    const half = (primaryRate / 2).toFixed(1).replace(/\.0$/, '');
+    taxPercentDisplay = invoice.isInterState ? `${primaryRate}% (IGST ${primaryRate}%)` : `${primaryRate}% (${half}% + ${half}%)`;
+  }
+
+  const explicitDiscPercents = (rows || [])
+    .map(r => parseFloat(r.disc ?? r.disc_percent ?? r.disc_perc ?? 0))
+    .filter(d => !isNaN(d) && d > 0);
+  const primaryDiscPercent = explicitDiscPercents.length > 0
+    ? explicitDiscPercents[0]
+    : (invoice.grossAmount > 0 ? Number(((invoice.discAmount / invoice.grossAmount) * 100).toFixed(2)) : 0);
+
   return {
     ...invoice,
+    grossAmount: invoice.grossAmount,
     baseAmount: invoice.grossAmount,
     discAmount: invoice.discAmount,
+    discountAmount: invoice.discAmount,
+    discPercent: primaryDiscPercent,
     taxableAmount: invoice.taxableAmount,
+    billAmount: invoice.taxableAmount,
     taxAmount: invoice.taxAmount,
     totalAmount: invoice.netAmount,
     netAmount: invoice.netAmount,
     deductionAmount: invoice.deductionAmount,
-    grandTotal: invoice.grandTotal
+    grandTotal: invoice.grandTotal,
+    cgstAmount: invoice.cgstAmount,
+    sgstAmount: invoice.sgstAmount,
+    igstAmount: invoice.igstAmount,
+    primaryTaxRate: primaryRate,
+    tax_percent: primaryRate,
+    taxPercentDisplay
   };
 };

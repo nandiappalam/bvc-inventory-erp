@@ -422,7 +422,10 @@ const PurchaseRequestCreate = () => {
         }))
       };
 
-      const endpoint = editId ? `/purchase-requests/${editId}` : '/purchase-requests';
+      const forceApprovedUpdate = editId && String(status).trim().toLowerCase() === 'approved';
+      const endpoint = editId
+        ? `/purchase-requests/${editId}${forceApprovedUpdate ? '?force=true' : ''}`
+        : '/purchase-requests';
       const method = editId ? 'PUT' : 'POST';
 
       const data = await api(endpoint, {
@@ -893,11 +896,11 @@ const PurchaseRequestCreate = () => {
             variant="contained"
             color="primary"
             startIcon={submitting ? <CircularProgress size={18} color="inherit" /> : <SaveIcon />}
-            onClick={() => handleSubmitForm('Draft')}
+            onClick={() => handleSubmitForm(editId ? status : 'Draft')}
             disabled={submitting}
             sx={{ backgroundColor: '#475569', '&:hover': { backgroundColor: '#334155' }, fontWeight: '700', textTransform: 'none' }}
           >
-            {editId ? 'Update Draft' : 'Save as Draft'}
+            {editId ? 'Save Changes' : 'Save as Draft'}
           </Button>
 
           <Button

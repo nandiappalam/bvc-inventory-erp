@@ -204,6 +204,11 @@ export const MASTER_CONFIG = {
   },
   godown: {
     table: 'godown_master',
+    displayFields: [
+      'godown_name', 'godown_type', 'storage_duration', 'duration_unit',
+      'rate_per_kg', 'rate_per_ton', 'billing_basis', 'billing_method',
+      'min_billable_days', 'capacity', 'temperature_range', 'status'
+    ],
     sections: [
       {
         title: 'Basic Information',
@@ -222,6 +227,20 @@ export const MASTER_CONFIG = {
           { name: 'capacity', label: 'Capacity', type: 'number', dependsOn: { field: 'godown_type', value: 'Cold Storage' } },
           { name: 'capacity_unit', label: 'Capacity Unit', type: 'select', options: [{ label: 'KG', value: 'KG' }, { label: 'Bags', value: 'Bags' }, { label: 'Tons', value: 'Tons' }], defaultValue: 'KG', dependsOn: { field: 'godown_type', value: 'Cold Storage' } },
           { name: 'temperature_range', label: 'Temperature Range', type: 'text', dependsOn: { field: 'godown_type', value: 'Cold Storage' } },
+        ]
+      },
+      {
+        title: 'Cold Storage Billing',
+        dependsOn: { field: 'godown_type', value: 'Cold Storage' },
+        fields: [
+          { name: 'storage_duration', label: 'Configured Storage Duration', type: 'number', min: 1, required: true, defaultValue: 10, dependsOn: { field: 'godown_type', value: 'Cold Storage' } },
+          { name: 'duration_unit', label: 'Duration Unit', type: 'select', options: [{ label: 'Days', value: 'Days' }, { label: 'Months', value: 'Months' }], defaultValue: 'Days', dependsOn: { field: 'godown_type', value: 'Cold Storage' } },
+          { name: 'rate_per_kg', label: 'Rate per KG', type: 'number', min: 0, defaultValue: 0, dependsOn: { field: 'godown_type', value: 'Cold Storage' } },
+          { name: 'rate_per_ton', label: 'Rate per Ton', type: 'number', min: 0, defaultValue: 0, dependsOn: { field: 'godown_type', value: 'Cold Storage' } },
+          { name: 'billing_basis', label: 'Billing Basis', type: 'select', options: [{ label: 'Per KG', value: 'Per KG' }, { label: 'Per Ton', value: 'Per Ton' }], defaultValue: 'Per KG', dependsOn: { field: 'godown_type', value: 'Cold Storage' } },
+          { name: 'billing_method', label: 'Billing Method', type: 'select', options: [{ label: 'Fixed Period', value: 'Fixed Period' }, { label: 'Per Day', value: 'Per Day' }], defaultValue: 'Fixed Period', dependsOn: { field: 'godown_type', value: 'Cold Storage' } },
+          { name: 'min_billable_days', label: 'Minimum Billable Days', type: 'number', min: 1, defaultValue: 10, dependsOn: { field: 'godown_type', value: 'Cold Storage' } },
+          { name: 'cold_storage_remarks', label: 'Billing Remarks', type: 'textarea', dependsOn: { field: 'godown_type', value: 'Cold Storage' } },
         ]
       },
       {
@@ -246,6 +265,31 @@ export const MASTER_CONFIG = {
         title: 'Status',
         fields: [
           { name: 'status', label: 'Status', type: 'select', options: [{ label: 'Active', value: 'Active' }, { label: 'Inactive', value: 'Inactive' }], defaultValue: 'Active' }
+        ]
+      }
+    ]
+  },
+  terms: {
+    table: 'terms_master',
+    title: 'Terms',
+    displayFields: ['term_code', 'name', 'category', 'term_type', 'credit_days', 'due_days', 'status'],
+    sections: [
+      {
+        title: 'Terms Information',
+        fields: [
+          { name: 'term_code', label: 'Term Code', type: 'text', required: true },
+          { name: 'name', label: 'Term Name', type: 'text', required: true },
+          { name: 'category', label: 'Category', type: 'select', options: ['Payment Terms', 'Delivery Terms', 'Storage Terms', 'Commercial', 'Other'], defaultValue: 'Payment Terms' },
+          { name: 'term_type', label: 'Term Type', type: 'select', options: ['Commercial', 'Operational', 'Financial', 'Legal'], defaultValue: 'Commercial' },
+          { name: 'description', label: 'Description', type: 'textarea', fullWidth: true },
+          { name: 'credit_days', label: 'Credit Days', type: 'number', min: 0, defaultValue: 0 },
+          { name: 'due_days', label: 'Due Days', type: 'number', min: 0, defaultValue: 0 },
+          { name: 'payment_terms', label: 'Payment Terms', type: 'textarea', fullWidth: true },
+          { name: 'delivery_terms', label: 'Delivery Terms', type: 'textarea', fullWidth: true },
+          { name: 'storage_terms', label: 'Storage Terms', type: 'textarea', fullWidth: true },
+          { name: 'business_conditions', label: 'Business Conditions', type: 'textarea', fullWidth: true },
+          { name: 'remarks', label: 'Remarks', type: 'textarea', fullWidth: true },
+          { name: 'status', label: 'Status', type: 'select', options: ['Active', 'Inactive'], defaultValue: 'Active' },
         ]
       }
     ]
@@ -610,4 +654,3 @@ export const MASTER_CONFIG = {
     ]
   }
 };
-

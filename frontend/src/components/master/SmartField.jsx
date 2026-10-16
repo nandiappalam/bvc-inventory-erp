@@ -101,6 +101,9 @@ export const SmartField = ({
     className: "uniform-input",
     required: field.required || false,
     disabled: loading,
+    min: field.min,
+    max: field.max,
+    step: field.step,
   };
 
   return (

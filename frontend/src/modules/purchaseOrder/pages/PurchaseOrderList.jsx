@@ -54,12 +54,12 @@ const handlePrintPurchaseOrder = async (row) => {
     const suppAddr = fullPo.address || fullPo.supplier_address || fullPo.supplierAddress || '';
 
     const itemsRows = items.length > 0 ? items.map((it, idx) => {
-      const qty = parseFloat(it.qty || 0);
+      const qty = parseFloat(it.approved_qty ?? it.qty ?? 0);
       const wt = parseFloat(it.weight || it.per_unit_weight || 0);
       const totWt = parseFloat(it.tot_wt || it.total_weight || (qty * wt) || 0);
       const rate = parseFloat(it.rate || it.purc_rate || 0);
       const disc = parseFloat(it.disc_percent || it.discount_percent || 0);
-      const tax = parseFloat(it.tax_percent || it.tax_rate || fullPo.tax_percent || 5);
+      const tax = parseFloat(it.tax_percent ?? it.tax_rate ?? fullPo.tax_percent ?? 0);
       const baseAmt = qty * rate;
       const discAmt = baseAmt * (disc / 100);
       const taxable = baseAmt - discAmt;
@@ -315,4 +315,3 @@ const PurchaseOrderList = () => {
 };
 
 export default PurchaseOrderList;
-

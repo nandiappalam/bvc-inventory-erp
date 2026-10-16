@@ -1,6 +1,6 @@
 /**
  * Automated Tests for BVC ERP Centralized GST / Tax Engine
- * Covers all 17 requirements:
+ * Covers all 21 requirements:
  * 1. Taxable 5% Intra-State (CGST 2.5% + SGST 2.5%, IGST 0)
  * 2. Taxable 5% Inter-State (IGST 5%, CGST 0, SGST 0)
  * 3. Without Tax (All tax = 0)
@@ -18,6 +18,10 @@
  * 15. Without Tax tampering prevention (backend zero tax enforce)
  * 16. Company TN & Supplier TN -> CGST + SGST
  * 17. Company TN & Supplier KA -> IGST
+ * 18. Purchase summary separates taxable and exempt value
+ * 19. Unclassified zero-rate is not assumed exempt
+ * 20. Percentage discount is calculated when amount is zero
+ * 21. Purchase tax summary matches mixed taxable/exempt example
  */
 
 const assert = require('assert');
@@ -104,7 +108,8 @@ runTest('Without Tax -> All tax components strictly 0', () => {
     partyState: 'Tamil Nadu'
   });
 
-  assert.strictEqual(result.taxableAmount, 10000);
+  assert.strictEqual(result.taxableAmount, 0);
+  assert.strictEqual(result.withoutTaxAmount, 10000);
   assert.strictEqual(result.gstRate, 0);
   assert.strictEqual(result.cgstAmount, 0);
   assert.strictEqual(result.sgstAmount, 0);
@@ -125,10 +130,28 @@ runTest('Tax Type = Exempt -> GST 0 with Exempt classification', () => {
   });
 
   assert.strictEqual(result.taxType, 'Exempt');
-  assert.strictEqual(result.taxableAmount, 10000);
+  assert.strictEqual(result.taxableAmount, 0);
+  assert.strictEqual(result.exemptAmount, 10000);
   assert.strictEqual(result.gstRate, 0);
   assert.strictEqual(result.totalTax, 0);
   assert.strictEqual(result.grandTotal, 10000);
+});
+
+runTest('Tax Master label containing Exempt remains an exempt amount', () => {
+  const result = calculateLineTax({
+    qty: 1,
+    rate: 500000,
+    taxType: 'GST 0% (Exempt)',
+    gstRate: 0,
+    companyState: 'Tamil Nadu',
+    partyState: 'Tamil Nadu'
+  });
+
+  assert.strictEqual(result.taxType, 'Exempt');
+  assert.strictEqual(result.taxableAmount, 0);
+  assert.strictEqual(result.exemptAmount, 500000);
+  assert.strictEqual(result.totalTax, 0);
+  assert.strictEqual(result.totalAmount, 500000);
 });
 
 // TEST 5: Nil Rated
@@ -145,6 +168,8 @@ runTest('Tax Type = Nil Rated -> GST 0 with Nil Rated classification', () => {
 
   assert.strictEqual(result.taxType, 'Nil Rated');
   assert.strictEqual(result.hsnCode, '1905');
+  assert.strictEqual(result.taxableAmount, 0);
+  assert.strictEqual(result.nilRatedAmount, 10000);
   assert.strictEqual(result.totalTax, 0);
   assert.strictEqual(result.grandTotal, 10000);
 });
@@ -160,6 +185,8 @@ runTest('Tax Type = Zero Rated -> GST 0 with Zero Rated classification', () => {
   });
 
   assert.strictEqual(result.taxType, 'Zero Rated');
+  assert.strictEqual(result.taxableAmount, 0);
+  assert.strictEqual(result.zeroRatedAmount, 50000);
   assert.strictEqual(result.totalTax, 0);
   assert.strictEqual(result.grandTotal, 50000);
 });
@@ -173,6 +200,8 @@ runTest('Tax Type = Non-GST -> GST 0 with Non-GST classification', () => {
   });
 
   assert.strictEqual(result.taxType, 'Non-GST');
+  assert.strictEqual(result.taxableAmount, 0);
+  assert.strictEqual(result.nonGstAmount, 3000);
   assert.strictEqual(result.totalTax, 0);
   assert.strictEqual(result.grandTotal, 3000);
 });
@@ -226,13 +255,68 @@ runTest('Multi-item invoice with 5%, 12%, and Exempt lines aggregated cleanly', 
     ]
   });
 
-  assert.strictEqual(invoice.taxableAmount, 75000); // 50000 + 20000 + 5000
+  assert.strictEqual(invoice.taxableAmount, 70000); // Taxable items only: 50000 + 20000
+  assert.strictEqual(invoice.exemptAmount, 5000);
   assert.strictEqual(invoice.cgstAmount, 2450); // 1250 (5% on 50k) + 1200 (12% on 20k)
   assert.strictEqual(invoice.sgstAmount, 2450); // 1250 + 1200
   assert.strictEqual(invoice.igstAmount, 0);
   assert.strictEqual(invoice.taxAmount, 4900);
   assert.strictEqual(invoice.grandTotal, 79900);
   assert.strictEqual(invoice.rateSummaries.length, 3);
+});
+
+// TEST 18: Purchase taxable and exempt classification totals
+runTest('Purchase summary separates taxable and exempt values without double-counting', () => {
+  const invoice = calculateInvoiceTax({
+    companyState: 'Tamil Nadu',
+    partyState: 'Tamil Nadu',
+    items: [
+      { item_name: 'Broken Rice', qty: 1, rate: 524500, disc_amount: 10000, tax_percent: 5, tax_type: 'Taxable' },
+      { item_name: 'Urad Gotta', qty: 1, rate: 100000, tax_percent: 0, tax_type: 'Exempt' }
+    ]
+  });
+
+  assert.strictEqual(invoice.grossAmount, 624500);
+  assert.strictEqual(invoice.discAmount, 10000);
+  assert.strictEqual(invoice.taxableAmount, 514500);
+  assert.strictEqual(invoice.exemptAmount, 100000);
+  assert.strictEqual(invoice.taxAmount, 25725);
+  assert.strictEqual(invoice.cgstAmount, 12862.5);
+  assert.strictEqual(invoice.sgstAmount, 12862.5);
+  assert.strictEqual(invoice.netAmount, 640225);
+  assert.strictEqual(invoice.grandTotal, 640225);
+  assert.strictEqual(invoice.items[1].amount, 100000);
+  assert.strictEqual(invoice.items[1].taxable_amount, 0);
+});
+
+// TEST 19: A zero GST rate defaults to Nil Rated, not Exempt
+runTest('Unclassified zero-rated line stays distinct from Exempt', () => {
+  const invoice = calculateInvoiceTax({
+    items: [{ item_name: 'Nil-rated item', qty: 1, rate: 1000, gst_rate: 0 }]
+  });
+
+  runTest('Mixed purchase example calculates tax only on taxable value', () => {
+    const invoice = calculateInvoiceTax({
+      companyState: 'Tamil Nadu',
+      partyState: 'Tamil Nadu',
+      items: [
+        { item_name: 'Taxable goods', qty: 1, rate: 500000, tax_type: 'Taxable', gst_rate: 5 },
+        { item_name: 'Exempt goods', qty: 1, rate: 600000, tax_type: 'Exempt', gst_rate: 0 }
+      ]
+    });
+
+    assert.strictEqual(invoice.grossAmount, 1100000);
+    assert.strictEqual(invoice.taxableAmount, 500000);
+    assert.strictEqual(invoice.exemptAmount, 600000);
+    assert.strictEqual(invoice.cgstAmount, 12500);
+    assert.strictEqual(invoice.sgstAmount, 12500);
+    assert.strictEqual(invoice.grandTotal, 1125000);
+  });
+
+  assert.strictEqual(invoice.exemptAmount, 0);
+  assert.strictEqual(invoice.nilRatedAmount, 1000);
+  assert.strictEqual(invoice.taxableAmount, 0);
+  assert.strictEqual(invoice.grandTotal, 1000);
 });
 
 // TEST 11: Discount applied before tax
@@ -254,6 +338,21 @@ runTest('Discount applied before tax calculation', () => {
   assert.strictEqual(result.sgstAmount, 225);
   assert.strictEqual(result.totalTax, 450);
   assert.strictEqual(result.grandTotal, 9450);
+});
+
+runTest('Percentage discount is calculated when supplied amount is zero', () => {
+  const result = calculateLineTax({
+    qty: 1,
+    rate: 10000,
+    discPercent: 10,
+    discAmount: 0,
+    gstRate: 5,
+    taxType: 'Taxable'
+  });
+
+  assert.strictEqual(result.discAmount, 1000);
+  assert.strictEqual(result.taxableAmount, 9000);
+  assert.strictEqual(result.totalTax, 450);
 });
 
 // TEST 12: Purchase Return original tax preservation
@@ -360,6 +459,21 @@ runTest('Company Tamil Nadu + Supplier Karnataka -> Inter-State (IGST)', () => {
   assert.strictEqual(result.cgstAmount, 0);
   assert.strictEqual(result.sgstAmount, 0);
   assert.strictEqual(result.igstAmount, 1800);
+});
+
+runTest('Explicit zero GST rate takes precedence over stale fallback rates', () => {
+  const result = calculateLineTax({
+    qty: 10,
+    rate: 100,
+    taxType: 'Taxable',
+    gstRate: 0,
+    tax_rate: 5
+  });
+
+  assert.strictEqual(result.taxableAmount, 1000);
+  assert.strictEqual(result.gstRate, 0);
+  assert.strictEqual(result.totalTax, 0);
+  assert.strictEqual(result.grandTotal, 1000);
 });
 
 console.log(`\n========================================`);

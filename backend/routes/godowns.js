@@ -3,6 +3,46 @@ const router = express.Router();
 const db = require('../config/database');
 const recycleBinService = require('../services/RecycleBinService');
 
+const getBillingSettings = (body) => {
+  const storageDuration = Number(body.storage_duration || 10);
+  const minBillableDays = Number(body.min_billable_days || storageDuration);
+  let ratePerKg = Number(body.rate_per_kg || 0);
+  let ratePerTon = Number(body.rate_per_ton || 0);
+  const billingBasis = body.billing_basis || 'Per KG';
+  const billingMethod = body.billing_method || 'Fixed Period';
+  const durationUnit = body.duration_unit || 'Days';
+  const isColdStorage = String(body.godown_type || '').toLowerCase() === 'cold storage';
+
+  if (isColdStorage && (
+    !Number.isFinite(storageDuration) || storageDuration <= 0 ||
+    !Number.isFinite(minBillableDays) || minBillableDays <= 0 ||
+    !Number.isFinite(ratePerKg) || ratePerKg < 0 ||
+    !Number.isFinite(ratePerTon) || ratePerTon < 0 ||
+    !['Per KG', 'Per Ton'].includes(billingBasis) ||
+    !['Days', 'Months'].includes(durationUnit) ||
+    !['Fixed Period', 'Per Day'].includes(billingMethod)
+  )) {
+    return { error: 'Cold storage duration, billing basis, method, and rates must be valid.' };
+  }
+
+  if (billingBasis === 'Per KG' && ratePerKg > 0) {
+    ratePerTon = Number((ratePerKg * 1000).toFixed(6));
+  } else if (billingBasis === 'Per Ton' && ratePerTon > 0) {
+    ratePerKg = Number((ratePerTon / 1000).toFixed(6));
+  }
+
+  return {
+    storage_duration: storageDuration,
+    duration_unit: durationUnit,
+    rate_per_kg: ratePerKg,
+    rate_per_ton: ratePerTon,
+    billing_basis: billingBasis,
+    billing_method: billingMethod,
+    min_billable_days: minBillableDays,
+    cold_storage_remarks: body.cold_storage_remarks || null
+  };
+};
+
 const enrichGodown = (row) => {
   if (!row || typeof row !== 'object') return row;
   const copy = { ...row };
@@ -103,22 +143,31 @@ router.post('/', async (req, res) => {
     const gst_no = body.gst_no || body.gst_number || null;
     const status = body.status || 'Active';
 
+    // Cold storage specific fields
+    const billingSettings = getBillingSettings(body);
+    if (billingSettings.error) return res.status(400).json({ success: false, message: billingSettings.error });
+    const { storage_duration, duration_unit, rate_per_kg, rate_per_ton, billing_basis, billing_method, min_billable_days, cold_storage_remarks } = billingSettings;
+
     // If ID provided, update existing
     if (body.id) {
       await db.run(`
         UPDATE godown_master SET 
           godown_name = ?, print_name = ?, godown_type = ?, storage_location = ?, external_company = ?,
           capacity = ?, capacity_unit = ?, temperature_range = ?, contact_person = ?, address = ?,
-          phone_off = ?, mobile1 = ?, email = ?, website = ?, area = ?, gst_number = ?, status = ?
+          phone_off = ?, mobile1 = ?, email = ?, website = ?, area = ?, gst_number = ?, status = ?,
+          storage_duration = ?, duration_unit = ?, rate_per_kg = ?, rate_per_ton = ?,
+          billing_basis = ?, billing_method = ?, min_billable_days = ?, cold_storage_remarks = ?
         WHERE id = ?
       `, [
         godown_name, print_name, godown_type, storage_location, external_company,
         capacity, capacity_unit, temperature_range, contact_person, address,
         phone_off, mobile1, email, website, area, gst_number, status,
+        storage_duration, duration_unit, rate_per_kg, rate_per_ton,
+        billing_basis, billing_method, min_billable_days, cold_storage_remarks,
         body.id
       ]);
 
-      const updated = enrichGodown({ id: body.id, ...body, godown_name, print_name, godown_type, storage_location, external_company, capacity, capacity_unit, temperature_range, contact_person, address, address1, phone_off, mobile1, email, website, area, gst_number, status });
+      const updated = enrichGodown({ id: body.id, ...body, godown_name, print_name, godown_type, storage_location, external_company, capacity, capacity_unit, temperature_range, contact_person, address, address1, phone_off, mobile1, email, website, area, gst_number, status, storage_duration, duration_unit, rate_per_kg, rate_per_ton, billing_basis, billing_method, min_billable_days, cold_storage_remarks });
       return res.json({ success: true, id: body.id, data: updated, message: 'Godown updated successfully' });
     }
 
@@ -130,15 +179,19 @@ router.post('/', async (req, res) => {
         UPDATE godown_master SET 
           print_name = ?, godown_type = ?, storage_location = ?, external_company = ?,
           capacity = ?, capacity_unit = ?, temperature_range = ?, contact_person = ?, address = ?,
-          phone_off = ?, mobile1 = ?, email = ?, website = ?, area = ?, gst_number = ?, status = ?
+          phone_off = ?, mobile1 = ?, email = ?, website = ?, area = ?, gst_number = ?, status = ?,
+          storage_duration = ?, duration_unit = ?, rate_per_kg = ?, rate_per_ton = ?,
+          billing_basis = ?, billing_method = ?, min_billable_days = ?, cold_storage_remarks = ?
         WHERE id = ?
       `, [
         print_name, godown_type, storage_location, external_company,
         capacity, capacity_unit, temperature_range, contact_person, address,
         phone_off, mobile1, email, website, area, gst_number, status,
+        storage_duration, duration_unit, rate_per_kg, rate_per_ton,
+        billing_basis, billing_method, min_billable_days, cold_storage_remarks,
         existingId
       ]);
-      const updated = enrichGodown({ id: existingId, ...body, godown_name, print_name, godown_type, storage_location, external_company, capacity, capacity_unit, temperature_range, contact_person, address, address1, phone_off, mobile1, email, website, area, gst_number, status });
+      const updated = enrichGodown({ id: existingId, ...body, godown_name, print_name, godown_type, storage_location, external_company, capacity, capacity_unit, temperature_range, contact_person, address, address1, phone_off, mobile1, email, website, area, gst_number, status, storage_duration, duration_unit, rate_per_kg, rate_per_ton, billing_basis, billing_method, min_billable_days, cold_storage_remarks });
       return res.json({ success: true, id: existingId, data: updated, message: 'Godown updated successfully' });
     }
 
@@ -147,16 +200,20 @@ router.post('/', async (req, res) => {
       INSERT INTO godown_master (
         godown_name, print_name, godown_type, storage_location, external_company,
         capacity, capacity_unit, temperature_range, contact_person, address,
-        phone_off, mobile1, email, website, area, gst_number, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        phone_off, mobile1, email, website, area, gst_number, status,
+        storage_duration, duration_unit, rate_per_kg, rate_per_ton,
+        billing_basis, billing_method, min_billable_days, cold_storage_remarks
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       godown_name, print_name, godown_type, storage_location, external_company,
       capacity, capacity_unit, temperature_range, contact_person, address,
-      phone_off, mobile1, email, website, area, gst_number, status
+      phone_off, mobile1, email, website, area, gst_number, status,
+      storage_duration, duration_unit, rate_per_kg, rate_per_ton,
+      billing_basis, billing_method, min_billable_days, cold_storage_remarks
     ]);
 
     const newId = insertRes.lastID || insertRes.lastInsertRowid || insertRes.rows?.[0]?.id;
-    const created = enrichGodown({ id: newId, godown_name, print_name, godown_type, storage_location, external_company, capacity, capacity_unit, temperature_range, contact_person, address, address1, phone_off, mobile1, email, website, area, gst_number, status });
+    const created = enrichGodown({ id: newId, godown_name, print_name, godown_type, storage_location, external_company, capacity, capacity_unit, temperature_range, contact_person, address, address1, phone_off, mobile1, email, website, area, gst_number, status, storage_duration, duration_unit, rate_per_kg, rate_per_ton, billing_basis, billing_method, min_billable_days, cold_storage_remarks });
 
     res.json({ success: true, id: newId, data: created, message: 'Godown saved successfully' });
   } catch (err) {
@@ -200,21 +257,28 @@ router.put('/:id', async (req, res) => {
     const area = body.area || body.location || null;
     const gst_number = body.gst_number || body.gst_no || null;
     const status = body.status || 'Active';
+    const billingSettings = getBillingSettings(body);
+    if (billingSettings.error) return res.status(400).json({ success: false, message: billingSettings.error });
+    const { storage_duration, duration_unit, rate_per_kg, rate_per_ton, billing_basis, billing_method, min_billable_days, cold_storage_remarks } = billingSettings;
 
     await db.run(`
       UPDATE godown_master SET 
         godown_name = ?, print_name = ?, godown_type = ?, storage_location = ?, external_company = ?,
         capacity = ?, capacity_unit = ?, temperature_range = ?, contact_person = ?, address = ?,
-        phone_off = ?, mobile1 = ?, email = ?, website = ?, area = ?, gst_number = ?, status = ?
+        phone_off = ?, mobile1 = ?, email = ?, website = ?, area = ?, gst_number = ?, status = ?,
+        storage_duration = ?, duration_unit = ?, rate_per_kg = ?, rate_per_ton = ?,
+        billing_basis = ?, billing_method = ?, min_billable_days = ?, cold_storage_remarks = ?
       WHERE id = ?
     `, [
       godown_name, print_name, godown_type, storage_location, external_company,
       capacity, capacity_unit, temperature_range, contact_person, address,
       phone_off, mobile1, email, website, area, gst_number, status,
+      storage_duration, duration_unit, rate_per_kg, rate_per_ton,
+      billing_basis, billing_method, min_billable_days, cold_storage_remarks,
       id
     ]);
 
-    const updated = enrichGodown({ id: parseInt(id), ...body, godown_name, print_name, godown_type, storage_location, external_company, capacity, capacity_unit, temperature_range, contact_person, address, address1, phone_off, mobile1, email, website, area, gst_number, status });
+    const updated = enrichGodown({ id: parseInt(id), ...body, godown_name, print_name, godown_type, storage_location, external_company, capacity, capacity_unit, temperature_range, contact_person, address, address1, phone_off, mobile1, email, website, area, gst_number, status, ...billingSettings });
     res.json({ success: true, id: parseInt(id), data: updated, message: 'Godown updated successfully' });
   } catch (err) {
     console.error('Error updating godown:', err);

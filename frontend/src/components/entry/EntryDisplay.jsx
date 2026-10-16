@@ -140,10 +140,10 @@ const EntryDisplay = ({
     try {
       let result;
       
-      if (tableName && !['purchases', 'sales'].includes(tableName)) {
-        result = await api(`/masters/${tableName}`);
-      } else if (apiEndpoint) {
+      if (apiEndpoint) {
         result = await api(apiEndpoint);
+      } else if (tableName) {
+        result = await api(`/masters/${tableName}`);
       } else {
         setData([]);
         return;

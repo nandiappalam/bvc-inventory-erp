@@ -103,8 +103,11 @@ function calculateLineTax(params = {}) {
 
   // Discount handling (discount before tax)
   let discPercent = parseFloat(params.discPercent || params.disc_percent || params.disc || 0) || 0;
-  let discAmount = params.discAmount !== undefined && params.discAmount !== null && params.discAmount !== ''
+  const suppliedDiscAmount = params.discAmount !== undefined && params.discAmount !== null && params.discAmount !== ''
     ? parseFloat(params.discAmount)
+    : null;
+  let discAmount = suppliedDiscAmount !== null && (suppliedDiscAmount !== 0 || discPercent === 0)
+    ? suppliedDiscAmount
     : round2(grossAmount * (discPercent / 100));
   
   if (discAmount > grossAmount) discAmount = grossAmount;
@@ -122,13 +125,24 @@ function calculateLineTax(params = {}) {
 
   const isInclusive = !isWithoutTax && (rawMode.toLowerCase() === 'inclusive' || String(params.calcType).toLowerCase() === 'inclusive');
 
-  let taxType = String(params.taxType || params.tax_type || 'Taxable').trim();
+  const gstRateValue = [
+    params.gstRate,
+    params.gst_rate,
+    params.taxRate,
+    params.tax_rate,
+    params.tax_percent
+  ].find(value => value !== undefined && value !== null && value !== '');
+  const configuredGstRate = Math.max(0, parseFloat(gstRateValue) || 0);
+  let taxType = String(params.taxType || params.tax_type || '').trim();
+  if (!taxType) {
+    taxType = configuredGstRate === 0 ? 'Nil Rated' : 'Taxable';
+  }
   if (!['Taxable', 'Exempt', 'Nil Rated', 'Zero Rated', 'Non-GST'].includes(taxType)) {
-    if (taxType.toLowerCase() === 'exempt') taxType = 'Exempt';
+    if (taxType.toLowerCase().includes('exempt')) taxType = 'Exempt';
     else if (taxType.toLowerCase().includes('nil')) taxType = 'Nil Rated';
     else if (taxType.toLowerCase().includes('zero')) taxType = 'Zero Rated';
     else if (taxType.toLowerCase().includes('non-gst') || taxType.toLowerCase().includes('nongst')) taxType = 'Non-GST';
-    else taxType = 'Taxable';
+    else taxType = configuredGstRate === 0 ? 'Nil Rated' : 'Taxable';
   }
 
   // Inter-state determination
@@ -152,7 +166,13 @@ function calculateLineTax(params = {}) {
       grossAmount,
       discPercent,
       discAmount,
-      taxableAmount: amountAfterDiscount,
+      taxableAmount: 0,
+      classifiedAmount: amountAfterDiscount,
+      exemptAmount: 0,
+      nilRatedAmount: 0,
+      zeroRatedAmount: 0,
+      nonGstAmount: 0,
+      withoutTaxAmount: amountAfterDiscount,
       gstRate: 0,
       cgstRate: 0,
       cgstAmount: 0,
@@ -179,7 +199,13 @@ function calculateLineTax(params = {}) {
       grossAmount,
       discPercent,
       discAmount,
-      taxableAmount: amountAfterDiscount,
+      taxableAmount: 0,
+      classifiedAmount: amountAfterDiscount,
+      exemptAmount: taxType === 'Exempt' ? amountAfterDiscount : 0,
+      nilRatedAmount: taxType === 'Nil Rated' ? amountAfterDiscount : 0,
+      zeroRatedAmount: taxType === 'Zero Rated' ? amountAfterDiscount : 0,
+      nonGstAmount: taxType === 'Non-GST' ? amountAfterDiscount : 0,
+      withoutTaxAmount: 0,
       gstRate: 0,
       cgstRate: 0,
       cgstAmount: 0,
@@ -197,7 +223,7 @@ function calculateLineTax(params = {}) {
   }
 
   // BASELINE CASE 3: TAXABLE
-  const nominalGstRate = Math.max(0, parseFloat(params.gstRate || params.gst_rate || params.taxRate || params.tax_rate || params.tax_percent || 0));
+  const nominalGstRate = configuredGstRate;
   const nominalCessRate = Math.max(0, parseFloat(params.cessRate || params.cess_rate || 0));
 
   let taxableAmount = 0;
@@ -266,6 +292,12 @@ function calculateLineTax(params = {}) {
     discPercent,
     discAmount,
     taxableAmount,
+    classifiedAmount: amountAfterDiscount,
+    exemptAmount: 0,
+    nilRatedAmount: 0,
+    zeroRatedAmount: 0,
+    nonGstAmount: 0,
+    withoutTaxAmount: 0,
     gstRate: nominalGstRate,
     cgstRate,
     cgstAmount,
@@ -316,17 +348,22 @@ function calculateInvoiceTax(invoiceData = {}) {
   let totalCessAmount = 0;
   let totalTaxAmount = 0;
   let baseNetAmount = 0;
+  let totalExemptAmount = 0;
+  let totalNilRatedAmount = 0;
+  let totalZeroRatedAmount = 0;
+  let totalNonGstAmount = 0;
+  let totalWithoutTaxAmount = 0;
 
   // Rate-wise and HSN-wise tax summary grouping maps
   const rateSummaryMap = {};
   const hsnSummaryMap = {};
   const taxTypeSummaryMap = {
-    'Taxable': { count: 0, taxableValue: 0, taxAmount: 0, total: 0 },
-    'Exempt': { count: 0, taxableValue: 0, taxAmount: 0, total: 0 },
-    'Nil Rated': { count: 0, taxableValue: 0, taxAmount: 0, total: 0 },
-    'Zero Rated': { count: 0, taxableValue: 0, taxAmount: 0, total: 0 },
-    'Non-GST': { count: 0, taxableValue: 0, taxAmount: 0, total: 0 },
-    'Without Tax': { count: 0, taxableValue: 0, taxAmount: 0, total: 0 }
+    'Taxable': { count: 0, taxableValue: 0, classifiedValue: 0, taxAmount: 0, total: 0 },
+    'Exempt': { count: 0, taxableValue: 0, classifiedValue: 0, taxAmount: 0, total: 0 },
+    'Nil Rated': { count: 0, taxableValue: 0, classifiedValue: 0, taxAmount: 0, total: 0 },
+    'Zero Rated': { count: 0, taxableValue: 0, classifiedValue: 0, taxAmount: 0, total: 0 },
+    'Non-GST': { count: 0, taxableValue: 0, classifiedValue: 0, taxAmount: 0, total: 0 },
+    'Without Tax': { count: 0, taxableValue: 0, classifiedValue: 0, taxAmount: 0, total: 0 }
   };
 
   const processedItems = items.map((rawItem, idx) => {
@@ -342,7 +379,7 @@ function calculateInvoiceTax(invoiceData = {}) {
       rate: parseFloat(rawItem.rate) || 0,
       discPercent: rawItem.disc_percent ?? rawItem.disc_perc ?? rawItem.discPercent ?? rawItem.disc,
       discAmount: rawItem.disc_amount ?? rawItem.discAmount,
-      taxType: rawItem.tax_type || rawItem.taxType || invoiceData.defaultTaxType || 'Taxable',
+      taxType: rawItem.tax_type || rawItem.taxType || '',
       taxMode: rawItem.tax_mode || rawItem.taxMode || taxMode,
       gstRate: rawItem.gst_rate ?? rawItem.tax_rate ?? rawItem.tax_percent ?? rawItem.tax_perc ?? rawItem.tax ?? rawItem.taxRate,
       cessRate: rawItem.cess_rate ?? rawItem.cessRate ?? 0,
@@ -356,6 +393,11 @@ function calculateInvoiceTax(invoiceData = {}) {
     totalGrossAmount += lineCalc.grossAmount;
     totalDiscountAmount += lineCalc.discAmount;
     totalTaxableAmount += lineCalc.taxableAmount;
+    totalExemptAmount += lineCalc.exemptAmount || 0;
+    totalNilRatedAmount += lineCalc.nilRatedAmount || 0;
+    totalZeroRatedAmount += lineCalc.zeroRatedAmount || 0;
+    totalNonGstAmount += lineCalc.nonGstAmount || 0;
+    totalWithoutTaxAmount += lineCalc.withoutTaxAmount || 0;
     totalCgstAmount += lineCalc.cgstAmount;
     totalSgstAmount += lineCalc.sgstAmount;
     totalIgstAmount += lineCalc.igstAmount;
@@ -416,6 +458,7 @@ function calculateInvoiceTax(invoiceData = {}) {
     if (taxTypeSummaryMap[classificationKey]) {
       taxTypeSummaryMap[classificationKey].count += 1;
       taxTypeSummaryMap[classificationKey].taxableValue = round2(taxTypeSummaryMap[classificationKey].taxableValue + lineCalc.taxableAmount);
+      taxTypeSummaryMap[classificationKey].classifiedValue = round2(taxTypeSummaryMap[classificationKey].classifiedValue + (lineCalc.classifiedAmount || 0));
       taxTypeSummaryMap[classificationKey].taxAmount = round2(taxTypeSummaryMap[classificationKey].taxAmount + lineCalc.totalTax);
       taxTypeSummaryMap[classificationKey].total = round2(taxTypeSummaryMap[classificationKey].total + lineCalc.totalAmount);
     }
@@ -428,7 +471,8 @@ function calculateInvoiceTax(invoiceData = {}) {
       weight: itemWt,
       total_wt: lineTotalWt,
       total_weight: lineTotalWt,
-      amount: lineCalc.taxableAmount, // Canonical taxable base
+      amount: lineCalc.classifiedAmount,
+      taxable_amount: lineCalc.taxableAmount,
       net_line_total: lineCalc.totalAmount
     };
   });
@@ -451,6 +495,11 @@ function calculateInvoiceTax(invoiceData = {}) {
   totalGrossAmount = round2(totalGrossAmount);
   totalDiscountAmount = round2(totalDiscountAmount);
   totalTaxableAmount = round2(totalTaxableAmount);
+  totalExemptAmount = round2(totalExemptAmount);
+  totalNilRatedAmount = round2(totalNilRatedAmount);
+  totalZeroRatedAmount = round2(totalZeroRatedAmount);
+  totalNonGstAmount = round2(totalNonGstAmount);
+  totalWithoutTaxAmount = round2(totalWithoutTaxAmount);
   totalCgstAmount = round2(totalCgstAmount);
   totalSgstAmount = round2(totalSgstAmount);
   totalIgstAmount = round2(totalIgstAmount);
@@ -475,6 +524,11 @@ function calculateInvoiceTax(invoiceData = {}) {
     discountAmount: totalDiscountAmount,
     taxableAmount: totalTaxableAmount,
     billAmount: totalTaxableAmount,
+    exemptAmount: totalExemptAmount,
+    nilRatedAmount: totalNilRatedAmount,
+    zeroRatedAmount: totalZeroRatedAmount,
+    nonGstAmount: totalNonGstAmount,
+    withoutTaxAmount: totalWithoutTaxAmount,
     cgstAmount: totalCgstAmount,
     sgstAmount: totalSgstAmount,
     igstAmount: totalIgstAmount,

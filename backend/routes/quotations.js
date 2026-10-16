@@ -17,12 +17,14 @@ router.get('/next-bill-no', async (req, res) => {
 // GET all quotations
 router.get('/', async (req, res) => {
   try {
-    const result = await db.query(`
+    const qResult = await db.query(`
       SELECT 
         q.id,
+        q.bill_no,
         q.bill_no as s_no,
         q.bill_no as sNo,
         q.date,
+        q.customer as customer_id,
         COALESCE(cm.name, pcm.name, lm.name, q.customer) as customer,
         COALESCE(cm.name, pcm.name, lm.name, q.customer) as customer_name,
         q.pay_type,
@@ -39,27 +41,55 @@ router.get('/', async (req, res) => {
         q.percent,
         q.deduction_amount,
         q.deduction_remarks,
-        qi.id as itemId,
-        qi.item_name,
-        qi.qty,
-        qi.box,
-        qi.rate,
-        qi.disc,
-        qi.tax,
-        qi.amount as item_amount
+        q.created_at
       FROM quotations q
       LEFT JOIN customer_master cm ON (CAST(cm.id AS TEXT) = CAST(q.customer AS TEXT) OR cm.name = q.customer)
       LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(q.customer AS TEXT) OR pcm.name = q.customer)
       LEFT JOIN ledgermaster lm ON (CAST(lm.id AS TEXT) = CAST(q.customer AS TEXT) OR lm.name = q.customer)
-      LEFT JOIN quotation_items qi ON q.id = qi.quotation_id
-      ORDER BY q.id DESC, qi.id ASC
-    `)
-    res.json(result.rows || [])
+      ORDER BY q.id DESC
+    `);
+
+    const quotations = qResult.rows || [];
+    if (quotations.length === 0) {
+      return res.json([]);
+    }
+
+    const itemsResult = await db.query(`
+      SELECT * FROM quotation_items ORDER BY id ASC
+    `);
+    const allItems = itemsResult.rows || [];
+
+    const itemsByQuotation = {};
+    for (const item of allItems) {
+      if (!itemsByQuotation[item.quotation_id]) {
+        itemsByQuotation[item.quotation_id] = [];
+      }
+      itemsByQuotation[item.quotation_id].push(item);
+    }
+
+    const enrichedQuotations = quotations.map(q => {
+      const qItems = itemsByQuotation[q.id] || [];
+      const itemNames = qItems.map(it => it.item_name).filter(Boolean);
+      const totalQty = qItems.reduce((sum, it) => sum + (parseFloat(it.qty) || 0), 0);
+      const firstItem = qItems[0] || {};
+      return {
+        ...q,
+        items: qItems,
+        item_name: itemNames.join(', ') || q.item_name || '',
+        lot_no: q.lot_no || firstItem.lot_no || '',
+        qty: totalQty || q.qty || 0,
+        rate: firstItem.rate || 0,
+        tax_perc: q.tax_percent || firstItem.tax || 0,
+        disc_perc: firstItem.disc || 0
+      };
+    });
+
+    res.json(enrichedQuotations);
   } catch (error) {
-    console.error('Error fetching quotations:', error)
-    res.status(500).json({ message: 'Error fetching quotations', error: error.message })
+    console.error('Error fetching quotations:', error);
+    res.status(500).json({ message: 'Error fetching quotations', error: error.message });
   }
-})
+});
 
 // POST a new quotation
 router.post('/', async (req, res) => {
@@ -128,7 +158,17 @@ router.post('/', async (req, res) => {
 // GET single quotation by ID
 router.get('/:id', async (req, res) => {
   try {
-    const qRes = await db.query('SELECT * FROM quotations WHERE id = ?', [req.params.id]);
+    const qRes = await db.query(`
+      SELECT 
+        q.*,
+        q.customer as customer_id,
+        COALESCE(cm.name, pcm.name, lm.name, q.customer) as customer_name
+      FROM quotations q
+      LEFT JOIN customer_master cm ON (CAST(cm.id AS TEXT) = CAST(q.customer AS TEXT) OR cm.name = q.customer)
+      LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(q.customer AS TEXT) OR pcm.name = q.customer)
+      LEFT JOIN ledgermaster lm ON (CAST(lm.id AS TEXT) = CAST(q.customer AS TEXT) OR lm.name = q.customer)
+      WHERE q.id = ?
+    `, [req.params.id]);
     if (!qRes.rows || qRes.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Quotation not found' });
     }

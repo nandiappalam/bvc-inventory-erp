@@ -7,6 +7,7 @@ const isWastageItem = (itemName, itemGroup) => {
   const name = (itemName || '').toLowerCase();
   if (
     grp.includes('wastage') || 
+    grp.includes('waste') ||
     grp.includes('reject') || 
     grp.includes('rejection') || 
     grp.includes('loss') || 
@@ -16,6 +17,7 @@ const isWastageItem = (itemName, itemGroup) => {
   }
   if (
     name.includes('wastage') || 
+    name.includes('waste') ||
     name.includes('husk') || 
     name.includes('dust') || 
     name.includes('bran') || 
@@ -26,9 +28,7 @@ const isWastageItem = (itemName, itemGroup) => {
     name.includes('rejection') ||
     name.includes('scrap')
   ) {
-    if (!name.includes('broken rice') && !name.includes('rice') && !name.includes('dal')) {
-      return true;
-    }
+    return true;
   }
   return false;
 };
@@ -245,6 +245,7 @@ router.get('/godown-stock', async (req, res) => {
     const gId = godownId || godown_id;
     const itemQuery = item || search;
     const lotQuery = lotNo || lot_no;
+    const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
     // 1. Fetch godowns directly from godown_master (Source of Truth)
     let godowns = [];
@@ -274,9 +275,6 @@ router.get('/godown-stock', async (req, res) => {
     if (gId && gId !== 'all') {
       godowns = godowns.filter(g => String(g.id) === String(gId) || norm(g.godown_name) === norm(gId));
     }
-
-    // Normalize helper for godown matching
-    const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
     // Fallback item master if no stock transactions exist yet
     let allItems = [];
@@ -314,6 +312,9 @@ router.get('/godown-stock', async (req, res) => {
         SUM(CASE WHEN s.qty < 0 AND LOWER(s.type) != 'purchase return' THEN COALESCE(ABS(s.qty), 0) ELSE 0 END) as out_qty,
         SUM(COALESCE(s.qty, 0)) as available_qty,
         AVG(COALESCE(s.rate, 0)) as rate,
+        MIN(CASE WHEN s.qty > 0 THEN s.date END) as first_entry_date,
+        MAX(CASE WHEN s.qty > 0 THEN s.date END) as last_in_date,
+        MAX(CASE WHEN s.qty < 0 THEN s.date END) as last_out_date,
         MAX(s.date) as last_transaction_date
       FROM stock s
       LEFT JOIN item_master im ON LOWER(s.item_name) = LOWER(im.item_name)
@@ -393,6 +394,115 @@ router.get('/godown-stock', async (req, res) => {
       console.log('Notice in lot table query for godown-stock:', err.message);
     }
 
+    const lotDateRows = await db.query(`
+      SELECT pi.item_name, pi.lot_no, MAX(p.date) AS purchase_date, NULL AS processed_date, 'purchase' AS record_type
+      FROM purchase_items pi
+      JOIN purchases p ON p.id = pi.purchase_id
+      WHERE pi.lot_no IS NOT NULL AND pi.lot_no != ''
+      GROUP BY pi.item_name, pi.lot_no
+      UNION ALL
+      SELECT process_rows.item_name, process_rows.lot_no, NULL AS purchase_date, MAX(process_rows.processed_date) AS processed_date, process_rows.record_type
+      FROM (
+        SELECT go.item_name, go.lot_no, g.date AS processed_date, 'processed' AS record_type
+        FROM grain_output_items go
+        JOIN grains g ON g.id = go.grain_id
+        WHERE go.lot_no IS NOT NULL AND go.lot_no != ''
+        UNION ALL
+        SELECT gw.item_name, gw.lot_no, g.date AS processed_date, 'waste' AS record_type
+        FROM grain_wastage_items gw
+        JOIN grains g ON g.id = gw.grain_id
+        WHERE gw.lot_no IS NOT NULL AND gw.lot_no != ''
+        UNION ALL
+        SELECT foi.item_name, foi.lot_no, fo.date AS processed_date, 'processed' AS record_type
+        FROM flour_out_items foi
+        JOIN flour_out fo ON fo.id = foi.flour_out_id
+        WHERE foi.lot_no IS NOT NULL AND foi.lot_no != ''
+      ) process_rows
+      GROUP BY process_rows.item_name, process_rows.lot_no, process_rows.record_type
+    `);
+    const lotDates = new Map();
+    (lotDateRows.rows || []).forEach(row => {
+      const key = String(row.lot_no || '').trim().toLowerCase();
+      const dates = lotDates.get(key) || {};
+      if (row.purchase_date && (!dates.purchase_date || String(row.purchase_date) > String(dates.purchase_date))) {
+        dates.purchase_date = row.purchase_date;
+      }
+      if (row.processed_date && (!dates.processed_date || String(row.processed_date) > String(dates.processed_date))) {
+        dates.processed_date = row.processed_date;
+      }
+      if (row.record_type === 'processed') dates.has_processed_record = true;
+      if (row.record_type === 'waste') dates.has_waste_record = true;
+      lotDates.set(key, dates);
+    });
+    const addLotDates = row => {
+      const key = String(row.lot_no || '').trim().toLowerCase();
+      const dates = lotDates.get(key) || {};
+      return {
+        ...row,
+        purchase_date: dates.purchase_date || row.purchase_date || null,
+        processed_date: dates.processed_date || row.processed_date || null,
+        has_processed_record: Boolean(dates.has_processed_record),
+        has_waste_record: Boolean(dates.has_waste_record)
+      };
+    };
+    stockTxnRows = stockTxnRows.map(addLotDates);
+    lotRows = lotRows.map(addLotDates);
+
+    const coldStorageGodowns = godowns.filter(g =>
+      String(g.godown_type || '').toLowerCase() === 'cold storage' ||
+      String(g.storage_location || '').toLowerCase().includes('outside') ||
+      norm(g.godown_name).includes('cold')
+    );
+    let coldStorageRows = [];
+    if (coldStorageGodowns.length > 0) {
+      const coldStorageRes = await db.query(`
+        SELECT
+          csi.item_id,
+          csi.item_name,
+          COALESCE(
+            (
+              SELECT pi.lot_no
+              FROM purchase_items pi
+              WHERE LOWER(TRIM(pi.item_name)) = LOWER(TRIM(csi.item_name))
+                AND UPPER(TRIM(pi.lot_no)) = UPPER(TRIM(REPLACE(csi.purchase_lot_no, 'CS-', '')))
+              ORDER BY pi.id DESC
+              LIMIT 1
+            ),
+            CASE
+              WHEN UPPER(TRIM(csi.purchase_lot_no)) LIKE 'CS-%' THEN SUBSTR(TRIM(csi.purchase_lot_no), 4)
+              ELSE csi.purchase_lot_no
+            END
+          ) AS purchase_lot_no,
+          csi.cold_storage_lot_no,
+          csv.cold_storage_id,
+          csv.cold_storage_name,
+          COALESCE(
+            (SELECT im.item_code FROM item_master im WHERE LOWER(csi.item_name) = LOWER(im.item_name) LIMIT 1),
+            UPPER(SUBSTR(csi.item_name, 1, 4))
+          ) AS item_code,
+          COALESCE(
+            (SELECT COALESCE(im.type, im.item_group) FROM item_master im WHERE LOWER(csi.item_name) = LOWER(im.item_name) LIMIT 1),
+            'General'
+          ) AS category,
+          COALESCE(NULLIF(MAX(csi.weight), 0), 1) AS weight,
+          csi.unit,
+          SUM(CASE WHEN csv.voucher_type = 'IN' THEN csi.quantity ELSE 0 END) AS in_qty,
+          SUM(CASE WHEN csv.voucher_type = 'OUT' THEN csi.quantity ELSE 0 END) AS out_qty,
+          SUM(CASE WHEN csv.voucher_type = 'IN' THEN csi.total_wt ELSE 0 END) AS in_wt,
+          SUM(CASE WHEN csv.voucher_type = 'OUT' THEN csi.total_wt ELSE 0 END) AS out_wt,
+          MAX(CASE WHEN csv.voucher_type = 'IN' THEN csv.voucher_date END) AS last_in_date,
+          MAX(CASE WHEN csv.voucher_type = 'OUT' THEN csv.voucher_date END) AS last_out_date,
+          MAX(csv.voucher_date) AS last_transaction_date
+        FROM cold_storage_items csi
+        JOIN cold_storage_vouchers csv ON csi.voucher_id = csv.id
+        WHERE COALESCE(csv.remarks, '') NOT LIKE 'Auto-sync from Stock Lot CS-%'
+        GROUP BY
+          csi.item_id, csi.item_name, csi.purchase_lot_no, csi.cold_storage_lot_no,
+          csv.cold_storage_id, csv.cold_storage_name, csi.unit
+      `);
+      coldStorageRows = coldStorageRes.rows || [];
+    }
+
     // Fetch item_transfers as well to ensure transfers are never missed
     let trfRows = [];
     try {
@@ -419,38 +529,59 @@ router.get('/godown-stock', async (req, res) => {
       // Collect item keys (item_name + lot_no) matching this godown across stock, stock_lots
       const itemMap = new Map();
 
-      // 1. Process stock ledger entries for this godown (the absolute source of truth)
-      const stockForG = stockTxnRows.filter(s => {
-        const sLotNorm = (s.lot_no || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-        const sItemNorm = (s.item_name || '').trim().toUpperCase();
-        const isLot3 = sLotNorm === 'LOT0003' || sLotNorm === 'LOT003' || sLotNorm === 'LOT3' || sItemNorm.includes('URAD');
-        const isLot6 = sLotNorm === 'LOT0006' || sLotNorm === 'LOT006' || sLotNorm === 'LOT6';
+      const isColdStorage = coldStorageGodowns.some(coldGodown => String(coldGodown.id) === String(targetGId));
+      const godownRows = isColdStorage
+        ? coldStorageRows.filter(row => {
+          if (row.cold_storage_id !== null && row.cold_storage_id !== undefined && row.cold_storage_id !== '') {
+            return String(row.cold_storage_id) === String(targetGId);
+          }
+          return norm(row.cold_storage_name) === normGName;
+        }).map(row => {
+          const inQty = parseFloat(row.in_qty) || 0;
+          const outQty = parseFloat(row.out_qty) || 0;
+          const inWeight = parseFloat(row.in_wt) || 0;
+          const outWeight = parseFloat(row.out_wt) || 0;
+          const availableQty = inQty - outQty;
+          const weight = parseFloat(row.weight) || (availableQty ? (inWeight - outWeight) / availableQty : 1);
+          return {
+            item_id: row.item_id,
+            item_code: row.item_code,
+            item_name: row.item_name,
+            category: row.category,
+            weight,
+            unit: row.unit || 'KG',
+            lot_no: row.cold_storage_lot_no || row.purchase_lot_no,
+            purchase_lot_no: row.purchase_lot_no,
+            opening_qty: 0,
+            in_qty: inQty,
+            out_qty: outQty,
+            qty: availableQty,
+            current_qty: availableQty,
+            available_qty: availableQty,
+            available_wt: inWeight - outWeight,
+            in_wt: inWeight,
+            out_wt: outWeight,
+            first_entry_date: row.last_in_date || null,
+            purchase_date: null,
+            processed_date: null,
+            last_in_date: row.last_in_date || null,
+            last_out_date: row.last_out_date || null,
+            rate: 0,
+            stock_value: 0,
+            godown_id: targetGId,
+            godown_name: gName,
+            last_transaction_date: row.last_transaction_date || todayStr,
+            status: availableQty > 0 ? 'In Stock' : 'Out of Stock'
+          };
+        })
+        : stockTxnRows.filter(row => {
+          if (row.godown_id !== null && row.godown_id !== undefined && row.godown_id !== '') {
+            return String(row.godown_id) === String(targetGId);
+          }
+          return norm(row.godown_name) === normGName;
+        });
 
-        // LOT0003 / URAD strictly belongs ONLY to PJ (Factory Godown, ID 1), NEVER to Cold Storage!
-        if (isLot3) {
-          return String(targetGId) === '1' || normGName === 'pj';
-        }
-        // LOT0006 strictly belongs to Cold Storage (ID 2), NEVER to PJ!
-        if (isLot6) {
-          return String(targetGId) !== '1' && normGName !== 'pj';
-        }
-
-        const sNorm = norm(s.godown_name);
-        if (s.godown_id && String(s.godown_id) === String(targetGId)) return true;
-        if (sNorm && sNorm === normGName) return true;
-        if (sNorm && normGName && (sNorm.includes(normGName) || normGName.includes(sNorm))) return true;
-        if (godowns[0] && String(godowns[0].id) === String(targetGId)) {
-          // If this is the primary godown, also catch any item not matching any other known godown
-          const matchesOther = godowns.slice(1).some(otherG => {
-            const oNorm = norm(otherG.godown_name);
-            return (s.godown_id && String(s.godown_id) === String(otherG.id)) || (sNorm && (sNorm === oNorm || sNorm.includes(oNorm) || oNorm.includes(sNorm)));
-          });
-          if (!matchesOther) return true;
-        }
-        return false;
-      });
-
-      stockForG.forEach((s, idx) => {
+      godownRows.forEach((s, idx) => {
         const key = `${(s.item_name || '').toLowerCase()}:::${(s.lot_no || '').toLowerCase()}`;
         const availQty = parseFloat(s.available_qty) || 0;
         const openQty = parseFloat(s.opening_qty) || 0;
@@ -458,15 +589,6 @@ router.get('/godown-stock', async (req, res) => {
         const outQty = parseFloat(s.out_qty) || 0;
         const uWt = parseFloat(s.weight) || 50;
         const rate = parseFloat(s.rate) || 0;
-
-        const sLotNorm = (s.lot_no || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-        const sItemNorm = (s.item_name || '').trim().toUpperCase();
-        let rowGodownId = targetGId;
-        let rowGodownName = gName;
-        if (sLotNorm === 'LOT0003' || sLotNorm === 'LOT003' || sLotNorm === 'LOT3' || sItemNorm.includes('URAD')) {
-          rowGodownId = 1;
-          rowGodownName = 'PJ';
-        }
 
         itemMap.set(key, {
           item_id: s.item_id || (idx + 1),
@@ -486,8 +608,15 @@ router.get('/godown-stock', async (req, res) => {
           rate: rate,
           stock_value: availQty * rate,
           amount: availQty * rate,
-          godown_id: rowGodownId,
-          godown_name: rowGodownName,
+          first_entry_date: s.first_entry_date || null,
+          purchase_date: s.purchase_date || null,
+          processed_date: s.processed_date || null,
+          has_processed_record: s.has_processed_record,
+          has_waste_record: s.has_waste_record,
+          last_in_date: s.last_in_date || null,
+          last_out_date: s.last_out_date || null,
+          godown_id: targetGId,
+          godown_name: gName,
           last_transaction_date: s.last_transaction_date || todayStr,
           last_updated_date: s.last_transaction_date || todayStr,
           status: availQty > 0 ? 'In Stock' : 'Out of Stock'
@@ -495,34 +624,11 @@ router.get('/godown-stock', async (req, res) => {
       });
 
       // 2. Process stock_lots for this godown (to catch any lot records not captured by the ledger)
-      const lotsForG = lotRows.filter(l => {
-        const lLotNorm = (l.lot_no || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-        const lItemNorm = (l.item_name || '').trim().toUpperCase();
-        const isLot3 = lLotNorm === 'LOT0003' || lLotNorm === 'LOT003' || lLotNorm === 'LOT3' || lItemNorm.includes('URAD');
-        const isLot6 = lLotNorm === 'LOT0006' || lLotNorm === 'LOT006' || lLotNorm === 'LOT6';
-
-        // LOT0003 / URAD strictly belongs ONLY to PJ (Factory Godown, ID 1), NEVER to Cold Storage!
-        if (isLot3) {
-          return String(targetGId) === '1' || normGName === 'pj';
+      const lotsForG = isColdStorage ? [] : lotRows.filter(row => {
+        if (row.godown_id !== null && row.godown_id !== undefined && row.godown_id !== '') {
+          return String(row.godown_id) === String(targetGId);
         }
-        // LOT0006 strictly belongs to Cold Storage (ID 2), NEVER to PJ!
-        if (isLot6) {
-          return String(targetGId) !== '1' && normGName !== 'pj';
-        }
-
-        const lNorm = norm(l.godown_name);
-        if (l.godown_id && String(l.godown_id) === String(targetGId)) return true;
-        if (lNorm && lNorm === normGName) return true;
-        if (lNorm && normGName && (lNorm.includes(normGName) || normGName.includes(lNorm))) return true;
-        if (godowns[0] && String(godowns[0].id) === String(targetGId)) {
-          // If this is the primary godown, also catch any item not matching any other known godown
-          const matchesOther = godowns.slice(1).some(otherG => {
-            const oNorm = norm(otherG.godown_name);
-            return (l.godown_id && String(l.godown_id) === String(otherG.id)) || (lNorm && (lNorm === oNorm || lNorm.includes(oNorm) || oNorm.includes(lNorm)));
-          });
-          if (!matchesOther) return true;
-        }
-        return false;
+        return norm(row.godown_name) === normGName;
       });
 
       lotsForG.forEach((l, idx) => {
@@ -532,15 +638,6 @@ router.get('/godown-stock', async (req, res) => {
           const openQty = parseFloat(l.opening_qty) || 0;
           const uWt = parseFloat(l.weight) || 50;
           const rate = parseFloat(l.rate) || 0;
-
-          const lLotNorm = (l.lot_no || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-          const lItemNorm = (l.item_name || '').trim().toUpperCase();
-          let rowGodownId = targetGId;
-          let rowGodownName = gName;
-          if (lLotNorm === 'LOT0003' || lLotNorm === 'LOT003' || lLotNorm === 'LOT3' || lItemNorm.includes('URAD')) {
-            rowGodownId = 1;
-            rowGodownName = 'PJ';
-          }
 
           itemMap.set(key, {
             item_id: l.item_id || (idx + 1000),
@@ -560,8 +657,15 @@ router.get('/godown-stock', async (req, res) => {
             rate: rate,
             stock_value: availQty * rate,
             amount: availQty * rate,
-            godown_id: rowGodownId,
-            godown_name: rowGodownName,
+            first_entry_date: l.last_transaction_date ? String(l.last_transaction_date).split('T')[0] : null,
+            purchase_date: l.purchase_date || null,
+            processed_date: l.processed_date || null,
+            has_processed_record: l.has_processed_record,
+            has_waste_record: l.has_waste_record,
+            last_in_date: null,
+            last_out_date: null,
+            godown_id: targetGId,
+            godown_name: gName,
             last_transaction_date: l.last_transaction_date ? String(l.last_transaction_date).split('T')[0] : todayStr,
             last_updated_date: l.last_transaction_date ? String(l.last_transaction_date).split('T')[0] : todayStr,
             status: availQty > 0 ? 'In Stock' : 'Out of Stock'
@@ -576,14 +680,18 @@ router.get('/godown-stock', async (req, res) => {
         const availQ = parseFloat(i.available_qty) || 0;
         const uWt = parseFloat(i.weight) || 50;
         const rVal = parseFloat(i.rate) || 0;
-        const stkWt = availQ * uWt;
+        const stkWt = parseFloat(i.available_wt ?? (availQ * uWt)) || 0;
         const stkVal = availQ * rVal;
 
         const nameLower = (i.item_name || '').toLowerCase();
         const catLower = (i.category || '').toLowerCase();
         let cat = 'RM';
-        if (nameLower.includes('wastage') || nameLower.includes('rejection') || nameLower.includes('scrap') || nameLower.includes('loss') || catLower.includes('wastage')) {
+        if (i.has_waste_record || isWastageItem(i.item_name, i.category)) {
           cat = 'Wastage';
+        } else if (nameLower.includes('vacuum') || nameLower.includes('vaccum') || catLower.includes('vacuum')) {
+          cat = 'Vacuum';
+        } else if (i.has_processed_record) {
+          cat = 'FG';
         } else if (
           nameLower.includes('papad') || nameLower.includes('atta') || nameLower.includes('bgf') || nameLower.includes('brf') || nameLower.includes('10 rs pack') || nameLower.includes('pack') ||
           catLower === 'fg' || catLower.includes('finished') || catLower.includes('flour') || catLower.includes('papad')
@@ -602,6 +710,9 @@ router.get('/godown-stock', async (req, res) => {
           current_qty: availQ,
           qty: availQ,
           category: cat,
+          entry_date: i.purchase_date || (cat === 'RM' ? (i.first_entry_date || i.last_in_date || null) : null),
+          processed_date: i.processed_date || null,
+          stock_location_type: isColdStorage ? 'cold-storage' : 'godown',
           weight: uWt,
           rate: rVal,
           stock_weight: stkWt,

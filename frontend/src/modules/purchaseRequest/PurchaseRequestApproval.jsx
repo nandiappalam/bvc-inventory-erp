@@ -146,7 +146,7 @@ const PurchaseRequestApproval = () => {
             id: it.id,
             item_name: name,
             requested_qty: it.requested_qty,
-            approved_qty: it.approved_qty || it.requested_qty,
+            approved_qty: it.approved_qty ?? it.requested_qty,
             unit: it.unit,
             estimated_rate: it.estimated_rate
           };
