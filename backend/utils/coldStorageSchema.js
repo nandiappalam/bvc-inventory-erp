@@ -445,6 +445,35 @@ async function ensurePostgresColdStorageSchema(companyId) {
   `, [], companyId);
 
   await db.query(`
+    CREATE TABLE IF NOT EXISTS "${schema}"."godown_transfers" (
+      id SERIAL PRIMARY KEY,
+      s_no TEXT,
+      transfer_date TEXT,
+      from_godown_id INTEGER,
+      from_godown_name TEXT,
+      to_godown_id INTEGER,
+      to_godown_name TEXT,
+      item_name TEXT,
+      lot_no TEXT,
+      qty REAL DEFAULT 0,
+      weight REAL DEFAULT 0,
+      vehicle_no TEXT,
+      driver_name TEXT,
+      driver_phone TEXT,
+      transporter_name TEXT,
+      loadman_name TEXT,
+      loadman_charges REAL DEFAULT 0,
+      handling_amount REAL DEFAULT 0,
+      storage_rate REAL DEFAULT 0,
+      storage_days INTEGER DEFAULT 0,
+      storage_charges REAL DEFAULT 0,
+      insurance_charges REAL DEFAULT 0,
+      remarks TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `, [], companyId);
+
+  await db.query(`
     CREATE TABLE IF NOT EXISTS "${schema}"."cold_storage_items" (
       id SERIAL PRIMARY KEY,
       voucher_id INTEGER NOT NULL,
@@ -537,14 +566,49 @@ async function ensurePostgresColdStorageSchema(companyId) {
     )
   `, [], companyId);
 
+
   const pgCols = [
+    'purchase_id INTEGER', 'vehicle_no TEXT', 'driver_name TEXT', 'transporter_name TEXT',
+    'loadman_name TEXT', 'loadman_charges NUMERIC DEFAULT 0', 'storage_days INTEGER DEFAULT 0',
+    'total_qty NUMERIC DEFAULT 0', 'total_weight NUMERIC DEFAULT 0', 'bill_type TEXT DEFAULT \'OUTWARD\'',
+    'paid_amount NUMERIC DEFAULT 0', 'balance_amount NUMERIC DEFAULT 0', 'payment_status TEXT DEFAULT \'Pending\'',
+    'accounting_voucher_no TEXT',
+    'is_cold_storage INTEGER DEFAULT 0',
+    'slab_calculation_type TEXT DEFAULT \'Progressive\'',
+    'inward_unloading_rate NUMERIC DEFAULT 0.50',
+    'outward_loading_rate NUMERIC DEFAULT 0.50',
+    'storage_rate_per_kg_day NUMERIC DEFAULT 0.20',
+    'free_storage_days INTEGER DEFAULT 0',
+    'min_billable_days INTEGER DEFAULT 1',
+    'operator_id INTEGER',
+    'operator_name TEXT',
+    'rate_per_bag NUMERIC DEFAULT 0',
+    'rate_per_kg NUMERIC DEFAULT 0.20',
+    'rate_per_ton NUMERIC DEFAULT 0',
+    'inward_handling_rate NUMERIC DEFAULT 0.50',
+    'outward_handling_rate NUMERIC DEFAULT 0.50',
+    'insurance_rate NUMERIC DEFAULT 0',
+    'mamool_rate NUMERIC DEFAULT 0',
+    'default_chamber TEXT DEFAULT \'Chamber 1\'',
+    'gst_rate NUMERIC DEFAULT 18',
+    'billing_basis TEXT DEFAULT \'Per KG/Day\'',
+    'billing_method TEXT DEFAULT \'Progressive\'',
+    'storage_duration INTEGER DEFAULT 10'
+  ];
+  for (const colDef of pgCols) {
+    try {
+      await db.query(`ALTER TABLE "godown_master" ADD COLUMN IF NOT EXISTS ${colDef}`, [], companyId);
+    } catch (_) {}
+  }
+
+  const pgBillCols = [
     'purchase_id INTEGER', 'vehicle_no TEXT', 'driver_name TEXT', 'transporter_name TEXT',
     'loadman_name TEXT', 'loadman_charges NUMERIC DEFAULT 0', 'storage_days INTEGER DEFAULT 0',
     'total_qty NUMERIC DEFAULT 0', 'total_weight NUMERIC DEFAULT 0', 'bill_type TEXT DEFAULT \'OUTWARD\'',
     'paid_amount NUMERIC DEFAULT 0', 'balance_amount NUMERIC DEFAULT 0', 'payment_status TEXT DEFAULT \'Pending\'',
     'accounting_voucher_no TEXT'
   ];
-  for (const colDef of pgCols) {
+  for (const colDef of pgBillCols) {
     try {
       await db.query(`ALTER TABLE "${schema}"."cold_storage_bills" ADD COLUMN IF NOT EXISTS ${colDef}`, [], companyId);
     } catch (_) {}
