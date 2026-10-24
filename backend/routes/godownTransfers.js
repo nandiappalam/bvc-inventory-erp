@@ -19,10 +19,30 @@ const initTable = async () => {
         lot_no TEXT,
         qty REAL DEFAULT 0,
         weight REAL DEFAULT 0,
+        vehicle_no TEXT,
+        driver_name TEXT,
+        driver_phone TEXT,
+        transporter_name TEXT,
+        loadman_name TEXT,
+        loadman_charges REAL DEFAULT 0,
+        insurance_charges REAL DEFAULT 0,
         remarks TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
+
+    const cols = [
+      'ALTER TABLE godown_transfers ADD COLUMN vehicle_no TEXT',
+      'ALTER TABLE godown_transfers ADD COLUMN driver_name TEXT',
+      'ALTER TABLE godown_transfers ADD COLUMN driver_phone TEXT',
+      'ALTER TABLE godown_transfers ADD COLUMN transporter_name TEXT',
+      'ALTER TABLE godown_transfers ADD COLUMN loadman_name TEXT',
+      'ALTER TABLE godown_transfers ADD COLUMN loadman_charges REAL DEFAULT 0',
+      'ALTER TABLE godown_transfers ADD COLUMN insurance_charges REAL DEFAULT 0'
+    ];
+    for (const sql of cols) {
+      try { await db.run(sql); } catch (_) {}
+    }
   } catch (err) {
     console.error('Error creating godown_transfers table:', err.message);
   }
@@ -232,11 +252,20 @@ router.post('/', async (req, res) => {
         throw insufficientStockError;
       }
 
+      const vehicle_no = req.body.vehicle_no || req.body.lorry_no || '';
+      const driver_name = req.body.driver_name || req.body.driver || '';
+      const driver_phone = req.body.driver_phone || '';
+      const transporter_name = req.body.transporter_name || req.body.transporter || '';
+      const loadman_name = req.body.loadman_name || req.body.worker_name || '';
+      const loadman_charges = parseFloat(req.body.loadman_charges || 0);
+      const insurance_charges = parseFloat(req.body.insurance_charges || 0);
+
       const result = await transaction.run(`
         INSERT INTO godown_transfers (
           s_no, transfer_date, from_godown_id, from_godown_name, to_godown_id, to_godown_name,
-          item_name, lot_no, qty, weight, remarks
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          item_name, lot_no, qty, weight, vehicle_no, driver_name, driver_phone,
+          transporter_name, loadman_name, loadman_charges, insurance_charges, remarks
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
         finalSNo,
         transfer_date || new Date().toISOString().split('T')[0],
@@ -248,6 +277,13 @@ router.post('/', async (req, res) => {
         lot_no,
         transferQty,
         transferWt,
+        vehicle_no,
+        driver_name,
+        driver_phone,
+        transporter_name,
+        loadman_name,
+        loadman_charges,
+        insurance_charges,
         remarks || ''
       ]);
       transferId = result.lastID;
@@ -371,9 +407,10 @@ router.post('/', async (req, res) => {
       }
     }
 
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
     let coldStorageSyncWarning;
     try {
-      await syncGodownTransfersToColdStorage();
+      await syncGodownTransfersToColdStorage(activeCompanyId);
     } catch (syncError) {
       coldStorageSyncWarning = syncError.message;
       console.error('Godown transfer saved, but cold-storage voucher sync failed:', syncError);

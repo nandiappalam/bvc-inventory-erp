@@ -462,9 +462,19 @@ async function createPurchaseVoucherChain(purchaseData) {
   }
 
   // Enhanced GST tax posting (CGST/SGST/IGST split or aggregate)
-  const cgst = Number(purchaseData.cgstAmount || 0);
-  const sgst = Number(purchaseData.sgstAmount || 0);
-  const igst = Number(purchaseData.igstAmount || 0);
+  let cgst = Number(purchaseData.cgstAmount || 0);
+  let sgst = Number(purchaseData.sgstAmount || 0);
+  let igst = Number(purchaseData.igstAmount || 0);
+  const totalTax = Number(taxAmount || 0);
+
+  if (cgst === 0 && sgst === 0 && igst === 0 && totalTax > 0) {
+    if (purchaseData.isInterstate) {
+      igst = totalTax;
+    } else {
+      cgst = Number((totalTax / 2).toFixed(2));
+      sgst = Number((totalTax - cgst).toFixed(2));
+    }
+  }
 
   if (cgst > 0 || sgst > 0 || igst > 0) {
     if (cgst > 0) {
@@ -479,29 +489,6 @@ async function createPurchaseVoucherChain(purchaseData) {
       voucherEntryRows.push({ ledgerName: 'Input IGST', debit: igst, credit: 0, remarks: `IGST on ${particulars}` });
       ledgerEntries.push(createLedgerEntry({ ledgerName: 'Input IGST', date: voucherDate, voucherType: 'Purchase', voucherNo, debit: igst, credit: 0, referenceId: purchaseId, referenceType: 'purchase', particulars: `IGST on ${particulars}`, voucherId, transactionId: purchaseId, transactionType: 'purchase' }));
     }
-  } else if (Number(taxAmount || 0) > 0) {
-    voucherEntryRows.push({
-      ledgerName: 'Input Tax',
-      debit: Number(taxAmount || 0),
-      credit: 0,
-      remarks: `Tax on ${particulars}`,
-    })
-    ledgerEntries.push(
-      createLedgerEntry({
-        ledgerName: 'Input Tax',
-        date: voucherDate,
-        voucherType: 'Purchase',
-        voucherNo,
-        debit: Number(taxAmount || 0),
-        credit: 0,
-        referenceId: purchaseId,
-        referenceType: 'purchase',
-        particulars: `Tax on ${particulars}`,
-        voucherId,
-        transactionId: purchaseId,
-        transactionType: 'purchase',
-      })
-    )
   }
 
   if (Number(discAmount || 0) > 0) {
@@ -706,9 +693,19 @@ async function createSalesVoucherChain(salesData) {
   }
 
   // Output Tax Credit (CGST/SGST/IGST split or aggregate)
-  const cgst = Number(salesData.cgstAmount || 0);
-  const sgst = Number(salesData.sgstAmount || 0);
-  const igst = Number(salesData.igstAmount || 0);
+  let cgst = Number(salesData.cgstAmount || 0);
+  let sgst = Number(salesData.sgstAmount || 0);
+  let igst = Number(salesData.igstAmount || 0);
+  const totalTax = Number(taxAmount || 0);
+
+  if (cgst === 0 && sgst === 0 && igst === 0 && totalTax > 0) {
+    if (salesData.isInterstate) {
+      igst = totalTax;
+    } else {
+      cgst = Number((totalTax / 2).toFixed(2));
+      sgst = Number((totalTax - cgst).toFixed(2));
+    }
+  }
 
   if (cgst > 0 || sgst > 0 || igst > 0) {
     if (cgst > 0) {
@@ -723,29 +720,6 @@ async function createSalesVoucherChain(salesData) {
       voucherEntryRows.push({ ledgerName: 'Output IGST', debit: 0, credit: igst, remarks: `IGST on ${particulars}` });
       ledgerEntries.push(createLedgerEntry({ ledgerName: 'Output IGST', date: voucherDate, voucherType: 'Sales', voucherNo, debit: 0, credit: igst, referenceId: salesId, referenceType: 'sales', particulars: `IGST on ${particulars}`, voucherId, transactionId: salesId, transactionType: 'sales' }));
     }
-  } else if (Number(taxAmount || 0) > 0) {
-    voucherEntryRows.push({
-      ledgerName: 'Output Tax',
-      debit: 0,
-      credit: Number(taxAmount || 0),
-      remarks: `Tax on ${particulars}`,
-    })
-    ledgerEntries.push(
-      createLedgerEntry({
-        ledgerName: 'Output Tax',
-        date: voucherDate,
-        voucherType: 'Sales',
-        voucherNo,
-        debit: 0,
-        credit: Number(taxAmount || 0),
-        referenceId: salesId,
-        referenceType: 'sales',
-        particulars: `Tax on ${particulars}`,
-        voucherId,
-        transactionId: salesId,
-        transactionType: 'sales',
-      })
-    )
   }
 
   // Discount Debit

@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express')
 const cors = require('cors')
 const path = require('path')
@@ -503,7 +504,34 @@ async function initializeMasterTables() {
         address TEXT,
         phone_off TEXT,
         area TEXT,
-        status TEXT DEFAULT 'Active'
+        status TEXT DEFAULT 'Active',
+        mobile1 TEXT,
+        email TEXT,
+        website TEXT,
+        gst_number TEXT,
+        godown_type TEXT DEFAULT 'Normal',
+        storage_location TEXT DEFAULT 'Inside Factory',
+        external_company TEXT,
+        capacity REAL DEFAULT 0,
+        capacity_unit TEXT DEFAULT 'KG',
+        temperature_range TEXT,
+        storage_duration INTEGER DEFAULT 10,
+        duration_unit TEXT DEFAULT 'Days',
+        rate_per_kg REAL DEFAULT 0,
+        rate_per_ton REAL DEFAULT 0,
+        billing_basis TEXT DEFAULT 'Per KG',
+        billing_method TEXT DEFAULT 'Fixed Period',
+        min_billable_days INTEGER DEFAULT 10,
+        cold_storage_remarks TEXT,
+        operator_id INTEGER,
+        operator_name TEXT,
+        rate_per_bag REAL DEFAULT 0,
+        inward_handling_rate REAL DEFAULT 0,
+        outward_handling_rate REAL DEFAULT 0,
+        insurance_rate REAL DEFAULT 0,
+        mamool_rate REAL DEFAULT 0,
+        default_chamber TEXT DEFAULT 'Chamber 1',
+        gst_rate REAL DEFAULT 18
       )`
     },
     {

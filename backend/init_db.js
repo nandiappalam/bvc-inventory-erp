@@ -1,4 +1,4 @@
-const isPostgres = process.env.DB_ENGINE === 'postgres' || (!!process.env.DATABASE_URL && process.env.DB_ENGINE !== 'sqlite');
+const isPostgres = (!!process.env.DATABASE_URL && process.env.DB_ENGINE !== 'sqlite');
 let sqlite3 = null;
 let path = null;
 let dbPath = null;

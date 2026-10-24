@@ -36,7 +36,11 @@ function getSmtpTransporter(customConfig = null) {
   const port = customConfig?.port || parseInt(process.env.SMTP_PORT || '587', 10);
   const secure = customConfig?.secure !== undefined ? customConfig.secure : (port === 465 || process.env.SMTP_SECURE === 'true');
 
-  if (!user && !host) {
+  // Verify that credentials are fully and genuinely provided before attempting SMTP auth
+  const isDummyPass = !pass || pass === 'your_password' || pass.includes('placeholder') || pass.trim() === '';
+  const isDummyUser = !user || user.includes('example.com') || user.trim() === '';
+
+  if (isDummyUser || isDummyPass) {
     return null;
   }
 
@@ -55,7 +59,7 @@ function getSmtpTransporter(customConfig = null) {
       host: host || 'smtp.gmail.com',
       port,
       secure,
-      auth: user && pass ? { user, pass } : undefined,
+      auth: { user, pass },
       tls: {
         rejectUnauthorized: false
       }
@@ -112,7 +116,20 @@ async function sendEmailAlert({ to, subject, text, html, smtpConfig = null }) {
       mailtoUrl
     };
   } catch (err) {
-    console.error(`[NotificationService] Error sending email to ${to}:`, err.message);
+    const isAuthError = /530|535|auth|authentication|eauth/i.test(err.message || '');
+    if (isAuthError) {
+      console.warn(`[NotificationService] SMTP auth failed for ${to} (${err.message}). Falling back to client dispatch.`);
+      return {
+        success: true,
+        delivered: false,
+        smtpConfigured: false,
+        method: 'CLIENT_DISPATCH',
+        recipient: to,
+        mailtoUrl,
+        note: 'SMTP authentication required or invalid credentials. Using client mailto dispatch.'
+      };
+    }
+    console.warn(`[NotificationService] SMTP delivery notice for ${to}:`, err.message);
     return {
       success: false,
       delivered: false,

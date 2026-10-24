@@ -7,6 +7,7 @@ import { generateVehicleInPassHtml } from '../utils/vehiclePassPrint';
 import { generatePurchasePrintHtml } from '../utils/purchasePrintHelper';
 import { useAuth } from '../context/AuthContext';
 import DigitalDocumentModal from './documents/DigitalDocumentModal';
+import ColdStoragePurchaseStatementModal from './coldStorage/ColdStoragePurchaseStatementModal';
 import './PurchaseDisplay.css';
 
 // Classic ERP Column definitions for Purchase Display
@@ -128,6 +129,7 @@ const PurchaseDisplay = () => {
   const navigate = useNavigate();
   const { isAdmin, hasPermission, selectedCompany } = useAuth();
   const [activeDoc, setActiveDoc] = useState(null);
+  const [selectedCsPurchase, setSelectedCsPurchase] = useState(null);
 
   const canEdit = isAdmin || hasPermission('Purchase', 'Display', 'can_edit') || hasPermission('Purchase', 'can_edit');
   const canDelete = isAdmin || hasPermission('Purchase', 'Display', 'can_delete') || hasPermission('Purchase', 'can_delete');
@@ -214,6 +216,19 @@ const PurchaseDisplay = () => {
       >
         Vehicle Movement
       </button>
+      {((row.godown && String(row.godown).toLowerCase().includes('cold')) ||
+        (row.godown_name && String(row.godown_name).toLowerCase().includes('cold')) ||
+        row.is_cold_storage ||
+        Number(row.godown_id) === 2) && (
+        <button 
+          className="action-btn" 
+          style={{ backgroundColor: '#0284c7', color: '#ffffff', border: 'none', padding: '5px 11px', borderRadius: '4px', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }} 
+          onClick={() => setSelectedCsPurchase(row)}
+          title="Open Cold Storage Purchase Bill Statement, Operator Terms & Payment Charges"
+        >
+          ❄️ Cold Storage Statement
+        </button>
+      )}
       {canDelete && (
         <button 
           className="action-btn delete-btn danger" 
@@ -280,6 +295,14 @@ const PurchaseDisplay = () => {
           date={activeDoc.date}
           itemSummary={activeDoc.itemSummary}
           status={activeDoc.status}
+        />
+      )}
+      {selectedCsPurchase && (
+        <ColdStoragePurchaseStatementModal
+          open={Boolean(selectedCsPurchase)}
+          onClose={() => setSelectedCsPurchase(null)}
+          purchaseRow={selectedCsPurchase}
+          navigate={navigate}
         />
       )}
     </>

@@ -282,15 +282,25 @@ router.post('/', async (req, res) => {
 
     // Create sales ledger entries
     try {
+      const salesTaxVal = parseFloat(formData.tax_amt) || 0;
+      const isInterstateSales = String(formData.tax_type || '').toLowerCase().includes('inter');
+      const cgstSales = parseFloat(formData.cgst_amt) || (isInterstateSales ? 0 : Number((salesTaxVal / 2).toFixed(2)));
+      const sgstSales = parseFloat(formData.sgst_amt) || (isInterstateSales ? 0 : Number((salesTaxVal - cgstSales).toFixed(2)));
+      const igstSales = parseFloat(formData.igst_amt) || (isInterstateSales ? salesTaxVal : 0);
+
       await createSalesLedgerEntries({
         customer: formData.customer_id || formData.customer || '',
         date: formData.date || new Date().toISOString().split('T')[0],
         invNo: billNo,
         salesId: salesId,
         totalAmount: totalAmt,
-        taxAmount: parseFloat(formData.tax_amt) || 0,
+        taxAmount: salesTaxVal,
+        cgstAmount: cgstSales,
+        sgstAmount: sgstSales,
+        igstAmount: igstSales,
+        isInterstate: isInterstateSales,
         discAmount: 0,
-        baseAmount: parseFloat(totals?.baseAmount) || parseFloat(formData.bill_amt) || (totalAmt - (parseFloat(formData.tax_amt) || 0)),
+        baseAmount: parseFloat(totals?.baseAmount) || parseFloat(formData.bill_amt) || (totalAmt - salesTaxVal),
         deductions: formData.deduction_amount ? [{
           deduction: formData.deduction,
           amount: parseFloat(formData.deduction_amount) || 0,
@@ -611,6 +621,12 @@ router.put('/:id', async (req, res) => {
 
     // Update sales ledger entries and voucher chain
     try {
+      const salesTaxVal = parseFloat(formData.tax_amt) || 0;
+      const isInterstateSales = String(formData.tax_type || '').toLowerCase().includes('inter');
+      const cgstSales = parseFloat(formData.cgst_amt) || (isInterstateSales ? 0 : Number((salesTaxVal / 2).toFixed(2)));
+      const sgstSales = parseFloat(formData.sgst_amt) || (isInterstateSales ? 0 : Number((salesTaxVal - cgstSales).toFixed(2)));
+      const igstSales = parseFloat(formData.igst_amt) || (isInterstateSales ? salesTaxVal : 0);
+
       await deleteLedgerEntries(salesId)
       await createSalesLedgerEntries({
         customer: formData.customer_id || formData.customer || '',
@@ -618,7 +634,11 @@ router.put('/:id', async (req, res) => {
         invNo: formData.sNo || formData.bill_no || formData.s_no || salesId,
         salesId: salesId,
         totalAmount: totalAmt,
-        taxAmount: parseFloat(formData.tax_amt) || 0,
+        taxAmount: salesTaxVal,
+        cgstAmount: cgstSales,
+        sgstAmount: sgstSales,
+        igstAmount: igstSales,
+        isInterstate: isInterstateSales,
         discAmount: 0,
         baseAmount: parseFloat(totals?.baseAmount) || parseFloat(formData.bill_amt) || 0,
         deductions: formData.deduction_amount ? [{

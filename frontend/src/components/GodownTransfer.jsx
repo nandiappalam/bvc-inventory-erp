@@ -34,6 +34,13 @@ const GodownTransfer = () => {
     lot_no: '',
     qty: '',
     weight: '',
+    vehicle_no: '',
+    driver_name: '',
+    driver_phone: '',
+    transporter_name: '',
+    loadman_name: '',
+    loadman_charges: '',
+    insurance_charges: '',
     remarks: ''
   });
 
@@ -212,6 +219,13 @@ const GodownTransfer = () => {
           lot_no: '',
           qty: '',
           weight: '',
+          vehicle_no: '',
+          driver_name: '',
+          driver_phone: '',
+          transporter_name: '',
+          loadman_name: '',
+          loadman_charges: '',
+          insurance_charges: '',
           remarks: ''
         });
         fetchNextSNo();
@@ -505,43 +519,100 @@ const GodownTransfer = () => {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
-            {/* Weight */}
-            <div>
-              <label className="block text-xs font-semibold uppercase text-slate-500 mb-1">Transfer Weight (Kg)</label>
-              <input
-                type="number"
-                step="any"
-                value={formData.weight}
-                onChange={(e) => setFormData(prev => ({ ...prev, weight: e.target.value }))}
-                placeholder="Weight in Kg"
-                className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-bold"
-              />
-            </div>
+          {/* Transport & Charges Details */}
+          <div className="pt-2 border-t border-slate-100">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">Vehicle Transport, Driver & Operational Charges</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+              <div>
+                <label className="block text-xs font-semibold uppercase text-slate-500 mb-1">Vehicle / Lorry No</label>
+                <input
+                  type="text"
+                  value={formData.vehicle_no}
+                  onChange={(e) => setFormData(prev => ({ ...prev, vehicle_no: e.target.value }))}
+                  placeholder="e.g. TN-38-BZ-1234"
+                  className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-mono"
+                />
+              </div>
 
-            {/* Remarks */}
-            <div>
-              <label className="block text-xs font-semibold uppercase text-slate-500 mb-1">Remarks / Vehicle / Notes</label>
-              <input
-                type="text"
-                value={formData.remarks}
-                onChange={(e) => setFormData(prev => ({ ...prev, remarks: e.target.value }))}
-                placeholder="e.g. Driver name or transfer reason"
-                className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
+              <div>
+                <label className="block text-xs font-semibold uppercase text-slate-500 mb-1">Driver Name & Contact</label>
+                <input
+                  type="text"
+                  value={formData.driver_name}
+                  onChange={(e) => setFormData(prev => ({ ...prev, driver_name: e.target.value }))}
+                  placeholder="Driver Name"
+                  className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
 
-            {/* Submit Button */}
-            <div>
-              <button
-                type="submit"
-                disabled={submitting}
-                className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed text-white font-semibold text-sm rounded-lg shadow-sm transition-colors flex items-center justify-center gap-2"
-              >
-                <TransferIcon className="w-5 h-5" />
-                {submitting ? 'Recording Transfer...' : 'Submit Stock Transfer'}
-              </button>
+              <div>
+                <label className="block text-xs font-semibold uppercase text-slate-500 mb-1">Transporter / Agency</label>
+                <input
+                  type="text"
+                  value={formData.transporter_name}
+                  onChange={(e) => setFormData(prev => ({ ...prev, transporter_name: e.target.value }))}
+                  placeholder="Transport Name"
+                  className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase text-slate-500 mb-1">Loadman / Worker Team</label>
+                <input
+                  type="text"
+                  value={formData.loadman_name}
+                  onChange={(e) => setFormData(prev => ({ ...prev, loadman_name: e.target.value }))}
+                  placeholder="Loadman Name"
+                  className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase text-slate-500 mb-1">Loadman / Labour Charges (₹)</label>
+                <input
+                  type="number"
+                  step="any"
+                  value={formData.loadman_charges}
+                  onChange={(e) => setFormData(prev => ({ ...prev, loadman_charges: e.target.value }))}
+                  placeholder="₹ Labour Charge"
+                  className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-semibold"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase text-slate-500 mb-1">Insurance Charges (₹)</label>
+                <input
+                  type="number"
+                  step="any"
+                  value={formData.insurance_charges}
+                  onChange={(e) => setFormData(prev => ({ ...prev, insurance_charges: e.target.value }))}
+                  placeholder="₹ Insurance"
+                  className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-semibold"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-xs font-semibold uppercase text-slate-500 mb-1">Transfer Remarks / Notes</label>
+                <input
+                  type="text"
+                  value={formData.remarks}
+                  onChange={(e) => setFormData(prev => ({ ...prev, remarks: e.target.value }))}
+                  placeholder="e.g. Factory godown inward or transfer reason"
+                  className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
             </div>
+          </div>
+
+          <div className="pt-2 flex justify-end">
+            <button
+              type="submit"
+              disabled={submitting}
+              className="py-2.5 px-6 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed text-white font-bold text-sm rounded-lg shadow-sm transition-colors flex items-center justify-center gap-2"
+            >
+              <TransferIcon className="w-5 h-5" />
+              {submitting ? 'Recording Transfer...' : 'Submit Stock Transfer'}
+            </button>
           </div>
         </form>
       </div>

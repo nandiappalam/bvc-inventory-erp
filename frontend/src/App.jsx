@@ -200,6 +200,8 @@ import ColdStorageVouchers from './components/coldStorage/ColdStorageVouchers'
 import ColdStorageLedger from './components/coldStorage/ColdStorageLedger'
 import ColdStorageTraceability from './components/coldStorage/ColdStorageTraceability'
 import ColdStorageMaster from './components/coldStorage/ColdStorageMaster'
+import ColdStorageBilling from './components/coldStorage/ColdStorageBilling'
+import ColdStorageWorkspace from './components/coldStorage/ColdStorageWorkspace'
 
 // Reports
 import { 
@@ -515,6 +517,9 @@ const AppLayout = () => {
           <Route path="/entry/vehicle-movement-display" element={<VehicleList />} />
 
           {/* Cold Storage Module Routes */}
+          <Route path="/cold-storage" element={<ColdStorageWorkspace />} />
+          <Route path="/cold-storage/workspace" element={<ColdStorageWorkspace />} />
+          <Route path="/cold-storage/billing" element={<ColdStorageBilling />} />
           <Route path="/cold-storage/in" element={<ColdStorageIn />} />
           <Route path="/cold-storage/out" element={<ColdStorageOut />} />
           <Route path="/cold-storage/stock" element={<ColdStorageStock />} />

@@ -457,16 +457,26 @@ router.post('/', async (req, res) => {
 
       createdIds.push(result.lastID);
 
-      // Insert into godown_transfers for legacy compatibility
+      // Insert into godown_transfers for legacy compatibility & Cold Storage Sync
       try {
+        const trfVehicle = req.body.vehicle_no || req.body.lorry_no || '';
+        const trfDriver = req.body.driver_name || req.body.driver || '';
+        const trfDriverPhone = req.body.driver_phone || '';
+        const trfTransporter = req.body.transporter_name || req.body.transporter || '';
+        const trfLoadman = req.body.loadman_name || req.body.worker_name || '';
+        const trfLoadmanCharges = parseFloat(req.body.loadman_charges || 0);
+        const trfInsuranceCharges = parseFloat(req.body.insurance_charges || 0);
+
         await db.run(`
           INSERT INTO godown_transfers (
             s_no, transfer_date, from_godown_id, from_godown_name, to_godown_id, to_godown_name,
-            item_name, lot_no, qty, weight, remarks
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            item_name, lot_no, qty, weight, vehicle_no, driver_name, driver_phone,
+            transporter_name, loadman_name, loadman_charges, insurance_charges, remarks
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
           trfNo, trfDate, from_godown_id, fGodownName, to_godown_id, tGodownName,
-          itmName, lotNo, trfQty, trfWt * trfQty, itemRemarks
+          itmName, lotNo, trfQty, trfWt * trfQty, trfVehicle, trfDriver, trfDriverPhone,
+          trfTransporter, trfLoadman, trfLoadmanCharges, trfInsuranceCharges, itemRemarks
         ]);
       } catch (gErr) {
         console.warn('Legacy godown_transfers insert warning:', gErr.message);
@@ -491,7 +501,7 @@ router.post('/', async (req, res) => {
           trfRate,
           fGodownName,
           from_godown_id,
-          `[${transfer_no}] Transferred to ${tGodownName}. ${itemRemarks}`
+          `[${trfNo}] Transferred to ${tGodownName}. ${itemRemarks}`
         ]);
 
         // 2. Inward entry to destination godown
@@ -509,7 +519,7 @@ router.post('/', async (req, res) => {
           trfRate,
           tGodownName,
           to_godown_id,
-          `[${transfer_no}] Transferred from ${fGodownName}. ${itemRemarks}`
+          `[${trfNo}] Transferred from ${fGodownName}. ${itemRemarks}`
         ]);
 
         // 3. Update stock_lots
@@ -568,9 +578,10 @@ router.post('/', async (req, res) => {
 
     await rebuildStockLedger();
 
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
     let coldStorageSyncWarning;
     try {
-      await syncGodownTransfersToColdStorage();
+      await syncGodownTransfersToColdStorage(activeCompanyId);
     } catch (syncError) {
       coldStorageSyncWarning = syncError.message;
       console.error('Item transfer saved, but cold-storage voucher sync failed:', syncError);

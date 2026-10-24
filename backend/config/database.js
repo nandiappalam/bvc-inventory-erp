@@ -6,7 +6,7 @@ if (types && typeof types.setTypeParser === 'function') {
   types.setTypeParser(1114, (val) => val); // TIMESTAMP without timezone (1114) -> string
   types.setTypeParser(1184, (val) => val); // TIMESTAMPTZ (1184) -> string
 }
-const sqlite3 = require('sqlite3').verbose();
+let sqlite3 = null;
 const path = require('path');
 const fs = require('fs');
 const { AsyncLocalStorage } = require('async_hooks');
@@ -52,7 +52,19 @@ const rawConnectionString = sanitizeConnectionString(
   ''
 );
 
-const isPostgres = process.env.DB_ENGINE === 'postgres' || (!!rawConnectionString && process.env.DB_ENGINE !== 'sqlite');
+const hasValidPgUrl = Boolean(rawConnectionString && rawConnectionString.trim().length > 0);
+let isPostgres = false;
+
+if (process.env.DB_ENGINE === 'sqlite') {
+  isPostgres = false;
+} else if (hasValidPgUrl) {
+  isPostgres = true;
+} else if (process.env.DB_ENGINE === 'postgres') {
+  console.warn('⚠️ [PostgreSQL Pool] DB_ENGINE is postgres, but no DATABASE_URL or POSTGRES_URL was found. Falling back to local SQLite engine.');
+  isPostgres = false;
+} else {
+  isPostgres = false;
+}
 
 // ============================================================================
 // MODE 1 vs MODE 2 ARCHITECTURAL ISOLATION
@@ -113,6 +125,7 @@ if (isPostgres) {
   console.log('🔹 Neon PostgreSQL: DISABLED');
   console.log('🔹 Cloud Sync: STRICTLY NON-SYNCED & NON-LINKED');
   console.log('================================================================');
+  sqlite3 = require('sqlite3').verbose();
 
   dbDir = path.join(__dirname, '../../database');
   if (!fs.existsSync(dbDir)) {
@@ -134,7 +147,7 @@ const TENANT_BUSINESS_TABLES = new Set([
   'grains', 'grain_input_items', 'grain_output_items', 'grain_wastage_items',
   'flour_out', 'flour_out_items', 'flour_out_returns', 'flour_out_return_items',
   'papad_in', 'papad_return', 'papad_company_master', 'papad_company_entry', 'papad_companies',
-  'godown_master', 'godown_transfers', 'item_transfers', 'item_master', 'item_groups', 'cold_storage_vouchers', 'cold_storage_items', 'cold_storage_stock',
+  'godown_master', 'godown_transfers', 'item_transfers', 'item_master', 'item_groups', 'cold_storage_vouchers', 'cold_storage_items', 'cold_storage_stock', 'cold_storage_charge_master', 'cold_storage_bills',
   'customer_master', 'supplier_master', 'employee_master', 'flour_mill_master', 'city_master', 'area_master',
   'transport_master', 'tax_master', 'qc_inspections', 'qc_inspection_params', 'qc_approval_history',
   'incoming_quality_reports', 'compliance_documents', 'compliance_production_records', 'compliance_cleaning_records',
@@ -933,9 +946,31 @@ function getCompanyDatabaseInstance(companyId = 1) {
       'ALTER TABLE purchases ADD COLUMN gross_weight REAL DEFAULT 0',
       'ALTER TABLE purchases ADD COLUMN tare_weight REAL DEFAULT 0',
       'ALTER TABLE purchases ADD COLUMN net_weight REAL DEFAULT 0',
-      'ALTER TABLE purchases ADD COLUMN stock_type TEXT',
+      'ALTER TABLE purchases ADD COLUMN stock_type TEXT DEFAULT "RM"',
       'ALTER TABLE purchases ADD COLUMN taxable_amount REAL DEFAULT 0',
       'ALTER TABLE purchases ADD COLUMN exempt_amount REAL DEFAULT 0',
+      'ALTER TABLE purchases ADD COLUMN godown_id INTEGER',
+      'ALTER TABLE purchases ADD COLUMN voucher_no TEXT',
+      'ALTER TABLE purchases ADD COLUMN bill_amt REAL DEFAULT 0',
+      'ALTER TABLE purchases ADD COLUMN total_amt REAL DEFAULT 0',
+      'ALTER TABLE purchases ADD COLUMN company_state TEXT DEFAULT "Tamil Nadu"',
+      'ALTER TABLE purchases ADD COLUMN party_state TEXT DEFAULT "Tamil Nadu"',
+      'ALTER TABLE purchases ADD COLUMN company_state_code TEXT DEFAULT "33"',
+      'ALTER TABLE purchases ADD COLUMN party_state_code TEXT DEFAULT "33"',
+      'ALTER TABLE purchases ADD COLUMN tax_mode TEXT DEFAULT "Exclusive"',
+      'ALTER TABLE purchases ADD COLUMN cgst_amount REAL DEFAULT 0',
+      'ALTER TABLE purchases ADD COLUMN sgst_amount REAL DEFAULT 0',
+      'ALTER TABLE purchases ADD COLUMN igst_amount REAL DEFAULT 0',
+      'ALTER TABLE purchases ADD COLUMN cess_amount REAL DEFAULT 0',
+      'ALTER TABLE purchases ADD COLUMN sub_total REAL DEFAULT 0',
+      'ALTER TABLE purchases ADD COLUMN total_deductions REAL DEFAULT 0',
+      'ALTER TABLE purchases ADD COLUMN round_off REAL DEFAULT 0',
+      'ALTER TABLE godown_master ADD COLUMN capacity REAL DEFAULT 0',
+      'ALTER TABLE godown_master ADD COLUMN capacity_unit TEXT DEFAULT "KG"',
+      'ALTER TABLE godown_master ADD COLUMN temperature_range TEXT',
+      'ALTER TABLE godown_master ADD COLUMN godown_type TEXT DEFAULT "Normal"',
+      'ALTER TABLE godown_master ADD COLUMN storage_location TEXT DEFAULT "Inside Factory"',
+      'ALTER TABLE godown_master ADD COLUMN external_company TEXT',
       'ALTER TABLE godown_master ADD COLUMN storage_duration INTEGER DEFAULT 10',
       'ALTER TABLE godown_master ADD COLUMN duration_unit TEXT DEFAULT "Days"',
       'ALTER TABLE godown_master ADD COLUMN rate_per_kg REAL DEFAULT 0',
@@ -943,11 +978,150 @@ function getCompanyDatabaseInstance(companyId = 1) {
       'ALTER TABLE godown_master ADD COLUMN billing_basis TEXT DEFAULT "Per KG"',
       'ALTER TABLE godown_master ADD COLUMN billing_method TEXT DEFAULT "Fixed Period"',
       'ALTER TABLE godown_master ADD COLUMN min_billable_days INTEGER DEFAULT 10',
-      'ALTER TABLE godown_master ADD COLUMN cold_storage_remarks TEXT'
+      'ALTER TABLE godown_master ADD COLUMN cold_storage_remarks TEXT',
+      'ALTER TABLE godown_master ADD COLUMN operator_id INTEGER',
+      'ALTER TABLE godown_master ADD COLUMN operator_name TEXT',
+      'ALTER TABLE godown_master ADD COLUMN rate_per_bag REAL DEFAULT 0',
+      'ALTER TABLE godown_master ADD COLUMN inward_handling_rate REAL DEFAULT 0',
+      'ALTER TABLE godown_master ADD COLUMN outward_handling_rate REAL DEFAULT 0',
+      'ALTER TABLE godown_master ADD COLUMN insurance_rate REAL DEFAULT 0',
+      'ALTER TABLE godown_master ADD COLUMN mamool_rate REAL DEFAULT 0',
+      'ALTER TABLE godown_master ADD COLUMN default_chamber TEXT DEFAULT "Chamber 1"',
+      'ALTER TABLE godown_master ADD COLUMN gst_rate REAL DEFAULT 18',
+      'ALTER TABLE godown_master ADD COLUMN is_cold_storage INTEGER DEFAULT 0',
+      'ALTER TABLE godown_master ADD COLUMN slab_calculation_type TEXT DEFAULT "Progressive"',
+      'ALTER TABLE godown_master ADD COLUMN inward_unloading_rate REAL DEFAULT 0.50',
+      'ALTER TABLE godown_master ADD COLUMN outward_loading_rate REAL DEFAULT 0.50',
+      'ALTER TABLE godown_master ADD COLUMN storage_rate_per_kg_day REAL DEFAULT 0.20',
+      'ALTER TABLE godown_master ADD COLUMN free_storage_days INTEGER DEFAULT 0',
+      'ALTER TABLE godown_master ADD COLUMN min_billable_days INTEGER DEFAULT 1',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN operator_id INTEGER',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN operator_name TEXT',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN inward_source_type TEXT DEFAULT "Factory Godown"',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN outward_dest_type TEXT DEFAULT "Internal Godown"',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN customer_id INTEGER',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN customer_name TEXT',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN sales_order_ref TEXT',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN vehicle_no TEXT',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN driver_name TEXT',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN driver_phone TEXT',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN transporter_name TEXT',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN lr_no TEXT',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN lr_date TEXT',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN gate_pass_no TEXT',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN chamber_no TEXT',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN floor_no TEXT',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN rack_no TEXT',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN handling_rate REAL DEFAULT 0',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN handling_amount REAL DEFAULT 0',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN storage_rate REAL DEFAULT 0',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN storage_basis TEXT',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN billed_status TEXT DEFAULT "Unbilled"',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN bill_id INTEGER',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN purchase_id INTEGER',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN purchase_inv_no TEXT',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN supplier_id INTEGER',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN supplier_name TEXT',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN loadman_worker_id INTEGER',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN loadman_name TEXT',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN loadman_qty_kg REAL DEFAULT 0',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN loadman_rate_per_kg REAL DEFAULT 0',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN loadman_charges REAL DEFAULT 0',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN additional_charges REAL DEFAULT 0',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN storage_days INTEGER DEFAULT 0',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN storage_charges REAL DEFAULT 0',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN charge_snapshot_json TEXT',
+      'ALTER TABLE cold_storage_vouchers ADD COLUMN status TEXT DEFAULT "Confirmed"',
+      'ALTER TABLE cold_storage_items ADD COLUMN purchase_id INTEGER',
+      'ALTER TABLE cold_storage_items ADD COLUMN purchase_item_id INTEGER',
+      'ALTER TABLE cold_storage_items ADD COLUMN inward_voucher_id INTEGER',
+      'ALTER TABLE cold_storage_items ADD COLUMN inward_item_id INTEGER',
+      'ALTER TABLE cold_storage_items ADD COLUMN inward_date TEXT',
+      'ALTER TABLE cold_storage_items ADD COLUMN outward_date TEXT',
+      'ALTER TABLE cold_storage_items ADD COLUMN storage_days INTEGER DEFAULT 0',
+      'ALTER TABLE cold_storage_items ADD COLUMN storage_charge REAL DEFAULT 0',
+      'ALTER TABLE cold_storage_items ADD COLUMN labour_charge REAL DEFAULT 0',
+      'ALTER TABLE cold_storage_items ADD COLUMN remaining_quantity REAL',
+      'ALTER TABLE cold_storage_items ADD COLUMN remaining_weight REAL',
+      'ALTER TABLE cold_storage_charge_master ADD COLUMN slab_calculation_type TEXT DEFAULT "Progressive"',
+      'ALTER TABLE cold_storage_charge_master ADD COLUMN free_days INTEGER DEFAULT 0',
+      'ALTER TABLE cold_storage_charge_master ADD COLUMN min_days INTEGER DEFAULT 0',
+      'ALTER TABLE cold_storage_charge_master ADD COLUMN min_charge REAL DEFAULT 0'
     ];
     for (const sql of extraCols) {
       instance.run(sql, () => {});
     }
+    // Ensure cold_storage_charge_master table exists
+    instance.run(`
+      CREATE TABLE IF NOT EXISTS cold_storage_charge_master (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cold_storage_id INTEGER NOT NULL,
+        item_group_id INTEGER,
+        item_id INTEGER,
+        charge_name TEXT,
+        charge_type TEXT,
+        slab_start_day INTEGER,
+        slab_end_day INTEGER,
+        rate REAL DEFAULT 0,
+        billing_basis TEXT,
+        billing_method TEXT,
+        slab_calculation_type TEXT DEFAULT 'Progressive',
+        free_days INTEGER DEFAULT 0,
+        min_days INTEGER DEFAULT 0,
+        min_charge REAL DEFAULT 0,
+        gst_rate REAL DEFAULT 18,
+        effective_from TEXT,
+        effective_to TEXT,
+        status TEXT DEFAULT 'Active',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `, () => {});
+    // Ensure cold_storage_bills table exists
+    instance.run(`
+      CREATE TABLE IF NOT EXISTS cold_storage_bills (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bill_no TEXT UNIQUE NOT NULL,
+        bill_date TEXT NOT NULL,
+        operator_id INTEGER,
+        operator_name TEXT NOT NULL,
+        cold_storage_id INTEGER,
+        cold_storage_name TEXT NOT NULL,
+        period_from TEXT,
+        period_to TEXT,
+        operator_invoice_no TEXT,
+        operator_invoice_date TEXT,
+        operator_invoice_amount REAL DEFAULT 0,
+        erp_calculated_amount REAL DEFAULT 0,
+        variance_amount REAL DEFAULT 0,
+        storage_charges REAL DEFAULT 0,
+        handling_charges REAL DEFAULT 0,
+        insurance_charges REAL DEFAULT 0,
+        mamool_charges REAL DEFAULT 0,
+        other_charges REAL DEFAULT 0,
+        taxable_amount REAL DEFAULT 0,
+        tax_rate REAL DEFAULT 18,
+        cgst_amount REAL DEFAULT 0,
+        sgst_amount REAL DEFAULT 0,
+        igst_amount REAL DEFAULT 0,
+        total_tax REAL DEFAULT 0,
+        grand_total REAL DEFAULT 0,
+        status TEXT DEFAULT 'Pending',
+        voucher_id INTEGER,
+        voucher_no TEXT,
+        remarks TEXT,
+        items_json TEXT,
+        created_by TEXT DEFAULT 'Admin',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `, () => {});
+
+    // Ensure Cold Storage Rent & Handling Charges ledger exists in ledgermaster
+    instance.run(`
+      INSERT OR IGNORE INTO ledgermaster (id, name, printname, under, openingbalance, area, credit, debit, status, alias_name, opening_type, ledger_type)
+      SELECT 201, 'Cold Storage Rent & Handling Charges', 'Cold Storage Rent & Handling Charges', 'Direct Expenses', 0, '', 0, 0, 'Active', 'CS RENT', 'Dr', 'General'
+      WHERE NOT EXISTS (SELECT 1 FROM ledgermaster WHERE LOWER(name) LIKE '%cold storage%rent%' OR id = 201)
+    `, () => {});
   });
 
   companyDbPool.set(cId, instance);
@@ -1027,6 +1201,10 @@ async function ensurePostgresCompanySequences(companyId = 1) {
 // ============================================================================
 async function executePgQuery(sql, params = [], companyId = 1, isMaster = false) {
   if (!pgPool) {
+    if (!isPostgres) {
+      const targetDb = isMaster ? openMasterDatabase() : getCompanyDatabaseInstance(companyId);
+      return queryOnSqlite(targetDb, sql, params);
+    }
     throw new Error('PostgreSQL pool not initialized. Please verify DATABASE_URL.');
   }
 

@@ -6,6 +6,7 @@ const { createPurchaseLedgerEntries, deleteLedgerEntries } = require('../utils/l
 const { rebuildStockLedger } = require('../utils/stockRebuilder')
 const { reserveNextLotNumber, recordLotNumber } = require('../utils/lotHelper')
 const { calculateLineTax, calculateInvoiceTax } = require('../services/taxEngine')
+const { getColdStorageTariff } = require('../services/ColdStorageBillingService')
 
 const calculatePurchaseTotals = (formData = {}, items = [], deductions = []) => calculateInvoiceTax({
   items: items.map((item) => {
@@ -65,6 +66,47 @@ const getPurchaseWeights = (formData = {}) => {
     return { error: 'Net Weight must equal Cross Weight minus Tare Weight.' };
   }
   return { grossWeight, tareWeight, netWeight };
+};
+
+const ensurePurchasesColumns = async (companyId = 1) => {
+  const cId = parseInt(companyId, 10) || 1;
+  const columns = [
+    'ALTER TABLE purchases ADD COLUMN stock_type TEXT DEFAULT "RM"',
+    'ALTER TABLE purchases ADD COLUMN taxable_amount REAL DEFAULT 0',
+    'ALTER TABLE purchases ADD COLUMN exempt_amount REAL DEFAULT 0',
+    'ALTER TABLE purchases ADD COLUMN godown_id INTEGER',
+    'ALTER TABLE purchases ADD COLUMN voucher_no TEXT',
+    'ALTER TABLE purchases ADD COLUMN bill_amt REAL DEFAULT 0',
+    'ALTER TABLE purchases ADD COLUMN total_amt REAL DEFAULT 0',
+    'ALTER TABLE purchases ADD COLUMN gross_weight REAL DEFAULT 0',
+    'ALTER TABLE purchases ADD COLUMN tare_weight REAL DEFAULT 0',
+    'ALTER TABLE purchases ADD COLUMN net_weight REAL DEFAULT 0',
+    'ALTER TABLE purchases ADD COLUMN transporter TEXT',
+    'ALTER TABLE purchases ADD COLUMN transport TEXT',
+    'ALTER TABLE purchases ADD COLUMN vehicle_no TEXT',
+    'ALTER TABLE purchases ADD COLUMN lorry_no TEXT',
+    'ALTER TABLE purchases ADD COLUMN driver_name TEXT',
+    'ALTER TABLE purchases ADD COLUMN driver TEXT',
+    'ALTER TABLE purchases ADD COLUMN company_state TEXT DEFAULT "Tamil Nadu"',
+    'ALTER TABLE purchases ADD COLUMN party_state TEXT DEFAULT "Tamil Nadu"',
+    'ALTER TABLE purchases ADD COLUMN company_state_code TEXT DEFAULT "33"',
+    'ALTER TABLE purchases ADD COLUMN party_state_code TEXT DEFAULT "33"',
+    'ALTER TABLE purchases ADD COLUMN tax_mode TEXT DEFAULT "Exclusive"',
+    'ALTER TABLE purchases ADD COLUMN cgst_amount REAL DEFAULT 0',
+    'ALTER TABLE purchases ADD COLUMN sgst_amount REAL DEFAULT 0',
+    'ALTER TABLE purchases ADD COLUMN igst_amount REAL DEFAULT 0',
+    'ALTER TABLE purchases ADD COLUMN cess_amount REAL DEFAULT 0',
+    'ALTER TABLE purchases ADD COLUMN purchase_order_id INTEGER',
+    'ALTER TABLE purchases ADD COLUMN po_no TEXT',
+    'ALTER TABLE purchases ADD COLUMN source_order_id INTEGER',
+    'ALTER TABLE purchases ADD COLUMN source_order_no TEXT',
+    'ALTER TABLE purchases ADD COLUMN sub_total REAL DEFAULT 0',
+    'ALTER TABLE purchases ADD COLUMN total_deductions REAL DEFAULT 0',
+    'ALTER TABLE purchases ADD COLUMN round_off REAL DEFAULT 0'
+  ];
+  for (const sql of columns) {
+    try { await db.run(sql, [], cId); } catch (_) {}
+  }
 };
  
 // GET all purchases
@@ -289,6 +331,8 @@ router.get('/:id', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const { formData, items, deductions } = req.body
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    await ensurePurchasesColumns(activeCompanyId);
  
     // Validation
     if (!formData?.date || !formData?.supplier) {
@@ -509,6 +553,32 @@ router.post('/', async (req, res) => {
           } catch (_) {}
         }
 
+        let opId = null;
+        let opName = null;
+        let defChamber = 'Chamber 1';
+        try {
+          const csLookup = await db.query('SELECT operator_id, operator_name, default_chamber FROM godown_master WHERE id = ?', [resolvedGodownId]);
+          if (csLookup.rows && csLookup.rows.length > 0) {
+            opId = csLookup.rows[0].operator_id;
+            opName = csLookup.rows[0].operator_name;
+            defChamber = csLookup.rows[0].default_chamber || 'Chamber 1';
+          }
+        } catch (_) {}
+
+        // Fetch tariff rules for godown
+        let tariff = null;
+        try {
+          tariff = await getColdStorageTariff(resolvedGodownId, activeCompanyId);
+        } catch (_) {}
+
+        let loadmanName = formData.loadman_name || formData.worker_name || 'K. Murugan';
+        let loadmanWorkerId = formData.loadman_worker_id || null;
+        let loadmanQtyKg = parseFloat(formData.loadman_qty_kg !== undefined && formData.loadman_qty_kg !== null && formData.loadman_qty_kg !== '' ? formData.loadman_qty_kg : calculatedTotals.totalWeight) || 0;
+        let loadmanRatePerKg = parseFloat(formData.loadman_rate_per_kg !== undefined && formData.loadman_rate_per_kg !== null && formData.loadman_rate_per_kg !== '' ? formData.loadman_rate_per_kg : (tariff?.inwardUnloadingRate || 0.50)) || 0.50;
+        let additionalCharges = parseFloat(formData.additional_charges || 0) || 0;
+        let loadmanTotalCharges = Number(((loadmanQtyKg * loadmanRatePerKg) + additionalCharges).toFixed(2));
+        let chamberNoVal = formData.chamber_no || defChamber || 'Chamber 1';
+
         let nextVoucherNo = 'CSI-000001';
         try {
           const csVRes = await db.query(`SELECT voucher_no FROM cold_storage_vouchers WHERE voucher_type = 'IN' ORDER BY id DESC LIMIT 1`);
@@ -520,10 +590,18 @@ router.post('/', async (req, res) => {
           }
         } catch (_) {}
 
+        let handlingRate = loadmanRatePerKg;
+        let handlingAmount = loadmanTotalCharges;
+        let storageRate = tariff?.ratePerKg || tariff?.ratePerBag || tariff?.defaultRate || 0.20;
+        let storageBasis = tariff?.billingBasis || 'Per KG/Day';
+
         const csVoucherRes = await db.run(`
           INSERT INTO cold_storage_vouchers 
-          (voucher_no, voucher_type, voucher_date, cold_storage_id, cold_storage_name, source_godown_id, source_godown_name, remarks, total_qty, total_wt, created_by)
-          VALUES (?, 'IN', ?, ?, ?, NULL, ?, ?, ?, ?, ?)
+          (voucher_no, voucher_type, voucher_date, cold_storage_id, cold_storage_name, source_godown_id, source_godown_name, remarks, total_qty, total_wt, created_by,
+           operator_id, operator_name, inward_source_type, vehicle_no, driver_name, transporter_name, lr_no, lr_date, chamber_no,
+           purchase_id, purchase_inv_no, supplier_id, supplier_name, loadman_worker_id, loadman_name, loadman_qty_kg, loadman_rate_per_kg, loadman_charges, additional_charges,
+           handling_rate, handling_amount, storage_rate, storage_basis, status)
+          VALUES (?, 'IN', ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'Direct Purchase', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Confirmed')
         `, [
           nextVoucherNo,
           formData.date || new Date().toISOString().slice(0, 10),
@@ -533,10 +611,32 @@ router.post('/', async (req, res) => {
           `Auto-inward from Purchase #${formData.invNo || formData.inv_no || purchaseId}${supplierName ? ` | Supplier: ${supplierName}` : ''}`,
           calculatedTotals.totalQty,
           calculatedTotals.totalWeight,
-          formData.createdBy || 'System / Purchase Auto-Inward'
+          formData.createdBy || 'System / Purchase Auto-Inward',
+          opId,
+          opName,
+          vehicleNoVal,
+          driverNameVal,
+          transporterVal,
+          formData.lr_no || '',
+          formData.lr_date || null,
+          chamberNoVal,
+          purchaseId,
+          formData.invNo || formData.inv_no || `PUR-${purchaseId}`,
+          formData.supplier || null,
+          supplierName,
+          loadmanWorkerId,
+          loadmanName,
+          loadmanQtyKg,
+          loadmanRatePerKg,
+          loadmanTotalCharges,
+          additionalCharges,
+          handlingRate,
+          handlingAmount,
+          storageRate,
+          storageBasis
         ]);
 
-        const csVoucherId = csVoucherRes.lastID;
+        const csVoucherId = csVoucherRes.lastID || csVoucherRes.lastInsertRowid;
 
         // Fetch inserted purchase items to get generated lot numbers
         const pItemsRes = await db.query(`SELECT * FROM purchase_items WHERE purchase_id = ?`, [purchaseId]);
@@ -546,11 +646,13 @@ router.post('/', async (req, res) => {
           const qty = parseFloat(pIt.qty) || 0;
           const wt = parseFloat(pIt.per_unit_weight) || 50;
           const totWt = parseFloat(pIt.total_weight) || (qty * wt);
+          const lineLabour = calculatedTotals.totalWeight > 0 ? Number(((totWt / calculatedTotals.totalWeight) * loadmanTotalCharges).toFixed(2)) : 0;
 
           await db.run(`
             INSERT INTO cold_storage_items 
-            (voucher_id, voucher_no, item_id, item_name, purchase_lot_no, cold_storage_lot_no, quantity, weight, total_wt, unit, remarks)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (voucher_id, voucher_no, item_id, item_name, purchase_lot_no, cold_storage_lot_no, quantity, weight, total_wt, unit, remarks,
+             purchase_id, purchase_item_id, inward_voucher_id, inward_date, storage_days, labour_charge, remaining_quantity, remaining_weight)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
           `, [
             csVoucherId,
             nextVoucherNo,
@@ -562,10 +664,50 @@ router.post('/', async (req, res) => {
             wt,
             totWt,
             'KG',
-            `Auto from Purchase #${formData.invNo || formData.inv_no || purchaseId}`
+            `Auto from Purchase #${formData.invNo || formData.inv_no || purchaseId}`,
+            purchaseId,
+            pIt.id,
+            csVoucherId,
+            formData.date || new Date().toISOString().slice(0, 10),
+            lineLabour,
+            qty,
+            totWt
           ]);
         }
-        console.log(`[COLD-STORAGE] Automatically created CSI Voucher ${nextVoucherNo} for Purchase #${purchaseId} in ${resolvedGodownName}`);
+
+        // Link unloading labour charge to operational_charges
+        try {
+          await db.run(`
+            INSERT INTO operational_charges (
+              company_id, charge_no, charge_type, source_module, source_transaction_type, source_transaction_id, source_transaction_no,
+              charge_date, party_name, item_name, lot_no, from_location, to_location, vehicle_no, driver_name,
+              quantity, rate, base_amount, total_amount, payment_status, remarks, created_by
+            ) VALUES (?, ?, 'UNLOADING', 'COLD_STORAGE', 'PURCHASE_CSI', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)
+          `, [
+            activeCompanyId,
+            `CHG-UNLOAD-${csVoucherId}`,
+            csVoucherId,
+            nextVoucherNo,
+            formData.date || new Date().toISOString().slice(0, 10),
+            loadmanName,
+            items[0]?.item_name || 'Commodity Inward',
+            items[0]?.lotNo || items[0]?.lot_no || '',
+            supplierName || 'Supplier Facility',
+            resolvedGodownName,
+            vehicleNoVal,
+            driverNameVal,
+            loadmanQtyKg,
+            loadmanRatePerKg,
+            Number((loadmanQtyKg * loadmanRatePerKg).toFixed(2)),
+            loadmanTotalCharges,
+            `Loadman Unloading Charges for CSI Voucher #${nextVoucherNo} (Purchase #${formData.invNo || purchaseId})`,
+            formData.createdBy || 'System / Purchase Auto-Inward'
+          ]);
+        } catch (opErr) {
+          console.warn('[Operational Charge CSI Link Notice]:', opErr.message);
+        }
+
+        console.log(`[COLD-STORAGE] Automatically created CSI Voucher ${nextVoucherNo} for Purchase #${purchaseId} in ${resolvedGodownName} with Loadman Charges ₹${loadmanTotalCharges}`);
       } catch (csErr) {
         console.error('Error auto-creating Cold Storage voucher for purchase:', csErr.message);
       }
@@ -664,6 +806,8 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const { formData, items, deductions } = req.body
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    await ensurePurchasesColumns(activeCompanyId);
     const routeId = String(req.params.id || '');
     let purchaseId = routeId;
     const purchaseById = await db.query('SELECT id FROM purchases WHERE CAST(id AS TEXT) = ? LIMIT 1', [routeId]);
@@ -903,10 +1047,35 @@ router.put('/:id', async (req, res) => {
           } catch (_) {}
         }
 
+        let opId = null;
+        let opName = null;
+        let defChamber = 'Chamber 1';
+        try {
+          const csLookup = await db.query('SELECT operator_id, operator_name, default_chamber FROM godown_master WHERE id = ?', [resolvedGodownId]);
+          if (csLookup.rows && csLookup.rows.length > 0) {
+            opId = csLookup.rows[0].operator_id;
+            opName = csLookup.rows[0].operator_name;
+            defChamber = csLookup.rows[0].default_chamber || 'Chamber 1';
+          }
+        } catch (_) {}
+
+        let tariff = null;
+        try {
+          tariff = await getColdStorageTariff(resolvedGodownId, activeCompanyId);
+        } catch (_) {}
+
+        let loadmanName = formData.loadman_name || formData.worker_name || 'K. Murugan';
+        let loadmanWorkerId = formData.loadman_worker_id || null;
+        let loadmanQtyKg = parseFloat(formData.loadman_qty_kg !== undefined && formData.loadman_qty_kg !== null && formData.loadman_qty_kg !== '' ? formData.loadman_qty_kg : calculatedTotals.totalWeight) || 0;
+        let loadmanRatePerKg = parseFloat(formData.loadman_rate_per_kg !== undefined && formData.loadman_rate_per_kg !== null && formData.loadman_rate_per_kg !== '' ? formData.loadman_rate_per_kg : (tariff?.inwardUnloadingRate || 0.50)) || 0.50;
+        let additionalCharges = parseFloat(formData.additional_charges || 0) || 0;
+        let loadmanTotalCharges = Number(((loadmanQtyKg * loadmanRatePerKg) + additionalCharges).toFixed(2));
+        let chamberNoVal = formData.chamber_no || defChamber || 'Chamber 1';
+
         // Check if CSI voucher already exists for this purchase
         const existingCsV = await db.query(
-          `SELECT id, voucher_no FROM cold_storage_vouchers WHERE remarks LIKE ? OR remarks LIKE ? LIMIT 1`,
-          [`%Purchase #${purchaseId}%`, `%Purchase #${formData.invNo || formData.inv_no}%`]
+          `SELECT id, voucher_no FROM cold_storage_vouchers WHERE purchase_id = ? OR remarks LIKE ? OR remarks LIKE ? LIMIT 1`,
+          [purchaseId, `%Purchase #${purchaseId}%`, `%Purchase #${formData.invNo || formData.inv_no}%`]
         );
 
         let csVoucherId = existingCsV.rows?.[0]?.id;
@@ -924,10 +1093,18 @@ router.put('/:id', async (req, res) => {
             }
           } catch (_) {}
 
+          let handlingRate = loadmanRatePerKg;
+          let handlingAmount = loadmanTotalCharges;
+          let storageRate = tariff?.ratePerKg || tariff?.ratePerBag || tariff?.defaultRate || 0.20;
+          let storageBasis = tariff?.billingBasis || 'Per KG/Day';
+
           const csVoucherRes = await db.run(`
             INSERT INTO cold_storage_vouchers 
-            (voucher_no, voucher_type, voucher_date, cold_storage_id, cold_storage_name, source_godown_id, source_godown_name, remarks, total_qty, total_wt, created_by)
-            VALUES (?, 'IN', ?, ?, ?, NULL, ?, ?, ?, ?, ?)
+            (voucher_no, voucher_type, voucher_date, cold_storage_id, cold_storage_name, source_godown_id, source_godown_name, remarks, total_qty, total_wt, created_by,
+             operator_id, operator_name, inward_source_type, vehicle_no, driver_name, transporter_name, lr_no, lr_date, chamber_no,
+             purchase_id, purchase_inv_no, supplier_id, supplier_name, loadman_worker_id, loadman_name, loadman_qty_kg, loadman_rate_per_kg, loadman_charges, additional_charges,
+             handling_rate, handling_amount, storage_rate, storage_basis, status)
+            VALUES (?, 'IN', ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'Direct Purchase', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Confirmed')
           `, [
             csVoucherNo,
             formData.date || new Date().toISOString().slice(0, 10),
@@ -937,14 +1114,46 @@ router.put('/:id', async (req, res) => {
             `Auto-inward from Purchase #${formData.invNo || formData.inv_no || purchaseId}${supplierName ? ` | Supplier: ${supplierName}` : ''}`,
             calculatedTotals.totalQty,
             calculatedTotals.totalWeight,
-            formData.createdBy || 'System / Purchase Auto-Inward'
+            formData.createdBy || 'System / Purchase Auto-Inward',
+            opId,
+            opName,
+            vehicleNoVal,
+            driverNameVal,
+            transporterVal,
+            formData.lr_no || '',
+            formData.lr_date || null,
+            chamberNoVal,
+            purchaseId,
+            formData.invNo || formData.inv_no || `PUR-${purchaseId}`,
+            formData.supplier || formData.supplier_id || null,
+            supplierName,
+            loadmanWorkerId,
+            loadmanName,
+            loadmanQtyKg,
+            loadmanRatePerKg,
+            loadmanTotalCharges,
+            additionalCharges,
+            handlingRate,
+            handlingAmount,
+            storageRate,
+            storageBasis
           ]);
-          csVoucherId = csVoucherRes.lastID;
+          csVoucherId = csVoucherRes.lastID || csVoucherRes.lastInsertRowid;
         } else {
+          let handlingRate = loadmanRatePerKg;
+          let handlingAmount = loadmanTotalCharges;
+          let storageRate = tariff?.ratePerKg || tariff?.ratePerBag || tariff?.defaultRate || 0.20;
+          let storageBasis = tariff?.billingBasis || 'Per KG/Day';
+
           await db.run(`
             UPDATE cold_storage_vouchers SET
               voucher_date = ?, cold_storage_id = ?, cold_storage_name = ?,
-              total_qty = ?, total_wt = ?, updated_at = CURRENT_TIMESTAMP
+              total_qty = ?, total_wt = ?, chamber_no = ?,
+              loadman_name = ?, loadman_worker_id = ?, loadman_qty_kg = ?,
+              loadman_rate_per_kg = ?, loadman_charges = ?, additional_charges = ?,
+              handling_rate = ?, handling_amount = ?, storage_rate = ?, storage_basis = ?,
+              vehicle_no = ?, driver_name = ?, transporter_name = ?,
+              updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
           `, [
             formData.date || new Date().toISOString().slice(0, 10),
@@ -952,6 +1161,20 @@ router.put('/:id', async (req, res) => {
             resolvedGodownName,
             calculatedTotals.totalQty,
             calculatedTotals.totalWeight,
+            chamberNoVal,
+            loadmanName,
+            loadmanWorkerId,
+            loadmanQtyKg,
+            loadmanRatePerKg,
+            loadmanTotalCharges,
+            additionalCharges,
+            handlingRate,
+            handlingAmount,
+            storageRate,
+            storageBasis,
+            vehicleNoVal,
+            driverNameVal,
+            transporterVal,
             csVoucherId
           ]);
           await db.run(`DELETE FROM cold_storage_items WHERE voucher_id = ?`, [csVoucherId]);
@@ -964,11 +1187,13 @@ router.put('/:id', async (req, res) => {
           const qty = parseFloat(pIt.qty) || 0;
           const wt = parseFloat(pIt.per_unit_weight) || 50;
           const totWt = parseFloat(pIt.total_weight) || (qty * wt);
+          const lineLabour = calculatedTotals.totalWeight > 0 ? Number(((totWt / calculatedTotals.totalWeight) * loadmanTotalCharges).toFixed(2)) : 0;
 
           await db.run(`
             INSERT INTO cold_storage_items 
-            (voucher_id, voucher_no, item_id, item_name, purchase_lot_no, cold_storage_lot_no, quantity, weight, total_wt, unit, remarks)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (voucher_id, voucher_no, item_id, item_name, purchase_lot_no, cold_storage_lot_no, quantity, weight, total_wt, unit, remarks,
+             purchase_id, purchase_item_id, inward_voucher_id, inward_date, storage_days, labour_charge, remaining_quantity, remaining_weight)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
           `, [
             csVoucherId,
             csVoucherNo,
@@ -980,8 +1205,51 @@ router.put('/:id', async (req, res) => {
             wt,
             totWt,
             'KG',
-            `Auto from Purchase #${formData.invNo || formData.inv_no || purchaseId}`
+            `Auto from Purchase #${formData.invNo || formData.inv_no || purchaseId}`,
+            purchaseId,
+            pIt.id,
+            csVoucherId,
+            formData.date || new Date().toISOString().slice(0, 10),
+            lineLabour,
+            qty,
+            totWt
           ]);
+        }
+
+        // Update or insert operational charge for Loadman
+        try {
+          await db.run(`
+            DELETE FROM operational_charges WHERE source_transaction_type = 'PURCHASE_CSI' AND (source_transaction_id = ? OR source_transaction_id = ?)
+          `, [purchaseId, csVoucherId]);
+
+          await db.run(`
+            INSERT INTO operational_charges (
+              company_id, charge_no, charge_type, source_module, source_transaction_type, source_transaction_id, source_transaction_no,
+              charge_date, party_name, item_name, lot_no, from_location, to_location, vehicle_no, driver_name,
+              quantity, rate, base_amount, total_amount, payment_status, remarks, created_by
+            ) VALUES (?, ?, 'UNLOADING', 'COLD_STORAGE', 'PURCHASE_CSI', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)
+          `, [
+            activeCompanyId,
+            `CHG-UNLOAD-${csVoucherId}`,
+            csVoucherId,
+            csVoucherNo,
+            formData.date || new Date().toISOString().slice(0, 10),
+            loadmanName,
+            items[0]?.item_name || 'Commodity Inward',
+            items[0]?.lotNo || items[0]?.lot_no || '',
+            supplierName || 'Supplier Facility',
+            resolvedGodownName,
+            vehicleNoVal,
+            driverNameVal,
+            loadmanQtyKg,
+            loadmanRatePerKg,
+            Number((loadmanQtyKg * loadmanRatePerKg).toFixed(2)),
+            loadmanTotalCharges,
+            `Loadman Unloading Charges for CSI Voucher #${csVoucherNo} (Purchase #${formData.invNo || purchaseId})`,
+            formData.createdBy || 'System / Purchase Auto-Inward'
+          ]);
+        } catch (opErr) {
+          console.warn('[Operational Charge CSI Update Notice]:', opErr.message);
         }
       } catch (csErr) {
         console.error('Error auto-managing Cold Storage voucher on update purchase:', csErr.message);

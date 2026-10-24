@@ -580,6 +580,17 @@ const ColdStorageVouchers = () => {
                   <Typography variant="body2">{selectedVoucherDetails.remarks}</Typography>
                 </Box>
               )}
+              
+              <Divider sx={{ my: 2 }} />
+              <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1, color: '#1f4fb2' }}>
+                Operational & Billing Details
+              </Typography>
+              <Grid container spacing={2}>
+                <Grid item xs={6} sm={3}><Typography variant="body2" color="text.secondary">Driver Name</Typography><Typography variant="body2" sx={{ fontWeight: 'bold' }}>{selectedVoucherDetails.driver_name || '—'}</Typography></Grid>
+                <Grid item xs={6} sm={3}><Typography variant="body2" color="text.secondary">Vehicle No</Typography><Typography variant="body2" sx={{ fontWeight: 'bold' }}>{selectedVoucherDetails.vehicle_no || '—'}</Typography></Grid>
+                <Grid item xs={6} sm={3}><Typography variant="body2" color="text.secondary">Handling Amt</Typography><Typography variant="body2" sx={{ fontWeight: 'bold' }}>₹{parseFloat(selectedVoucherDetails.handling_amount || 0).toFixed(2)}</Typography></Grid>
+                <Grid item xs={6} sm={3}><Typography variant="body2" color="text.secondary">Storage Rate</Typography><Typography variant="body2" sx={{ fontWeight: 'bold' }}>{selectedVoucherDetails.storage_rate || 0} ({selectedVoucherDetails.storage_basis || '-'})</Typography></Grid>
+              </Grid>
             </Box>
           ) : (
             <Typography>No details available.</Typography>

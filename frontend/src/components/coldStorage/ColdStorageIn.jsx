@@ -24,7 +24,9 @@ import {
   DialogActions,
   Divider,
   Chip,
-  Autocomplete
+  Autocomplete,
+  ToggleButtonGroup,
+  ToggleButton
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -33,7 +35,10 @@ import {
   AcUnit as ColdIcon,
   Print as PrintIcon,
   ArrowBack as ArrowBackIcon,
-  CheckCircle as CheckIcon
+  CheckCircle as CheckIcon,
+  LocalShipping as TruckIcon,
+  Business as OperatorIcon,
+  Warehouse as WarehouseIcon
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../services/api';
@@ -54,14 +59,33 @@ const ColdStorageIn = () => {
   const [coldStorages, setColdStorages] = useState([]);
   const [availableLots, setAvailableLots] = useState([]);
   const [godowns, setGodowns] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
 
   // Form State
+  const [inwardSourceType, setInwardSourceType] = useState('Factory Godown'); // 'Factory Godown' | 'Direct Purchase'
   const [voucherNo, setVoucherNo] = useState('');
   const [voucherDate, setVoucherDate] = useState(today);
   const [coldStorageId, setColdStorageId] = useState('');
   const [coldStorageName, setColdStorageName] = useState('');
+  const [selectedCsObj, setSelectedCsObj] = useState(null);
+
+  // Source
   const [sourceGodownId, setSourceGodownId] = useState('');
   const [sourceGodownName, setSourceGodownName] = useState('Main Godown');
+  const [sourceSupplierId, setSourceSupplierId] = useState(null);
+  const [sourceSupplierName, setSourceSupplierName] = useState('');
+
+  // Transit & Chamber details
+  const [vehicleNo, setVehicleNo] = useState('');
+  const [driverName, setDriverName] = useState('');
+  const [driverPhone, setDriverPhone] = useState('');
+  const [transporterName, setTransporterName] = useState('');
+  const [lrNo, setLrNo] = useState('');
+  const [lrDate, setLrDate] = useState('');
+  const [gatePassNo, setGatePassNo] = useState('');
+  const [chamberNo, setChamberNo] = useState('Chamber 1');
+  const [floorNo, setFloorNo] = useState('');
+  const [rackNo, setRackNo] = useState('');
   const [remarks, setRemarks] = useState('');
 
   // Items State
@@ -71,9 +95,9 @@ const ColdStorageIn = () => {
       purchase_lot_no: '',
       cold_storage_lot_no: '',
       quantity: '',
-      weight: '1',
+      weight: '50',
       total_wt: '0',
-      unit: 'KG',
+      unit: 'Bags',
       remarks: '',
       avail_in_main: 0
     }
@@ -86,33 +110,26 @@ const ColdStorageIn = () => {
   const fetchInitialData = async () => {
     setLoading(true);
     try {
-      // 1. Next Voucher No
-      const vRes = await api('/cold-storage/next-voucher-no?type=IN');
-      if (vRes && vRes.voucher_no) {
-        setVoucherNo(vRes.voucher_no);
-      }
+      const [vRes, csRes, lotsRes, gRes, supRes] = await Promise.all([
+        api('/cold-storage/next-voucher-no?type=IN').catch(() => ({ voucher_no: 'CSI-000001' })),
+        api('/cold-storage/storages').catch(() => ({ data: [] })),
+        api('/cold-storage/available-lots').catch(() => ({ data: [] })),
+        api('/godowns').catch(() => ({ data: [] })),
+        api('/masters/suppliers').catch(() => ({ data: [] }))
+      ]);
 
-      // 2. Cold Storage Godowns
-      const csRes = await api('/cold-storage/storages');
-      if (csRes && csRes.data) {
+      if (vRes?.voucher_no) setVoucherNo(vRes.voucher_no);
+      if (csRes?.data?.length > 0) {
         setColdStorages(csRes.data);
-        if (csRes.data.length > 0) {
-          setColdStorageId(csRes.data[0].id);
-          setColdStorageName(csRes.data[0].godown_name);
-        }
+        const first = csRes.data[0];
+        setColdStorageId(first.id);
+        setColdStorageName(first.godown_name);
+        setSelectedCsObj(first);
+        if (first.default_chamber) setChamberNo(first.default_chamber);
       }
-
-      // 3. Available Purchase Lots
-      const lotsRes = await api('/cold-storage/available-lots');
-      if (lotsRes && lotsRes.data) {
-        setAvailableLots(lotsRes.data);
-      }
-
-      // 4. Main Godowns
-      const gRes = await api('/godowns');
-      if (gRes && gRes.data) {
-        setGodowns(gRes.data);
-      }
+      if (lotsRes?.data) setAvailableLots(lotsRes.data);
+      if (gRes?.data) setGodowns(Array.isArray(gRes.data) ? gRes.data : (Array.isArray(gRes) ? gRes : []));
+      if (supRes?.data) setSuppliers(supRes.data);
     } catch (err) {
       console.error('Error loading initial data:', err);
     } finally {
@@ -126,39 +143,38 @@ const ColdStorageIn = () => {
     const selected = coldStorages.find(c => c.id === csId);
     if (selected) {
       setColdStorageName(selected.godown_name);
+      setSelectedCsObj(selected);
+      if (selected.default_chamber) setChamberNo(selected.default_chamber);
     }
   };
 
   const handleLotSelect = (index, lotKey) => {
     const selectedLot = availableLots.find(l => `${l.item_name}_${l.purchase_lot_no}` === lotKey);
     if (selectedLot) {
-      if (selectedLot.current_godown) {
+      if (inwardSourceType === 'Factory Godown' && selectedLot.current_godown) {
         setSourceGodownName(selectedLot.current_godown);
         if (selectedLot.current_godown_id) {
           setSourceGodownId(selectedLot.current_godown_id);
-        } else {
-          const matchedG = godowns.find(g => (g.godown_name || g.name || '').toLowerCase() === selectedLot.current_godown.toLowerCase());
-          if (matchedG) {
-            setSourceGodownId(matchedG.id);
-          }
         }
       }
+
       const updated = [...items];
-      const autoCsLot = `CS-${selectedLot.purchase_lot_no}`;
-      const lotWeight = parseFloat(selectedLot.weight || selectedLot.per_weight || (selectedLot.total_weight && selectedLot.purchased_qty ? (selectedLot.total_weight / selectedLot.purchased_qty) : 1)) || 1;
-      const initialQty = selectedLot.available_qty > 0 ? selectedLot.available_qty : '';
-      const initialTotalWt = initialQty !== '' ? (parseFloat(initialQty) * lotWeight).toFixed(2) : '';
-      
+      const qty = selectedLot.purchased_qty || 0;
+      const wt = selectedLot.weight || selectedLot.per_weight || 50;
+      const totWt = selectedLot.total_weight || (qty * wt);
+
       updated[index] = {
         ...updated[index],
         item_name: selectedLot.item_name,
         purchase_lot_no: selectedLot.purchase_lot_no,
-        cold_storage_lot_no: autoCsLot,
-        unit: selectedLot.unit || 'KG',
-        weight: String(lotWeight),
-        avail_in_main: selectedLot.available_qty,
-        quantity: initialQty,
-        total_wt: initialTotalWt
+        cold_storage_lot_no: selectedLot.purchase_lot_no.startsWith('CS-') 
+          ? selectedLot.purchase_lot_no 
+          : `CS-${selectedLot.purchase_lot_no}`,
+        quantity: qty ? String(qty) : '',
+        weight: wt ? String(wt) : '50',
+        total_wt: totWt ? String(totWt) : '0',
+        unit: selectedLot.unit || 'Bags',
+        avail_in_main: qty
       };
       setItems(updated);
     }
@@ -169,15 +185,15 @@ const ColdStorageIn = () => {
     updated[index][field] = value;
 
     if (field === 'quantity' || field === 'weight') {
-      const q = parseFloat(updated[index].quantity || 0);
-      const w = parseFloat(updated[index].weight || 1);
-      updated[index].total_wt = (q * w).toFixed(2);
+      const q = parseFloat(field === 'quantity' ? value : updated[index].quantity) || 0;
+      const w = parseFloat(field === 'weight' ? value : updated[index].weight) || 0;
+      updated[index].total_wt = String(q * w);
     }
 
     setItems(updated);
   };
 
-  const addItemRow = () => {
+  const handleAddItem = () => {
     setItems([
       ...items,
       {
@@ -185,31 +201,37 @@ const ColdStorageIn = () => {
         purchase_lot_no: '',
         cold_storage_lot_no: '',
         quantity: '',
-        weight: '1',
+        weight: '50',
         total_wt: '0',
-        unit: 'KG',
+        unit: 'Bags',
         remarks: '',
         avail_in_main: 0
       }
     ]);
   };
 
-  const removeItemRow = (index) => {
+  const handleRemoveItem = (index) => {
     if (items.length === 1) return;
-    setItems(items.filter((_, i) => i !== index));
+    setItems(items.filter((_, idx) => idx !== index));
   };
+
+  // Calculations
+  const totalQty = items.reduce((sum, it) => sum + (parseFloat(it.quantity) || 0), 0);
+  const totalWeight = items.reduce((sum, it) => sum + (parseFloat(it.total_wt) || 0), 0);
+  const handlingRate = parseFloat(selectedCsObj?.inward_handling_rate || 0);
+  const estimatedHandlingCharge = Number((totalQty * handlingRate).toFixed(2));
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!coldStorageId || !coldStorageName) {
-      setMessage('Please select a Cold Storage Godown');
+    if (!coldStorageId && !coldStorageName) {
+      setMessage('Please select a Cold Storage facility');
       setMessageType('error');
       return;
     }
 
-    const validItems = items.filter(i => i.item_name && parseFloat(i.quantity) > 0);
+    const validItems = items.filter(it => it.item_name.trim() && parseFloat(it.quantity || 0) > 0);
     if (validItems.length === 0) {
-      setMessage('Please enter at least one item with valid quantity');
+      setMessage('Please add at least one item with valid quantity');
       setMessageType('error');
       return;
     }
@@ -222,8 +244,27 @@ const ColdStorageIn = () => {
         voucher_date: voucherDate,
         cold_storage_id: coldStorageId,
         cold_storage_name: coldStorageName,
-        source_godown_id: sourceGodownId,
-        source_godown_name: sourceGodownName,
+        operator_id: selectedCsObj?.operator_id || null,
+        operator_name: selectedCsObj?.operator_name || selectedCsObj?.resolved_operator_name || '',
+        inward_source_type: inwardSourceType,
+        source_godown_id: inwardSourceType === 'Factory Godown' ? sourceGodownId : null,
+        source_godown_name: inwardSourceType === 'Factory Godown' 
+          ? sourceGodownName 
+          : (sourceSupplierName ? `Direct Supplier: ${sourceSupplierName}` : 'Direct Purchase'),
+        vehicle_no: vehicleNo,
+        driver_name: driverName,
+        driver_phone: driverPhone,
+        transporter_name: transporterName,
+        lr_no: lrNo,
+        lr_date: lrDate,
+        gate_pass_no: gatePassNo,
+        chamber_no: chamberNo,
+        floor_no: floorNo,
+        rack_no: rackNo,
+        handling_rate: handlingRate,
+        handling_amount: estimatedHandlingCharge,
+        storage_rate: parseFloat(selectedCsObj?.rate_per_bag || selectedCsObj?.rate_per_kg || 0),
+        storage_basis: selectedCsObj?.billing_basis || 'Per Bag',
         remarks,
         items: validItems
       };
@@ -240,7 +281,15 @@ const ColdStorageIn = () => {
           voucher_no: res.voucher_no,
           voucher_date: voucherDate,
           cold_storage_name: coldStorageName,
-          source_godown_name: sourceGodownName,
+          operator_name: payload.operator_name,
+          source_godown_name: payload.source_godown_name,
+          vehicle_no: vehicleNo,
+          driver_name: driverName,
+          lr_no: lrNo,
+          gate_pass_no: gatePassNo,
+          chamber_no: chamberNo,
+          handling_rate: handlingRate,
+          handling_amount: estimatedHandlingCharge,
           remarks,
           items: validItems
         });
@@ -257,74 +306,58 @@ const ColdStorageIn = () => {
     }
   };
 
-  const handleResetForm = () => {
-    setPrintModalOpen(false);
-    setItems([
-      {
-        item_name: '',
-        purchase_lot_no: '',
-        cold_storage_lot_no: '',
-        quantity: '',
-        weight: '1',
-        total_wt: '0',
-        unit: 'KG',
-        remarks: '',
-        avail_in_main: 0
-      }
-    ]);
-    setRemarks('');
-    fetchInitialData();
-  };
-
-  const totalQtySum = items.reduce((sum, i) => sum + parseFloat(i.quantity || 0), 0);
-  const totalWtSum = items.reduce((sum, i) => sum + parseFloat(i.total_wt || 0), 0);
-
-  const handlePrintVoucherSlip = () => {
+  const handlePrint = () => {
     if (!savedVoucher) return;
-    const itemsHtml = (savedVoucher.items || []).map((it, idx) => `
-      <tr>
+    const itemsHtml = savedVoucher.items.map((it, idx) => `
+      <tr style="background-color: ${idx % 2 === 0 ? '#ffffff' : '#f8fafc'};">
         <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center;">${idx + 1}</td>
-        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: bold;">${it.item_name}</td>
-        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center; color: #1f4fb2; font-weight: bold;">${it.cold_storage_lot_no || '-'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: 600;">${it.item_name}</td>
         <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center;">${it.purchase_lot_no || '-'}</td>
-        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; font-weight: bold;">${it.quantity} ${it.unit}</td>
-        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right;">${it.weight_per_unit || 1} KG</td>
-        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; font-weight: bold;">${it.total_wt} KG</td>
-        <td style="padding: 6px 8px; border: 1px solid #cbd5e1;">${it.remarks || '-'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center; font-weight: bold; color: #0284c7;">${it.cold_storage_lot_no || '-'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; font-weight: bold;">${parseFloat(it.quantity).toFixed(2)} ${it.unit || 'Bags'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right;">${parseFloat(it.weight || 1).toFixed(2)} KG</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; font-weight: bold;">${parseFloat(it.total_wt).toFixed(2)} KG</td>
       </tr>
     `).join('');
 
     const html = `
-      <div style="font-family: Arial, sans-serif; padding: 12px; color: #0f172a;">
-        <div style="border-bottom: 2px solid #1f4fb2; padding-bottom: 8px; margin-bottom: 12px;">
-          <div style="font-size: 18px; font-weight: 800; color: #1f4fb2; text-transform: uppercase;">BHAGWATI VEG COMMODITIES</div>
-          <div style="font-size: 14px; font-weight: 700; color: #334155; margin-top: 2px;">COLD STORAGE INWARD (IN) SLIP</div>
-        </div>
-
-        <div style="display: flex; justify-content: space-between; background: #f1f5f9; padding: 10px; border-radius: 4px; margin-bottom: 14px; font-size: 12px;">
+      <div style="font-family: Arial, sans-serif; color: #0f172a; padding: 15px;">
+        <div style="border-bottom: 2px solid #0284c7; padding-bottom: 8px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: flex-end;">
           <div>
-            <div><strong>Voucher #:</strong> ${savedVoucher.voucher_no}</div>
-            <div><strong>Date:</strong> ${savedVoucher.voucher_date}</div>
-            <div><strong>Origin Godown:</strong> ${savedVoucher.source_godown_name}</div>
+            <h2 style="margin: 0; color: #0284c7; font-size: 20px;">COLD STORAGE INWARD RECEIPT (CSI)</h2>
+            <div style="font-size: 11px; color: #64748b; margin-top: 3px;">BVC Exports ERP - External Cold Storage Management</div>
           </div>
           <div style="text-align: right;">
-            <div><strong>Cold Storage:</strong> ${savedVoucher.cold_storage_name}</div>
-            <div><strong>Total Qty:</strong> ${savedVoucher.total_qty || ''}</div>
-            <div><strong>Total Weight:</strong> ${savedVoucher.total_wt || ''} KG</div>
+            <div style="font-size: 15px; font-weight: bold; color: #0f172a;"># ${savedVoucher.voucher_no}</div>
+            <div style="font-size: 12px; color: #475569;">Date: <strong>${savedVoucher.voucher_date}</strong></div>
           </div>
         </div>
 
-        <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 10px; margin-bottom: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 12px;">
+          <div>
+            <div><strong>Cold Storage:</strong> ${savedVoucher.cold_storage_name}</div>
+            <div><strong>Operator:</strong> ${savedVoucher.operator_name || 'External Facility'}</div>
+            <div><strong>Source / Origin:</strong> ${savedVoucher.source_godown_name}</div>
+            <div><strong>Chamber / Location:</strong> ${savedVoucher.chamber_no || 'Chamber 1'}</div>
+          </div>
+          <div>
+            <div><strong>Vehicle / Lorry #:</strong> ${savedVoucher.vehicle_no || '-'}</div>
+            <div><strong>Driver Name:</strong> ${savedVoucher.driver_name || '-'}</div>
+            <div><strong>LR No:</strong> ${savedVoucher.lr_no || '-'}</div>
+            <div><strong>Operator Gate Pass:</strong> ${savedVoucher.gate_pass_no || '-'}</div>
+          </div>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 12px;">
           <thead>
-            <tr style="background-color: #1f4fb2; color: #ffffff;">
-              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: center;">#</th>
-              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: left;">Item Name</th>
-              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: center;">Cold Storage Lot #</th>
-              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: center;">Purchase Lot #</th>
-              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: right;">Qty</th>
-              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: right;">Per Wt</th>
-              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: right;">Total Wt</th>
-              <th style="padding: 6px; border: 1px solid #1f4fb2; color: #fff; text-align: left;">Remarks</th>
+            <tr style="background-color: #0284c7; color: #ffffff;">
+              <th style="padding: 6px; border: 1px solid #0284c7; text-align: center; color: #fff;">#</th>
+              <th style="padding: 6px; border: 1px solid #0284c7; text-align: left; color: #fff;">Item Name</th>
+              <th style="padding: 6px; border: 1px solid #0284c7; text-align: center; color: #fff;">Purchase Lot</th>
+              <th style="padding: 6px; border: 1px solid #0284c7; text-align: center; color: #fff;">Cold Storage Lot</th>
+              <th style="padding: 6px; border: 1px solid #0284c7; text-align: right; color: #fff;">Bags / Qty</th>
+              <th style="padding: 6px; border: 1px solid #0284c7; text-align: right; color: #fff;">Per Bag Wt</th>
+              <th style="padding: 6px; border: 1px solid #0284c7; text-align: right; color: #fff;">Total Weight</th>
             </tr>
           </thead>
           <tbody>
@@ -332,16 +365,22 @@ const ColdStorageIn = () => {
           </tbody>
         </table>
 
+        <div style="background: #f1f5f9; padding: 8px 12px; border-radius: 4px; display: flex; justify-content: space-between; font-size: 12px;">
+          <span><strong>Total Bags:</strong> ${totalQty.toFixed(2)}</span>
+          <span><strong>Total Net Weight:</strong> ${totalWeight.toFixed(2)} KG</span>
+          <span><strong>Inward Handling:</strong> ₹${estimatedHandlingCharge.toFixed(2)}</span>
+        </div>
+
         ${savedVoucher.remarks ? `
-          <div style="margin-top: 12px; font-size: 11px; color: #475569;">
+          <div style="margin-top: 10px; font-size: 11px; color: #475569;">
             <strong>Remarks:</strong> ${savedVoucher.remarks}
           </div>
         ` : ''}
 
         <div style="margin-top: 36px; display: flex; justify-content: space-between; font-size: 11px; color: #475569;">
-          <div style="border-top: 1px solid #94a3b8; width: 150px; text-align: center; padding-top: 4px;">Prepared By</div>
-          <div style="border-top: 1px solid #94a3b8; width: 150px; text-align: center; padding-top: 4px;">Cold Storage Incharge</div>
-          <div style="border-top: 1px solid #94a3b8; width: 150px; text-align: center; padding-top: 4px;">Authorized Signature</div>
+          <div style="border-top: 1px solid #94a3b8; width: 140px; text-align: center; padding-top: 4px;">Prepared By</div>
+          <div style="border-top: 1px solid #94a3b8; width: 140px; text-align: center; padding-top: 4px;">Lorry Driver / Carrier</div>
+          <div style="border-top: 1px solid #94a3b8; width: 140px; text-align: center; padding-top: 4px;">Cold Storage Gate Keeper</div>
         </div>
       </div>
     `;
@@ -352,26 +391,31 @@ const ColdStorageIn = () => {
   return (
     <Box sx={{ p: { xs: 2, md: 3 }, width: '100%', maxWidth: '100%', margin: '0 auto' }}>
       {/* Header */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2.5 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
           <IconButton color="primary" onClick={() => navigate('/cold-storage/vouchers')}>
             <ArrowBackIcon />
           </IconButton>
-          <ColdIcon sx={{ fontSize: 32, color: '#1f4fb2' }} />
-          <Typography variant="h5" sx={{ fontWeight: 'bold', color: '#1f4fb2' }}>
-            Cold Storage Inward Voucher (CSI)
-          </Typography>
+          <ColdIcon sx={{ fontSize: 32, color: '#0284c7' }} />
+          <Box>
+            <Typography variant="h5" sx={{ fontWeight: 'bold', color: '#0f172a' }}>
+              Cold Storage Inward Voucher (CSI)
+            </Typography>
+            <Typography variant="caption" sx={{ color: '#64748b' }}>
+              Record goods received into external cold storage facilities with transit and handling charges
+            </Typography>
+          </Box>
         </Box>
         <Chip 
           label={`Voucher #: ${voucherNo || 'Generating...'}`} 
           color="primary" 
           variant="outlined" 
-          sx={{ fontWeight: 'bold', fontSize: '15px' }} 
+          sx={{ fontWeight: 'bold', fontSize: '14px', height: 32 }} 
         />
       </Box>
 
       {message && (
-        <Alert severity={messageType} sx={{ mb: 3 }} onClose={() => setMessage('')}>
+        <Alert severity={messageType} sx={{ mb: 2.5 }} onClose={() => setMessage('')}>
           {message}
         </Alert>
       )}
@@ -382,19 +426,36 @@ const ColdStorageIn = () => {
         </Box>
       ) : (
         <form onSubmit={handleSubmit}>
-          {/* Main Info Card */}
-          <Card sx={{ mb: 3, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
-            <CardContent sx={{ p: 3 }}>
-              <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 2, color: '#2a5ea0' }}>
-                Storage Location & Transfer Details
-              </Typography>
-              <Grid container spacing={2.5}>
+          {/* Section 1: Inward Source & Facility Card */}
+          <Card sx={{ mb: 2.5, boxShadow: '0 2px 8px rgba(0,0,0,0.08)', borderRadius: 2 }}>
+            <CardContent sx={{ p: 2.5 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 'bold', color: '#0284c7', display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <WarehouseIcon fontSize="small" /> Inward Origin & Destination Facility
+                </Typography>
+                <ToggleButtonGroup
+                  value={inwardSourceType}
+                  exclusive
+                  size="small"
+                  onChange={(e, val) => val && setInwardSourceType(val)}
+                  sx={{ height: 32 }}
+                >
+                  <ToggleButton value="Factory Godown" sx={{ px: 2, fontSize: '12px', fontWeight: 600 }}>
+                    Factory Godown Transfer
+                  </ToggleButton>
+                  <ToggleButton value="Direct Purchase" sx={{ px: 2, fontSize: '12px', fontWeight: 600 }}>
+                    Direct Purchase Inward
+                  </ToggleButton>
+                </ToggleButtonGroup>
+              </Box>
+
+              <Grid container spacing={2}>
                 <Grid item xs={12} sm={3}>
                   <TextField
                     fullWidth
                     size="small"
                     type="date"
-                    label="Voucher Date"
+                    label="Inward Date"
                     value={voucherDate}
                     onChange={(e) => setVoucherDate(e.target.value)}
                     InputLabelProps={{ shrink: true }}
@@ -407,243 +468,317 @@ const ColdStorageIn = () => {
                     fullWidth
                     select
                     size="small"
-                    label="Destination Cold Storage"
+                    label="Destination Cold Storage Facility *"
                     value={coldStorageId}
                     onChange={handleColdStorageChange}
                     required
                   >
                     {coldStorages.map((cs) => (
                       <MenuItem key={cs.id} value={cs.id}>
-                        {cs.godown_name} ({cs.external_company || cs.storage_location || 'Cold Storage'})
+                        {cs.godown_name} ({cs.operator_name || cs.resolved_operator_name || 'External Operator'})
                       </MenuItem>
                     ))}
                   </TextField>
                 </Grid>
 
                 <Grid item xs={12} sm={4.5}>
-                  <Autocomplete
-                    freeSolo
-                    options={godowns.map((g) => g.godown_name || g.name || '')}
-                    value={sourceGodownName}
-                    onInputChange={(event, newInputValue) => {
-                      setSourceGodownName(newInputValue);
-                      const matched = godowns.find(g => (g.godown_name || g.name || '').toLowerCase() === (newInputValue || '').toLowerCase());
-                      if (matched) {
-                        setSourceGodownId(matched.id);
-                      }
-                    }}
-                    renderInput={(params) => (
-                      <TextField
-                        {...params}
-                        size="small"
-                        label="Source Godown / Origin"
-                        placeholder="Select or enter source godown"
-                        required
-                      />
-                    )}
-                  />
+                  {inwardSourceType === 'Factory Godown' ? (
+                    <Autocomplete
+                      freeSolo
+                      size="small"
+                      options={godowns.map((g) => g.godown_name || g.name || '')}
+                      value={sourceGodownName}
+                      onInputChange={(event, newInputValue) => {
+                        setSourceGodownName(newInputValue);
+                        const matched = godowns.find(g => (g.godown_name || g.name || '').toLowerCase() === (newInputValue || '').toLowerCase());
+                        if (matched) setSourceGodownId(matched.id);
+                      }}
+                      renderInput={(params) => (
+                        <TextField
+                          {...params}
+                          label="Source Factory Godown / Origin *"
+                          placeholder="Select origin factory godown"
+                          required
+                        />
+                      )}
+                    />
+                  ) : (
+                    <Autocomplete
+                      size="small"
+                      options={suppliers}
+                      getOptionLabel={(opt) => opt.print_name || opt.name || ''}
+                      value={suppliers.find(s => s.id === sourceSupplierId) || (sourceSupplierName ? { name: sourceSupplierName } : null)}
+                      onChange={(e, val) => {
+                        if (val) {
+                          setSourceSupplierId(val.id);
+                          setSourceSupplierName(val.print_name || val.name);
+                        } else {
+                          setSourceSupplierId(null);
+                          setSourceSupplierName('');
+                        }
+                      }}
+                      freeSolo
+                      renderInput={(params) => (
+                        <TextField
+                          {...params}
+                          label="Purchase Supplier / Farm Source *"
+                          placeholder="Direct supplier name"
+                          required
+                        />
+                      )}
+                    />
+                  )}
                 </Grid>
 
-                <Grid item xs={12}>
+                {/* Operator Terms Banner */}
+                {selectedCsObj && (
+                  <Grid item xs={12}>
+                    <Box sx={{ p: 1.5, bgcolor: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 1.5, display: 'flex', flexWrap: 'wrap', gap: 2, alignItems: 'center', fontSize: '12px' }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: '#0369a1', fontWeight: 'bold' }}>
+                        <OperatorIcon fontSize="small" /> Operator:
+                      </Box>
+                      <span><strong>{selectedCsObj.operator_name || selectedCsObj.resolved_operator_name || 'AgroChill Logistics'}</strong></span>
+                      <Divider orientation="vertical" flexItem sx={{ my: 0.5 }} />
+                      <span>Rate: <strong>₹{selectedCsObj.rate_per_bag || 15} / Bag</strong> ({selectedCsObj.storage_duration || 10} Days Slab)</span>
+                      <Divider orientation="vertical" flexItem sx={{ my: 0.5 }} />
+                      <span>Inward Handling: <strong>₹{selectedCsObj.inward_handling_rate || 3.5} / Bag</strong></span>
+                      <Divider orientation="vertical" flexItem sx={{ my: 0.5 }} />
+                      <span>Min Billable: <strong>{selectedCsObj.min_billable_days || 10} Days</strong></span>
+                      <Divider orientation="vertical" flexItem sx={{ my: 0.5 }} />
+                      <span>GST: <strong>{selectedCsObj.gst_rate || 18}%</strong></span>
+                    </Box>
+                  </Grid>
+                )}
+              </Grid>
+            </CardContent>
+          </Card>
+
+          {/* Section 2: Transit, Logistics & Chamber Card */}
+          <Card sx={{ mb: 2.5, boxShadow: '0 2px 8px rgba(0,0,0,0.08)', borderRadius: 2 }}>
+            <CardContent sx={{ p: 2.5 }}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 2, color: '#0284c7', display: 'flex', alignItems: 'center', gap: 1 }}>
+                <TruckIcon fontSize="small" /> Transit, Vehicle & Chamber Allocation
+              </Typography>
+              <Grid container spacing={2}>
+                <Grid item xs={12} sm={3}>
                   <TextField
                     fullWidth
                     size="small"
-                    label="Remarks / Vehicle / Temperature Notes"
-                    value={remarks}
-                    onChange={(e) => setRemarks(e.target.value)}
-                    placeholder="e.g. Transported in Reefer Truck at 4°C"
+                    label="Lorry / Vehicle No"
+                    value={vehicleNo}
+                    onChange={(e) => setVehicleNo(e.target.value)}
+                    placeholder="e.g. TN 28 AB 1234"
+                  />
+                </Grid>
+                <Grid item xs={12} sm={3}>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="Driver Name & Phone"
+                    value={driverName}
+                    onChange={(e) => setDriverName(e.target.value)}
+                    placeholder="Driver Name"
+                  />
+                </Grid>
+                <Grid item xs={12} sm={3}>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="Transporter Name"
+                    value={transporterName}
+                    onChange={(e) => setTransporterName(e.target.value)}
+                    placeholder="e.g. VRL Logistics"
+                  />
+                </Grid>
+                <Grid item xs={12} sm={3}>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="LR / Bilty No"
+                    value={lrNo}
+                    onChange={(e) => setLrNo(e.target.value)}
+                    placeholder="LR Number"
+                  />
+                </Grid>
+                <Grid item xs={12} sm={3}>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="Operator Inward Pass #"
+                    value={gatePassNo}
+                    onChange={(e) => setGatePassNo(e.target.value)}
+                    placeholder="Cold storage receipt / gate pass"
+                  />
+                </Grid>
+                <Grid item xs={12} sm={3}>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="Chamber / Room Allocation"
+                    value={chamberNo}
+                    onChange={(e) => setChamberNo(e.target.value)}
+                    placeholder="e.g. Chamber 1"
+                  />
+                </Grid>
+                <Grid item xs={12} sm={3}>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="Floor / Stack No"
+                    value={floorNo}
+                    onChange={(e) => setFloorNo(e.target.value)}
+                    placeholder="e.g. Floor 2, Stack 4"
+                  />
+                </Grid>
+                <Grid item xs={12} sm={3}>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="Rack / Position #"
+                    value={rackNo}
+                    onChange={(e) => setRackNo(e.target.value)}
+                    placeholder="e.g. Rack B3"
                   />
                 </Grid>
               </Grid>
             </CardContent>
           </Card>
 
-          {/* Items Table Card */}
-          <Card sx={{ mb: 3, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
-            <CardContent sx={{ p: { xs: 2, md: 3 } }}>
+          {/* Section 3: Item Lines Table */}
+          <Card sx={{ mb: 2.5, boxShadow: '0 2px 8px rgba(0,0,0,0.08)', borderRadius: 2 }}>
+            <CardContent sx={{ p: 2.5 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="subtitle1" sx={{ fontWeight: 'bold', color: '#2a5ea0' }}>
-                  Material & Lot Selection
+                <Typography variant="subtitle1" sx={{ fontWeight: 'bold', color: '#0284c7' }}>
+                  Items to Store & Lot Tracking
                 </Typography>
-                <Button startIcon={<AddIcon />} variant="outlined" size="small" onClick={addItemRow}>
-                  Add Item Row
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<AddIcon />}
+                  onClick={handleAddItem}
+                >
+                  Add Line Item
                 </Button>
               </Box>
 
-              <TableContainer component={Paper} variant="outlined" sx={{ overflowX: 'auto', borderRadius: 1.5 }}>
-                <Table sx={{ minWidth: 1250, '& .MuiTableCell-root': { py: 1, px: 1 } }}>
-                  <TableHead sx={{ backgroundColor: '#f0f4fa' }}>
+              <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e2e8f0', borderRadius: 1.5 }}>
+                <Table size="small">
+                  <TableHead sx={{ backgroundColor: '#f8fafc' }}>
                     <TableRow>
-                      <TableCell sx={{ fontWeight: 'bold', width: 45, textAlign: 'center' }}>#</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold', minWidth: 280, width: 320 }}>Purchase Lot & Item</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold', minWidth: 150, width: 170 }}>Purchase Lot #</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold', minWidth: 150, width: 170 }}>Cold Storage Lot #</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold', minWidth: 120, width: 135 }}>Inward Qty</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold', minWidth: 100, width: 110 }}>Per Wt</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold', minWidth: 120, width: 135 }}>Total Wt</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold', minWidth: 90, width: 100 }}>Unit</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold', minWidth: 160 }}>Item Remarks</TableCell>
-                      <TableCell align="center" sx={{ fontWeight: 'bold', width: 60 }}>Action</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', width: '22%' }}>Item Name *</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', width: '18%' }}>Source Purchase Lot</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', width: '18%' }}>Cold Storage Lot *</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', width: '12%' }} align="right">Bags / Qty *</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', width: '10%' }} align="right">Per Bag (KG)</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', width: '12%' }} align="right">Total Weight (KG)</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', width: '8%' }} align="center">Action</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {items.map((row, idx) => {
-                      const lotKey = row.item_name && row.purchase_lot_no ? `${row.item_name}_${row.purchase_lot_no}` : '';
-                      return (
-                        <TableRow key={idx} sx={{ '&:hover': { backgroundColor: '#fbfcfd' } }}>
-                          <TableCell align="center" sx={{ fontWeight: '600', color: 'text.secondary' }}>
-                            {idx + 1}
-                          </TableCell>
-                          
-                          {/* Lot & Item Select */}
-                          <TableCell>
-                            <TextField
-                              fullWidth
-                              select
-                              size="small"
-                              value={lotKey}
-                              onChange={(e) => handleLotSelect(idx, e.target.value)}
-                              SelectProps={{ 
-                                displayEmpty: true,
-                                sx: { fontSize: '0.875rem' }
-                              }}
-                            >
-                              <MenuItem value="" disabled>-- Select Purchase Lot --</MenuItem>
-                              {availableLots.map((l, lIdx) => (
-                                <MenuItem key={lIdx} value={`${l.item_name}_${l.purchase_lot_no}`}>
-                                  {l.item_name} (Lot: {l.purchase_lot_no}) - Avail: {l.available_qty} {l.unit}
-                                </MenuItem>
-                              ))}
-                            </TextField>
-                          </TableCell>
-
-                          <TableCell>
-                            <TextField
-                              fullWidth
-                              size="small"
-                              value={row.purchase_lot_no}
-                              onChange={(e) => handleItemChange(idx, 'purchase_lot_no', e.target.value)}
-                              placeholder="Purchase Lot #"
-                              inputProps={{
-                                sx: { px: 1.25, py: 0.9, fontSize: '0.875rem' }
-                              }}
-                            />
-                          </TableCell>
-
-                          <TableCell>
-                            <TextField
-                              fullWidth
-                              size="small"
-                              value={row.cold_storage_lot_no}
-                              onChange={(e) => handleItemChange(idx, 'cold_storage_lot_no', e.target.value)}
-                              placeholder="e.g. CS-001"
-                              inputProps={{
-                                sx: { px: 1.25, py: 0.9, fontSize: '0.875rem', fontWeight: '500' }
-                              }}
-                            />
-                          </TableCell>
-
-                          <TableCell>
-                            <TextField
-                              fullWidth
-                              size="small"
-                              type="number"
-                              value={row.quantity}
-                              onChange={(e) => handleItemChange(idx, 'quantity', e.target.value)}
-                              placeholder="Qty"
-                              inputProps={{
-                                step: "any",
-                                sx: { px: 1.25, py: 0.9, fontSize: '0.875rem', fontWeight: '600' }
-                              }}
-                            />
-                          </TableCell>
-
-                          <TableCell>
-                            <TextField
-                              fullWidth
-                              size="small"
-                              type="number"
-                              value={row.weight}
-                              onChange={(e) => handleItemChange(idx, 'weight', e.target.value)}
-                              placeholder="1"
-                              inputProps={{
-                                step: "any",
-                                sx: { px: 1.25, py: 0.9, fontSize: '0.875rem' }
-                              }}
-                            />
-                          </TableCell>
-
-                          <TableCell>
-                            <TextField
-                              fullWidth
-                              size="small"
-                              type="number"
-                              value={row.total_wt}
-                              onChange={(e) => handleItemChange(idx, 'total_wt', e.target.value)}
-                              placeholder="0"
-                              inputProps={{
-                                step: "any",
-                                sx: { px: 1.25, py: 0.9, fontSize: '0.875rem', fontWeight: '600' }
-                              }}
-                            />
-                          </TableCell>
-
-                          <TableCell>
-                            <TextField
-                              fullWidth
-                              size="small"
-                              value={row.unit}
-                              onChange={(e) => handleItemChange(idx, 'unit', e.target.value)}
-                              placeholder="KG"
-                              inputProps={{
-                                sx: { px: 1.25, py: 0.9, fontSize: '0.875rem', textAlign: 'center' }
-                              }}
-                            />
-                          </TableCell>
-
-                          <TableCell>
-                            <TextField
-                              fullWidth
-                              size="small"
-                              value={row.remarks}
-                              onChange={(e) => handleItemChange(idx, 'remarks', e.target.value)}
-                              placeholder="Notes"
-                              inputProps={{
-                                sx: { px: 1.25, py: 0.9, fontSize: '0.875rem' }
-                              }}
-                            />
-                          </TableCell>
-
-                          <TableCell align="center">
-                            <IconButton 
-                              color="error" 
-                              size="small" 
-                              onClick={() => removeItemRow(idx)}
-                              disabled={items.length === 1}
-                              title="Delete Row"
-                            >
-                              <DeleteIcon fontSize="small" />
-                            </IconButton>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
+                    {items.map((row, index) => (
+                      <TableRow key={index}>
+                        <TableCell>
+                          <TextField
+                            fullWidth
+                            size="small"
+                            placeholder="e.g. Broken Rice, Urad"
+                            value={row.item_name}
+                            onChange={(e) => handleItemChange(index, 'item_name', e.target.value)}
+                            required
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Autocomplete
+                            freeSolo
+                            size="small"
+                            options={availableLots.map(l => `${l.item_name}_${l.purchase_lot_no}`)}
+                            getOptionLabel={(opt) => {
+                              const lot = availableLots.find(l => `${l.item_name}_${l.purchase_lot_no}` === opt);
+                              return lot ? `${lot.purchase_lot_no} (${lot.purchased_qty} ${lot.unit || 'Bags'})` : opt;
+                            }}
+                            value={row.purchase_lot_no}
+                            onChange={(e, val) => handleLotSelect(index, val)}
+                            onInputChange={(e, val) => handleItemChange(index, 'purchase_lot_no', val)}
+                            renderInput={(params) => (
+                              <TextField {...params} placeholder="Select lot or type" size="small" />
+                            )}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <TextField
+                            fullWidth
+                            size="small"
+                            value={row.cold_storage_lot_no}
+                            onChange={(e) => handleItemChange(index, 'cold_storage_lot_no', e.target.value)}
+                            placeholder="Auto CS Lot"
+                          />
+                        </TableCell>
+                        <TableCell align="right">
+                          <TextField
+                            fullWidth
+                            size="small"
+                            type="number"
+                            value={row.quantity}
+                            onChange={(e) => handleItemChange(index, 'quantity', e.target.value)}
+                            inputProps={{ style: { textAlign: 'right' } }}
+                            required
+                          />
+                        </TableCell>
+                        <TableCell align="right">
+                          <TextField
+                            fullWidth
+                            size="small"
+                            type="number"
+                            value={row.weight}
+                            onChange={(e) => handleItemChange(index, 'weight', e.target.value)}
+                            inputProps={{ style: { textAlign: 'right' } }}
+                          />
+                        </TableCell>
+                        <TableCell align="right">
+                          <Typography variant="body2" sx={{ fontWeight: 'bold', textAlign: 'right', pt: 1 }}>
+                            {Number(row.total_wt || 0).toFixed(2)}
+                          </Typography>
+                        </TableCell>
+                        <TableCell align="center">
+                          <IconButton
+                            size="small"
+                            color="error"
+                            disabled={items.length === 1}
+                            onClick={() => handleRemoveItem(index)}
+                          >
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </TableCell>
+                      </TableRow>
+                    ))}
                   </TableBody>
                 </Table>
               </TableContainer>
 
-              {/* Total Summary */}
-              <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 4, mt: 2, p: 1.5, backgroundColor: '#f8fafc', borderRadius: 1 }}>
-                <Typography variant="subtitle2">
-                  Total Items: <strong>{items.length}</strong>
-                </Typography>
-                <Typography variant="subtitle2">
-                  Total Inward Quantity: <strong style={{ color: '#1f4fb2' }}>{totalQtySum.toFixed(2)}</strong>
-                </Typography>
-                <Typography variant="subtitle2">
-                  Total Weight: <strong style={{ color: '#1f4fb2' }}>{totalWtSum.toFixed(2)} KG</strong>
-                </Typography>
+              {/* Inward Summary Strip */}
+              <Box sx={{ mt: 2, p: 2, bgcolor: '#f8fafc', borderRadius: 1.5, display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid #e2e8f0' }}>
+                <Box sx={{ display: 'flex', gap: 3 }}>
+                  <Typography variant="body2">
+                    Total Quantity: <strong>{totalQty.toFixed(2)} Bags</strong>
+                  </Typography>
+                  <Typography variant="body2">
+                    Total Weight: <strong>{totalWeight.toFixed(2)} KG</strong> ({(totalWeight / 1000).toFixed(3)} MT)
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#0369a1' }}>
+                    Est. Inward Handling: <strong>₹{estimatedHandlingCharge.toFixed(2)}</strong> (@ ₹{handlingRate}/bag)
+                  </Typography>
+                </Box>
               </Box>
+
+              <TextField
+                fullWidth
+                size="small"
+                sx={{ mt: 2 }}
+                label="Inward Operational Remarks / Condition Notes"
+                value={remarks}
+                onChange={(e) => setRemarks(e.target.value)}
+                placeholder="e.g. Moisture 12%, bags intact, stacked on chamber pallet 4"
+              />
             </CardContent>
           </Card>
 
@@ -655,57 +790,46 @@ const ColdStorageIn = () => {
             <Button
               type="submit"
               variant="contained"
+              size="large"
+              sx={{ bgcolor: '#0284c7', '&:hover': { bgcolor: '#0369a1' }, px: 4 }}
               startIcon={<SaveIcon />}
               disabled={saving}
-              sx={{ backgroundColor: '#1f4fb2', px: 4, py: 1 }}
             >
-              {saving ? 'Saving...' : 'Save Cold Storage Inward Voucher'}
+              {saving ? 'Creating Inward Voucher...' : 'Save Cold Storage Inward'}
             </Button>
           </Box>
         </form>
       )}
 
-      {/* Print / Success Confirmation Dialog */}
-      <Dialog open={printModalOpen} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ backgroundColor: '#1f4fb2', color: '#fff', display: 'flex', alignItems: 'center', gap: 1 }}>
-          <CheckIcon /> Cold Storage Inward Saved
+      {/* Print Success Modal */}
+      <Dialog open={printModalOpen} onClose={() => setPrintModalOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ textAlign: 'center', pt: 3 }}>
+          <CheckIcon sx={{ fontSize: 48, color: '#16a34a', mb: 1 }} />
+          <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
+            Inward Voucher Saved!
+          </Typography>
         </DialogTitle>
-        <DialogContent sx={{ pt: 3 }}>
-          {savedVoucher && (
-            <Box sx={{ p: 1 }}>
-              <Typography variant="h6" color="primary" gutterBottom>
-                Voucher #: {savedVoucher.voucher_no}
-              </Typography>
-              <Typography variant="body2" gutterBottom>
-                <strong>Date:</strong> {savedVoucher.voucher_date}
-              </Typography>
-              <Typography variant="body2" gutterBottom>
-                <strong>Cold Storage:</strong> {savedVoucher.cold_storage_name}
-              </Typography>
-              <Typography variant="body2" gutterBottom>
-                <strong>Origin:</strong> {savedVoucher.source_godown_name}
-              </Typography>
-              <Divider sx={{ my: 2 }} />
-              <Typography variant="subtitle2" sx={{ fontWeight: 'bold', mb: 1 }}>Items Transferred:</Typography>
-              {savedVoucher.items.map((it, idx) => (
-                <Box key={idx} sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5, fontSize: '13px' }}>
-                  <span>{it.item_name} (Lot: {it.cold_storage_lot_no})</span>
-                  <span><strong>{it.quantity} {it.unit}</strong> ({it.total_wt} KG)</span>
-                </Box>
-              ))}
-            </Box>
-          )}
-        </DialogContent>
-        <DialogActions sx={{ p: 2, justifyContent: 'space-between' }}>
-          <Button variant="outlined" onClick={handleResetForm}>
-            Create Another Voucher
-          </Button>
-          <Button 
-            variant="contained" 
+        <DialogContent sx={{ textAlign: 'center', pb: 2 }}>
+          <Typography variant="body2" sx={{ color: '#64748b', mb: 2 }}>
+            Cold Storage Inward Voucher <strong>{savedVoucher?.voucher_no}</strong> has been created and stock has been allocated to {savedVoucher?.cold_storage_name}.
+          </Typography>
+          <Button
+            variant="contained"
+            color="primary"
+            fullWidth
             startIcon={<PrintIcon />}
-            onClick={handlePrintVoucherSlip}
+            onClick={handlePrint}
+            sx={{ mb: 1 }}
           >
-            Print Voucher Slip
+            Print Inward Receipt (CSI)
+          </Button>
+        </DialogContent>
+        <DialogActions sx={{ justifyContent: 'center', pb: 3 }}>
+          <Button onClick={() => { setPrintModalOpen(false); navigate('/cold-storage/vouchers'); }}>
+            View Voucher Register
+          </Button>
+          <Button variant="outlined" onClick={() => { setPrintModalOpen(false); fetchInitialData(); }}>
+            New Inward
           </Button>
         </DialogActions>
       </Dialog>

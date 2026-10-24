@@ -14,16 +14,10 @@ export function generateVehicleInPassHtml(row = {}, company = {}) {
   const currentTime = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
 
   const vehicleNo = row.vehicle_no || row.lorry_no || '—';
-  const rawTransporter = row.transporter_name || row.transporterName || row.transporter || row.transport;
-  const transporter = rawTransporter && /^\d+$/.test(String(rawTransporter).trim())
-    ? 'Transporter name unavailable'
-    : (rawTransporter || 'Direct / Own Vehicle');
+  const transporter = row.transporter || row.transport || 'Direct / Own Vehicle';
   const driverName = row.driver_name || row.driver || '—';
   const supplierName = row.supplier_name || row.supplier || '—';
-  const supplierAddress = row.supplier_address || row.address || '—';
-  const supplierGst = row.supplier_gstin || row.gst_no || row.gst_number || '—';
-  const supplierContact = row.supplier_contact_person || row.contact_person || '—';
-  const supplierPhone = row.supplier_phone || row.phone || '—';
+  const supplierAddress = row.address || '—';
   const invNo = row.inv_no || row.invoice_no || '—';
   const poNo = row.po_no || (row.purchase_order_id ? `PO-${row.purchase_order_id}` : 'Direct Purchase');
   const itemName = row.item_name || '—';
@@ -32,16 +26,6 @@ export function generateVehicleInPassHtml(row = {}, company = {}) {
   const unitWt = row.weight || row.per_unit_wt || '—';
   const totalWeight = row.total_weight || row.total_wt || '—';
   const godown = row.godown || row.godown_name || 'Main Godown';
-  const grossWeight = row.gross_weight ?? row.cross_weight;
-  const tareWeight = row.tare_weight;
-  const netWeight = row.net_weight ?? (
-    grossWeight !== undefined && grossWeight !== null && tareWeight !== undefined && tareWeight !== null
-      ? Number(grossWeight) - Number(tareWeight)
-      : null
-  );
-  const formatWeight = value => value === undefined || value === null || value === ''
-    ? '—'
-    : Number(value).toLocaleString('en-IN', { maximumFractionDigits: 2 });
 
   return `
     <div style="font-family: 'Segoe UI', Arial, sans-serif; color: #1e293b; line-height: 1.4; max-width: 850px; margin: 0 auto; padding: 10px;">
@@ -107,14 +91,6 @@ export function generateVehicleInPassHtml(row = {}, company = {}) {
               <td style="padding: 6px 10px; border-bottom: 1px solid #f1f5f9; font-weight: 700; color: #0f172a;">${supplierName}</td>
             </tr>
             <tr>
-              <td style="padding: 6px 10px; border-bottom: 1px solid #f1f5f9; color: #64748b; font-weight: 600;">GSTIN</td>
-              <td style="padding: 6px 10px; border-bottom: 1px solid #f1f5f9; font-weight: 600;">${supplierGst}</td>
-            </tr>
-            <tr>
-              <td style="padding: 6px 10px; border-bottom: 1px solid #f1f5f9; color: #64748b; font-weight: 600;">Contact / Phone</td>
-              <td style="padding: 6px 10px; border-bottom: 1px solid #f1f5f9; font-weight: 600;">${supplierContact} / ${supplierPhone}</td>
-            </tr>
-            <tr>
               <td style="padding: 6px 10px; border-bottom: 1px solid #f1f5f9; color: #64748b; font-weight: 600;">Supplier Invoice No</td>
               <td style="padding: 6px 10px; border-bottom: 1px solid #f1f5f9; font-weight: 600;">${invNo}</td>
             </tr>
@@ -162,14 +138,14 @@ export function generateVehicleInPassHtml(row = {}, company = {}) {
           <th colspan="4" style="padding: 6px 10px; text-align: left; font-weight: 700; color: #334155;">⚖️ WEIGHBRIDGE & SECURITY CHECKS</th>
         </tr>
         <tr>
-          <td style="padding: 8px 10px; border-right: 1px solid #cbd5e1; width: 25%;"><strong>Cross / Gross Weight:</strong> ${formatWeight(grossWeight)} KG</td>
-          <td style="padding: 8px 10px; border-right: 1px solid #cbd5e1; width: 25%;"><strong>Tare Weight:</strong> ${formatWeight(tareWeight)} KG</td>
-          <td style="padding: 8px 10px; border-right: 1px solid #cbd5e1; width: 25%;"><strong>Net Weight:</strong> ${formatWeight(netWeight)} KG</td>
+          <td style="padding: 8px 10px; border-right: 1px solid #cbd5e1; width: 25%;"><strong>Gross Weight:</strong> ________________ KG</td>
+          <td style="padding: 8px 10px; border-right: 1px solid #cbd5e1; width: 25%;"><strong>Tare Weight:</strong> Pending Exit</td>
+          <td style="padding: 8px 10px; border-right: 1px solid #cbd5e1; width: 25%;"><strong>Net Weight:</strong> ________________ KG</td>
           <td style="padding: 8px 10px; width: 25%;"><strong>Security Seal:</strong> Verified [ ✓ ]</td>
         </tr>
         <tr style="border-top: 1px solid #cbd5e1;">
           <td colspan="4" style="padding: 8px 10px; color: #475569;">
-            <strong>Remarks / Inspection Notes:</strong> ${row.remarks || 'Material received in good condition. Sample drawn for Quality Control inspection.'}
+            <strong>Remarks / Inspection Notes:</strong> Material received in good condition. Sample drawn for Quality Control inspection.
           </td>
         </tr>
       </table>

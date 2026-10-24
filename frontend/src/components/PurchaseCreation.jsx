@@ -61,7 +61,15 @@ const PurchaseCreation = () => {
     source_order_no: '',
     source_order_id: '',
     purchase_order_id: '',
-    po_no: ''
+    po_no: '',
+
+    // Cold Storage Inward & Loadman Unloading Details
+    chamber_no: 'Chamber 1',
+    loadman_name: 'K. Murugan',
+    loadman_worker_id: '',
+    loadman_qty_kg: '',
+    loadman_rate_per_kg: '0.50',
+    additional_charges: '0'
   })
 
   const [poPickerOpen, setPoPickerOpen] = useState(false);
@@ -111,6 +119,13 @@ const PurchaseCreation = () => {
       source_order_id: formData.source_order_id || formData.purchase_order_id,
       purchase_order_id: formData.purchase_order_id || formData.source_order_id,
       po_no: formData.po_no || formData.source_order_no,
+      // Cold Storage & Loadman details
+      chamber_no: formData.chamber_no || 'Chamber 1',
+      loadman_name: formData.loadman_name || 'K. Murugan',
+      loadman_worker_id: formData.loadman_worker_id || null,
+      loadman_qty_kg: formData.loadman_qty_kg,
+      loadman_rate_per_kg: formData.loadman_rate_per_kg,
+      additional_charges: formData.additional_charges,
       // Keep fields that may be used by ledger helper
       supplier_id: formData.supplier_id
     }
@@ -299,6 +314,9 @@ const PurchaseCreation = () => {
     }
   }, []);
 
+  const [godownsList, setGodownsList] = useState([]);
+  const [coldStorageTariff, setColdStorageTariff] = useState(null);
+
   // Fetch Masters and Existing Record
   useEffect(() => {
     const loadDeductions = async () => {
@@ -309,6 +327,18 @@ const PurchaseCreation = () => {
         setDeductions(Array.isArray(data) ? data : []);
       } catch (err) { console.error('Deduction load failed', err); }
     };
+
+    const loadGodowns = async () => {
+      try {
+        const res = await getMasters('godowns');
+        const arr = Array.isArray(res?.data || res) ? (res?.data || res) : [];
+        setGodownsList(arr);
+      } catch (err) {
+        console.warn('Godowns master load failed:', err.message);
+      }
+    };
+
+    loadGodowns();
 
     const fetchNextSNo = async () => {
       if (id) return;
@@ -528,6 +558,63 @@ const PurchaseCreation = () => {
     }
   }, [id, formData, tableData, selectedDeductions]);
 
+  // Auto-detect Cold Storage selection and load live tariff rules
+  useEffect(() => {
+    const rawGodown = formData.godown_id;
+    if (!rawGodown) {
+      setColdStorageTariff(null);
+      return;
+    }
+    const g = (godownsList || []).find(it => 
+      String(it.id) === String(rawGodown) || 
+      String(it.godown_name).toLowerCase() === String(rawGodown).toLowerCase()
+    );
+    const isCs = Boolean(
+      g && (
+        Number(g.is_cold_storage) === 1 ||
+        String(g.godown_type || '').toLowerCase().includes('cold') ||
+        String(g.storage_location || '').toLowerCase().includes('outside') ||
+        String(g.godown_name || '').toLowerCase().includes('cold') ||
+        Number(g.id) === 2
+      )
+    );
+
+    if (isCs && g?.id) {
+      api(`/cold-storage/tariff/${g.id}`).then(res => {
+        if (res && res.data) {
+          setColdStorageTariff(res.data);
+          setFormData(prev => ({
+            ...prev,
+            loadman_rate_per_kg: prev.loadman_rate_per_kg || String(res.data.inwardUnloadingRate || '0.50'),
+            chamber_no: prev.chamber_no || g.default_chamber || 'Chamber 1'
+          }));
+        }
+      }).catch(e => console.warn('Tariff fetch notice:', e.message));
+    } else {
+      setColdStorageTariff(null);
+    }
+  }, [formData.godown_id, godownsList]);
+
+  const selectedGodownObj = useMemo(() => {
+    const rawGodown = formData.godown_id;
+    if (!rawGodown) return null;
+    return (godownsList || []).find(it => 
+      String(it.id) === String(rawGodown) || 
+      String(it.godown_name).toLowerCase() === String(rawGodown).toLowerCase()
+    ) || null;
+  }, [godownsList, formData.godown_id]);
+
+  const isColdStorageSelected = useMemo(() => {
+    if (!selectedGodownObj) return false;
+    return Boolean(
+      Number(selectedGodownObj.is_cold_storage) === 1 ||
+      String(selectedGodownObj.godown_type || '').toLowerCase().includes('cold') ||
+      String(selectedGodownObj.storage_location || '').toLowerCase().includes('outside') ||
+      String(selectedGodownObj.godown_name || '').toLowerCase().includes('cold') ||
+      Number(selectedGodownObj.id) === 2
+    );
+  }, [selectedGodownObj]);
+
   const handleOpenPoPicker = async () => {
     setPoPickerOpen(true);
     setLoadingPoList(true);
@@ -706,6 +793,13 @@ const PurchaseCreation = () => {
   const totals = useMemo(() => {
     return erpTotals; // Use the comprehensive erpTotals
   }, [erpTotals]);
+
+  const calculatedLoadmanCharges = useMemo(() => {
+    const qty = parseFloat(formData.loadman_qty_kg !== undefined && formData.loadman_qty_kg !== '' ? formData.loadman_qty_kg : (erpTotals?.totalWeight || 0)) || 0;
+    const rate = parseFloat(formData.loadman_rate_per_kg !== undefined && formData.loadman_rate_per_kg !== '' ? formData.loadman_rate_per_kg : 0.50) || 0;
+    const add = parseFloat(formData.additional_charges || 0) || 0;
+    return Number(((qty * rate) + add).toFixed(2));
+  }, [formData.loadman_qty_kg, formData.loadman_rate_per_kg, formData.additional_charges, erpTotals?.totalWeight]);
 
   const payload = useMemo(() => ({
     date: formData.date,
@@ -1396,6 +1490,121 @@ const PurchaseCreation = () => {
             />
           ) : null}
         />
+
+        {/* Cold Storage Inward & Loadman Unloading Details (Auto-Linked CSI Voucher) */}
+        {isColdStorageSelected && (
+          <div style={{
+            margin: '14px 0 18px',
+            padding: '16px 20px',
+            background: 'linear-gradient(135deg, #f0fdf4 0%, #e0f2fe 100%)',
+            border: '1.5px solid #0284c7',
+            borderRadius: '8px',
+            boxShadow: '0 2px 8px rgba(2, 132, 199, 0.08)'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '22px' }}>❄️</span>
+                <div>
+                  <h4 style={{ margin: 0, color: '#0369a1', fontWeight: 'bold', fontSize: '15px' }}>
+                    Cold Storage Inward & Unloading Configuration (Auto-Linked CSI Voucher)
+                  </h4>
+                  <span style={{ fontSize: '12px', color: '#475569' }}>
+                    Facility: <strong>{selectedGodownObj?.godown_name || 'BTS Cold Storage'}</strong> • Operator: <strong>{coldStorageTariff?.operatorName || selectedGodownObj?.operator_name || 'AgroCold Services'}</strong>
+                  </span>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <span style={{ background: '#0284c7', color: '#fff', padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' }}>
+                  Rule: {coldStorageTariff?.calculationType || 'Progressive'} Slabs
+                </span>
+                <span style={{ background: '#10b981', color: '#fff', padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' }}>
+                  Days 1–15: ₹0.20/kg/day
+                </span>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#334155', marginBottom: '4px' }}>
+                  Chamber / Rack
+                </label>
+                <input
+                  type="text"
+                  value={formData.chamber_no || 'Chamber 1'}
+                  onChange={(e) => setFormData(prev => ({ ...prev, chamber_no: e.target.value }))}
+                  style={{ width: '100%', padding: '6px 10px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#334155', marginBottom: '4px' }}>
+                  Loadman / Worker Name
+                </label>
+                <input
+                  type="text"
+                  value={formData.loadman_name || 'K. Murugan'}
+                  onChange={(e) => setFormData(prev => ({ ...prev, loadman_name: e.target.value }))}
+                  placeholder="e.g. K. Murugan"
+                  style={{ width: '100%', padding: '6px 10px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#334155', marginBottom: '4px' }}>
+                  Unloaded Weight (KG)
+                </label>
+                <input
+                  type="number"
+                  step="any"
+                  value={formData.loadman_qty_kg !== undefined && formData.loadman_qty_kg !== '' ? formData.loadman_qty_kg : erpTotals.totalWeight}
+                  onChange={(e) => setFormData(prev => ({ ...prev, loadman_qty_kg: e.target.value }))}
+                  style={{ width: '100%', padding: '6px 10px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '13px', fontWeight: 'bold' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#334155', marginBottom: '4px' }}>
+                  Loadman Rate (₹/KG)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={formData.loadman_rate_per_kg !== undefined && formData.loadman_rate_per_kg !== '' ? formData.loadman_rate_per_kg : '0.50'}
+                  onChange={(e) => setFormData(prev => ({ ...prev, loadman_rate_per_kg: e.target.value }))}
+                  style={{ width: '100%', padding: '6px 10px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#334155', marginBottom: '4px' }}>
+                  Additional Charges (₹)
+                </label>
+                <input
+                  type="number"
+                  step="any"
+                  value={formData.additional_charges || '0'}
+                  onChange={(e) => setFormData(prev => ({ ...prev, additional_charges: e.target.value }))}
+                  style={{ width: '100%', padding: '6px 10px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                />
+              </div>
+
+              <div style={{ background: '#fff', padding: '8px 12px', borderRadius: '6px', border: '1px solid #93c5fd' }}>
+                <span style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: 'bold' }}>
+                  Total Unloading Charges
+                </span>
+                <span style={{ fontSize: '16px', fontWeight: 'bold', color: '#0369a1' }}>
+                  ₹{calculatedLoadmanCharges.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+                <span style={{ display: 'block', fontSize: '10px', color: '#16a34a' }}>
+                  Auto-links to Worker Pay & CSI
+                </span>
+              </div>
+            </div>
+            <div style={{ marginTop: '8px', fontSize: '11px', color: '#475569' }}>
+              ℹ️ <strong>One-Time Entry:</strong> Saving this purchase automatically creates a linked <strong>Cold Storage Inward (CSI)</strong> record, registers the <code>CS-</code> lot in external inventory, and creates a pending worker payment record. No re-entry required.
+            </div>
+          </div>
+        )}
 
         <EntryItemsTable
           columns={columns}

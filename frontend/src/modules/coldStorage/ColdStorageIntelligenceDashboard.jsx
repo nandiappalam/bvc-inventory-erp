@@ -747,18 +747,17 @@ export default function ColdStorageIntelligenceDashboard() {
                 <TableRow>
                   <TableCell sx={{ fontWeight: 700 }}>Lot No</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Item Commodity</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Supplier</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Inward Date</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Storage Age</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Current Stock</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>QC Status</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }} align="center">Action</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Age</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Storage Charges</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Insurance</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Other Chgs</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {chamberInventory.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} align="center" sx={{ py: 3, color: 'text.secondary' }}>
+                    <TableCell colSpan={7} align="center" sx={{ py: 3, color: 'text.secondary' }}>
                       No active stock lots found in this chamber.
                     </TableCell>
                   </TableRow>
@@ -767,8 +766,9 @@ export default function ColdStorageIntelligenceDashboard() {
                     <TableRow key={lot.lotNo} hover>
                       <TableCell sx={{ fontFamily: 'monospace', fontWeight: 700 }}>{lot.lotNo}</TableCell>
                       <TableCell>{lot.itemName}</TableCell>
-                      <TableCell>{lot.supplierName}</TableCell>
-                      <TableCell>{lot.inwardDate}</TableCell>
+                      <TableCell sx={{ fontWeight: 700 }}>
+                        {lot.currentStockKg?.toLocaleString()} {lot.unit}
+                      </TableCell>
                       <TableCell>
                         <Chip
                           label={`${lot.daysInStorage} Days`}
@@ -777,31 +777,9 @@ export default function ColdStorageIntelligenceDashboard() {
                           sx={{ fontWeight: 600, fontSize: '11px' }}
                         />
                       </TableCell>
-                      <TableCell sx={{ fontWeight: 700 }}>
-                        {lot.currentStockKg?.toLocaleString()} {lot.unit}
-                      </TableCell>
-                      <TableCell>
-                        <Chip
-                          label={lot.qcStatus}
-                          size="small"
-                          color={lot.qcStatus === 'PASSED' ? 'success' : 'error'}
-                          sx={{ fontWeight: 700, fontSize: '11px' }}
-                        />
-                      </TableCell>
-                      <TableCell align="center">
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          startIcon={<QrCode2Icon />}
-                          onClick={() => {
-                            setInventoryOpen(false);
-                            navigate(`/barcode-qr?code=LOT-${encodeURIComponent(lot.lotNo)}`);
-                          }}
-                          sx={{ textTransform: 'none' }}
-                        >
-                          Scan 360°
-                        </Button>
-                      </TableCell>
+                      <TableCell>₹{parseFloat(lot.storageRent || 0).toFixed(2)}</TableCell>
+                      <TableCell>₹{parseFloat(lot.insurance || 0).toFixed(2)}</TableCell>
+                      <TableCell>₹{parseFloat(lot.otherCharges || 0).toFixed(2)}</TableCell>
                     </TableRow>
                   ))
                 )}

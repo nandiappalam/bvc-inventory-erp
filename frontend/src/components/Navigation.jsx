@@ -425,6 +425,12 @@ const Navigation = () => {
   // Grouped Cold Storage Modules
   const coldStorageGroups = [
     {
+      groupTitle: 'Command Center',
+      items: [
+        { name: 'Cold Storage Workspace', path: '/cold-storage' }
+      ]
+    },
+    {
       groupTitle: 'Operations',
       items: [
         { name: 'Cold Storage IN (CSI)', path: '/cold-storage/in' },
@@ -432,9 +438,15 @@ const Navigation = () => {
       ]
     },
     {
-      groupTitle: 'Stock',
+      groupTitle: 'Stock & Valuation',
       items: [
-        { name: 'Stock Balance', path: '/cold-storage/stock' }
+        { name: 'Stock & Lot Valuation', path: '/cold-storage/stock' }
+      ]
+    },
+    {
+      groupTitle: 'Operator Billing',
+      items: [
+        { name: 'Operator Billing & Verification', path: '/cold-storage/billing' }
       ]
     },
     {

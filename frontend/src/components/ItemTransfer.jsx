@@ -78,6 +78,13 @@ const ItemTransfer = ({ initialView = 'create' }) => {
     transfer_qty: '',
     transfer_weight: '',
     rate: 0,
+    vehicle_no: '',
+    driver_name: '',
+    driver_phone: '',
+    transporter_name: '',
+    loadman_name: '',
+    loadman_charges: '',
+    insurance_charges: '',
     remarks: '',
     created_by: 'Admin'
   });
@@ -122,7 +129,8 @@ const ItemTransfer = ({ initialView = 'create' }) => {
     fetch('/api/godowns')
       .then((res) => res.json())
       .then((data) => {
-        if (Array.isArray(data)) setGodowns(data);
+        const list = Array.isArray(data) ? data : (data.data || []);
+        setGodowns(list);
       })
       .catch((err) => console.error('Error fetching godowns:', err));
 
