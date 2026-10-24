@@ -395,25 +395,25 @@ router.get('/godown-stock', async (req, res) => {
     }
 
     const lotDateRows = await db.query(`
-      SELECT pi.item_name, pi.lot_no, MAX(p.date) AS purchase_date, NULL AS processed_date, 'purchase' AS record_type
+      SELECT pi.item_name, pi.lot_no, CAST(MAX(p.date) AS VARCHAR) AS purchase_date, CAST(NULL AS VARCHAR) AS processed_date, 'purchase' AS record_type
       FROM purchase_items pi
       JOIN purchases p ON p.id = pi.purchase_id
       WHERE pi.lot_no IS NOT NULL AND pi.lot_no != ''
       GROUP BY pi.item_name, pi.lot_no
       UNION ALL
-      SELECT process_rows.item_name, process_rows.lot_no, NULL AS purchase_date, MAX(process_rows.processed_date) AS processed_date, process_rows.record_type
+      SELECT process_rows.item_name, process_rows.lot_no, CAST(NULL AS VARCHAR) AS purchase_date, CAST(MAX(process_rows.processed_date) AS VARCHAR) AS processed_date, process_rows.record_type
       FROM (
-        SELECT go.item_name, go.lot_no, g.date AS processed_date, 'processed' AS record_type
+        SELECT go.item_name, go.lot_no, CAST(g.date AS VARCHAR) AS processed_date, 'processed' AS record_type
         FROM grain_output_items go
         JOIN grains g ON g.id = go.grain_id
         WHERE go.lot_no IS NOT NULL AND go.lot_no != ''
         UNION ALL
-        SELECT gw.item_name, gw.lot_no, g.date AS processed_date, 'waste' AS record_type
+        SELECT gw.item_name, gw.lot_no, CAST(g.date AS VARCHAR) AS processed_date, 'waste' AS record_type
         FROM grain_wastage_items gw
         JOIN grains g ON g.id = gw.grain_id
         WHERE gw.lot_no IS NOT NULL AND gw.lot_no != ''
         UNION ALL
-        SELECT foi.item_name, foi.lot_no, fo.date AS processed_date, 'processed' AS record_type
+        SELECT foi.item_name, foi.lot_no, CAST(fo.date AS VARCHAR) AS processed_date, 'processed' AS record_type
         FROM flour_out_items foi
         JOIN flour_out fo ON fo.id = foi.flour_out_id
         WHERE foi.lot_no IS NOT NULL AND foi.lot_no != ''

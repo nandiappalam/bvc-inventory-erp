@@ -324,8 +324,8 @@ router.get('/:id', async (req, res) => {
     let godownRow = null
     if (purchaseData.godown) {
       godownRow = (await db.query(
-        'SELECT godown_name, print_name, address, area FROM godown_master WHERE id = ?',
-        [purchaseData.godown]
+        `SELECT godown_name, print_name, address, area FROM godown_master WHERE CAST(id AS TEXT) = ? OR godown_name = ? OR print_name = ? LIMIT 1`,
+        [String(purchaseData.godown), String(purchaseData.godown), String(purchaseData.godown)]
       )).rows[0]
     }
 
@@ -441,7 +441,7 @@ router.post('/', async (req, res) => {
 
     try {
       if (resolvedGodownId) {
-        const gRes = await db.query('SELECT godown_name FROM godown_master WHERE id = ?', [resolvedGodownId]);
+        const gRes = await db.query('SELECT godown_name FROM godown_master WHERE CAST(id AS TEXT) = ?', [String(resolvedGodownId)]);
         if (gRes.rows && gRes.rows[0]) resolvedGodownName = gRes.rows[0].godown_name;
       } else if (resolvedGodownName) {
         const gRes = await db.query('SELECT id, godown_name FROM godown_master WHERE LOWER(TRIM(godown_name)) = LOWER(TRIM(?))', [resolvedGodownName]);
@@ -1036,7 +1036,7 @@ router.put('/:id', async (req, res) => {
     }
     try {
       if (resolvedGodownId) {
-        const gRes = await db.query('SELECT godown_name FROM godown_master WHERE id = ?', [resolvedGodownId]);
+        const gRes = await db.query('SELECT godown_name FROM godown_master WHERE CAST(id AS TEXT) = ?', [String(resolvedGodownId)]);
         if (gRes.rows && gRes.rows[0]) resolvedGodownName = gRes.rows[0].godown_name;
       } else if (resolvedGodownName) {
         const gRes = await db.query('SELECT id, godown_name FROM godown_master WHERE LOWER(godown_name) = LOWER(?)', [resolvedGodownName]);

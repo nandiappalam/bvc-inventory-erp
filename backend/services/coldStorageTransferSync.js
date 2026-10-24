@@ -15,11 +15,12 @@ const createVoucherForTransfer = async (transfer, companyId = 1) => {
   const cId = parseInt(companyId, 10) || 1;
   const remarks = transferReference(transfer);
   const existing = await db.query(
-    'SELECT id FROM cold_storage_vouchers WHERE remarks = ? LIMIT 1',
+    'SELECT id, voucher_no FROM cold_storage_vouchers WHERE remarks = ? LIMIT 1',
     [remarks],
     cId
   );
-  if (existing.rows && existing.rows[0]) return existing.rows[0].id;
+  let voucherId = existing.rows?.[0]?.id;
+  let voucherNo = existing.rows?.[0]?.voucher_no;
 
   const toGodownId = transfer.to_godown_id;
   let tariff = null;
@@ -27,13 +28,15 @@ const createVoucherForTransfer = async (transfer, companyId = 1) => {
     tariff = await getColdStorageTariff(toGodownId, cId);
   } catch (_) {}
 
-  const lastVoucher = await db.query(
-    "SELECT voucher_no FROM cold_storage_vouchers WHERE voucher_type = 'IN' ORDER BY id DESC LIMIT 1",
-    [],
-    cId
-  );
-  const lastNumber = Number(String(lastVoucher.rows?.[0]?.voucher_no || '').replace(/\D/g, '')) || 0;
-  const voucherNo = `CSI-${String(lastNumber + 1).padStart(6, '0')}`;
+  if (!voucherNo) {
+    const lastVoucher = await db.query(
+      "SELECT voucher_no FROM cold_storage_vouchers WHERE voucher_type = 'IN' ORDER BY id DESC LIMIT 1",
+      [],
+      cId
+    );
+    const lastNumber = Number(String(lastVoucher.rows?.[0]?.voucher_no || '').replace(/\D/g, '')) || 0;
+    voucherNo = `CSI-${String(lastNumber + 1).padStart(6, '0')}`;
+  }
   const quantity = Number(transfer.qty) || 0;
   const totalWeight = Number(transfer.weight) || (quantity * 50);
   const perUnitWeight = quantity > 0 ? totalWeight / quantity : 50;
@@ -62,72 +65,92 @@ const createVoucherForTransfer = async (transfer, companyId = 1) => {
   const loadmanName = transfer.loadman_name || transfer.worker_name || 'Inward Loadman Team';
   const loadmanCharges = parseFloat(transfer.loadman_charges || 0);
   const handlingRate = tariff?.inwardUnloadingRate || 0.50;
-  const handlingAmount = loadmanCharges > 0 ? loadmanCharges : Number((totalWeight * handlingRate).toFixed(2));
-  const storageRate = tariff?.storageSlabs?.[0]?.rate || 0.20;
+  const handlingAmount = parseFloat(transfer.handling_amount) > 0 ? parseFloat(transfer.handling_amount) : (loadmanCharges > 0 ? loadmanCharges : Number((totalWeight * handlingRate).toFixed(2)));
+  const storageRate = parseFloat(transfer.storage_rate) > 0 ? parseFloat(transfer.storage_rate) : (tariff?.storageSlabs?.[0]?.rate || 0.20);
   const storageBasis = 'Per KG/Day';
 
-  const voucherResult = await db.run(`
-    INSERT INTO cold_storage_vouchers (
-      voucher_no, voucher_type, voucher_date, cold_storage_id, cold_storage_name,
-      source_godown_id, source_godown_name, remarks, total_qty, total_wt,
-      operator_id, operator_name, inward_source_type, handling_rate, handling_amount,
-      storage_rate, storage_basis, vehicle_no, driver_name, driver_phone,
-      transporter_name, loadman_name, loadman_charges, status
-    ) VALUES (?, 'IN', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Godown Transfer', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Confirmed')
-  `, [
-    voucherNo,
-    transfer.transfer_date || new Date().toISOString().split('T')[0],
-    transfer.to_godown_id,
-    transfer.resolved_to_godown_name || transfer.to_godown_name,
-    transfer.from_godown_id,
-    transfer.resolved_from_godown_name || transfer.from_godown_name || '',
-    remarks,
-    quantity,
-    totalWeight,
-    tariff?.operatorId || null,
-    tariff?.operatorName || 'Cold Storage Operator',
-    handlingRate,
-    handlingAmount,
-    storageRate,
-    storageBasis,
-    vehicleNo,
-    driverName,
-    driverPhone,
-    transporterName,
-    loadmanName,
-    handlingAmount
-  ], cId);
+  if (voucherId) {
+    await db.run(`
+      UPDATE cold_storage_vouchers SET
+        vehicle_no = ?, driver_name = ?, driver_phone = ?, transporter_name = ?,
+        loadman_name = ?, loadman_charges = ?, handling_amount = ?, storage_rate = ?,
+        total_qty = ?, total_wt = ?
+      WHERE id = ?
+    `, [
+      vehicleNo, driverName, driverPhone, transporterName,
+      loadmanName, loadmanCharges, handlingAmount, storageRate,
+      quantity, totalWeight, voucherId
+    ], cId);
 
-  let voucherId = voucherResult.rows?.[0]?.id || voucherResult.lastID || voucherResult.lastInsertRowid;
-  if (!voucherId) {
-    const lookup = await db.query('SELECT id FROM cold_storage_vouchers WHERE voucher_no = ?', [voucherNo], cId);
-    voucherId = lookup.rows?.[0]?.id;
+    await db.run(`
+      UPDATE cold_storage_items SET
+        quantity = ?, weight = ?, total_wt = ?, labour_charge = ?
+      WHERE voucher_id = ?
+    `, [quantity, perUnitWeight, totalWeight, handlingAmount, voucherId], cId);
+  } else {
+    const voucherResult = await db.run(`
+      INSERT INTO cold_storage_vouchers (
+        voucher_no, voucher_type, voucher_date, cold_storage_id, cold_storage_name,
+        source_godown_id, source_godown_name, remarks, total_qty, total_wt,
+        operator_id, operator_name, inward_source_type, handling_rate, handling_amount,
+        storage_rate, storage_basis, vehicle_no, driver_name, driver_phone,
+        transporter_name, loadman_name, loadman_charges, status
+      ) VALUES (?, 'IN', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Godown Transfer', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Confirmed')
+    `, [
+      voucherNo,
+      transfer.transfer_date || new Date().toISOString().split('T')[0],
+      transfer.to_godown_id,
+      transfer.resolved_to_godown_name || transfer.to_godown_name,
+      transfer.from_godown_id,
+      transfer.resolved_from_godown_name || transfer.from_godown_name || '',
+      remarks,
+      quantity,
+      totalWeight,
+      tariff?.operatorId || null,
+      tariff?.operatorName || 'Cold Storage Operator',
+      handlingRate,
+      handlingAmount,
+      storageRate,
+      storageBasis,
+      vehicleNo,
+      driverName,
+      driverPhone,
+      transporterName,
+      loadmanName,
+      handlingAmount
+    ], cId);
+
+    voucherId = voucherResult.rows?.[0]?.id || voucherResult.lastID || voucherResult.lastInsertRowid;
+    if (!voucherId) {
+      const lookup = await db.query('SELECT id FROM cold_storage_vouchers WHERE voucher_no = ?', [voucherNo], cId);
+      voucherId = lookup.rows?.[0]?.id;
+    }
+    if (!voucherId) throw new Error(`Cold-storage transfer voucher ${voucherNo} was not saved.`);
+
+    await db.run(`
+      INSERT INTO cold_storage_items (
+        voucher_id, voucher_no, item_id, item_name, purchase_lot_no, cold_storage_lot_no,
+        quantity, weight, total_wt, unit, remarks,
+        inward_date, remaining_quantity, remaining_weight, labour_charge
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      voucherId,
+      voucherNo,
+      item?.id || null,
+      transfer.item_name,
+      lotNo,
+      coldStorageLot,
+      quantity,
+      perUnitWeight,
+      totalWeight,
+      item?.unit || 'KG',
+      `Godown Transfer ${transfer.s_no}`,
+      transfer.transfer_date || new Date().toISOString().split('T')[0],
+      quantity,
+      totalWeight,
+      handlingAmount
+    ], cId);
   }
-  if (!voucherId) throw new Error(`Cold-storage transfer voucher ${voucherNo} was not saved.`);
-
-  await db.run(`
-    INSERT INTO cold_storage_items (
-      voucher_id, voucher_no, item_id, item_name, purchase_lot_no, cold_storage_lot_no,
-      quantity, weight, total_wt, unit, remarks,
-      inward_date, remaining_quantity, remaining_weight, labour_charge
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `, [
-    voucherId,
-    voucherNo,
-    item?.id || null,
-    transfer.item_name,
-    lotNo,
-    coldStorageLot,
-    quantity,
-    perUnitWeight,
-    totalWeight,
-    item?.unit || 'KG',
-    `Godown Transfer ${transfer.s_no}`,
-    transfer.transfer_date || new Date().toISOString().split('T')[0],
-    quantity,
-    totalWeight,
-    handlingAmount
-  ], cId);
 
   // Auto-generate INWARD Cold Storage Bill
   try {
@@ -180,11 +203,12 @@ const createOutwardVoucherForTransfer = async (transfer, companyId = 1) => {
   const cId = parseInt(companyId, 10) || 1;
   const remarks = transferReference(transfer);
   const existing = await db.query(
-    'SELECT id FROM cold_storage_vouchers WHERE remarks = ? LIMIT 1',
+    'SELECT id, voucher_no FROM cold_storage_vouchers WHERE remarks = ? LIMIT 1',
     [remarks],
     cId
   );
-  if (existing.rows && existing.rows[0]) return existing.rows[0].id;
+  let voucherId = existing.rows?.[0]?.id;
+  let voucherNo = existing.rows?.[0]?.voucher_no;
 
   const fromGodownId = transfer.from_godown_id;
   let tariff = null;
@@ -192,13 +216,15 @@ const createOutwardVoucherForTransfer = async (transfer, companyId = 1) => {
     tariff = await getColdStorageTariff(fromGodownId, cId);
   } catch (_) {}
 
-  const lastVoucher = await db.query(
-    "SELECT voucher_no FROM cold_storage_vouchers WHERE voucher_type = 'OUT' ORDER BY id DESC LIMIT 1",
-    [],
-    cId
-  );
-  const lastNumber = Number(String(lastVoucher.rows?.[0]?.voucher_no || '').replace(/\D/g, '')) || 0;
-  const voucherNo = `CSO-${String(lastNumber + 1).padStart(6, '0')}`;
+  if (!voucherNo) {
+    const lastVoucher = await db.query(
+      "SELECT voucher_no FROM cold_storage_vouchers WHERE voucher_type = 'OUT' ORDER BY id DESC LIMIT 1",
+      [],
+      cId
+    );
+    const lastNumber = Number(String(lastVoucher.rows?.[0]?.voucher_no || '').replace(/\D/g, '')) || 0;
+    voucherNo = `CSO-${String(lastNumber + 1).padStart(6, '0')}`;
+  }
   const quantity = Number(transfer.qty) || 0;
   const totalWeight = Number(transfer.weight) || (quantity * 50);
   const perUnitWeight = quantity > 0 ? totalWeight / quantity : 50;
@@ -294,74 +320,98 @@ const createOutwardVoucherForTransfer = async (transfer, companyId = 1) => {
     additionalCharges: loadmanInput
   });
 
-  const storageCharges = storageCalc.totalCharge;
-  const loadingCharges = loadmanInput > 0 ? loadmanInput : loadingCalc.totalCharge;
+  const customStorageRate = parseFloat(transfer.storage_rate) || 0;
+  const storageCharges = customStorageRate > 0 ? Number((totalWeight * customStorageRate * billableDays).toFixed(2)) : storageCalc.totalCharge;
+  const loadingCharges = parseFloat(transfer.handling_amount) > 0 ? parseFloat(transfer.handling_amount) : (loadmanInput > 0 ? loadmanInput : loadingCalc.totalCharge);
   const insuranceCharges = parseFloat(transfer.insurance_charges || 0);
 
-  const voucherResult = await db.run(`
-    INSERT INTO cold_storage_vouchers (
-      voucher_no, voucher_type, voucher_date, cold_storage_id, cold_storage_name,
-      destination_godown_id, destination_godown_name, remarks, total_qty, total_wt,
-      operator_id, operator_name, outward_dest_type, handling_rate, handling_amount,
-      storage_days, storage_charges, vehicle_no, driver_name, driver_phone,
-      transporter_name, loadman_name, loadman_charges, additional_charges, status
-    ) VALUES (?, 'OUT', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Internal Godown', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Confirmed')
-  `, [
-    voucherNo,
-    trfDate,
-    transfer.from_godown_id,
-    transfer.resolved_from_godown_name || transfer.from_godown_name,
-    transfer.to_godown_id,
-    transfer.resolved_to_godown_name || transfer.to_godown_name || 'Main Godown',
-    remarks,
-    quantity,
-    totalWeight,
-    tariff?.operatorId || null,
-    tariff?.operatorName || 'Cold Storage Operator',
-    tariff?.outwardLoadingRate || 0.50,
-    loadingCharges,
-    calendarDays,
-    storageCharges,
-    vehicleNo,
-    driverName,
-    driverPhone,
-    transporterName,
-    loadmanName,
-    loadingCharges,
-    insuranceCharges
-  ], cId);
+  if (voucherId) {
+    await db.run(`
+      UPDATE cold_storage_vouchers SET
+        vehicle_no = ?, driver_name = ?, driver_phone = ?, transporter_name = ?,
+        loadman_name = ?, loadman_charges = ?, handling_amount = ?,
+        storage_days = ?, storage_charges = ?, additional_charges = ?,
+        total_qty = ?, total_wt = ?
+      WHERE id = ?
+    `, [
+      vehicleNo, driverName, driverPhone, transporterName,
+      loadmanName, loadingCharges, loadingCharges,
+      calendarDays, storageCharges, insuranceCharges,
+      quantity, totalWeight, voucherId
+    ], cId);
 
-  let voucherId = voucherResult.rows?.[0]?.id || voucherResult.lastID || voucherResult.lastInsertRowid;
-  if (!voucherId) {
-    const lookup = await db.query('SELECT id FROM cold_storage_vouchers WHERE voucher_no = ?', [voucherNo], cId);
-    voucherId = lookup.rows?.[0]?.id;
+    await db.run(`
+      UPDATE cold_storage_items SET
+        quantity = ?, weight = ?, total_wt = ?,
+        storage_days = ?, storage_charge = ?, labour_charge = ?
+      WHERE voucher_id = ?
+    `, [quantity, perUnitWeight, totalWeight, calendarDays, storageCharges, loadingCharges, voucherId], cId);
+  } else {
+    const voucherResult = await db.run(`
+      INSERT INTO cold_storage_vouchers (
+        voucher_no, voucher_type, voucher_date, cold_storage_id, cold_storage_name,
+        destination_godown_id, destination_godown_name, remarks, total_qty, total_wt,
+        operator_id, operator_name, outward_dest_type, handling_rate, handling_amount,
+        storage_days, storage_charges, vehicle_no, driver_name, driver_phone,
+        transporter_name, loadman_name, loadman_charges, additional_charges, status
+      ) VALUES (?, 'OUT', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Internal Godown', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Confirmed')
+    `, [
+      voucherNo,
+      trfDate,
+      transfer.from_godown_id,
+      transfer.resolved_from_godown_name || transfer.from_godown_name,
+      transfer.to_godown_id,
+      transfer.resolved_to_godown_name || transfer.to_godown_name || 'Main Godown',
+      remarks,
+      quantity,
+      totalWeight,
+      tariff?.operatorId || null,
+      tariff?.operatorName || 'Cold Storage Operator',
+      tariff?.outwardLoadingRate || 0.50,
+      loadingCharges,
+      calendarDays,
+      storageCharges,
+      vehicleNo,
+      driverName,
+      driverPhone,
+      transporterName,
+      loadmanName,
+      loadingCharges,
+      insuranceCharges
+    ], cId);
+
+    voucherId = voucherResult.rows?.[0]?.id || voucherResult.lastID || voucherResult.lastInsertRowid;
+    if (!voucherId) {
+      const lookup = await db.query('SELECT id FROM cold_storage_vouchers WHERE voucher_no = ?', [voucherNo], cId);
+      voucherId = lookup.rows?.[0]?.id;
+    }
+    if (!voucherId) throw new Error(`Cold-storage transfer voucher ${voucherNo} was not saved.`);
+
+    await db.run(`
+      INSERT INTO cold_storage_items (
+        voucher_id, voucher_no, item_id, item_name, purchase_lot_no, cold_storage_lot_no,
+        quantity, weight, total_wt, unit, remarks,
+        inward_date, outward_date, storage_days, storage_charge, labour_charge
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      voucherId,
+      voucherNo,
+      item?.id || null,
+      transfer.item_name,
+      lotNo,
+      coldStorageLot,
+      quantity,
+      perUnitWeight,
+      totalWeight,
+      item?.unit || 'KG',
+      `Godown Transfer ${transfer.s_no}`,
+      inwardDate,
+      trfDate,
+      calendarDays,
+      storageCharges,
+      loadingCharges
+    ], cId);
   }
-  if (!voucherId) throw new Error(`Cold-storage transfer voucher ${voucherNo} was not saved.`);
-
-  await db.run(`
-    INSERT INTO cold_storage_items (
-      voucher_id, voucher_no, item_id, item_name, purchase_lot_no, cold_storage_lot_no,
-      quantity, weight, total_wt, unit, remarks,
-      inward_date, outward_date, storage_days, storage_charge, labour_charge
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `, [
-    voucherId,
-    voucherNo,
-    item?.id || null,
-    transfer.item_name,
-    lotNo,
-    coldStorageLot,
-    quantity,
-    perUnitWeight,
-    totalWeight,
-    item?.unit || 'KG',
-    `Godown Transfer ${transfer.s_no}`,
-    inwardDate,
-    trfDate,
-    calendarDays,
-    storageCharges,
-    loadingCharges
-  ], cId);
 
   // Update remaining quantity on original inward item
   if (inRow?.id) {
@@ -451,10 +501,6 @@ const syncGodownTransfersToColdStorage = async (companyId = 1) => {
       OR CAST(destination.id AS TEXT) = '2'
       OR CAST(gt.to_godown_id AS TEXT) = '2'
     )
-    AND NOT EXISTS (
-      SELECT 1 FROM cold_storage_vouchers csv
-      WHERE csv.remarks = 'Auto-created from Godown Transfer ' || gt.s_no || ' (ID ' || gt.id || ')'
-    )
     ORDER BY gt.id
   `, [], cId);
 
@@ -481,10 +527,6 @@ const syncGodownTransfersToColdStorage = async (companyId = 1) => {
       OR source.is_cold_storage = 1
       OR CAST(source.id AS TEXT) = '2'
       OR CAST(gt.from_godown_id AS TEXT) = '2'
-    )
-    AND NOT EXISTS (
-      SELECT 1 FROM cold_storage_vouchers csv
-      WHERE csv.remarks = 'Auto-created from Godown Transfer ' || gt.s_no || ' (ID ' || gt.id || ')'
     )
     ORDER BY gt.id
   `, [], cId);

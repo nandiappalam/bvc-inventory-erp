@@ -33,6 +33,7 @@
   return invoke(cmd, args);
 };*/
 const isTauriApp = () => false;
+export const API_BASE_URL = "";
 
 // ===============================
 // HTTP HEADERS (WEB ONLY)

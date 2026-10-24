@@ -331,11 +331,11 @@ const AppLayout = () => {
           <Route path="/inventory/item-transfer/display" element={<ItemTransfer initialView="display" />} />
           <Route path="/inventory/item-transfer" element={<ItemTransfer initialView="create" />} />
           <Route path="/inventory/item-transfer-list" element={<ItemTransfer initialView="display" />} />
-          <Route path="/godown-transfer" element={<ItemTransfer initialView="create" />} />
-          <Route path="/godown-transfer-display" element={<ItemTransfer initialView="display" />} />
-          <Route path="/entry/godown-transfer" element={<ItemTransfer initialView="create" />} />
-          <Route path="/entry/godown-transfer-create" element={<ItemTransfer initialView="create" />} />
-          <Route path="/entry/godown-transfer-display" element={<ItemTransfer initialView="display" />} />
+          <Route path="/godown-transfer" element={<GodownTransfer initialView="create" />} />
+          <Route path="/godown-transfer-display" element={<GodownTransfer initialView="display" />} />
+          <Route path="/entry/godown-transfer" element={<GodownTransfer initialView="create" />} />
+          <Route path="/entry/godown-transfer-create" element={<GodownTransfer initialView="create" />} />
+          <Route path="/entry/godown-transfer-display" element={<GodownTransfer initialView="display" />} />
           <Route path="/reports/lot-history" element={<LotHistoryReport />} />
           <Route path="/reports/daily-production" element={<DailyProductionReport />} />
           <Route path="/reports/ccp-monitoring" element={<CcpMonitoringReport />} />

@@ -38,6 +38,10 @@ const initTable = async () => {
       'ALTER TABLE godown_transfers ADD COLUMN transporter_name TEXT',
       'ALTER TABLE godown_transfers ADD COLUMN loadman_name TEXT',
       'ALTER TABLE godown_transfers ADD COLUMN loadman_charges REAL DEFAULT 0',
+      'ALTER TABLE godown_transfers ADD COLUMN handling_amount REAL DEFAULT 0',
+      'ALTER TABLE godown_transfers ADD COLUMN storage_rate REAL DEFAULT 0',
+      'ALTER TABLE godown_transfers ADD COLUMN storage_days INTEGER DEFAULT 0',
+      'ALTER TABLE godown_transfers ADD COLUMN storage_charges REAL DEFAULT 0',
       'ALTER TABLE godown_transfers ADD COLUMN insurance_charges REAL DEFAULT 0'
     ];
     for (const sql of cols) {
@@ -258,14 +262,16 @@ router.post('/', async (req, res) => {
       const transporter_name = req.body.transporter_name || req.body.transporter || '';
       const loadman_name = req.body.loadman_name || req.body.worker_name || '';
       const loadman_charges = parseFloat(req.body.loadman_charges || 0);
+      const handling_amount = parseFloat(req.body.handling_amount || req.body.handling_charges || loadman_charges || 0);
+      const storage_rate = parseFloat(req.body.storage_rate || 0);
       const insurance_charges = parseFloat(req.body.insurance_charges || 0);
 
       const result = await transaction.run(`
         INSERT INTO godown_transfers (
           s_no, transfer_date, from_godown_id, from_godown_name, to_godown_id, to_godown_name,
           item_name, lot_no, qty, weight, vehicle_no, driver_name, driver_phone,
-          transporter_name, loadman_name, loadman_charges, insurance_charges, remarks
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          transporter_name, loadman_name, loadman_charges, handling_amount, storage_rate, insurance_charges, remarks
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
         finalSNo,
         transfer_date || new Date().toISOString().split('T')[0],
@@ -283,6 +289,8 @@ router.post('/', async (req, res) => {
         transporter_name,
         loadman_name,
         loadman_charges,
+        handling_amount,
+        storage_rate,
         insurance_charges,
         remarks || ''
       ]);
@@ -438,6 +446,124 @@ router.delete('/:id', async (req, res) => {
   } catch (err) {
     console.error('Error deleting godown transfer:', err);
     res.status(500).json({ message: 'Error deleting godown transfer', error: err.message });
+  }
+});
+
+// PUT update existing godown transfer
+router.put('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      vehicle_no,
+      driver_name,
+      driver_phone,
+      transporter_name,
+      loadman_name,
+      loadman_charges,
+      handling_amount,
+      storage_rate,
+      insurance_charges,
+      remarks,
+      qty,
+      weight
+    } = req.body;
+
+    const existing = await db.query('SELECT * FROM godown_transfers WHERE id = ?', [id]);
+    if (!existing.rows || existing.rows.length === 0) {
+      return res.status(404).json({ message: 'Godown transfer record not found' });
+    }
+
+    const loadmanChargesVal = parseFloat(loadman_charges !== undefined ? loadman_charges : existing.rows[0].loadman_charges || 0);
+    const handlingAmountVal = parseFloat(handling_amount !== undefined ? handling_amount : (req.body.handling_charges !== undefined ? req.body.handling_charges : loadmanChargesVal));
+    const storageRateVal = parseFloat(storage_rate !== undefined ? storage_rate : existing.rows[0].storage_rate || 0);
+    const insuranceChargesVal = parseFloat(insurance_charges !== undefined ? insurance_charges : existing.rows[0].insurance_charges || 0);
+
+    const vehicleNoVal = vehicle_no !== undefined ? vehicle_no : (existing.rows[0].vehicle_no || '');
+    const driverNameVal = driver_name !== undefined ? driver_name : (existing.rows[0].driver_name || '');
+    const driverPhoneVal = driver_phone !== undefined ? driver_phone : (existing.rows[0].driver_phone || '');
+    const transporterNameVal = transporter_name !== undefined ? transporter_name : (existing.rows[0].transporter_name || '');
+    const loadmanNameVal = loadman_name !== undefined ? loadman_name : (existing.rows[0].loadman_name || '');
+    const remarksVal = remarks !== undefined ? remarks : (existing.rows[0].remarks || '');
+    const qtyVal = qty !== undefined ? parseFloat(qty) : (existing.rows[0].qty || 0);
+    const weightVal = weight !== undefined ? parseFloat(weight) : (existing.rows[0].weight || 0);
+
+    await db.run(`
+      UPDATE godown_transfers SET
+        vehicle_no = ?,
+        driver_name = ?,
+        driver_phone = ?,
+        transporter_name = ?,
+        loadman_name = ?,
+        loadman_charges = ?,
+        handling_amount = ?,
+        storage_rate = ?,
+        insurance_charges = ?,
+        remarks = ?,
+        qty = ?,
+        weight = ?
+      WHERE id = ?
+    `, [
+      vehicleNoVal,
+      driverNameVal,
+      driverPhoneVal,
+      transporterNameVal,
+      loadmanNameVal,
+      loadmanChargesVal,
+      handlingAmountVal,
+      storageRateVal,
+      insuranceChargesVal,
+      remarksVal,
+      qtyVal,
+      weightVal,
+      id
+    ]);
+
+    // Also update corresponding item_transfers record
+    const trfNo = existing.rows[0].s_no;
+    if (trfNo) {
+      await db.run(`
+        UPDATE item_transfers SET
+          vehicle_no = ?,
+          driver_name = ?,
+          driver_phone = ?,
+          transporter_name = ?,
+          loadman_name = ?,
+          loadman_charges = ?,
+          handling_amount = ?,
+          storage_rate = ?,
+          insurance_charges = ?,
+          remarks = ?,
+          transfer_qty = ?,
+          weight = ?
+        WHERE transfer_no = ?
+      `, [
+        vehicleNoVal,
+        driverNameVal,
+        driverPhoneVal,
+        transporterNameVal,
+        loadmanNameVal,
+        loadmanChargesVal,
+        handlingAmountVal,
+        storageRateVal,
+        insuranceChargesVal,
+        remarksVal,
+        qtyVal,
+        qtyVal > 0 ? (weightVal / qtyVal) : weightVal,
+        trfNo
+      ]);
+    }
+
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    try {
+      await syncGodownTransfersToColdStorage(activeCompanyId);
+    } catch (syncErr) {
+      console.warn('Sync notice after transfer update:', syncErr.message);
+    }
+
+    res.json({ success: true, message: 'Godown transfer updated successfully' });
+  } catch (err) {
+    console.error('Error updating godown transfer:', err);
+    res.status(500).json({ message: 'Error updating godown transfer', error: err.message });
   }
 });
 

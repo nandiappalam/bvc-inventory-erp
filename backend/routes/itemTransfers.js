@@ -50,6 +50,25 @@ const initTable = async () => {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
+
+    const cols = [
+      'vehicle_no TEXT',
+      'driver_name TEXT',
+      'driver_phone TEXT',
+      'transporter_name TEXT',
+      'loadman_name TEXT',
+      'loadman_charges REAL DEFAULT 0',
+      'handling_amount REAL DEFAULT 0',
+      'storage_rate REAL DEFAULT 0',
+      'storage_days INTEGER DEFAULT 0',
+      'storage_charges REAL DEFAULT 0',
+      'insurance_charges REAL DEFAULT 0'
+    ];
+    for (const t of ['item_transfers', 'godown_transfers']) {
+      for (const col of cols) {
+        try { await db.run(`ALTER TABLE ${t} ADD COLUMN ${col}`); } catch (_) {}
+      }
+    }
   } catch (err) {
     console.error('Error initializing item_transfers tables:', err.message);
   }
@@ -427,13 +446,25 @@ router.post('/', async (req, res) => {
       const lotNo = itm.lot_no || 'LOT-MAIN';
       const itemRemarks = itm.remarks || remarks || '';
 
+      const trfVehicle = req.body.vehicle_no || req.body.lorry_no || itm.vehicle_no || '';
+      const trfDriver = req.body.driver_name || req.body.driver || itm.driver_name || '';
+      const trfDriverPhone = req.body.driver_phone || itm.driver_phone || '';
+      const trfTransporter = req.body.transporter_name || req.body.transporter || itm.transporter_name || '';
+      const trfLoadman = req.body.loadman_name || req.body.worker_name || itm.loadman_name || '';
+      const trfLoadmanCharges = parseFloat(req.body.loadman_charges || itm.loadman_charges || 0);
+      const trfHandlingAmount = parseFloat(req.body.handling_amount !== undefined ? req.body.handling_amount : (req.body.handling_charges !== undefined ? req.body.handling_charges : (itm.handling_amount || trfLoadmanCharges || 0)));
+      const trfStorageRate = parseFloat(req.body.storage_rate || itm.storage_rate || 0);
+      const trfInsuranceCharges = parseFloat(req.body.insurance_charges || itm.insurance_charges || 0);
+
       // Insert into item_transfers
       const result = await db.run(`
         INSERT INTO item_transfers (
           transfer_no, date, from_godown_id, from_godown_name, to_godown_id, to_godown_name,
           item_id, item_code, item_name, lot_no, weight, unit, available_qty, transfer_qty,
-          rate, amount, remarks, created_by
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          rate, amount, vehicle_no, driver_name, driver_phone, transporter_name,
+          loadman_name, loadman_charges, handling_amount, storage_rate, insurance_charges,
+          remarks, created_by
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
         trfNo,
         trfDate,
@@ -451,6 +482,15 @@ router.post('/', async (req, res) => {
         trfQty,
         trfRate,
         trfAmount,
+        trfVehicle,
+        trfDriver,
+        trfDriverPhone,
+        trfTransporter,
+        trfLoadman,
+        trfLoadmanCharges,
+        trfHandlingAmount,
+        trfStorageRate,
+        trfInsuranceCharges,
         itemRemarks,
         created_by || 'Admin'
       ]);
@@ -459,24 +499,16 @@ router.post('/', async (req, res) => {
 
       // Insert into godown_transfers for legacy compatibility & Cold Storage Sync
       try {
-        const trfVehicle = req.body.vehicle_no || req.body.lorry_no || '';
-        const trfDriver = req.body.driver_name || req.body.driver || '';
-        const trfDriverPhone = req.body.driver_phone || '';
-        const trfTransporter = req.body.transporter_name || req.body.transporter || '';
-        const trfLoadman = req.body.loadman_name || req.body.worker_name || '';
-        const trfLoadmanCharges = parseFloat(req.body.loadman_charges || 0);
-        const trfInsuranceCharges = parseFloat(req.body.insurance_charges || 0);
-
         await db.run(`
           INSERT INTO godown_transfers (
             s_no, transfer_date, from_godown_id, from_godown_name, to_godown_id, to_godown_name,
             item_name, lot_no, qty, weight, vehicle_no, driver_name, driver_phone,
-            transporter_name, loadman_name, loadman_charges, insurance_charges, remarks
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            transporter_name, loadman_name, loadman_charges, handling_amount, storage_rate, insurance_charges, remarks
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
           trfNo, trfDate, from_godown_id, fGodownName, to_godown_id, tGodownName,
           itmName, lotNo, trfQty, trfWt * trfQty, trfVehicle, trfDriver, trfDriverPhone,
-          trfTransporter, trfLoadman, trfLoadmanCharges, trfInsuranceCharges, itemRemarks
+          trfTransporter, trfLoadman, trfLoadmanCharges, trfHandlingAmount, trfStorageRate, trfInsuranceCharges, itemRemarks
         ]);
       } catch (gErr) {
         console.warn('Legacy godown_transfers insert warning:', gErr.message);
@@ -600,6 +632,125 @@ router.post('/', async (req, res) => {
   } catch (err) {
     console.error('Error creating item transfer:', err);
     res.status(500).json({ message: 'Error creating item transfer', error: err.message });
+  }
+});
+
+// PUT update item transfer
+router.put('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const existingRes = await db.query('SELECT * FROM item_transfers WHERE id = ?', [id]);
+    const existing = existingRes.rows?.[0];
+    if (!existing) {
+      return res.status(404).json({ message: 'Item transfer record not found' });
+    }
+
+    const {
+      vehicle_no,
+      driver_name,
+      driver_phone,
+      transporter_name,
+      loadman_name,
+      loadman_charges,
+      handling_amount,
+      storage_rate,
+      insurance_charges,
+      remarks,
+      transfer_qty,
+      qty,
+      weight
+    } = req.body;
+
+    const vehicleNoVal = vehicle_no !== undefined ? vehicle_no : (existing.vehicle_no || '');
+    const driverNameVal = driver_name !== undefined ? driver_name : (existing.driver_name || '');
+    const driverPhoneVal = driver_phone !== undefined ? driver_phone : (existing.driver_phone || '');
+    const transporterNameVal = transporter_name !== undefined ? transporter_name : (existing.transporter_name || '');
+    const loadmanNameVal = loadman_name !== undefined ? loadman_name : (existing.loadman_name || '');
+    const loadmanChargesVal = parseFloat(loadman_charges !== undefined ? loadman_charges : (existing.loadman_charges || 0));
+    const handlingAmountVal = parseFloat(handling_amount !== undefined ? handling_amount : (req.body.handling_charges !== undefined ? req.body.handling_charges : (existing.handling_amount !== undefined ? existing.handling_amount : loadmanChargesVal)));
+    const storageRateVal = parseFloat(storage_rate !== undefined ? storage_rate : (existing.storage_rate || 0));
+    const insuranceChargesVal = parseFloat(insurance_charges !== undefined ? insurance_charges : (existing.insurance_charges || 0));
+    const remarksVal = remarks !== undefined ? remarks : (existing.remarks || '');
+    const qtyVal = parseFloat(transfer_qty !== undefined ? transfer_qty : (qty !== undefined ? qty : (existing.transfer_qty || 0)));
+    const weightVal = parseFloat(weight !== undefined ? weight : (existing.weight || 0));
+
+    await db.run(`
+      UPDATE item_transfers SET
+        vehicle_no = ?,
+        driver_name = ?,
+        driver_phone = ?,
+        transporter_name = ?,
+        loadman_name = ?,
+        loadman_charges = ?,
+        handling_amount = ?,
+        storage_rate = ?,
+        insurance_charges = ?,
+        remarks = ?,
+        transfer_qty = ?,
+        weight = ?
+      WHERE id = ?
+    `, [
+      vehicleNoVal,
+      driverNameVal,
+      driverPhoneVal,
+      transporterNameVal,
+      loadmanNameVal,
+      loadmanChargesVal,
+      handlingAmountVal,
+      storageRateVal,
+      insuranceChargesVal,
+      remarksVal,
+      qtyVal,
+      weightVal,
+      id
+    ]);
+
+    // Also update corresponding godown_transfers record
+    const trfNo = existing.transfer_no;
+    if (trfNo) {
+      await db.run(`
+        UPDATE godown_transfers SET
+          vehicle_no = ?,
+          driver_name = ?,
+          driver_phone = ?,
+          transporter_name = ?,
+          loadman_name = ?,
+          loadman_charges = ?,
+          handling_amount = ?,
+          storage_rate = ?,
+          insurance_charges = ?,
+          remarks = ?,
+          qty = ?,
+          weight = ?
+        WHERE s_no = ?
+      `, [
+        vehicleNoVal,
+        driverNameVal,
+        driverPhoneVal,
+        transporterNameVal,
+        loadmanNameVal,
+        loadmanChargesVal,
+        handlingAmountVal,
+        storageRateVal,
+        insuranceChargesVal,
+        remarksVal,
+        qtyVal,
+        weightVal * (qtyVal || 1),
+        trfNo
+      ]);
+    }
+
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    try {
+      await syncGodownTransfersToColdStorage(activeCompanyId);
+    } catch (syncErr) {
+      console.warn('Sync notice after item transfer update:', syncErr.message);
+    }
+
+    res.json({ success: true, message: 'Item transfer updated successfully' });
+  } catch (err) {
+    console.error('Error updating item transfer:', err);
+    res.status(500).json({ message: 'Error updating item transfer', error: err.message });
   }
 });
 

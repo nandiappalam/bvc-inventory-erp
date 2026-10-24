@@ -2342,7 +2342,249 @@ router.get('/purchase-statement/:purchaseId', async (req, res) => {
       }
     });
   } catch (err) {
-    console.error('Error fetching cold storage purchase statement:', err);
+    console.error('Error fetching statement:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// GET /transfer-statement/:id - Fetch Cold Storage Transfer Bill Statement details for a Godown Transfer
+router.get('/transfer-statement/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+
+    // 1. Trigger transfer sync to ensure vouchers and bills exist
+    try {
+      const { syncGodownTransfersToColdStorage } = require('../services/coldStorageTransferSync');
+      await syncGodownTransfersToColdStorage(activeCompanyId);
+    } catch (e) {
+      console.warn('Sync notice in transfer-statement:', e.message);
+    }
+
+    // 2. Fetch transfer entry from godown_transfers or item_transfers
+    let transferRes = await db.query('SELECT * FROM godown_transfers WHERE id = ? OR s_no = ?', [id, id], activeCompanyId);
+    let transfer = transferRes.rows?.[0];
+    if (!transfer) {
+      const itRes = await db.query('SELECT * FROM item_transfers WHERE id = ? OR transfer_no = ?', [id, id], activeCompanyId);
+      const itRow = itRes.rows?.[0];
+      if (itRow) {
+        transfer = {
+          id: itRow.id,
+          s_no: itRow.transfer_no || `TRF-${itRow.id}`,
+          transfer_date: itRow.date,
+          from_godown_id: itRow.from_godown_id,
+          from_godown_name: itRow.from_godown_name,
+          to_godown_id: itRow.to_godown_id,
+          to_godown_name: itRow.to_godown_name,
+          item_name: itRow.item_name,
+          lot_no: itRow.lot_no,
+          qty: itRow.transfer_qty || itRow.qty,
+          weight: itRow.weight ? itRow.weight * (itRow.transfer_qty || 1) : 0,
+          vehicle_no: itRow.vehicle_no || '',
+          driver_name: itRow.driver_name || '',
+          driver_phone: itRow.driver_phone || '',
+          transporter_name: itRow.transporter_name || '',
+          loadman_name: itRow.loadman_name || '',
+          loadman_charges: itRow.loadman_charges || 0,
+          handling_amount: itRow.handling_amount || 0,
+          storage_rate: itRow.storage_rate || 0,
+          insurance_charges: itRow.insurance_charges || 0,
+          remarks: itRow.remarks || ''
+        };
+      }
+    }
+
+    if (!transfer) {
+      return res.status(404).json({ success: false, message: 'Transfer record not found' });
+    }
+
+    // 3. Resolve Godown & tariff
+    let csGodownId = transfer.from_godown_id;
+    let transferType = 'OUTWARD';
+    const fromGodownRes = await db.query(
+      'SELECT id, godown_name, godown_type, storage_location, is_cold_storage FROM godown_master WHERE id = ? OR LOWER(godown_name) = LOWER(?) LIMIT 1',
+      [transfer.from_godown_id, transfer.from_godown_name],
+      activeCompanyId
+    );
+    const toGodownRes = await db.query(
+      'SELECT id, godown_name, godown_type, storage_location, is_cold_storage FROM godown_master WHERE id = ? OR LOWER(godown_name) = LOWER(?) LIMIT 1',
+      [transfer.to_godown_id, transfer.to_godown_name],
+      activeCompanyId
+    );
+
+    const fromGodown = fromGodownRes.rows?.[0];
+    const toGodown = toGodownRes.rows?.[0];
+
+    const isFromCS = fromGodown && (
+      (fromGodown.godown_type && fromGodown.godown_type.toLowerCase().includes('cold')) ||
+      (fromGodown.godown_name && fromGodown.godown_name.toLowerCase().includes('cold')) ||
+      fromGodown.is_cold_storage === 1 || String(fromGodown.id) === '2'
+    );
+    const isToCS = toGodown && (
+      (toGodown.godown_type && toGodown.godown_type.toLowerCase().includes('cold')) ||
+      (toGodown.godown_name && toGodown.godown_name.toLowerCase().includes('cold')) ||
+      toGodown.is_cold_storage === 1 || String(toGodown.id) === '2'
+    );
+
+    if (isToCS && !isFromCS) {
+      csGodownId = transfer.to_godown_id;
+      transferType = 'INWARD';
+    } else if (isFromCS) {
+      csGodownId = transfer.from_godown_id;
+      transferType = 'OUTWARD';
+    }
+
+    const tariff = await getColdStorageTariff(csGodownId, activeCompanyId);
+
+    // 4. Find matching Cold Storage Voucher and Bill
+    const remarksSearch = `Auto-created from Godown Transfer ${transfer.s_no} (ID ${transfer.id})`;
+    const voucherRes = await db.query(
+      'SELECT * FROM cold_storage_vouchers WHERE remarks = ? OR remarks LIKE ? LIMIT 1',
+      [remarksSearch, `%Transfer ${transfer.s_no}%`],
+      activeCompanyId
+    );
+    const voucher = voucherRes.rows?.[0];
+
+    let billRes = null;
+    if (voucher) {
+      billRes = await db.query(
+        'SELECT * FROM cold_storage_bills WHERE voucher_id = ? OR voucher_no = ? LIMIT 1',
+        [voucher.id, voucher.voucher_no],
+        activeCompanyId
+      );
+    }
+    const linkedBill = billRes?.rows?.[0] || null;
+
+    // 5. Transporter name lookup
+    let finalTransporterName = transfer.transporter_name || voucher?.transporter_name || '';
+    if (/^\d+$/.test(String(finalTransporterName).trim())) {
+      try {
+        const tmRes = await db.query('SELECT print_name, name FROM transport_master WHERE id = ?', [finalTransporterName], activeCompanyId);
+        if (tmRes.rows && tmRes.rows[0]) {
+          finalTransporterName = tmRes.rows[0].print_name || tmRes.rows[0].name;
+        }
+      } catch (_) {}
+    }
+
+    // 6. Calculate stored days & charges
+    const trfDate = transfer.transfer_date || new Date().toISOString().split('T')[0];
+    let inwardDate = trfDate;
+
+    if (transferType === 'OUTWARD') {
+      try {
+        const rawLot = String(transfer.lot_no || '').replace(/^CS-/, '');
+        const inLookup = await db.query(`
+          SELECT csi.inward_date, csv.voucher_date
+          FROM cold_storage_items csi
+          JOIN cold_storage_vouchers csv ON csi.voucher_id = csv.id
+          WHERE csv.voucher_type = 'IN'
+            AND (LOWER(TRIM(csi.cold_storage_lot_no)) = LOWER(TRIM(?)) OR LOWER(TRIM(csi.purchase_lot_no)) = LOWER(TRIM(?)))
+          ORDER BY csi.id DESC LIMIT 1
+        `, [rawLot, rawLot], activeCompanyId);
+        if (inLookup.rows && inLookup.rows[0]) {
+          inwardDate = inLookup.rows[0].inward_date || inLookup.rows[0].voucher_date || trfDate;
+        }
+      } catch (_) {}
+    }
+
+    const { calendarDays, billableDays } = calculateStorageDays(inwardDate, trfDate, tariff.freeDays, tariff.minDays);
+    const quantity = Number(transfer.qty) || 0;
+    const totalWeight = Number(transfer.weight) || (quantity * 50);
+    const perUnitWeight = quantity > 0 ? totalWeight / quantity : 50;
+
+    const storageCalc = calculateSlabStorageCharge({
+      qtyKg: totalWeight,
+      billableDays: transferType === 'OUTWARD' ? billableDays : 0,
+      slabs: tariff.storageSlabs,
+      calculationType: tariff.calculationType
+    });
+
+    const handlingRate = transferType === 'INWARD' ? (tariff.inwardUnloadingRate || 0.50) : (tariff.outwardLoadingRate || 0.50);
+    const defaultHandling = Number((totalWeight * handlingRate).toFixed(2));
+    
+    const loadmanChargesVal = parseFloat(transfer.handling_amount || transfer.loadman_charges || voucher?.loadman_charges || linkedBill?.loadman_charges || defaultHandling);
+    const storageChargesVal = parseFloat(voucher?.storage_charges || linkedBill?.storage_charges || storageCalc.totalCharge);
+    const insuranceChargesVal = parseFloat(transfer.insurance_charges || voucher?.additional_charges || linkedBill?.insurance_charges || 0);
+
+    const taxableAmt = loadmanChargesVal + storageChargesVal + insuranceChargesVal;
+    const taxRate = tariff.gstRate || 18;
+    const totalTax = Number((taxableAmt * (taxRate / 100)).toFixed(2));
+    const grandTotal = Number((taxableAmt + totalTax).toFixed(2));
+
+    res.json({
+      success: true,
+      data: {
+        transfer_id: transfer.id,
+        s_no: transfer.s_no,
+        transfer_date: trfDate,
+        transfer_type: transferType,
+        from_godown_name: transfer.from_godown_name,
+        to_godown_name: transfer.to_godown_name,
+        cold_storage_id: tariff.coldStorageId,
+        cold_storage_name: tariff.godownName,
+        operator_id: tariff.operatorId,
+        operator_name: tariff.operatorName,
+        vehicle_no: transfer.vehicle_no || voucher?.vehicle_no || 'N/A',
+        driver_name: transfer.driver_name || voucher?.driver_name || 'N/A',
+        driver_phone: transfer.driver_phone || voucher?.driver_phone || '',
+        transporter_name: finalTransporterName || voucher?.transporter_name || 'N/A',
+        loadman_name: transfer.loadman_name || voucher?.loadman_name || 'Handling Team',
+        tariff_terms: {
+          calculation_type: tariff.calculationType,
+          free_days: tariff.freeDays,
+          min_days: tariff.minDays,
+          inward_unloading_rate: tariff.inwardUnloadingRate,
+          outward_loading_rate: tariff.outwardLoadingRate,
+          storage_slabs: tariff.storageSlabs
+        },
+        items: [{
+          item_name: transfer.item_name,
+          lot_no: transfer.lot_no,
+          cold_storage_lot_no: transfer.lot_no ? (transfer.lot_no.startsWith('CS-') ? transfer.lot_no : `CS-${transfer.lot_no}`) : `CS-${transfer.s_no}`,
+          qty: quantity,
+          per_unit_weight: perUnitWeight,
+          total_weight: totalWeight,
+          inward_date: inwardDate,
+          outward_date: trfDate,
+          storage_days: calendarDays,
+          billable_days: billableDays,
+          unloading_charge: loadmanChargesVal,
+          storage_charge: storageChargesVal,
+          total_item_charge: loadmanChargesVal + storageChargesVal
+        }],
+        financial_summary: {
+          handling_charges: Number(loadmanChargesVal.toFixed(2)),
+          storage_charges: Number(storageChargesVal.toFixed(2)),
+          insurance_charges: Number(insuranceChargesVal.toFixed(2)),
+          taxable_amount: Number(taxableAmt.toFixed(2)),
+          tax_rate: taxRate,
+          cgst_amount: Number((totalTax / 2).toFixed(2)),
+          sgst_amount: Number((totalTax / 2).toFixed(2)),
+          igst_amount: 0,
+          total_tax: totalTax,
+          grand_total: grandTotal
+        },
+        linked_bill: linkedBill ? {
+          bill_id: linkedBill.id,
+          bill_no: linkedBill.bill_no,
+          bill_date: linkedBill.bill_date,
+          status: linkedBill.status,
+          paid_amount: linkedBill.paid_amount || 0,
+          balance_amount: linkedBill.balance_amount || linkedBill.grand_total || grandTotal,
+          voucher_no: linkedBill.voucher_no || voucher?.voucher_no || 'Pending'
+        } : (voucher ? {
+          bill_id: null,
+          bill_no: `CSB-${voucher.voucher_no}`,
+          bill_date: voucher.voucher_date,
+          status: 'Generated',
+          paid_amount: 0,
+          balance_amount: grandTotal,
+          voucher_no: voucher.voucher_no
+        } : null)
+      }
+    });
+  } catch (err) {
+    console.error('Error fetching cold storage transfer statement:', err);
     res.status(500).json({ success: false, message: err.message });
   }
 });

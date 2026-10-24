@@ -44,10 +44,15 @@ import {
   CurrencyRupee as CurrencyRupeeIcon,
   Visibility as ViewIcon,
   ListAlt as ListIcon,
-  CheckCircle as SuccessIcon
+  CheckCircle as SuccessIcon,
+  AcUnit as ColdStorageIcon,
+  Edit as EditIcon,
+  Save as SaveIcon,
+  Close as CloseIcon
 } from '@mui/icons-material';
 import * as XLSX from 'xlsx';
 import { printHtml } from '../utils/printHelper';
+import ColdStorageTransferStatementModal from './coldStorage/ColdStorageTransferStatementModal';
 
 const ItemTransfer = ({ initialView = 'create' }) => {
   const [activeTab, setActiveTab] = useState(initialView === 'display' ? 'display' : 'create');
@@ -84,10 +89,79 @@ const ItemTransfer = ({ initialView = 'create' }) => {
     transporter_name: '',
     loadman_name: '',
     loadman_charges: '',
+    handling_amount: '',
+    storage_rate: '',
     insurance_charges: '',
     remarks: '',
     created_by: 'Admin'
   });
+
+  // Cold Storage Bill Modal State
+  const [openBillModal, setOpenBillModal] = useState(false);
+  const [selectedTransferRow, setSelectedTransferRow] = useState(null);
+
+  // Edit Transfer Particulars State
+  const [editingTransfer, setEditingTransfer] = useState(null);
+  const [updating, setUpdating] = useState(false);
+
+  // Helper to check if a godown is cold storage
+  const checkIsColdStorage = (godownObjOrName, godownId) => {
+    if (godownId) {
+      const g = godowns.find(x => String(x.id) === String(godownId));
+      if (g) {
+        const gName = (g.godown_name || '').toLowerCase();
+        const gType = (g.godown_type || '').toLowerCase();
+        const gLoc = (g.storage_location || '').toLowerCase();
+        if (gName.includes('cold') || gType.includes('cold') || gLoc.includes('outside') || g.is_cold_storage === 1 || String(g.id) === '2') {
+          return true;
+        }
+      }
+      if (String(godownId) === '2') return true;
+    }
+    if (!godownObjOrName) return false;
+    if (typeof godownObjOrName === 'object') {
+      const gName = (godownObjOrName.godown_name || '').toLowerCase();
+      const gType = (godownObjOrName.godown_type || '').toLowerCase();
+      const gLoc = (godownObjOrName.storage_location || '').toLowerCase();
+      return gName.includes('cold') || gType.includes('cold') || gLoc.includes('outside') || godownObjOrName.is_cold_storage === 1 || String(godownObjOrName.id) === '2';
+    }
+    const nameStr = String(godownObjOrName).toLowerCase();
+    const g = godowns.find(x => (x.godown_name || '').toLowerCase() === nameStr);
+    if (g) {
+      const gType = (g.godown_type || '').toLowerCase();
+      const gLoc = (g.storage_location || '').toLowerCase();
+      return nameStr.includes('cold') || gType.includes('cold') || gLoc.includes('outside') || g.is_cold_storage === 1 || String(g.id) === '2';
+    }
+    return nameStr.includes('cold') || nameStr.includes('storage') || String(godownObjOrName) === '2';
+  };
+
+  // Update existing transfer record
+  const handleUpdateTransfer = async (e) => {
+    if (e) e.preventDefault();
+    if (!editingTransfer || updating) return;
+    setUpdating(true);
+    setMessage({ type: '', text: '' });
+    try {
+      const res = await fetch(`/api/item-transfers/${editingTransfer.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editingTransfer)
+      });
+      const data = await res.json();
+      if (res.ok && (data.success || data.message)) {
+        setMessage({ type: 'success', text: 'Transfer details updated successfully & Cold Storage synchronized!' });
+        setEditingTransfer(null);
+        fetchTransfers();
+      } else {
+        setMessage({ type: 'error', text: data.message || 'Failed to update transfer' });
+      }
+    } catch (err) {
+      console.error('Error updating transfer:', err);
+      setMessage({ type: 'error', text: 'Network error updating transfer' });
+    } finally {
+      setUpdating(false);
+    }
+  };
 
   const fetchNextTransferNo = useCallback(async () => {
     try {
@@ -1245,16 +1319,18 @@ const ItemTransfer = ({ initialView = 'create' }) => {
                         <TableCell>Lot Number</TableCell>
                         <TableCell align="right" sx={{ bgcolor: '#e0f2fe !important', color: '#0369a1 !important' }}>Transfer Qty</TableCell>
                         <TableCell align="right">Weight (Kg)</TableCell>
-                        <TableCell align="right">Rate (₹)</TableCell>
+                        <TableCell>Driver & Vehicle</TableCell>
+                        <TableCell align="right">Handling (₹)</TableCell>
+                        <TableCell align="right">Storage Rate</TableCell>
                         <TableCell align="right" sx={{ bgcolor: '#dcfce7 !important', color: '#15803d !important' }}>Amount (₹)</TableCell>
-                        <TableCell align="center" width="120">Actions</TableCell>
+                        <TableCell align="center" width="140">Actions</TableCell>
                       </TableRow>
                     </TableHead>
 
                     <TableBody>
                       {transfersList.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={12} align="center" sx={{ py: 6, color: '#94a3b8' }}>
+                          <TableCell colSpan={14} align="center" sx={{ py: 6, color: '#94a3b8' }}>
                             No item transfers recorded yet.
                           </TableCell>
                         </TableRow>
@@ -1264,6 +1340,7 @@ const ItemTransfer = ({ initialView = 'create' }) => {
                           const unitWt = parseFloat(row.weight || 1);
                           const totalWt = (trfQty * unitWt).toFixed(2);
                           const amt = parseFloat(row.amount || (trfQty * (row.rate || 0))).toFixed(2);
+                          const isCS = checkIsColdStorage(row.from_godown_name, row.from_godown_id) || checkIsColdStorage(row.to_godown_name, row.to_godown_id);
 
                           return (
                             <TableRow key={row.id || idx} hover>
@@ -1274,8 +1351,12 @@ const ItemTransfer = ({ initialView = 'create' }) => {
                                 {row.transfer_no || `TRF-${row.id}`}
                               </TableCell>
                               <TableCell sx={{ color: '#475569', fontSize: '11px' }}>{row.date ? row.date.substring(0, 10) : ''}</TableCell>
-                              <TableCell sx={{ fontWeight: 700, color: '#1e3a8a' }}>📍 {row.from_godown_name}</TableCell>
-                              <TableCell sx={{ fontWeight: 700, color: '#15803d' }}>🚚 {row.to_godown_name}</TableCell>
+                              <TableCell sx={{ fontWeight: 700, color: '#1e3a8a' }}>
+                                {checkIsColdStorage(row.from_godown_name, row.from_godown_id) ? `❄️ ${row.from_godown_name}` : `📍 ${row.from_godown_name}`}
+                              </TableCell>
+                              <TableCell sx={{ fontWeight: 700, color: '#15803d' }}>
+                                {checkIsColdStorage(row.to_godown_name, row.to_godown_id) ? `❄️ ${row.to_godown_name}` : `🚚 ${row.to_godown_name}`}
+                              </TableCell>
                               <TableCell sx={{ fontWeight: 800, color: '#1e293b' }}>{row.item_name}</TableCell>
                               <TableCell sx={{ fontFamily: 'monospace', fontWeight: 700, color: '#2563eb' }}>{row.lot_no}</TableCell>
                               <TableCell align="right" sx={{ fontWeight: 900, color: '#0284c7', bgcolor: '#f0f9ff' }}>
@@ -1284,14 +1365,50 @@ const ItemTransfer = ({ initialView = 'create' }) => {
                               <TableCell align="right" sx={{ fontWeight: 700, color: '#334155' }}>
                                 {totalWt} Kg
                               </TableCell>
-                              <TableCell align="right" sx={{ color: '#475569' }}>
-                                ₹{row.rate || 0}
+                              <TableCell sx={{ fontSize: '11px', color: '#475569' }}>
+                                {row.driver_name ? <div>👤 {row.driver_name}</div> : null}
+                                {row.vehicle_no ? <div style={{ fontFamily: 'monospace', color: '#64748b' }}>🚚 {row.vehicle_no}</div> : null}
+                                {!row.driver_name && !row.vehicle_no ? '-' : null}
+                              </TableCell>
+                              <TableCell align="right" sx={{ fontWeight: 700, color: '#047857' }}>
+                                ₹{parseFloat(row.handling_amount || row.loadman_charges || 0).toFixed(2)}
+                              </TableCell>
+                              <TableCell align="right" sx={{ fontWeight: 700, color: '#1d4ed8' }}>
+                                ₹{parseFloat(row.storage_rate || 0).toFixed(2)}
                               </TableCell>
                               <TableCell align="right" sx={{ fontWeight: 900, color: '#15803d', bgcolor: '#f0fdf4' }}>
                                 ₹{parseFloat(amt).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                               </TableCell>
                               <TableCell align="center">
-                                <Stack direction="row" spacing={0.5} justifyContent="center">
+                                <Stack direction="row" spacing={0.5} justifyContent="center" alignItems="center">
+                                  {isCS && (
+                                    <Tooltip title="View / Generate Cold Storage Bill">
+                                      <Button
+                                        size="small"
+                                        variant="outlined"
+                                        color="sky"
+                                        onClick={() => {
+                                          setSelectedTransferRow(row);
+                                          setOpenBillModal(true);
+                                        }}
+                                        startIcon={<ColdStorageIcon sx={{ fontSize: 16 }} />}
+                                        sx={{ minWidth: 'auto', px: 1, py: 0.25, fontSize: '11px', fontWeight: 800, textTransform: 'none', borderRadius: 1.5 }}
+                                      >
+                                        CS Bill
+                                      </Button>
+                                    </Tooltip>
+                                  )}
+
+                                  <Tooltip title="Edit Driver, Vehicle & Charges">
+                                    <IconButton
+                                      size="small"
+                                      color="info"
+                                      onClick={() => setEditingTransfer({ ...row })}
+                                    >
+                                      <EditIcon sx={{ fontSize: 18 }} />
+                                    </IconButton>
+                                  </Tooltip>
+
                                   <Tooltip title="View Details / Voucher">
                                     <IconButton
                                       size="small"
@@ -1452,6 +1569,158 @@ const ItemTransfer = ({ initialView = 'create' }) => {
           </>
         )}
       </Dialog>
+
+      {/* Edit Transfer Particulars Modal */}
+      <Dialog open={Boolean(editingTransfer)} onClose={() => setEditingTransfer(null)} maxWidth="sm" fullWidth>
+        {editingTransfer && (
+          <form onSubmit={handleUpdateTransfer}>
+            <DialogTitle sx={{ bgcolor: '#1e3a8a', color: '#ffffff', fontWeight: 800, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Box display="flex" alignItems="center" gap={1}>
+                <EditIcon sx={{ fontSize: 22 }} />
+                <Typography variant="subtitle1" fontWeight={800}>
+                  Update Transfer #{editingTransfer.transfer_no || editingTransfer.s_no}
+                </Typography>
+              </Box>
+              <IconButton size="small" onClick={() => setEditingTransfer(null)} sx={{ color: '#ffffff' }}>
+                <CloseIcon />
+              </IconButton>
+            </DialogTitle>
+
+            <DialogContent sx={{ p: 3, bgcolor: '#f8fafc' }}>
+              <Box mb={2} p={1.5} bgcolor="#ffffff" borderRadius={1.5} border="1px solid #e2e8f0" display="flex" justifyContent="space-between" fontSize="12px">
+                <div>From: <strong>{editingTransfer.from_godown_name}</strong></div>
+                <div>To: <strong style={{ color: '#15803d' }}>{editingTransfer.to_godown_name}</strong></div>
+                <div>Item: <strong>{editingTransfer.item_name}</strong> ({editingTransfer.transfer_qty || editingTransfer.qty} units)</div>
+              </Box>
+
+              <Grid container spacing={2}>
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="Vehicle / Lorry No"
+                    placeholder="e.g. TN-38-BZ-1234"
+                    value={editingTransfer.vehicle_no || ''}
+                    onChange={(e) => setEditingTransfer({ ...editingTransfer, vehicle_no: e.target.value })}
+                  />
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="Driver Name"
+                    placeholder="e.g. Ramesh"
+                    value={editingTransfer.driver_name || ''}
+                    onChange={(e) => setEditingTransfer({ ...editingTransfer, driver_name: e.target.value })}
+                  />
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="Driver Phone"
+                    placeholder="e.g. +91 9876543210"
+                    value={editingTransfer.driver_phone || ''}
+                    onChange={(e) => setEditingTransfer({ ...editingTransfer, driver_phone: e.target.value })}
+                  />
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="Transporter Name"
+                    placeholder="Transport agency"
+                    value={editingTransfer.transporter_name || ''}
+                    onChange={(e) => setEditingTransfer({ ...editingTransfer, transporter_name: e.target.value })}
+                  />
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="Loadman / Worker Name"
+                    placeholder="Worker gang"
+                    value={editingTransfer.loadman_name || ''}
+                    onChange={(e) => setEditingTransfer({ ...editingTransfer, loadman_name: e.target.value })}
+                  />
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    type="number"
+                    fullWidth
+                    size="small"
+                    label="Labour Charges (₹)"
+                    value={editingTransfer.loadman_charges !== undefined ? editingTransfer.loadman_charges : ''}
+                    onChange={(e) => setEditingTransfer({
+                      ...editingTransfer,
+                      loadman_charges: e.target.value,
+                      handling_amount: editingTransfer.handling_amount ? editingTransfer.handling_amount : e.target.value
+                    })}
+                  />
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    type="number"
+                    fullWidth
+                    size="small"
+                    label="Handling Amount (₹)"
+                    value={editingTransfer.handling_amount !== undefined ? editingTransfer.handling_amount : ''}
+                    onChange={(e) => setEditingTransfer({ ...editingTransfer, handling_amount: e.target.value })}
+                  />
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    type="number"
+                    fullWidth
+                    size="small"
+                    label="Storage Rate (₹ / Kg / Day)"
+                    value={editingTransfer.storage_rate !== undefined ? editingTransfer.storage_rate : ''}
+                    onChange={(e) => setEditingTransfer({ ...editingTransfer, storage_rate: e.target.value })}
+                  />
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    type="number"
+                    fullWidth
+                    size="small"
+                    label="Insurance Charges (₹)"
+                    value={editingTransfer.insurance_charges !== undefined ? editingTransfer.insurance_charges : ''}
+                    onChange={(e) => setEditingTransfer({ ...editingTransfer, insurance_charges: e.target.value })}
+                  />
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="Remarks"
+                    value={editingTransfer.remarks || ''}
+                    onChange={(e) => setEditingTransfer({ ...editingTransfer, remarks: e.target.value })}
+                  />
+                </Grid>
+              </Grid>
+            </DialogContent>
+
+            <DialogActions sx={{ p: 2, bgcolor: '#ffffff', borderTop: '1px solid #e2e8f0' }}>
+              <Button onClick={() => setEditingTransfer(null)} variant="outlined">
+                Cancel
+              </Button>
+              <Button type="submit" variant="contained" disabled={updating} startIcon={<SaveIcon />} sx={{ bgcolor: '#1e3a8a' }}>
+                {updating ? 'Saving Changes...' : 'Save Transfer Details'}
+              </Button>
+            </DialogActions>
+          </form>
+        )}
+      </Dialog>
+
+      {/* Cold Storage Transfer Bill Statement Modal */}
+      <ColdStorageTransferStatementModal
+        open={openBillModal}
+        onClose={() => {
+          setOpenBillModal(false);
+          setSelectedTransferRow(null);
+        }}
+        transferRow={selectedTransferRow}
+      />
     </Container>
   );
 };

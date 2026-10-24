@@ -12,13 +12,18 @@ router.get('/live', async (req, res) => {
     const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
 
     // 1. Saved system notifications
-    const saved = await db.query(`
-      SELECT * FROM system_notifications 
-      WHERE company_id = ?
-      ORDER BY id DESC 
-      LIMIT 50
-    `, [activeCompanyId]);
-    const alerts = saved.rows || [];
+    let alerts = [];
+    try {
+      const saved = await db.query(`
+        SELECT * FROM system_notifications 
+        WHERE company_id = ?
+        ORDER BY id DESC 
+        LIMIT 50
+      `, [activeCompanyId]);
+      alerts = saved.rows || [];
+    } catch (_) {
+      alerts = [];
+    }
 
     // 2. Dynamic live alerts (Cold storage temp warnings)
     try {
