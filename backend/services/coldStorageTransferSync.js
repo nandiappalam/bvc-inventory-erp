@@ -497,7 +497,6 @@ const syncGodownTransfersToColdStorage = async (companyId = 1) => {
       LOWER(COALESCE(destination.godown_type, '')) LIKE '%cold%'
       OR LOWER(COALESCE(destination.storage_location, '')) LIKE '%outside%'
       OR LOWER(COALESCE(destination.godown_name, gt.to_godown_name, '')) LIKE '%cold%'
-      OR destination.is_cold_storage = 1
       OR CAST(destination.id AS TEXT) = '2'
       OR CAST(gt.to_godown_id AS TEXT) = '2'
     )
@@ -524,7 +523,6 @@ const syncGodownTransfersToColdStorage = async (companyId = 1) => {
       LOWER(COALESCE(source.godown_type, '')) LIKE '%cold%'
       OR LOWER(COALESCE(source.storage_location, '')) LIKE '%outside%'
       OR LOWER(COALESCE(source.godown_name, gt.from_godown_name, '')) LIKE '%cold%'
-      OR source.is_cold_storage = 1
       OR CAST(source.id AS TEXT) = '2'
       OR CAST(gt.from_godown_id AS TEXT) = '2'
     )

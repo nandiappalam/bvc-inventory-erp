@@ -2402,12 +2402,12 @@ router.get('/transfer-statement/:id', async (req, res) => {
     let csGodownId = transfer.from_godown_id;
     let transferType = 'OUTWARD';
     const fromGodownRes = await db.query(
-      'SELECT id, godown_name, godown_type, storage_location, is_cold_storage FROM godown_master WHERE id = ? OR LOWER(godown_name) = LOWER(?) LIMIT 1',
+      'SELECT id, godown_name, godown_type, storage_location FROM godown_master WHERE id = ? OR LOWER(godown_name) = LOWER(?) LIMIT 1',
       [transfer.from_godown_id, transfer.from_godown_name],
       activeCompanyId
     );
     const toGodownRes = await db.query(
-      'SELECT id, godown_name, godown_type, storage_location, is_cold_storage FROM godown_master WHERE id = ? OR LOWER(godown_name) = LOWER(?) LIMIT 1',
+      'SELECT id, godown_name, godown_type, storage_location FROM godown_master WHERE id = ? OR LOWER(godown_name) = LOWER(?) LIMIT 1',
       [transfer.to_godown_id, transfer.to_godown_name],
       activeCompanyId
     );
@@ -2418,12 +2418,12 @@ router.get('/transfer-statement/:id', async (req, res) => {
     const isFromCS = fromGodown && (
       (fromGodown.godown_type && fromGodown.godown_type.toLowerCase().includes('cold')) ||
       (fromGodown.godown_name && fromGodown.godown_name.toLowerCase().includes('cold')) ||
-      fromGodown.is_cold_storage === 1 || String(fromGodown.id) === '2'
+      (fromGodown.is_cold_storage || 0) === 1 || String(fromGodown.id) === '2'
     );
     const isToCS = toGodown && (
       (toGodown.godown_type && toGodown.godown_type.toLowerCase().includes('cold')) ||
       (toGodown.godown_name && toGodown.godown_name.toLowerCase().includes('cold')) ||
-      toGodown.is_cold_storage === 1 || String(toGodown.id) === '2'
+      (toGodown.is_cold_storage || 0) === 1 || String(toGodown.id) === '2'
     );
 
     if (isToCS && !isFromCS) {

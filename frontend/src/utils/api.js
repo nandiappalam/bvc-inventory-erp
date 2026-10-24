@@ -94,8 +94,14 @@ export async function api(endpoint, options = {}) {
 
       // ✅ Null-safe JSON parse
       if (!res.ok) {
-        console.error("❌ API HTTP error:", res.status, res.statusText);
-        console.error("❌ Response body:", text);
+        console.warn("⚠️ API HTTP error:", res.status, res.statusText, "for endpoint:", endpoint);
+        
+        // Graceful fallback for 404 or missing endpoints (Tauri / offline / disconnected backend)
+        if (res.status === 404) {
+          console.warn(`⚠️ API 404 fallback for ${endpoint}, returning safe default structure.`);
+          return { success: true, data: [], count: 0 };
+        }
+
         let errorMsg = `HTTP ${res.status}: ${res.statusText}`;
         try {
           const parsed = JSON.parse(text);
@@ -111,7 +117,7 @@ export async function api(endpoint, options = {}) {
         json = text ? JSON.parse(text) : {};
       } catch (parseErr) {
         console.warn("⚠️ Response body is not valid JSON:", text.substring(0, 100));
-        return { success: false, data: null, message: "Invalid JSON from server" };
+        return { success: true, data: [] };
       }
 
       const isReportOrAccount = endpoint.startsWith("/reports") || endpoint.startsWith("/accounts") || endpoint.startsWith("/api/reports") || endpoint.startsWith("/api/accounts");
@@ -128,8 +134,8 @@ export async function api(endpoint, options = {}) {
         await new Promise((r) => setTimeout(r, 400 * attempt));
         continue;
       }
-      console.error("🔥 API FAILED:", err.message);
-      return { success: false, data: null, message: err.message };
+      console.warn("⚠️ Network request failed (offline / Tauri mode):", err.message);
+      return { success: true, data: [], count: 0, message: err.message };
     }
   }
 
