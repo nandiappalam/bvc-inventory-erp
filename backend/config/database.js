@@ -1522,12 +1522,14 @@ function isSqlTextFile(filePath) {
     if (!fs.existsSync(filePath)) return false;
     const stat = fs.statSync(filePath);
     if (stat.size < 5) return false;
-    const buf = Buffer.alloc(Math.min(stat.size, 1024));
+    const ext = path.extname(filePath).toLowerCase();
+    if (ext === '.sql') return true;
+    const buf = Buffer.alloc(Math.min(stat.size, 2048));
     const fd = fs.openSync(filePath, 'r');
     fs.readSync(fd, buf, 0, buf.length, 0);
     fs.closeSync(fd);
-    const head = buf.toString('utf8').trim();
-    return /^(?:--|\/\*|SET\b|INSERT\b|CREATE\b|SELECT\b|BEGIN\b|DROP\b)/i.test(head);
+    const head = buf.toString('utf8').replace(/^\uFEFF/, '').trim();
+    return /^(?:--|\/\*|SET\b|INSERT\b|CREATE\b|SELECT\b|BEGIN\b|DROP\b|PRAGMA\b|DELETE\b|TRUNCATE\b|ALTER\b|COPY\b|REPLACE\b)/i.test(head);
   } catch (e) {
     return false;
   }

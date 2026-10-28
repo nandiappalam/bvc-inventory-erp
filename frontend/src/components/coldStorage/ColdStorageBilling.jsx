@@ -46,6 +46,8 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../services/api';
 import { printHtml } from '../../utils/printHelper';
+import ColdStorageReleaseOrderModal from './ColdStorageReleaseOrderModal';
+import { AcUnit as ColdIcon } from '@mui/icons-material';
 
 const ColdStorageBilling = () => {
   const navigate = useNavigate();
@@ -57,6 +59,10 @@ const ColdStorageBilling = () => {
   const [approving, setApproving] = useState(false);
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState('info');
+
+  // CSRO Modal State
+  const [csroModalOpen, setCsroModalOpen] = useState(false);
+  const [selectedCsroVoucher, setSelectedCsroVoucher] = useState(null);
 
   // Facilities & Operators
   const [coldStorages, setColdStorages] = useState([]);
@@ -484,7 +490,16 @@ const ColdStorageBilling = () => {
             </Typography>
           </Box>
         </Box>
-        <Box sx={{ display: 'flex', gap: 1.5 }}>
+        <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
+          <Button
+            variant="contained"
+            color="warning"
+            startIcon={<BillIcon />}
+            onClick={() => navigate('/cold-storage/out?view=history')}
+            sx={{ fontWeight: 800, bgcolor: '#d97706', '&:hover': { bgcolor: '#b45309' } }}
+          >
+            CSO Outward Bills & Statements
+          </Button>
           <Button variant="outlined" color="primary" onClick={() => navigate('/cold-storage/master')}>
             Facility Rates Master
           </Button>
@@ -891,7 +906,42 @@ const ColdStorageBilling = () => {
                           )}
                         </TableCell>
                         <TableCell align="center">
-                          <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'center' }}>
+                          <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'center', alignItems: 'center' }}>
+                            <Tooltip title="Print Cold Storage Release Order (CSRO)">
+                              <IconButton
+                                size="small"
+                                sx={{ color: '#1e3a8a', bgcolor: '#eff6ff' }}
+                                onClick={() => {
+                                  const vTarget = b.voucher_no || (b.bill_no?.startsWith('CSB-') ? b.bill_no.replace('CSB-', '') : '');
+                                  setSelectedCsroVoucher({
+                                    voucher_no: vTarget,
+                                    voucher_date: b.bill_date,
+                                    cold_storage_name: b.cold_storage_name,
+                                    operator_name: b.operator_name,
+                                    vehicle_no: b.vehicle_no,
+                                    driver_name: b.driver_name,
+                                    driver_phone: b.driver_phone,
+                                    transporter_name: b.transporter_name,
+                                    items: typeof b.items_json === 'string' ? JSON.parse(b.items_json) : (b.items_json || [])
+                                  });
+                                  setCsroModalOpen(true);
+                                }}
+                              >
+                                <ColdIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Open Full 10-Column CSO Bill Statement Preview & Editor">
+                              <IconButton
+                                size="small"
+                                sx={{ color: '#d97706', bgcolor: '#fffbeb' }}
+                                onClick={() => {
+                                  const vTarget = b.voucher_no || (b.bill_no?.startsWith('CSB-') ? b.bill_no.replace('CSB-', '') : '');
+                                  navigate(`/cold-storage/out?view=history&voucher_no=${vTarget}`);
+                                }}
+                              >
+                                <BillIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
                             <Tooltip title="View Lot Breakdown">
                               <IconButton
                                 size="small"
@@ -1030,6 +1080,13 @@ const ColdStorageBilling = () => {
           )}
         </DialogActions>
       </Dialog>
+
+      {/* CSRO Release Order Modal */}
+      <ColdStorageReleaseOrderModal
+        open={csroModalOpen}
+        onClose={() => setCsroModalOpen(false)}
+        csoData={selectedCsroVoucher}
+      />
     </Box>
   );
 };

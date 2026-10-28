@@ -33,17 +33,23 @@ import {
   Delete as DeleteIcon,
   Add as AddIcon,
   Print as PrintIcon,
-  Refresh as RefreshIcon
+  Refresh as RefreshIcon,
+  ReceiptLong as ReceiptIcon
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../services/api';
 import { printHtml } from '../../utils/printHelper';
+import ColdStorageReleaseOrderModal from './ColdStorageReleaseOrderModal';
 
 const ColdStorageVouchers = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [vouchers, setVouchers] = useState([]);
   const [coldStorages, setColdStorages] = useState([]);
+
+  // CSRO Modal State
+  const [csroModalOpen, setCsroModalOpen] = useState(false);
+  const [selectedCsroVoucher, setSelectedCsroVoucher] = useState(null);
 
   // Filters
   const [activeTab, setActiveTab] = useState('ALL'); // ALL, IN, OUT
@@ -307,7 +313,16 @@ const ColdStorageVouchers = () => {
             Cold Storage Voucher Register
           </Typography>
         </Box>
-        <Box sx={{ display: 'flex', gap: 1.5 }}>
+        <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
+          <Button
+            variant="outlined"
+            color="warning"
+            startIcon={<ReceiptIcon />}
+            onClick={() => navigate('/cold-storage/out?view=history')}
+            sx={{ fontWeight: 800, borderColor: '#d97706', color: '#b45309', bgcolor: '#fffbeb' }}
+          >
+            CSO Bill Statements
+          </Button>
           <Button
             variant="contained"
             color="primary"
@@ -467,30 +482,75 @@ const ColdStorageVouchers = () => {
                           {row.remarks || '-'}
                         </TableCell>
                         <TableCell align="center">
-                          <IconButton
-                            size="small"
-                            color="info"
-                            onClick={() => handlePrintRow(row)}
-                            title="Print Voucher"
-                          >
-                            <PrintIcon fontSize="small" />
-                          </IconButton>
-                          <IconButton
-                            size="small"
-                            color="primary"
-                            onClick={() => handleViewVoucher(row.id)}
-                            title="View Voucher"
-                          >
-                            <ViewIcon fontSize="small" />
-                          </IconButton>
-                          <IconButton
-                            size="small"
-                            color="error"
-                            onClick={() => handleDeleteVoucher(row.id, row.voucher_no)}
-                            title="Delete Voucher"
-                          >
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
+                          <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', justifyContent: 'center' }}>
+                            {!isIn && (
+                              <>
+                                <Button
+                                  size="small"
+                                  variant="contained"
+                                  startIcon={<ReceiptIcon sx={{ fontSize: 13 }} />}
+                                  onClick={() => navigate(`/cold-storage/out?view=history&voucher_id=${row.id}`)}
+                                  sx={{
+                                    bgcolor: '#d97706',
+                                    '&:hover': { bgcolor: '#b45309' },
+                                    textTransform: 'none',
+                                    fontWeight: 800,
+                                    fontSize: '11px',
+                                    py: 0.3,
+                                    px: 1,
+                                    whiteSpace: 'nowrap'
+                                  }}
+                                >
+                                  CSO Bill
+                                </Button>
+                                <Button
+                                  size="small"
+                                  variant="contained"
+                                  startIcon={<ColdIcon sx={{ fontSize: 13 }} />}
+                                  onClick={() => {
+                                    setSelectedCsroVoucher(row);
+                                    setCsroModalOpen(true);
+                                  }}
+                                  sx={{
+                                    bgcolor: '#1e3a8a',
+                                    '&:hover': { bgcolor: '#1d4ed8' },
+                                    textTransform: 'none',
+                                    fontWeight: 800,
+                                    fontSize: '11px',
+                                    py: 0.3,
+                                    px: 1,
+                                    whiteSpace: 'nowrap'
+                                  }}
+                                >
+                                  Print CSRO
+                                </Button>
+                              </>
+                            )}
+                            <IconButton
+                              size="small"
+                              color="info"
+                              onClick={() => handlePrintRow(row)}
+                              title="Print Voucher"
+                            >
+                              <PrintIcon fontSize="small" />
+                            </IconButton>
+                            <IconButton
+                              size="small"
+                              color="primary"
+                              onClick={() => handleViewVoucher(row.id)}
+                              title="View Voucher"
+                            >
+                              <ViewIcon fontSize="small" />
+                            </IconButton>
+                            <IconButton
+                              size="small"
+                              color="error"
+                              onClick={() => handleDeleteVoucher(row.id, row.voucher_no)}
+                              title="Delete Voucher"
+                            >
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          </Box>
                         </TableCell>
                       </TableRow>
                     );
@@ -596,13 +656,50 @@ const ColdStorageVouchers = () => {
             <Typography>No details available.</Typography>
           )}
         </DialogContent>
-        <DialogActions sx={{ p: 2 }}>
+        <DialogActions sx={{ p: 2, justifyContent: 'space-between' }}>
           <Button variant="outlined" onClick={() => setViewModalOpen(false)}>Close</Button>
-          <Button variant="contained" startIcon={<PrintIcon />} onClick={() => handlePrintVoucher(selectedVoucherDetails)}>
-            Print Voucher
-          </Button>
+          <Box sx={{ display: 'flex', gap: 1.5 }}>
+            {selectedVoucherDetails?.voucher_type === 'OUT' && (
+              <>
+                <Button
+                  variant="contained"
+                  color="info"
+                  startIcon={<ColdIcon />}
+                  onClick={() => {
+                    setSelectedCsroVoucher(selectedVoucherDetails);
+                    setCsroModalOpen(true);
+                  }}
+                  sx={{ fontWeight: 800, bgcolor: '#1e3a8a', '&:hover': { bgcolor: '#1d4ed8' }, textTransform: 'none' }}
+                >
+                  Print Release Order (CSRO)
+                </Button>
+                <Button
+                  variant="contained"
+                  color="warning"
+                  startIcon={<ReceiptIcon />}
+                  onClick={() => {
+                    setViewModalOpen(false);
+                    navigate(`/cold-storage/out?view=history&voucher_id=${selectedVoucherDetails.id}`);
+                  }}
+                  sx={{ fontWeight: 800, bgcolor: '#d97706', '&:hover': { bgcolor: '#b45309' }, textTransform: 'none' }}
+                >
+                  CSO Bill Preview
+                </Button>
+              </>
+            )}
+            <Button variant="contained" startIcon={<PrintIcon />} onClick={() => handlePrintVoucher(selectedVoucherDetails)}>
+              Print Voucher
+            </Button>
+          </Box>
         </DialogActions>
       </Dialog>
+
+      {/* Cold Storage Release Order Modal */}
+      <ColdStorageReleaseOrderModal
+        open={csroModalOpen}
+        onClose={() => setCsroModalOpen(false)}
+        csoData={selectedCsroVoucher}
+      />
     </Box>
   );
 };

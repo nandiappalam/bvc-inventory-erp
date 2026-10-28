@@ -2142,7 +2142,7 @@ const CategoryReportPage = () => {
           sx: { borderRadius: '12px', overflow: 'hidden' }
         }}
       >
-        <DialogTitle
+        <DialogTitle component="div"
           sx={{
             backgroundColor: '#1f4fb2',
             color: '#ffffff',

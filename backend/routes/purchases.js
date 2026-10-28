@@ -102,7 +102,10 @@ const ensurePurchasesColumns = async (companyId = 1) => {
     'ALTER TABLE purchases ADD COLUMN source_order_no TEXT',
     'ALTER TABLE purchases ADD COLUMN sub_total REAL DEFAULT 0',
     'ALTER TABLE purchases ADD COLUMN total_deductions REAL DEFAULT 0',
-    'ALTER TABLE purchases ADD COLUMN round_off REAL DEFAULT 0'
+    'ALTER TABLE purchases ADD COLUMN round_off REAL DEFAULT 0',
+    'ALTER TABLE purchases ADD COLUMN loadman_name TEXT',
+    'ALTER TABLE purchases ADD COLUMN loadman_rate_per_kg REAL DEFAULT 0.50',
+    'ALTER TABLE purchases ADD COLUMN loadman_charges REAL DEFAULT 0'
   ];
   for (const sql of columns) {
     try { await db.run(sql, [], cId); } catch (_) {}
@@ -726,6 +729,8 @@ router.post('/', async (req, res) => {
  
     // Create ledger entries
     try {
+      const loadmanRateVal = parseFloat(formData.loadman_rate_per_kg || 0);
+      const loadmanChargesVal = parseFloat(formData.loadman_charges) || Number((calculatedTotals.totalWeight * loadmanRateVal).toFixed(2));
       await createPurchaseLedgerEntries({
         supplier: formData.supplier,
         date: formData.date,
@@ -734,7 +739,10 @@ router.post('/', async (req, res) => {
         baseAmount: calculatedTotals.grossAmount,
         taxAmount: calculatedTotals.taxAmount,
         discAmount: calculatedTotals.discAmount,
-        netAmount: calculatedTotals.grandTotal
+        netAmount: calculatedTotals.grandTotal,
+        loadmanName: formData.loadman_name || 'K. Murugan',
+        loadmanRatePerKg: loadmanRateVal,
+        loadmanCharges: loadmanChargesVal
       })
       console.log('Ledger entries created for purchase:', purchaseId)
     } catch (ledgerError) {

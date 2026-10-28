@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../services/api.js';
-import { getMasters, safeArray, normalizeMasterKey } from '../../services/masterservice.js';
+import { getMasters, getCachedMasters, safeArray, normalizeMasterKey } from '../../services/masterservice.js';
 import { InlineMasterModal, getCreateLabel, normalizeMasterType } from '../common/InlineMasterModal.jsx';
 
 const masterTableMap = {
@@ -26,15 +26,29 @@ const masterTableMap = {
   deduction_sales: 'deduction_sales',
   areas: 'area_master',
   cities: 'city_master',
-  item_groups: 'item_groups'
+  item_groups: 'item_groups',
+  workers: 'operational_parties',
+  loadman: 'operational_parties',
+  loadmen: 'operational_parties'
 };
 
 const getOptionValue = (opt) => {
   if (opt === null || opt === undefined) return '';
   if (typeof opt === 'string' || typeof opt === 'number') return String(opt);
-  if (opt.id !== undefined && opt.id !== null) return String(opt.id);
-  if (opt.value !== undefined && opt.value !== null) return String(opt.value);
-  return String(opt.name || opt.code || '');
+  return String(
+    opt.worker_name ||
+    opt.worker ||
+    opt.full_name ||
+    opt.name ||
+    opt.supplier_name ||
+    opt.customer_name ||
+    opt.transport_name ||
+    opt.transporter ||
+    opt.godown_name ||
+    opt.id ||
+    opt.value ||
+    ''
+  );
 };
 
 const getOptionLabel = (opt) => {
@@ -63,6 +77,7 @@ const getOptionLabel = (opt) => {
     opt.print_name ||
     opt.printname ||
     opt.weight_name ||
+    opt.worker_name ||
     (opt.id !== undefined ? String(opt.id) : '') ||
     (opt.value !== undefined ? String(opt.value) : '')
   );
@@ -145,7 +160,14 @@ const MASTER_FIELD_TYPES = {
   deduction: 'deductions',
   deductions: 'deductions',
   deduction_purchase: 'deductions',
-  deduction_sales: 'deduction_sales'
+  deduction_sales: 'deduction_sales',
+  loadman_name: 'workers',
+  loadman_team: 'workers',
+  loadman: 'workers',
+  loadmen: 'workers',
+  loadman_worker: 'workers',
+  worker_name: 'workers',
+  workers: 'workers'
 };
 const DEBUG = false;
 
@@ -429,7 +451,9 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
     if (Array.isArray(field.options) && field.options.length > 1) {
       return field.options;
     }
-    return [];
+    const key = normKey || normalizeMasterKey(masterKeyFromTypes) || normalizeMasterKey(field.name);
+    const cached = getCachedMasters(key);
+    return cached && cached.length > 0 ? cached : [];
   });
   const [loading, setLoading] = useState(false);
 
@@ -576,8 +600,45 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
 
   const handleInlineCreated = async (newId, newRecord) => {
     await fetchMasterData(true);
-    const targetVal = newId !== undefined && newId !== null ? String(newId) : (newRecord?.name || '');
+    const createdName = newRecord?.name || newRecord?.worker_name || newRecord?.label || '';
+    const isNameBasedField = field.name.includes('name') || 
+                             field.name === 'transporter' || 
+                             field.name === 'driver' || 
+                             field.name === 'loadman_team' || 
+                             field.name === 'loadman' ||
+                             field.masterType === 'workers' ||
+                             field.masterType === 'loadman';
+
+    const targetVal = (isNameBasedField && createdName) 
+      ? createdName 
+      : (newId !== undefined && newId !== null ? String(newId) : createdName);
+
     onChange(field.name, targetVal);
+
+    if (newRecord || createdName) {
+      setMasterOptions(prev => {
+        const itemVal = targetVal;
+        const exists = (prev || []).some(o => 
+          String(getOptionValue(o)).toLowerCase() === itemVal.toLowerCase() ||
+          String(o.id) === String(newId)
+        );
+        if (!exists) {
+          return [
+            ...(prev || []),
+            {
+              id: newId,
+              name: createdName || targetVal,
+              worker_name: createdName || targetVal,
+              label: createdName || targetVal,
+              value: targetVal,
+              ...newRecord
+            }
+          ];
+        }
+        return prev;
+      });
+    }
+
     const key = normalizeMasterKey(field.masterType || field.name);
     const isAutofillMaster = 
       key === 'customers' || field.name === 'customer_id' || field.name === 'customer' || field.name === 'customerId' || field.name === 'customerName' ||
@@ -622,10 +683,16 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
         const optVal = getOptionValue(opt);
         const optLabel = getOptionLabel(opt);
         return String(optVal).toLowerCase() === rawVal.toLowerCase() ||
-               String(optLabel).toLowerCase() === rawVal.toLowerCase();
+               String(optLabel).toLowerCase() === rawVal.toLowerCase() ||
+               String(opt.id) === rawVal;
       });
       if (match) {
         selectValue = getOptionValue(match);
+        if (rawVal !== selectValue && (field.name.includes('name') || field.masterType === 'workers')) {
+          setTimeout(() => {
+            onChange(field.name, selectValue);
+          }, 0);
+        }
       }
     }
     const selectedOption = effectiveOptions.find(opt => String(getOptionValue(opt)) === String(selectValue));

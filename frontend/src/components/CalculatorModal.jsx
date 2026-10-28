@@ -85,7 +85,7 @@ const CalculatorModal = ({ open, onClose }) => {
         }
       }}
     >
-      <DialogTitle
+      <DialogTitle component="div"
         sx={{
           background: 'linear-gradient(135deg, #1f4fb2 0%, #2a5ea0 100%)',
           color: 'white',

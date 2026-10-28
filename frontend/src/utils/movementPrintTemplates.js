@@ -263,7 +263,7 @@ export const printOutpassDocument = (op, copyTitle = 'ORIGINAL STORE COPY') => {
       <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-left: 4px solid #1f4fb2; border-radius: 4px; padding: 10px 12px; margin-bottom: 24px; font-size: 11px; color: #1e3a8a; line-height: 1.5;">
         <strong>CUSTODY & OWNERSHIP DECLARATION:</strong>
         The material detailed in this gate outpass is dispatched exclusively for outside processing / jobwork / grinding.
-        <strong>Physical ownership remains 100% with Bharani Vel Chemicals / BVC Agro at all times.</strong>
+        <strong>Physical ownership remains 100% with BVC.</strong>
         The recipient mill is bound to return the processed material along with by-products and reconciled process loss via corresponding Inpass.
         Not for sale or transfer to any third party.
       </div>

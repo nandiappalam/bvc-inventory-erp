@@ -403,7 +403,7 @@ const StockAlertConfig = () => {
 
       {/* Add / Edit Modal */}
       <Dialog open={openModal} onClose={() => setOpenModal(false)} maxWidth="md" fullWidth>
-        <DialogTitle sx={{ backgroundColor: '#1f4fb2', color: '#ffffff', py: 1.5 }}>
+        <DialogTitle component="div" sx={{ backgroundColor: '#1f4fb2', color: '#ffffff', py: 1.5 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
               {editId ? 'Edit Stock Alert Threshold' : 'Add Stock Alert Threshold'}

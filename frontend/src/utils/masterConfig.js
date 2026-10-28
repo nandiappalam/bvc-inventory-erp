@@ -652,5 +652,38 @@ export const MASTER_CONFIG = {
         ]
       }
     ]
+  },
+  loadman: {
+    table: 'operational_parties',
+    sections: [
+      {
+        title: 'Basic Information',
+        fields: [
+          { name: 'party_code', label: 'Loadman Code', type: 'text', readOnly: true },
+          { name: 'name', label: 'Loadman Name', type: 'text', required: true },
+          { name: 'phone', label: 'Mobile Number', type: 'text' },
+        ]
+      },
+      {
+        title: 'Payment Details',
+        fields: [
+          { name: 'payment_mode', label: 'Payment Type', type: 'select', options: [{label: 'Per load', value: 'Per load'}, {label: 'Per bag', value: 'Per bag'}, {label: 'Daily wage', value: 'Daily wage'}, {label: 'Other', value: 'Other'}], defaultValue: 'Per load' },
+          { name: 'rate_configuration', label: 'Default Rate (₹)', type: 'number' },
+        ]
+      },
+      {
+        title: 'Address & Notes',
+        fields: [
+          { name: 'address', label: 'Address / Location', type: 'textarea' },
+          { name: 'notes', label: 'Remarks', type: 'textarea' },
+        ]
+      },
+      {
+        title: 'Status',
+        fields: [
+          { name: 'is_active', label: 'Status', type: 'select', options: [{ label: 'Active', value: 1 }, { label: 'Inactive', value: 0 }], defaultValue: 1 }
+        ]
+      }
+    ]
   }
 };

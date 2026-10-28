@@ -479,7 +479,15 @@ router.post('/weight-machine-setup', async (req, res) => {
 router.get('/general-setup', async (req, res) => {
   try {
     const { company_id } = req.query;
-    const companyId = company_id || 1;
+    const companyId = company_id || req.headers['x-company-id'] || 1;
+
+    // Ensure extra_settings column exists
+    try {
+      await db.run(`ALTER TABLE general_setup ADD COLUMN extra_settings TEXT`);
+    } catch (e) {
+      // Ignore if column already exists
+    }
+
     const result = await db.query(`SELECT * FROM general_setup WHERE company_id = ?`, [companyId]);
 
     const defaultDate = new Date().toLocaleDateString('en-GB').replace(/\//g, '-');
@@ -489,21 +497,31 @@ router.get('/general-setup', async (req, res) => {
       backup_subfolder: 'Yes',
       backup_path: '',
       printer_path: 'CutePDF Writer',
-      select_theme: 'Gray',
+      select_theme: 'Blue',
       credit_debit_instead: 'No',
       manual_voucher_no: 'No',
       use_voucher_print: 'No',
       date_locked_upto: '31-03-2017',
-      reset_version_no: 'No'
+      reset_version_no: 'No',
+      extra_settings: '{}'
     };
 
     if (result.rows.length === 0) {
-      return res.json(defaults);
+      return res.json({ success: true, ...defaults, extra_settings_data: {} });
     }
-    res.json({ ...defaults, ...result.rows[0] });
+    const row = result.rows[0];
+    let parsedExtra = {};
+    if (row.extra_settings) {
+      try {
+        parsedExtra = JSON.parse(row.extra_settings);
+      } catch (err) {
+        parsedExtra = {};
+      }
+    }
+    res.json({ success: true, ...defaults, ...row, extra_settings_data: parsedExtra });
   } catch (error) {
     console.error('Error fetching general setup:', error);
-    res.status(500).json({ message: 'Error fetching general setup', error: error.message });
+    res.status(500).json({ success: false, message: 'Error fetching general setup', error: error.message });
   }
 });
 
@@ -522,17 +540,30 @@ router.post('/general-setup', async (req, res) => {
       manual_voucher_no,
       use_voucher_print,
       date_locked_upto,
-      reset_version_no
+      reset_version_no,
+      extra_settings,
+      extra_settings_data
     } = req.body;
 
-    const companyId = company_id || 1;
+    const companyId = company_id || req.headers['x-company-id'] || 1;
+
+    // Ensure extra_settings column exists
+    try {
+      await db.run(`ALTER TABLE general_setup ADD COLUMN extra_settings TEXT`);
+    } catch (e) {
+      // Ignore if column already exists
+    }
+
+    const extraStr = typeof extra_settings === 'string'
+      ? extra_settings
+      : JSON.stringify(extra_settings_data || extra_settings || {});
 
     await db.run(`
       INSERT INTO general_setup (
         company_id, current_date, auto_backup, backup_subfolder, backup_path,
         printer_path, select_theme, credit_debit_instead, manual_voucher_no,
-        use_voucher_print, date_locked_upto, reset_version_no, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        use_voucher_print, date_locked_upto, reset_version_no, extra_settings, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(company_id) DO UPDATE SET
         current_date = excluded.current_date,
         auto_backup = excluded.auto_backup,
@@ -545,18 +576,19 @@ router.post('/general-setup', async (req, res) => {
         use_voucher_print = excluded.use_voucher_print,
         date_locked_upto = excluded.date_locked_upto,
         reset_version_no = excluded.reset_version_no,
+        extra_settings = excluded.extra_settings,
         updated_at = CURRENT_TIMESTAMP
     `, [
       companyId, current_date || '', auto_backup || 'Yes', backup_subfolder || 'Yes',
-      backup_path || '', printer_path || 'CutePDF Writer', select_theme || 'Gray',
+      backup_path || '', printer_path || 'CutePDF Writer', select_theme || 'Blue',
       credit_debit_instead || 'No', manual_voucher_no || 'No', use_voucher_print || 'No',
-      date_locked_upto || '31-03-2017', reset_version_no || 'No'
+      date_locked_upto || '31-03-2017', reset_version_no || 'No', extraStr
     ]);
 
-    res.json({ success: true, message: 'General Setup saved successfully' });
+    res.json({ success: true, message: 'General System Setup saved successfully' });
   } catch (error) {
     console.error('Error saving general setup:', error);
-    res.status(500).json({ message: 'Failed to save General Setup', error: error.message });
+    res.status(500).json({ success: false, message: 'Failed to save General Setup', error: error.message });
   }
 });
 

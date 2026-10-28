@@ -455,7 +455,7 @@ const FinancialYearDisplay = () => {
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle sx={{ backgroundColor: themeColors.lighterBlue, color: themeColors.primary, fontWeight: 'bold' }}>
+        <DialogTitle component="div" sx={{ backgroundColor: themeColors.lighterBlue, color: themeColors.primary, fontWeight: 'bold' }}>
           Financial Year Details
         </DialogTitle>
         <DialogContent sx={{ p: 3, pt: 3 }}>

@@ -1487,7 +1487,7 @@ const ItemTransfer = ({ initialView = 'create' }) => {
       <Dialog open={openModal} onClose={() => setOpenModal(false)} maxWidth="md" fullWidth>
         {selectedVoucher && (
           <>
-            <DialogTitle sx={{ bgcolor: '#0f172a', color: '#ffffff', fontWeight: 800, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <DialogTitle component="div" sx={{ bgcolor: '#0f172a', color: '#ffffff', fontWeight: 800, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <Box display="flex" alignItems="center" gap={1}>
                 <TransferIcon sx={{ color: '#38bdf8' }} />
                 Item Transfer Voucher #{selectedVoucher.transfer_no || selectedVoucher.id}
@@ -1574,7 +1574,7 @@ const ItemTransfer = ({ initialView = 'create' }) => {
       <Dialog open={Boolean(editingTransfer)} onClose={() => setEditingTransfer(null)} maxWidth="sm" fullWidth>
         {editingTransfer && (
           <form onSubmit={handleUpdateTransfer}>
-            <DialogTitle sx={{ bgcolor: '#1e3a8a', color: '#ffffff', fontWeight: 800, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <DialogTitle component="div" sx={{ bgcolor: '#1e3a8a', color: '#ffffff', fontWeight: 800, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <Box display="flex" alignItems="center" gap={1}>
                 <EditIcon sx={{ fontSize: 22 }} />
                 <Typography variant="subtitle1" fontWeight={800}>

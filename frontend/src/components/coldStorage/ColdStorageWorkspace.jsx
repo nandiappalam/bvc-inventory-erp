@@ -203,6 +203,20 @@ const ColdStorageWorkspace = () => {
           >
             New Outward (CSO)
           </Button>
+          <Button
+            variant="contained"
+            startIcon={<VoucherIcon />}
+            onClick={() => navigate('/cold-storage/out?view=history')}
+            sx={{
+              backgroundColor: 'rgba(255,255,255,0.25)',
+              '&:hover': { backgroundColor: 'rgba(255,255,255,0.35)' },
+              color: '#fff',
+              fontWeight: 'bold',
+              textTransform: 'none'
+            }}
+          >
+            CSO Bills & Register
+          </Button>
         </Box>
       </Box>
 

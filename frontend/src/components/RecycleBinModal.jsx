@@ -168,7 +168,7 @@ const RecycleBinModal = ({ open, onClose }) => {
   return (
     <>
       <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth paperprops={{ style: { borderRadius: 12 } }}>
-        <DialogTitle
+        <DialogTitle component="div"
           sx={{
             background: `linear-gradient(135deg, ${themeColors.primary} 0%, ${themeColors.secondary} 100%)`,
             color: 'white',

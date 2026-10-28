@@ -76,6 +76,127 @@ const PurchaseCreation = () => {
   const [poList, setPoList] = useState([]);
   const [loadingPoList, setLoadingPoList] = useState(false);
 
+  const [tableData, setTableData] = useState([{
+    sno: 1,
+    item_name: '',
+    lot_no: '',
+    qty: 0,
+    weight: 0,
+    total_wt: 0,
+    rate: 0,
+    disc: 0,
+    tax_rate: 5,
+    amount: 0,
+    lot_status: 'available'
+  }]);
+  const [deductions, setDeductions] = useState([]);
+  const [selectedDeductions, setSelectedDeductions] = useState([]);
+  const [inlineDeductionOpen, setInlineDeductionOpen] = useState(false);
+  const deductionsRef = React.useRef(deductions);
+  deductionsRef.current = deductions;
+
+  const validItems = useMemo(() => {
+    return (tableData || []).filter((r) => {
+      return (
+        (r?.item_name || r?.item_id) &&
+        Number(r?.qty) > 0
+      );
+    });
+  }, [tableData]);
+
+  // 1. Calculate Unloading / Loadman Charges from active items weight and rates
+  const calculatedLoadmanCharges = useMemo(() => {
+    const totalWt = validItems.reduce((acc, r) => acc + (parseFloat(r.total_wt || r.total_weight || (Number(r.qty || 0) * Number(r.weight || 50))) || 0), 0);
+    const qty = parseFloat(formData.loadman_qty_kg !== undefined && formData.loadman_qty_kg !== '' ? formData.loadman_qty_kg : totalWt) || 0;
+    const rate = parseFloat(formData.loadman_rate_per_kg !== undefined && formData.loadman_rate_per_kg !== '' ? formData.loadman_rate_per_kg : 0.50) || 0;
+    const add = parseFloat(formData.additional_charges || 0) || 0;
+    return Number(((qty * rate) + add).toFixed(2));
+  }, [formData.loadman_qty_kg, formData.loadman_rate_per_kg, formData.additional_charges, validItems]);
+
+  // 2. ERP Calculation Logic (FINAL canonical flow)
+  const erpTotals = useMemo(() => {
+    const invoiceResult = calculateInvoiceTax({
+      items: validItems,
+      taxMode: formData.tax_type,
+      defaultTaxType: 'Taxable',
+      companyState: 'Tamil Nadu',
+      partyState: formData.supplier_state || 'Tamil Nadu',
+      partyStateCode: formData.supplier_state_code || undefined
+    });
+
+    const calculatedDeductions = selectedDeductions.map(d => {
+      const percentage = Number(d.percentage ?? d.percent ?? 0) || 0;
+      const calculationType = String(d.calculation_type || d.calc_type || '').toLowerCase();
+      const isPercentage = calculationType.includes('percent') || percentage > 0;
+      const amount = isPercentage && !d.manual_amount
+        ? Number((invoiceResult.taxableAmount * percentage / 100).toFixed(2))
+        : Number(d.amount || 0) || 0;
+      return { ...d, amount };
+    });
+
+    const addDeductions = calculatedDeductions
+      .filter(d => String(d.type || d.calculation || '').toUpperCase() === 'ADD')
+      .reduce((s, d) => s + (Number(d.amount || 0) || 0), 0);
+
+    const lessDeductions = calculatedDeductions
+      .filter(d => String(d.type || d.calculation || '').toUpperCase() === 'LESS')
+      .reduce((s, d) => s + (Number(d.amount || 0) || 0), 0);
+
+    const totalDeductions = addDeductions - lessDeductions;
+    // Grand Total including Unloading / Loadman Charges as requested by user
+    const grandTotal = Number((invoiceResult.netAmount + totalDeductions + calculatedLoadmanCharges).toFixed(2));
+
+    const activeTaxRate = Number(invoiceResult.rateSummaries
+      .find(rate => Number(rate.gstRate) > 0)?.gstRate || 0);
+
+    return {
+      totalQty: invoiceResult.totalQty,
+      totalWeight: invoiceResult.totalWeight,
+      baseAmount: invoiceResult.baseAmount,
+      discountAmount: invoiceResult.discAmount,
+      discountPercent: (() => {
+        const rates = [...new Set(validItems
+          .map(item => Number(item.disc_percent ?? item.disc ?? 0))
+          .filter(rate => rate > 0))];
+        return rates.length === 1 ? rates[0] : 0;
+      })(),
+      taxable: invoiceResult.taxableAmount,
+      exemptAmount: invoiceResult.exemptAmount || 0,
+      nilRatedAmount: invoiceResult.nilRatedAmount || 0,
+      zeroRatedAmount: invoiceResult.zeroRatedAmount || 0,
+      nonGstAmount: invoiceResult.nonGstAmount || 0,
+      withoutTaxAmount: invoiceResult.withoutTaxAmount || 0,
+      taxAmount: invoiceResult.taxAmount,
+      cgstAmount: invoiceResult.cgstAmount,
+      sgstAmount: invoiceResult.sgstAmount,
+      igstAmount: invoiceResult.igstAmount,
+      cessAmount: invoiceResult.cessAmount,
+      rateSummaries: invoiceResult.rateSummaries,
+      hsnSummaries: invoiceResult.hsnSummaries,
+      taxRate: activeTaxRate,
+      isInterState: invoiceResult.isInterState,
+      netAmount: invoiceResult.netAmount,
+      totalDeductions,
+      grandTotal,
+      unloadingCharges: calculatedLoadmanCharges,
+      calculatedDeductions
+    };
+  }, [validItems, formData.tax_type, formData.tax_rate, formData.tax_percent, formData.supplier_state, formData.supplier_state_code, selectedDeductions, calculatedLoadmanCharges]);
+
+  // Expose 'totals' alias to guarantee no ReferenceError anywhere in component
+  const totals = erpTotals;
+
+  // Keep loadman_charges form field automatically synchronized with calculated charges
+  useEffect(() => {
+    const chargeStr = String(calculatedLoadmanCharges || 0);
+    setFormData(prev => {
+      if (prev.loadman_charges !== chargeStr) {
+        return { ...prev, loadman_charges: chargeStr };
+      }
+      return prev;
+    });
+  }, [calculatedLoadmanCharges]);
+
   // Backend (/routes/purchases.js) expects legacy shape inside req.body: { formData, items, totals }
   // IMPORTANT: purchase handler reads: formData.date, formData.supplier, formData.payType, formData.invNo,
   // formData.invDate, formData.godown, formData.taxType, formData.type, formData.address, formData.sno, etc.
@@ -123,20 +244,16 @@ const PurchaseCreation = () => {
       chamber_no: formData.chamber_no || 'Chamber 1',
       loadman_name: formData.loadman_name || 'K. Murugan',
       loadman_worker_id: formData.loadman_worker_id || null,
-      loadman_qty_kg: formData.loadman_qty_kg,
-      loadman_rate_per_kg: formData.loadman_rate_per_kg,
-      additional_charges: formData.additional_charges,
+      loadman_qty_kg: formData.loadman_qty_kg || String(erpTotals?.totalWeight || 0),
+      loadman_rate_per_kg: formData.loadman_rate_per_kg || '0.50',
+      loadman_charges: formData.loadman_charges || String(calculatedLoadmanCharges || 0),
+      additional_charges: formData.additional_charges || '0',
       // Keep fields that may be used by ledger helper
       supplier_id: formData.supplier_id
     }
-  }, [formData])
+  }, [formData, erpTotals?.totalWeight, calculatedLoadmanCharges])
 
-  const [tableData, setTableData] = useState([]);
-  const [deductions, setDeductions] = useState([]);
-  const [selectedDeductions, setSelectedDeductions] = useState([]);
-  const [inlineDeductionOpen, setInlineDeductionOpen] = useState(false);
-  const deductionsRef = React.useRef(deductions);
-  deductionsRef.current = deductions;
+
 
   const loadDeductions = useCallback(async () => {
     try {
@@ -245,7 +362,8 @@ const PurchaseCreation = () => {
       if (match) startLotNum = parseInt(match[1], 10);
     } catch (e) {}
 
-    const baseItems = (draft.tableData && draft.tableData.length > 0) ? draft.tableData : (order.items || []);
+    // Prioritize actual purchase order items over any stale cached draft to avoid unwanted rows
+    const baseItems = (order.items && order.items.length > 0) ? order.items : (draft.tableData || []);
     const mappedItems = baseItems.map((it, idx) => {
       const qty = Number(it.qty || 0);
       const rate = Number(it.rate || it.purc_rate || 0);
@@ -287,7 +405,20 @@ const PurchaseCreation = () => {
       };
     });
 
-    setTableData(mappedItems);
+    const filteredMappedItems = mappedItems.filter(it => Boolean(it.item_name || it.item_id) && (Number(it.qty) > 0 || Number(it.rate) > 0 || mappedItems.length === 1));
+    setTableData(filteredMappedItems.length > 0 ? filteredMappedItems : [{
+      sno: 1,
+      item_name: '',
+      lot_no: '',
+      qty: '',
+      weight: '',
+      total_wt: '',
+      rate: '',
+      disc: '',
+      tax_rate: 5,
+      amount: '',
+      lot_status: 'available'
+    }]);
 
     const orderDeductions = (order.deductions && order.deductions.length > 0) ? order.deductions : (draft.selectedDeductions || []);
     if (orderDeductions.length > 0) {
@@ -705,101 +836,7 @@ const PurchaseCreation = () => {
     setSelectedDeductions(prev => prev.filter((_, i) => i !== index));
   }, []);
 
-  const validItems = useMemo(() => {
-    return (tableData || []).filter((r) => {
-      return (
-        (r?.item_name || r?.item_id) &&
-        Number(r?.qty) > 0
-      );
-    });
-  }, [tableData]);
 
-
-  // ERP Calculation Logic (FINAL canonical flow)
-  // Base Amount = Qty × Rate
-  // Discount     = Base × Disc%
-  // Taxable      = Base − Discount
-  // Tax          = Taxable × GST%
-  // Net Total    = Taxable + Tax
-  // Grand Total  = Net Total + ADD deductions − LESS deductions
-  const erpTotals = useMemo(() => {
-    const invoiceResult = calculateInvoiceTax({
-      items: validItems,
-      taxMode: formData.tax_type,
-      defaultTaxType: 'Taxable',
-      companyState: 'Tamil Nadu',
-      partyState: formData.supplier_state || 'Tamil Nadu',
-      partyStateCode: formData.supplier_state_code || undefined
-    });
-
-    const calculatedDeductions = selectedDeductions.map(d => {
-      const percentage = Number(d.percentage ?? d.percent ?? 0) || 0;
-      const calculationType = String(d.calculation_type || d.calc_type || '').toLowerCase();
-      const isPercentage = calculationType.includes('percent') || percentage > 0;
-      const amount = isPercentage && !d.manual_amount
-        ? Number((invoiceResult.taxableAmount * percentage / 100).toFixed(2))
-        : Number(d.amount || 0) || 0;
-      return { ...d, amount };
-    });
-
-    const addDeductions = calculatedDeductions
-      .filter(d => String(d.type || d.calculation || '').toUpperCase() === 'ADD')
-      .reduce((s, d) => s + (Number(d.amount || 0) || 0), 0);
-
-    const lessDeductions = calculatedDeductions
-      .filter(d => String(d.type || d.calculation || '').toUpperCase() === 'LESS')
-      .reduce((s, d) => s + (Number(d.amount || 0) || 0), 0);
-
-    const totalDeductions = addDeductions - lessDeductions;
-    const grandTotal = Number((invoiceResult.netAmount + totalDeductions).toFixed(2));
-
-    const activeTaxRate = Number(invoiceResult.rateSummaries
-      .find(rate => Number(rate.gstRate) > 0)?.gstRate || 0);
-
-    return {
-      totalQty: invoiceResult.totalQty,
-      totalWeight: invoiceResult.totalWeight,
-      baseAmount: invoiceResult.baseAmount,
-      discountAmount: invoiceResult.discAmount,
-      discountPercent: (() => {
-        const rates = [...new Set(validItems
-          .map(item => Number(item.disc_percent ?? item.disc ?? 0))
-          .filter(rate => rate > 0))];
-        return rates.length === 1 ? rates[0] : 0;
-      })(),
-      taxable: invoiceResult.taxableAmount,
-      exemptAmount: invoiceResult.exemptAmount || 0,
-      nilRatedAmount: invoiceResult.nilRatedAmount || 0,
-      zeroRatedAmount: invoiceResult.zeroRatedAmount || 0,
-      nonGstAmount: invoiceResult.nonGstAmount || 0,
-      withoutTaxAmount: invoiceResult.withoutTaxAmount || 0,
-      taxAmount: invoiceResult.taxAmount,
-      cgstAmount: invoiceResult.cgstAmount,
-      sgstAmount: invoiceResult.sgstAmount,
-      igstAmount: invoiceResult.igstAmount,
-      cessAmount: invoiceResult.cessAmount,
-      rateSummaries: invoiceResult.rateSummaries,
-      hsnSummaries: invoiceResult.hsnSummaries,
-      taxRate: activeTaxRate,
-      isInterState: invoiceResult.isInterState,
-      netAmount: invoiceResult.netAmount,
-      totalDeductions,
-      grandTotal,
-      calculatedDeductions
-    };
-  }, [validItems, formData.tax_type, formData.tax_rate, formData.tax_percent, formData.supplier_state, formData.supplier_state_code, selectedDeductions]);
-
-
-  const totals = useMemo(() => {
-    return erpTotals; // Use the comprehensive erpTotals
-  }, [erpTotals]);
-
-  const calculatedLoadmanCharges = useMemo(() => {
-    const qty = parseFloat(formData.loadman_qty_kg !== undefined && formData.loadman_qty_kg !== '' ? formData.loadman_qty_kg : (erpTotals?.totalWeight || 0)) || 0;
-    const rate = parseFloat(formData.loadman_rate_per_kg !== undefined && formData.loadman_rate_per_kg !== '' ? formData.loadman_rate_per_kg : 0.50) || 0;
-    const add = parseFloat(formData.additional_charges || 0) || 0;
-    return Number(((qty * rate) + add).toFixed(2));
-  }, [formData.loadman_qty_kg, formData.loadman_rate_per_kg, formData.additional_charges, erpTotals?.totalWeight]);
 
   const payload = useMemo(() => ({
     date: formData.date,
@@ -1092,6 +1129,9 @@ const PurchaseCreation = () => {
     { name: 'transporter', label: 'Transporter', type: 'masterSelect', masterType: 'transports', placeholder: 'Select/Enter Transporter', col: 2 },
     { name: 'vehicle_no', label: 'Vehicle No', type: 'text', placeholder: 'e.g. TN-38-AB-1234', col: 2 },
     { name: 'driver_name', label: 'Driver Name', type: 'text', placeholder: 'Driver Name', col: 2 },
+    { name: 'loadman_name', label: 'Loadman Team', type: 'masterSelect', masterType: 'workers', placeholder: 'e.g. K. Murugan', col: 2 },
+    { name: 'loadman_rate_per_kg', label: 'Loadman (₹/Kg)', type: 'number', min: 0, step: '0.01', placeholder: '0.50', col: 2 },
+    { name: 'loadman_charges', label: 'Unloading Fee (₹)', type: 'number', readOnly: true, col: 2 },
 
     // Column 3
     { name: 'supplier_id', label: 'Supplier', type: 'masterSelect', masterType: 'suppliers', col: 3 },
@@ -1491,120 +1531,7 @@ const PurchaseCreation = () => {
           ) : null}
         />
 
-        {/* Cold Storage Inward & Loadman Unloading Details (Auto-Linked CSI Voucher) */}
-        {isColdStorageSelected && (
-          <div style={{
-            margin: '14px 0 18px',
-            padding: '16px 20px',
-            background: 'linear-gradient(135deg, #f0fdf4 0%, #e0f2fe 100%)',
-            border: '1.5px solid #0284c7',
-            borderRadius: '8px',
-            boxShadow: '0 2px 8px rgba(2, 132, 199, 0.08)'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '22px' }}>❄️</span>
-                <div>
-                  <h4 style={{ margin: 0, color: '#0369a1', fontWeight: 'bold', fontSize: '15px' }}>
-                    Cold Storage Inward & Unloading Configuration (Auto-Linked CSI Voucher)
-                  </h4>
-                  <span style={{ fontSize: '12px', color: '#475569' }}>
-                    Facility: <strong>{selectedGodownObj?.godown_name || 'BTS Cold Storage'}</strong> • Operator: <strong>{coldStorageTariff?.operatorName || selectedGodownObj?.operator_name || 'AgroCold Services'}</strong>
-                  </span>
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                <span style={{ background: '#0284c7', color: '#fff', padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' }}>
-                  Rule: {coldStorageTariff?.calculationType || 'Progressive'} Slabs
-                </span>
-                <span style={{ background: '#10b981', color: '#fff', padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' }}>
-                  Days 1–15: ₹0.20/kg/day
-                </span>
-              </div>
-            </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#334155', marginBottom: '4px' }}>
-                  Chamber / Rack
-                </label>
-                <input
-                  type="text"
-                  value={formData.chamber_no || 'Chamber 1'}
-                  onChange={(e) => setFormData(prev => ({ ...prev, chamber_no: e.target.value }))}
-                  style={{ width: '100%', padding: '6px 10px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '13px' }}
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#334155', marginBottom: '4px' }}>
-                  Loadman / Worker Name
-                </label>
-                <input
-                  type="text"
-                  value={formData.loadman_name || 'K. Murugan'}
-                  onChange={(e) => setFormData(prev => ({ ...prev, loadman_name: e.target.value }))}
-                  placeholder="e.g. K. Murugan"
-                  style={{ width: '100%', padding: '6px 10px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '13px' }}
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#334155', marginBottom: '4px' }}>
-                  Unloaded Weight (KG)
-                </label>
-                <input
-                  type="number"
-                  step="any"
-                  value={formData.loadman_qty_kg !== undefined && formData.loadman_qty_kg !== '' ? formData.loadman_qty_kg : erpTotals.totalWeight}
-                  onChange={(e) => setFormData(prev => ({ ...prev, loadman_qty_kg: e.target.value }))}
-                  style={{ width: '100%', padding: '6px 10px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '13px', fontWeight: 'bold' }}
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#334155', marginBottom: '4px' }}>
-                  Loadman Rate (₹/KG)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={formData.loadman_rate_per_kg !== undefined && formData.loadman_rate_per_kg !== '' ? formData.loadman_rate_per_kg : '0.50'}
-                  onChange={(e) => setFormData(prev => ({ ...prev, loadman_rate_per_kg: e.target.value }))}
-                  style={{ width: '100%', padding: '6px 10px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '13px' }}
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#334155', marginBottom: '4px' }}>
-                  Additional Charges (₹)
-                </label>
-                <input
-                  type="number"
-                  step="any"
-                  value={formData.additional_charges || '0'}
-                  onChange={(e) => setFormData(prev => ({ ...prev, additional_charges: e.target.value }))}
-                  style={{ width: '100%', padding: '6px 10px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '13px' }}
-                />
-              </div>
-
-              <div style={{ background: '#fff', padding: '8px 12px', borderRadius: '6px', border: '1px solid #93c5fd' }}>
-                <span style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: 'bold' }}>
-                  Total Unloading Charges
-                </span>
-                <span style={{ fontSize: '16px', fontWeight: 'bold', color: '#0369a1' }}>
-                  ₹{calculatedLoadmanCharges.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </span>
-                <span style={{ display: 'block', fontSize: '10px', color: '#16a34a' }}>
-                  Auto-links to Worker Pay & CSI
-                </span>
-              </div>
-            </div>
-            <div style={{ marginTop: '8px', fontSize: '11px', color: '#475569' }}>
-              ℹ️ <strong>One-Time Entry:</strong> Saving this purchase automatically creates a linked <strong>Cold Storage Inward (CSI)</strong> record, registers the <code>CS-</code> lot in external inventory, and creates a pending worker payment record. No re-entry required.
-            </div>
-          </div>
-        )}
 
         <EntryItemsTable
           columns={columns}
@@ -1649,6 +1576,7 @@ const PurchaseCreation = () => {
           igstAmt={erpTotals.igstAmount || 0}
           rateSummaries={erpTotals.rateSummaries || []}
           deductionsAmt={erpTotals.totalDeductions || 0}
+          unloadingAmt={calculatedLoadmanCharges || 0}
           taxType={formData.tax_type}
           isInterState={erpTotals.isInterState}
         />

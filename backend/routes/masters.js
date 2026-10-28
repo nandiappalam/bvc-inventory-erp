@@ -410,6 +410,14 @@ const masterTypeAliases = {
   terms: { table: 'terms_master', displayField: 'name', hasStatus: true, uniqueField: 'term_code' },
   term: { table: 'terms_master', displayField: 'name', hasStatus: true, uniqueField: 'term_code' },
   terms_master: { table: 'terms_master', displayField: 'name', hasStatus: true, uniqueField: 'term_code' },
+  worker: { table: 'operational_parties', displayField: 'name', hasStatus: false, uniqueField: 'name' },
+  workers: { table: 'operational_parties', displayField: 'name', hasStatus: false, uniqueField: 'name' },
+  worker_master: { table: 'operational_parties', displayField: 'name', hasStatus: false, uniqueField: 'name' },
+  loadman: { table: 'operational_parties', displayField: 'name', hasStatus: false, uniqueField: 'name' },
+  loadmen: { table: 'operational_parties', displayField: 'name', hasStatus: false, uniqueField: 'name' },
+  loadman_team: { table: 'operational_parties', displayField: 'name', hasStatus: false, uniqueField: 'name' },
+  loadman_name: { table: 'operational_parties', displayField: 'name', hasStatus: false, uniqueField: 'name' },
+  operational_parties: { table: 'operational_parties', displayField: 'name', hasStatus: false, uniqueField: 'name' },
 }
 
 // Master tables mapping with fields
@@ -562,6 +570,24 @@ const masterTables = {
       'storage_terms', 'business_conditions', 'remarks', 'status'
     ],
     uniqueField: 'term_code',
+    displayField: 'name'
+  },
+  operational_parties: {
+    table: 'operational_parties',
+    fields: ['id', 'party_code', 'name', 'category', 'party_category', 'phone', 'whatsapp_number', 'email', 'default_payment_mode', 'payment_mode', 'address', 'bank_name', 'account_no', 'ifsc_code', 'upi_id', 'notes', 'is_active'],
+    uniqueField: 'name',
+    displayField: 'name'
+  },
+  workers: {
+    table: 'operational_parties',
+    fields: ['id', 'party_code', 'name', 'category', 'party_category', 'phone', 'whatsapp_number', 'email', 'default_payment_mode', 'payment_mode', 'address', 'bank_name', 'account_no', 'ifsc_code', 'upi_id', 'notes', 'is_active'],
+    uniqueField: 'name',
+    displayField: 'name'
+  },
+  loadman: {
+    table: 'operational_parties',
+    fields: ['id', 'party_code', 'name', 'category', 'party_category', 'phone', 'whatsapp_number', 'email', 'default_payment_mode', 'payment_mode', 'address', 'bank_name', 'account_no', 'ifsc_code', 'upi_id', 'notes', 'is_active'],
+    uniqueField: 'name',
     displayField: 'name'
   }
 }
@@ -905,6 +931,9 @@ router.get('/:type', async (req, res, next) => {
 
       const allItemsList = Array.from(itemMap.values())
       return res.json({ success: true, data: allItemsList })
+    } else if (tableName === 'operational_parties') {
+      query += ` WHERE (is_active = 1 OR is_active IS NULL)`;
+      query += orderClause || ` ORDER BY name ASC`;
     } else {
       if (hasStatus) {
         query += ` WHERE (status = 'Active' OR status IS NULL OR status = '')`
@@ -921,6 +950,10 @@ router.get('/:type', async (req, res, next) => {
       
       copy.id = copy.id || copy[displayField] || resolvedName || copy.item_code || copy.godown_name;
       copy.name = resolvedName;
+      copy.label = resolvedName;
+      copy.value = resolvedName;
+      copy.worker_name = copy.worker_name || resolvedName;
+      copy.worker = copy.worker || resolvedName;
       copy.supplier_name = copy.supplier_name || resolvedName;
       copy.customer_name = copy.customer_name || resolvedName;
       copy.item_name = copy.item_name || resolvedName;

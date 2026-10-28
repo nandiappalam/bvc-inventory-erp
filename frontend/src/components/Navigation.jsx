@@ -31,6 +31,7 @@ import UniversalSearchModal from './common/UniversalSearchModal';
 import StockAlertBell from './StockAlert/StockAlertBell';
 import CentralNotificationsBell from './CentralNotificationsBell';
 import SystemStatus from './SystemStatus';
+import ViewControlToolbar from './ViewControlToolbar';
 import { useAuth, PERMISSION_TYPES } from '../context/AuthContext';
 
 // ERP Theme Colors
@@ -73,6 +74,8 @@ const modulePermissionMap = {
   'Inpass': 'Open',
   'Voucher': 'Voucher',
   'Vehicle Movement': 'Vehicle Movement',
+  'Cold Storage IN': 'Godown',
+  'Cold Storage OUT': 'Godown',
   // Master
   'Item': 'Item',
   'Item Group': 'Item Group',
@@ -390,7 +393,7 @@ const Navigation = () => {
     },
     {
       groupTitle: 'Inventory & Movement',
-      modules: ['Open', 'Stock Adjust', 'Godown Transfer', 'Weight Conversion', 'Outpass', 'Inpass']
+      modules: ['Open', 'Stock Adjust', 'Godown Transfer', 'Cold Storage IN', 'Cold Storage OUT', 'Weight Conversion', 'Outpass', 'Inpass']
     },
     {
       groupTitle: 'Finance & Other Entries',
@@ -406,7 +409,7 @@ const Navigation = () => {
     },
     {
       groupTitle: 'Customers & Suppliers',
-      modules: ['Customer', 'Suppliers']
+      modules: ['Customer', 'Suppliers', 'Loadman']
     },
     {
       groupTitle: 'Manufacturing Masters',
@@ -539,7 +542,8 @@ const Navigation = () => {
     {
       groupTitle: 'Production Planning & Control',
       items: [
-        { name: 'Factory Production Planning & Control', path: '/factory-production-planning' }
+        { name: 'Factory Production Planning & Control', path: '/factory-production-planning' },
+        { name: 'Hand Sorting, QC & Production', path: '/hand-sorting-production' }
       ]
     },
     {
@@ -1072,6 +1076,9 @@ const Navigation = () => {
                 <CalculateIcon fontSize="small" />
               </IconButton>
             </Tooltip>
+
+            {/* Application Zoom & Fullscreen Controls */}
+            <ViewControlToolbar variant="header" />
           </Box>
         </Toolbar>
       </AppBar>

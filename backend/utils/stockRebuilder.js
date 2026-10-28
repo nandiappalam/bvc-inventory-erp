@@ -856,7 +856,7 @@ async function rebuildStockLedger() {
         targetGName = csGodown ? csGodown.godown_name : 'BTS Cold Storage';
       }
 
-      const dedupeKey = `${itemNorm}:::${lotNorm || lot.lot_no}`;
+      const dedupeKey = `${itemNorm}:::${lotNorm || lot.lot_no}:::${targetGId}`;
       if (!consolidatedLots.has(dedupeKey)) {
         consolidatedLots.set(dedupeKey, {
           ...lot,

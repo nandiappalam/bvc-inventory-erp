@@ -483,7 +483,7 @@ const ColdStorageStock = () => {
                           {row.inward_date || '—'}
                         </TableCell>
                         <TableCell align="right" sx={{ fontWeight: 'bold', color: isExhausted ? '#dc2626' : '#059669', fontSize: '13px' }}>
-                          {parseFloat(row.available_qty || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })} {row.unit || 'Bags'}
+                          {parseFloat(row.available_qty || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })} {(!row.unit || row.unit.toLowerCase() === 'kg') ? 'Bags' : row.unit}
                         </TableCell>
                         <TableCell align="right" sx={{ fontWeight: 'bold' }}>
                           {parseFloat(row.available_wt || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })} KG

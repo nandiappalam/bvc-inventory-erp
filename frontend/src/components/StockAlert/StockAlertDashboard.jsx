@@ -139,8 +139,11 @@ const StockAlertDashboard = () => {
     };
     window.addEventListener('stock-alerts-updated', handleStockUpdate);
 
-    // Periodic sync every 20 seconds
-    const interval = setInterval(fetchDashboardData, 20000);
+    // Periodic sync every 60 seconds (paused when tab hidden)
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      fetchDashboardData();
+    }, 60000);
 
     return () => {
       window.removeEventListener('stock-alerts-updated', handleStockUpdate);

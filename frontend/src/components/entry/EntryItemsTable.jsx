@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { validateEntryConfig } from '../../utils/validateEntryPage';
 
 import { api, getMasters } from '../../services/api.js';
-import { safeArray, normalizeMasterKey } from '../../services/masterservice.js';
+import { safeArray, normalizeMasterKey, getCachedMasters } from '../../services/masterservice.js';
 import { DEBUG } from '../../config/debug';
 import ItemDropdownCell from './ItemDropdownCell.jsx';
 import ExistingLotDropdownCell from './ExistingLotDropdownCell.jsx';
@@ -33,7 +33,11 @@ const MasterSelectCell = ({
   data,
 }) => {
   const normKey = normalizeMasterKey(masterType || cellKey);
-  const [options, setOptions] = useState([]);
+  const [options, setOptions] = useState(() => {
+    const table = (normKey || '').replace('_master', '');
+    const cached = getCachedMasters(table || normKey);
+    return cached && cached.length > 0 ? cached : [];
+  });
   const [loading, setLoading] = useState(false);
   const [inlineModalOpen, setInlineModalOpen] = useState(false);
 
@@ -51,10 +55,13 @@ const MasterSelectCell = ({
         const result = await getMasters(table);
 
         const data = safeArray(result?.data || result);
-        setOptions(data);
+        if (data && data.length > 0) {
+          setOptions(data);
+        } else if (options.length === 0) {
+          setOptions(data);
+        }
       } catch (err) {
         console.error(err);
-        setOptions([]);
       } finally {
         setLoading(false);
       }

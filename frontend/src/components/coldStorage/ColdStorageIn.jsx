@@ -60,6 +60,7 @@ const ColdStorageIn = () => {
   const [availableLots, setAvailableLots] = useState([]);
   const [godowns, setGodowns] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
+  const [masterItems, setMasterItems] = useState([]);
 
   // Form State
   const [inwardSourceType, setInwardSourceType] = useState('Factory Godown'); // 'Factory Godown' | 'Direct Purchase'
@@ -110,12 +111,13 @@ const ColdStorageIn = () => {
   const fetchInitialData = async () => {
     setLoading(true);
     try {
-      const [vRes, csRes, lotsRes, gRes, supRes] = await Promise.all([
+      const [vRes, csRes, lotsRes, gRes, supRes, itemsRes] = await Promise.all([
         api('/cold-storage/next-voucher-no?type=IN').catch(() => ({ voucher_no: 'CSI-000001' })),
         api('/cold-storage/storages').catch(() => ({ data: [] })),
         api('/cold-storage/available-lots').catch(() => ({ data: [] })),
         api('/godowns').catch(() => ({ data: [] })),
-        api('/masters/suppliers').catch(() => ({ data: [] }))
+        api('/masters/suppliers').catch(() => ({ data: [] })),
+        api('/masters/item_master').catch(() => ({ data: [] }))
       ]);
 
       if (vRes?.voucher_no) setVoucherNo(vRes.voucher_no);
@@ -130,11 +132,43 @@ const ColdStorageIn = () => {
       if (lotsRes?.data) setAvailableLots(lotsRes.data);
       if (gRes?.data) setGodowns(Array.isArray(gRes.data) ? gRes.data : (Array.isArray(gRes) ? gRes : []));
       if (supRes?.data) setSuppliers(supRes.data);
+      if (itemsRes) {
+        const itemList = Array.isArray(itemsRes) ? itemsRes : (itemsRes.data || []);
+        setMasterItems(itemList);
+      }
     } catch (err) {
       console.error('Error loading initial data:', err);
     } finally {
       setLoading(false);
     }
+  };
+
+  const getItemOptions = () => {
+    const optionsMap = new Map();
+    (masterItems || []).forEach(item => {
+      if (item && item.item_name) {
+        const name = item.item_name.trim();
+        if (!optionsMap.has(name.toLowerCase())) {
+          optionsMap.set(name.toLowerCase(), name);
+        }
+      }
+    });
+    (availableLots || []).forEach(lot => {
+      if (lot && lot.item_name) {
+        const name = lot.item_name.trim();
+        if (!optionsMap.has(name.toLowerCase())) {
+          optionsMap.set(name.toLowerCase(), name);
+        }
+      }
+    });
+    return Array.from(optionsMap.values()).sort();
+  };
+
+  const getAvailableLotsForItem = (itemName) => {
+    if (!itemName || !itemName.trim()) return availableLots;
+    const norm = itemName.toLowerCase().trim();
+    const matched = availableLots.filter(l => (l.item_name || '').toLowerCase().trim() === norm);
+    return matched.length > 0 ? matched : availableLots;
   };
 
   const handleColdStorageChange = (e) => {
@@ -146,6 +180,46 @@ const ColdStorageIn = () => {
       setSelectedCsObj(selected);
       if (selected.default_chamber) setChamberNo(selected.default_chamber);
     }
+  };
+
+  const handleItemNameSelect = (index, selectedValue) => {
+    const val = typeof selectedValue === 'string' ? selectedValue : (selectedValue?.item_name || '');
+    if (!val) {
+      handleItemChange(index, 'item_name', '');
+      return;
+    }
+
+    const updated = [...items];
+    updated[index] = {
+      ...updated[index],
+      item_name: val
+    };
+
+    // Check master item weight default
+    const matchedMaster = masterItems.find(m => (m.item_name || '').toLowerCase().trim() === val.toLowerCase().trim());
+    if (matchedMaster && matchedMaster.weight && Number(matchedMaster.weight) > 0) {
+      updated[index].weight = String(matchedMaster.weight);
+    }
+
+    // Check if an available lot exists for this item name
+    const matchedLot = availableLots.find(l => (l.item_name || '').toLowerCase().trim() === val.toLowerCase().trim());
+    if (matchedLot) {
+      updated[index].purchase_lot_no = matchedLot.purchase_lot_no;
+      updated[index].cold_storage_lot_no = matchedLot.purchase_lot_no.startsWith('CS-') 
+        ? matchedLot.purchase_lot_no 
+        : `CS-${matchedLot.purchase_lot_no}`;
+      if (matchedLot.purchased_qty) {
+        updated[index].quantity = String(matchedLot.purchased_qty);
+      }
+      const wt = matchedLot.weight || matchedLot.per_weight || matchedMaster?.weight || 50;
+      updated[index].weight = String(wt);
+      const q = parseFloat(updated[index].quantity || 0);
+      updated[index].total_wt = String(q * wt);
+      if (matchedLot.unit) updated[index].unit = matchedLot.unit;
+      if (matchedLot.purchased_qty) updated[index].avail_in_main = matchedLot.purchased_qty;
+    }
+
+    setItems(updated);
   };
 
   const handleLotSelect = (index, lotKey) => {
@@ -678,25 +752,33 @@ const ColdStorageIn = () => {
                     {items.map((row, index) => (
                       <TableRow key={index}>
                         <TableCell>
-                          <TextField
-                            fullWidth
+                          <Autocomplete
+                            freeSolo
                             size="small"
-                            placeholder="e.g. Broken Rice, Urad"
-                            value={row.item_name}
-                            onChange={(e) => handleItemChange(index, 'item_name', e.target.value)}
-                            required
+                            options={getItemOptions()}
+                            value={row.item_name || ''}
+                            onChange={(e, val) => handleItemNameSelect(index, val || '')}
+                            onInputChange={(e, val) => handleItemChange(index, 'item_name', val)}
+                            renderInput={(params) => (
+                              <TextField
+                                {...params}
+                                placeholder="Select or type item name *"
+                                size="small"
+                                required
+                              />
+                            )}
                           />
                         </TableCell>
                         <TableCell>
                           <Autocomplete
                             freeSolo
                             size="small"
-                            options={availableLots.map(l => `${l.item_name}_${l.purchase_lot_no}`)}
+                            options={getAvailableLotsForItem(row.item_name).map(l => `${l.item_name}_${l.purchase_lot_no}`)}
                             getOptionLabel={(opt) => {
                               const lot = availableLots.find(l => `${l.item_name}_${l.purchase_lot_no}` === opt);
                               return lot ? `${lot.purchase_lot_no} (${lot.purchased_qty} ${lot.unit || 'Bags'})` : opt;
                             }}
-                            value={row.purchase_lot_no}
+                            value={row.purchase_lot_no || ''}
                             onChange={(e, val) => handleLotSelect(index, val)}
                             onInputChange={(e, val) => handleItemChange(index, 'purchase_lot_no', val)}
                             renderInput={(params) => (

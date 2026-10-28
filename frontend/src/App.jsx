@@ -5,6 +5,8 @@ import CssBaseline from '@mui/material/CssBaseline'
 import { Box } from '@mui/material'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { ConfirmProvider } from './context/ConfirmContext'
+import { ViewControlProvider } from './context/ViewControlContext'
+import { CustomThemeProvider } from './context/ThemeContext'
 import ErrorBoundary from './components/ErrorBoundary'
 import CompanySelection from './components/CompanySelection'
 import LoginPage from './components/LoginPage'
@@ -29,6 +31,7 @@ import LotGenealogyDashboard from './modules/lotGenealogy/LotGenealogyDashboard'
 import BOMDashboard from './modules/bom/BOMDashboard'
 import ProductionPlanningDashboard from './modules/productionPlanning/ProductionPlanningDashboard'
 import FactoryProductionPlanningDashboard from './modules/productionPlanning/FactoryProductionPlanningDashboard'
+import HandSortingWorkspace from './modules/productionPlanning/HandSortingWorkspace'
 import JobworkControlDashboard from './modules/jobwork/JobworkControlDashboard'
 
 // Enterprise Intelligence Modules (Phases 8–13)
@@ -288,6 +291,8 @@ const AppLayout = () => {
           <Route path="/bom" element={<BOMDashboard />} />
           <Route path="/factory-production-planning" element={<FactoryProductionPlanningDashboard />} />
           <Route path="/factory-production-planning-control" element={<FactoryProductionPlanningDashboard />} />
+          <Route path="/hand-sorting-production" element={<HandSortingWorkspace />} />
+          <Route path="/hand-sorting" element={<HandSortingWorkspace />} />
           <Route path="/production-planning" element={<ProductionPlanningDashboard />} />
           <Route path="/yield-intelligence" element={<ProductionPlanningDashboard />} />
           <Route path="/jobwork-control" element={<JobworkControlDashboard />} />
@@ -528,7 +533,9 @@ const AppLayout = () => {
           <Route path="/cold-storage/traceability" element={<ColdStorageTraceability />} />
           <Route path="/cold-storage/master" element={<ColdStorageMaster />} />
           <Route path="/entry/cold-storage-in-create" element={<ColdStorageIn />} />
+          <Route path="/entry/cold-storage-in-display" element={<ColdStorageVouchers />} />
           <Route path="/entry/cold-storage-out-create" element={<ColdStorageOut />} />
+          <Route path="/entry/cold-storage-out-display" element={<ColdStorageVouchers />} />
           <Route path="/entry/cold-storage-display" element={<ColdStorageVouchers />} />
 
           {/* Master Routes — All routed through dynamic config-driven components */}
@@ -590,6 +597,8 @@ const AppLayout = () => {
           <Route path="/recycle-bin" element={<RecycleBinPage />} />
 
           {/* Dynamic Master Routes (config-driven) */}
+          <Route path="/master/loadman-create" element={<DynamicMasterForm configKey="loadman" />} />
+          <Route path="/master/loadman-display" element={<DynamicMasterDisplay configKey="loadman" />} />
           <Route path="/master/:module/create" element={<ModuleFormRoute />} />
           <Route path="/master/:module/display" element={<ModuleDisplayRoute />} />
 
@@ -610,31 +619,32 @@ const AppLayout = () => {
 function App() {
   return (
     <ErrorBoundary>
-      <ThemeProvider theme={theme}>
-        <CssBaseline />
-        <AuthProvider>
-          <ConfirmProvider>
-            <Router>
-              <Routes>
-                {/* Default & Public Routes */}
-                <Route path="/" element={<Navigate to="/company-select" replace />} />
-                <Route path="/company-select" element={<CompanySelection />} />
-                <Route path="/company-create" element={<CompanyCreate />} />
-                <Route path="/company-alter/:id" element={<CompanyCreate />} />
-                <Route path="/company-display" element={<CompanyDisplay />} />
-                <Route path="/login" element={<LoginPage />} />
-                <Route path="/auth-choice" element={<AuthChoice />} />
-                <Route path="/user/create" element={<UserCreate />} />
-                <Route path="/v/:token" element={<PublicDocumentVerification />} />
-                <Route path="/verify-document/:token" element={<PublicDocumentVerification />} />
-                
-                {/* Protected Routes */}
-                <Route path="*" element={<AppLayout />} />
-              </Routes>
-            </Router>
-          </ConfirmProvider>
-        </AuthProvider>
-      </ThemeProvider>
+      <CustomThemeProvider>
+        <ViewControlProvider>
+          <AuthProvider>
+            <ConfirmProvider>
+              <Router>
+                <Routes>
+                  {/* Default & Public Routes */}
+                  <Route path="/" element={<Navigate to="/company-select" replace />} />
+                  <Route path="/company-select" element={<CompanySelection />} />
+                  <Route path="/company-create" element={<CompanyCreate />} />
+                  <Route path="/company-alter/:id" element={<CompanyCreate />} />
+                  <Route path="/company-display" element={<CompanyDisplay />} />
+                  <Route path="/login" element={<LoginPage />} />
+                  <Route path="/auth-choice" element={<AuthChoice />} />
+                  <Route path="/user/create" element={<UserCreate />} />
+                  <Route path="/v/:token" element={<PublicDocumentVerification />} />
+                  <Route path="/verify-document/:token" element={<PublicDocumentVerification />} />
+                  
+                  {/* Protected Routes */}
+                  <Route path="*" element={<AppLayout />} />
+                </Routes>
+              </Router>
+            </ConfirmProvider>
+          </AuthProvider>
+        </ViewControlProvider>
+      </CustomThemeProvider>
     </ErrorBoundary>
   )
 }

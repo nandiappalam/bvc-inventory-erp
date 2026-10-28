@@ -93,14 +93,27 @@ export const MASTER_CONFIGS = {
     ]
   },
   workers: {
-    title: 'Register New Worker / Labour',
+    title: 'Register New Loadman / Worker',
     table: 'workers',
     key: 'workers',
     labelField: 'name',
     fields: [
-      { name: 'name', label: 'Full Name', required: true, fullWidth: true },
+      { name: 'name', label: 'Loadman / Worker Name', required: true, fullWidth: true, placeholder: 'e.g. K. Murugan' },
       { name: 'category', label: 'Role Category', required: true, type: 'select', options: ['LOADMAN', 'UNLOAD_WORKER', 'HELPER', 'LABOUR', 'EXTERNAL_MILL'], defaultValue: 'LOADMAN' },
-      { name: 'phone', label: 'Mobile Number', required: false },
+      { name: 'phone', label: 'Mobile Number', required: false, placeholder: 'e.g. 9842112345' },
+      { name: 'payment_mode', label: 'Preferred Payment Mode', required: false, type: 'select', options: ['CASH', 'BANK', 'UPI'], defaultValue: 'CASH' },
+      { name: 'upi_id', label: 'UPI / Bank Details', required: false, fullWidth: true }
+    ]
+  },
+  loadman: {
+    title: 'Register New Loadman Team / Worker',
+    table: 'workers',
+    key: 'loadman',
+    labelField: 'name',
+    fields: [
+      { name: 'name', label: 'Loadman / Team Name', required: true, fullWidth: true, placeholder: 'e.g. K. Murugan' },
+      { name: 'category', label: 'Role Category', required: true, type: 'select', options: ['LOADMAN', 'UNLOAD_WORKER', 'HELPER', 'LABOUR'], defaultValue: 'LOADMAN' },
+      { name: 'phone', label: 'Mobile Number', required: false, placeholder: 'e.g. 9842112345' },
       { name: 'payment_mode', label: 'Preferred Payment Mode', required: false, type: 'select', options: ['CASH', 'BANK', 'UPI'], defaultValue: 'CASH' },
       { name: 'upi_id', label: 'UPI / Bank Details', required: false, fullWidth: true }
     ]
@@ -267,7 +280,7 @@ export const normalizeMasterType = (rawType) => {
   if (k === 'weight' || k === 'weights' || k === 'weightmaster' || k === 'weight_id' || k === 'wt') return 'weights';
   if (k === 'item' || k === 'items' || k === 'item_id') return 'items';
   if (k === 'transport' || k === 'transports' || k === 'transporter' || k === 'transporters' || k === 'transport_id') return 'transports';
-  if (k === 'worker' || k === 'workers' || k === 'loadman') return 'workers';
+  if (k === 'worker' || k === 'workers' || k === 'loadman' || k === 'loadmen' || k === 'loadman_team' || k === 'loadman_name' || k === 'operational_parties') return 'workers';
   if (k === 'driver' || k === 'drivers') return 'drivers';
   if (k === 'flour_mill' || k === 'flour_mills' || k === 'flourmill') return 'flour_mills';
   if (k === 'papad_company' || k === 'papad_companies' || k === 'papadcomp') return 'papad_companies';
@@ -283,6 +296,9 @@ export const normalizeMasterType = (rawType) => {
 };
 
 export const getCreateLabel = (rawType) => {
+  const rawLower = String(rawType || '').toLowerCase();
+  if (rawLower.includes('loadman')) return '+ Enter Loadman Manually';
+  if (rawLower.includes('worker')) return '+ Enter Worker Manually';
   const norm = normalizeMasterType(rawType);
   if (norm === 'weights' || norm === 'weight') return '+ Enter Weight Manually';
   if (norm === 'godowns' || norm === 'godown') return '+ Enter Godown Manually';
@@ -371,12 +387,14 @@ export const InlineMasterModal = ({ open, onClose, masterType, initialName = '',
         } else {
           throw new Error(res?.message || res?.error || 'Failed to save weight master');
         }
-      } else if (normType === 'workers' || normType === 'drivers') {
+      } else if (normType === 'workers' || normType === 'drivers' || normType === 'loadman') {
+        const roleCategory = normType === 'drivers' ? 'DRIVER' : (formState.category || 'LOADMAN');
         const payload = {
           name: formState.name,
-          category: normType === 'drivers' ? 'DRIVER' : (formState.category || 'LOADMAN'),
-          party_category: normType === 'drivers' ? 'DRIVER' : (formState.category || 'LOADMAN'),
+          category: roleCategory,
+          party_category: roleCategory,
           phone: formState.phone || '',
+          whatsapp_number: formState.phone || '',
           default_payment_mode: formState.payment_mode || 'CASH',
           payment_mode: formState.payment_mode || 'CASH',
           upi_id: formState.upi_id || '',
@@ -386,9 +404,17 @@ export const InlineMasterModal = ({ open, onClose, masterType, initialName = '',
         const res = await api('/operational-charges/parties', { method: 'POST', body: payload });
         if (res && (res.data?.id || res.id || res.success)) {
           newId = res.data?.id || res.id;
-          createdRecord = res.data || { id: newId, name: formState.name, category: payload.category };
+          createdRecord = {
+            ...(res.data || {}),
+            id: newId,
+            name: formState.name,
+            worker_name: formState.name,
+            label: formState.name,
+            value: formState.name,
+            category: payload.category
+          };
         } else {
-          throw new Error(res?.error || res?.message || 'Failed to save worker/driver master');
+          throw new Error(res?.error || res?.message || 'Failed to save worker/loadman master');
         }
       } else if (normType === 'deductions' || normType === 'deduction_purchase' || normType === 'deduction_sales') {
         const dedName = formState.ded_name || formState.name || 'New Deduction';
@@ -419,7 +445,7 @@ export const InlineMasterModal = ({ open, onClose, masterType, initialName = '',
         if (res && (res.id || res.success)) {
           newId = res.id;
           const primaryName = formState[config.fields[0]?.name] || 'New Record';
-          createdRecord = res.data || { id: newId, idVal: newId, name: primaryName, [config.labelField]: primaryName };
+          createdRecord = res.data || { id: newId, idVal: newId, name: primaryName, [config.labelField]: primaryName, label: primaryName, value: primaryName };
         } else {
           throw new Error(res?.message || res?.error || `Failed to save ${config.title}`);
         }
@@ -427,6 +453,9 @@ export const InlineMasterModal = ({ open, onClose, masterType, initialName = '',
 
       invalidateMasterCache(normType);
       invalidateMasterCache(config.table);
+      invalidateMasterCache('workers');
+      invalidateMasterCache('loadman');
+      invalidateMasterCache('operational_parties');
 
       if (onSuccess) {
         onSuccess(newId, createdRecord || formState);

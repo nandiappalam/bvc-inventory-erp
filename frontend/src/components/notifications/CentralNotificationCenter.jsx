@@ -132,7 +132,10 @@ export default function CentralNotificationCenter() {
 
   useEffect(() => {
     loadAllData();
-    const interval = setInterval(loadLiveSummary, 20000);
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      loadLiveSummary();
+    }, 60000); // 60s auto-refresh with tab visibility check
     return () => clearInterval(interval);
   }, []);
 

@@ -76,8 +76,11 @@ const StockAlertBell = () => {
     window.addEventListener('focus', handleStockUpdate);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    // Poll every 60 seconds when active
-    const interval = setInterval(fetchActiveAlerts, 60000);
+    // Poll every 120 seconds when active and visible
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      fetchActiveAlerts();
+    }, 120000);
     return () => {
       window.removeEventListener('stock-alerts-updated', handleStockUpdate);
       window.removeEventListener('focus', handleStockUpdate);

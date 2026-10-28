@@ -26,7 +26,10 @@ export default function CentralNotificationsBell() {
 
   useEffect(() => {
     fetchLiveAlerts();
-    const interval = setInterval(fetchLiveAlerts, 30000); // 30s auto-refresh
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      fetchLiveAlerts();
+    }, 60000); // 60s auto-refresh with tab visibility check
     return () => clearInterval(interval);
   }, []);
 

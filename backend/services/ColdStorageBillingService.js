@@ -534,17 +534,19 @@ async function createOrUpdateColdStorageBill({
       cId
     );
   } else {
-    // Generate next Bill Number CSB-000001
+    // Generate next Bill Number CSB-000001 robustly
     let nextNum = 1;
     try {
-      const cntRes = await db.query(`SELECT bill_no FROM cold_storage_bills ORDER BY id DESC LIMIT 1`, [], cId);
-      if (cntRes.rows && cntRes.rows.length > 0) {
-        const lastNo = cntRes.rows[0].bill_no || '';
-        const parsed = parseInt(lastNo.replace(/\D/g, ''), 10);
-        if (!isNaN(parsed)) nextNum = parsed + 1;
-      }
+      const maxRes = await db.query(`SELECT MAX(id) as max_id FROM cold_storage_bills`, [], cId);
+      nextNum = parseInt(maxRes.rows?.[0]?.max_id || 0, 10) + 1;
     } catch (_) {}
     billNo = `CSB-${String(nextNum).padStart(6, '0')}`;
+    try {
+      const existing = await db.query(`SELECT id FROM cold_storage_bills WHERE bill_no = ?`, [billNo], cId);
+      if (existing.rows && existing.rows.length > 0) {
+        billNo = `CSB-${Date.now()}`;
+      }
+    } catch (_) {}
 
     const insRes = await db.run(
       `INSERT INTO cold_storage_bills (

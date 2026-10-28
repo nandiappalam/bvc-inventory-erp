@@ -207,9 +207,9 @@ router.get('/available-lots', async (req, res) => {
           COALESCE(g.godown_name, p.godown, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) AS current_godown,
           COALESCE(g.id, (SELECT id FROM godown_master ORDER BY id ASC LIMIT 1)) AS current_godown_id,
           SUM(pi.qty) AS purchased_qty,
-          SUM(COALESCE(pi.total_wt, pi.qty * COALESCE(pi.weight, 0), pi.qty)) AS total_weight,
-          COALESCE(NULLIF(MAX(pi.weight), 0), NULLIF(MAX(pi.per_unit_weight), 0), 1) AS weight,
-          COALESCE(NULLIF(MAX(pi.weight), 0), NULLIF(MAX(pi.per_unit_weight), 0), 1) AS per_weight,
+          SUM(COALESCE(NULLIF(pi.total_wt, 0), NULLIF(pi.total_weight, 0), pi.qty * COALESCE(NULLIF(pi.weight, 0), NULLIF(pi.per_unit_weight, 0), 50))) AS total_weight,
+          COALESCE(NULLIF(MAX(pi.weight), 1), NULLIF(MAX(pi.weight), 0), NULLIF(MAX(pi.per_unit_weight), 1), NULLIF(MAX(pi.per_unit_weight), 0), 50) AS weight,
+          COALESCE(NULLIF(MAX(pi.weight), 1), NULLIF(MAX(pi.weight), 0), NULLIF(MAX(pi.per_unit_weight), 1), NULLIF(MAX(pi.per_unit_weight), 0), 50) AS per_weight,
           COALESCE(pi.unit, 'KG') AS unit
         FROM purchase_items pi
         LEFT JOIN purchases p ON pi.purchase_id = p.id
@@ -228,9 +228,9 @@ router.get('/available-lots', async (req, res) => {
             (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1) AS current_godown,
             (SELECT id FROM godown_master ORDER BY id ASC LIMIT 1) AS current_godown_id,
             SUM(pi.qty) AS purchased_qty,
-            SUM(pi.qty) AS total_weight,
-            1 AS weight,
-            1 AS per_weight,
+            SUM(pi.qty * 50) AS total_weight,
+            50 AS weight,
+            50 AS per_weight,
             'KG' AS unit
           FROM purchase_items pi
           WHERE pi.lot_no IS NOT NULL AND pi.lot_no != ''
@@ -267,9 +267,8 @@ router.get('/available-lots', async (req, res) => {
     const items = (result.rows || []).map(r => {
       const key = `${r.item_name}_${r.purchase_lot_no}`;
       const movedToCS = csInMap[key] || 0;
-      const total = parseFloat(r.purchased_qty || 0);
-      const availInMain = Math.max(0, total - movedToCS);
-      const perWt = parseFloat(r.weight || r.per_weight || (r.total_weight && total ? (r.total_weight / total) : 1)) || 1;
+      const rawWt = parseFloat(r.weight || r.per_weight || (r.total_weight && total ? (r.total_weight / total) : 50)) || 50;
+      const perWt = rawWt <= 1 ? 50 : rawWt;
       return {
         ...r,
         weight: perWt,
@@ -306,8 +305,8 @@ router.get('/stock', async (req, res) => {
         SUM(CASE WHEN csv.voucher_type = 'OUT' THEN csi.quantity ELSE 0 END) AS out_qty,
         SUM(CASE WHEN csv.voucher_type = 'IN' THEN csi.total_wt ELSE 0 END) AS in_wt,
         SUM(CASE WHEN csv.voucher_type = 'OUT' THEN csi.total_wt ELSE 0 END) AS out_wt,
-        COALESCE(NULLIF(MAX(csi.weight), 0), 1) AS weight,
-        COALESCE(NULLIF(MAX(csi.weight), 0), 1) AS per_weight,
+        COALESCE(NULLIF(MAX(csi.weight), 1), NULLIF(MAX(csi.weight), 0), 50) AS weight,
+        COALESCE(NULLIF(MAX(csi.weight), 1), NULLIF(MAX(csi.weight), 0), 50) AS per_weight,
         csi.unit,
         MIN(CASE WHEN csv.voucher_type = 'IN' THEN csv.voucher_date END) AS inward_date,
         MAX(CASE WHEN csv.voucher_type = 'OUT' THEN csv.voucher_date END) AS last_outward_date,
@@ -359,8 +358,10 @@ router.get('/stock', async (req, res) => {
       const availQty = Math.max(0, inQty - outQty);
       const inWt = parseFloat(r.in_wt || 0);
       const outWt = parseFloat(r.out_wt || 0);
-      const availWt = Math.max(0, inWt - outWt);
-      const perWt = parseFloat(r.weight || (availQty > 0 ? availWt / availQty : 1)) || 1;
+      let availWt = Math.max(0, inWt - outWt);
+      let perWt = parseFloat(r.weight || 50) || 50;
+      if (perWt <= 1) perWt = 50;
+      if (availWt <= availQty && availQty > 0) availWt = availQty * perWt;
 
       const csId = r.cold_storage_id || 2;
       if (!tariffsCache[csId]) {
@@ -484,8 +485,8 @@ router.get('/cs-lots', async (req, res) => {
         SUM(CASE WHEN csv.voucher_type = 'OUT' THEN csi.quantity ELSE 0 END) AS available_qty,
         SUM(CASE WHEN csv.voucher_type = 'IN' THEN csi.total_wt ELSE 0 END) - 
         SUM(CASE WHEN csv.voucher_type = 'OUT' THEN csi.total_wt ELSE 0 END) AS available_wt,
-        COALESCE(NULLIF(MAX(csi.weight), 0), 1) AS weight,
-        COALESCE(NULLIF(MAX(csi.weight), 0), 1) AS per_weight,
+        COALESCE(NULLIF(MAX(csi.weight), 1), NULLIF(MAX(csi.weight), 0), 50) AS weight,
+        COALESCE(NULLIF(MAX(csi.weight), 1), NULLIF(MAX(csi.weight), 0), 50) AS per_weight,
         csi.unit
       FROM cold_storage_items csi
       JOIN cold_storage_vouchers csv ON csi.voucher_id = csv.id
@@ -501,8 +502,10 @@ router.get('/cs-lots', async (req, res) => {
 
     const formatted = (result.rows || []).map(r => {
       const availQty = parseFloat(r.available_qty || 0);
-      const availWt = parseFloat(r.available_wt || 0);
-      const perWt = parseFloat(r.weight || r.per_weight || (availQty > 0 ? (availWt / availQty) : 1)) || 1;
+      let availWt = parseFloat(r.available_wt || 0);
+      let perWt = parseFloat(r.weight || r.per_weight || (availQty > 0 && availWt > 0 ? (availWt / availQty) : 50)) || 50;
+      if (perWt <= 1 && availQty > 0) perWt = 50;
+      if (availWt <= availQty && availQty > 0) availWt = availQty * perWt;
       const inDate = r.inward_date || todayStr;
       const daysInfo = calculateStorageDays(inDate, todayStr, 0, 1);
 
@@ -1171,7 +1174,7 @@ router.post('/out', async (req, res) => {
         INSERT INTO operational_charges (
           company_id, charge_no, charge_type, source_module, source_transaction_type, source_transaction_id, source_transaction_no,
           charge_date, party_name, item_name, lot_no, from_location, to_location, vehicle_no, driver_name,
-          quantity, rate, base_amount, total_amount, payment_status, remarks, created_by
+          quantity, rate, amount, total_amount, payment_status, remarks, created_by
         ) VALUES (?, ?, 'LOADING', 'COLD_STORAGE', 'CSO', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)
       `, [
         activeCompanyId,
@@ -1233,6 +1236,17 @@ router.post('/out', async (req, res) => {
       console.warn('Auto bill generation warning for CS OUT:', billErr.message);
     }
 
+    let fullBill = null;
+    if (billInfo?.billId) {
+      try {
+        const bLookup = await db.query('SELECT * FROM cold_storage_bills WHERE id = ?', [billInfo.billId], activeCompanyId);
+        fullBill = bLookup.rows?.[0] || null;
+        if (fullBill) {
+          try { fullBill.items = JSON.parse(fullBill.items_json || '[]'); } catch (_) { fullBill.items = outwardBillItems; }
+        }
+      } catch (_) {}
+    }
+
     res.json({ 
       success: true, 
       message: `Cold Storage OUT Voucher ${voucher_no} issued successfully`, 
@@ -1240,7 +1254,12 @@ router.post('/out', async (req, res) => {
       id: voucher_id,
       bill_id: billInfo?.billId || null,
       bill_no: billInfo?.billNo || null,
-      bill_grand_total: billInfo?.grandTotal || 0
+      bill_grand_total: billInfo?.grandTotal || 0,
+      bill: fullBill,
+      tariff,
+      billing_items: outwardBillItems,
+      total_storage_charges: totalStorageCharges,
+      total_handling_charges: totalOutwardLoadingCharges
     });
   } catch (err) {
     console.error('Error saving Cold Storage OUT:', err);
@@ -1253,27 +1272,37 @@ router.get('/vouchers', async (req, res) => {
   try {
     await syncGodownTransfersToColdStorage();
     const { voucher_type, date_from, date_to, cold_storage_id } = req.query;
-    let query = `SELECT * FROM cold_storage_vouchers WHERE COALESCE(remarks, '') NOT LIKE 'Auto-sync from Stock Lot CS-%'`;
+    let query = `
+      SELECT 
+        csv.*,
+        csb.id AS bill_id,
+        csb.bill_no,
+        csb.grand_total AS bill_grand_total,
+        csb.status AS bill_status
+      FROM cold_storage_vouchers csv
+      LEFT JOIN cold_storage_bills csb ON (csb.voucher_id = csv.id OR csb.voucher_no = csv.voucher_no OR csb.bill_no = ('CSB-' || csv.voucher_no))
+      WHERE COALESCE(csv.remarks, '') NOT LIKE 'Auto-sync from Stock Lot CS-%'
+    `;
     const params = [];
 
     if (voucher_type) {
       params.push(voucher_type.toUpperCase());
-      query += ` AND voucher_type = ?`;
+      query += ` AND csv.voucher_type = ?`;
     }
     if (cold_storage_id) {
       params.push(cold_storage_id);
-      query += ` AND cold_storage_id = ?`;
+      query += ` AND csv.cold_storage_id = ?`;
     }
     if (date_from) {
       params.push(date_from);
-      query += ` AND voucher_date >= ?`;
+      query += ` AND csv.voucher_date >= ?`;
     }
     if (date_to) {
       params.push(date_to);
-      query += ` AND voucher_date <= ?`;
+      query += ` AND csv.voucher_date <= ?`;
     }
 
-    query += ` ORDER BY id DESC`;
+    query += ` ORDER BY csv.id DESC`;
 
     const result = await db.query(query, params);
     res.json({ success: true, data: result.rows || [] });
@@ -1282,22 +1311,52 @@ router.get('/vouchers', async (req, res) => {
   }
 });
 
-// GET single Cold Storage voucher with items
+// GET single Cold Storage voucher with items, linked bill, and tariff
 router.get('/vouchers/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const vRes = await db.query(`SELECT * FROM cold_storage_vouchers WHERE id = ?`, [id]);
+    const vRes = await db.query(`SELECT * FROM cold_storage_vouchers WHERE id = ? OR voucher_no = ?`, [id, id]);
     if (!vRes.rows || vRes.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Voucher not found' });
     }
 
-    const itemsRes = await db.query(`SELECT * FROM cold_storage_items WHERE voucher_id = ?`, [id]);
+    const vData = vRes.rows[0];
+    const voucherId = vData.id;
+    const itemsRes = await db.query(`SELECT * FROM cold_storage_items WHERE voucher_id = ?`, [voucherId]);
+    const items = itemsRes.rows || [];
+
+    // Find linked bill if any
+    let bill = null;
+    try {
+      const bRes = await db.query(
+        `SELECT * FROM cold_storage_bills WHERE voucher_id = ? OR voucher_no = ? OR bill_no = ? OR bill_no = ? OR remarks LIKE ? ORDER BY id DESC LIMIT 1`,
+        [voucherId, vData.voucher_no, `CSB-${vData.voucher_no}`, vData.voucher_no, `%${vData.voucher_no}%`]
+      );
+      if (bRes.rows && bRes.rows.length > 0) {
+        bill = bRes.rows[0];
+        try {
+          bill.items = JSON.parse(bill.items_json || '[]');
+        } catch (_) {
+          bill.items = items;
+        }
+      }
+    } catch (_) {}
+
+    // Find tariff if cold_storage_id exists
+    let tariff = null;
+    if (vData.cold_storage_id) {
+      try {
+        tariff = await getColdStorageTariff(vData.cold_storage_id, req.companyId || 1);
+      } catch (_) {}
+    }
 
     res.json({
       success: true,
       data: {
-        ...vRes.rows[0],
-        items: itemsRes.rows || []
+        ...vData,
+        items,
+        bill,
+        tariff
       }
     });
   } catch (err) {
@@ -1772,10 +1831,19 @@ router.post('/bills', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Cold Storage facility is required' });
     }
 
-    // Generate Bill No CSB-000001
-    const countRes = await db.query('SELECT COUNT(*) as cnt FROM cold_storage_bills');
-    const nextNum = parseInt(countRes.rows?.[0]?.cnt || 0, 10) + 1;
-    const bill_no = `CSB-${String(nextNum).padStart(6, '0')}`;
+    // Generate Bill No CSB-000001 robustly
+    let nextNum = 1;
+    try {
+      const maxRes = await db.query('SELECT MAX(id) as max_id FROM cold_storage_bills', [], activeCompanyId);
+      nextNum = parseInt(maxRes.rows?.[0]?.max_id || 0, 10) + 1;
+    } catch (_) {}
+    let bill_no = `CSB-${String(nextNum).padStart(6, '0')}`;
+    try {
+      const existing = await db.query('SELECT id FROM cold_storage_bills WHERE bill_no = ?', [bill_no], activeCompanyId);
+      if (existing.rows && existing.rows.length > 0) {
+        bill_no = `CSB-${Date.now()}`;
+      }
+    } catch (_) {}
     const today = new Date().toISOString().split('T')[0];
 
     const insertRes = await db.run(`
@@ -2005,6 +2073,110 @@ router.get('/bills/:id', async (req, res) => {
       bill.items = [];
     }
     res.json({ success: true, data: bill });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// PUT /bills/:id - Update / edit existing cold storage bill
+router.put('/bills/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    const existingRes = await db.query('SELECT * FROM cold_storage_bills WHERE id = ? OR bill_no = ?', [id, id], activeCompanyId);
+    if (!existingRes.rows || existingRes.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Bill not found' });
+    }
+    const existing = existingRes.rows[0];
+    const body = req.body || {};
+
+    const storageCharges = parseFloat(body.storage_charges !== undefined ? body.storage_charges : existing.storage_charges || 0);
+    const handlingCharges = parseFloat(body.handling_charges !== undefined ? body.handling_charges : existing.handling_charges || 0);
+    const insuranceCharges = parseFloat(body.insurance_charges !== undefined ? body.insurance_charges : existing.insurance_charges || 0);
+    const mamoolCharges = parseFloat(body.mamool_charges !== undefined ? body.mamool_charges : existing.mamool_charges || 0);
+    const otherCharges = parseFloat(body.other_charges !== undefined ? body.other_charges : existing.other_charges || 0);
+
+    const taxableAmount = parseFloat((storageCharges + handlingCharges + insuranceCharges + mamoolCharges + otherCharges).toFixed(2));
+    const taxRate = parseFloat(body.tax_rate !== undefined ? body.tax_rate : existing.tax_rate || 18);
+    const totalTax = parseFloat(((taxableAmount * taxRate) / 100).toFixed(2));
+    const cgstAmount = parseFloat((totalTax / 2).toFixed(2));
+    const sgstAmount = parseFloat((totalTax / 2).toFixed(2));
+    const grandTotal = parseFloat((taxableAmount + totalTax).toFixed(2));
+
+    const opInvAmount = parseFloat(body.operator_invoice_amount !== undefined ? body.operator_invoice_amount : existing.operator_invoice_amount || grandTotal);
+    const variance = parseFloat((opInvAmount - grandTotal).toFixed(2));
+
+    const opInvNo = body.operator_invoice_no !== undefined ? body.operator_invoice_no : existing.operator_invoice_no || '';
+    const opInvDate = body.operator_invoice_date !== undefined ? body.operator_invoice_date : existing.operator_invoice_date;
+    const remarks = body.remarks !== undefined ? body.remarks : existing.remarks || '';
+    const itemsJson = body.items ? JSON.stringify(body.items) : (body.items_json || existing.items_json || '[]');
+
+    await db.run(`
+      UPDATE cold_storage_bills SET
+        operator_invoice_no = ?,
+        operator_invoice_date = ?,
+        operator_invoice_amount = ?,
+        storage_charges = ?,
+        handling_charges = ?,
+        insurance_charges = ?,
+        mamool_charges = ?,
+        other_charges = ?,
+        taxable_amount = ?,
+        tax_rate = ?,
+        cgst_amount = ?,
+        sgst_amount = ?,
+        total_tax = ?,
+        grand_total = ?,
+        erp_calculated_amount = ?,
+        variance_amount = ?,
+        remarks = ?,
+        items_json = ?,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `, [
+      opInvNo,
+      opInvDate,
+      opInvAmount,
+      storageCharges,
+      handlingCharges,
+      insuranceCharges,
+      mamoolCharges,
+      otherCharges,
+      taxableAmount,
+      taxRate,
+      cgstAmount,
+      sgstAmount,
+      totalTax,
+      grandTotal,
+      grandTotal,
+      variance,
+      remarks,
+      itemsJson,
+      existing.id
+    ], activeCompanyId);
+
+    const updatedRes = await db.query('SELECT * FROM cold_storage_bills WHERE id = ?', [existing.id], activeCompanyId);
+    const updated = updatedRes.rows?.[0] || {};
+    try { updated.items = JSON.parse(updated.items_json || '[]'); } catch (_) { updated.items = []; }
+
+    res.json({
+      success: true,
+      message: `Bill #${updated.bill_no} updated successfully!`,
+      data: updated,
+      bill: updated
+    });
+  } catch (err) {
+    console.error('Error updating bill:', err);
+    res.status(500).json({ success: false, message: 'Error updating bill: ' + err.message });
+  }
+});
+
+// GET /tariff/:godownId - Get tariff and slab calculation rules for a specific cold storage godown
+router.get('/tariff/:godownId', async (req, res) => {
+  try {
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    const tariff = await getColdStorageTariff(req.params.godownId, activeCompanyId);
+    res.json({ success: true, tariff, data: tariff });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

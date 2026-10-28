@@ -179,6 +179,7 @@ app.use('/api/production-planning-mgmt', require('./routes/productionPlanningMan
 app.use('/api/factory-production-planning', require('./routes/factoryProductionPlanning'))
 app.use('/api/yield-intelligence', require('./routes/yieldIntelligence'))
 app.use('/api/jobwork-control', require('./routes/jobworkControl'))
+app.use('/api/hand-sorting', require('./routes/handSorting'))
 
 // Phases 8–13 Enterprise Intelligence Modules
 app.use('/api/cold-storage-intelligence', require('./routes/coldStorageIntelligence'))

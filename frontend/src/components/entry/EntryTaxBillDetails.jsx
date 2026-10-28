@@ -27,6 +27,8 @@ export const EntryTaxBillDetails = ({
   deductionsAmt = 0,
   deductionPercent = 0,
   edPercent = 0,
+  unloadingAmt = 0,
+  loadmanCharges = 0,
   isInterState = false,
   taxType = 'Exclusive',
   title = 'Bill & Tax Details'
@@ -39,7 +41,8 @@ export const EntryTaxBillDetails = ({
   const numericWithoutTaxAmt = parseFloat(withoutTaxAmt) || 0;
   const numericTaxAmt = parseFloat(taxAmt) || 0;
   const numericTotalAmt = parseFloat(totalAmt) || 0;
-  const numericGrandTotal = parseFloat(grandTotal) || (numericTotalAmt - (parseFloat(deductionsAmt) || 0));
+  const numericUnloadingAmt = parseFloat(unloadingAmt || loadmanCharges) || 0;
+  const numericGrandTotal = parseFloat(grandTotal) || (numericTotalAmt - (parseFloat(deductionsAmt) || 0) + numericUnloadingAmt);
   const numericTaxPercent = parseFloat(taxPercent) || 0;
   const numericDiscAmt = parseFloat(discAmt) || 0;
   const numericDiscPercent = parseFloat(discPercent) || 0;
@@ -260,6 +263,18 @@ export const EntryTaxBillDetails = ({
               </div>
             )}
           </>
+        )}
+
+        {/* Unloading / Labour Charges */}
+        {numericUnloadingAmt > 0 && (
+          <div style={{ ...styles.item, backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0' }}>
+            <span style={{ ...styles.label, color: '#166534', fontWeight: 'bold' }}>
+              Unloading / Loadman Fee:
+            </span>
+            <span style={{ ...styles.amount, color: '#15803d', fontWeight: '800' }}>
+              + {formatCurr(numericUnloadingAmt)}
+            </span>
+          </div>
         )}
 
         {/* Net Payable / Grand Total */}

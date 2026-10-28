@@ -621,7 +621,7 @@ const CrudPage = ({ module, action }) => {
         open={deleteDialogOpen}
         onClose={() => setDeleteDialogOpen(false)}
       >
-        <DialogTitle>Confirm Delete</DialogTitle>
+        <DialogTitle component="div">Confirm Delete</DialogTitle>
         <DialogContent>
           <DialogContentText>
             Are you sure you want to delete this item?

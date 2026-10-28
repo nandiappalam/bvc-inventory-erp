@@ -38,8 +38,12 @@ const createVoucherForTransfer = async (transfer, companyId = 1) => {
     voucherNo = `CSI-${String(lastNumber + 1).padStart(6, '0')}`;
   }
   const quantity = Number(transfer.qty) || 0;
-  const totalWeight = Number(transfer.weight) || (quantity * 50);
-  const perUnitWeight = quantity > 0 ? totalWeight / quantity : 50;
+  let totalWeight = Number(transfer.weight) || 0;
+  let perUnitWeight = quantity > 0 && totalWeight > 0 ? totalWeight / quantity : 50;
+  if (quantity > 0 && (totalWeight <= quantity || perUnitWeight <= 1)) {
+    perUnitWeight = 50;
+    totalWeight = quantity * 50;
+  }
 
   const itemResult = await db.query(
     'SELECT id, unit FROM item_master WHERE LOWER(TRIM(item_name)) = LOWER(TRIM(?)) LIMIT 1',
@@ -226,8 +230,12 @@ const createOutwardVoucherForTransfer = async (transfer, companyId = 1) => {
     voucherNo = `CSO-${String(lastNumber + 1).padStart(6, '0')}`;
   }
   const quantity = Number(transfer.qty) || 0;
-  const totalWeight = Number(transfer.weight) || (quantity * 50);
-  const perUnitWeight = quantity > 0 ? totalWeight / quantity : 50;
+  let totalWeight = Number(transfer.weight) || 0;
+  let perUnitWeight = quantity > 0 && totalWeight > 0 ? totalWeight / quantity : 50;
+  if (quantity > 0 && (totalWeight <= quantity || perUnitWeight <= 1)) {
+    perUnitWeight = 50;
+    totalWeight = quantity * 50;
+  }
 
   const itemResult = await db.query(
     'SELECT id, unit FROM item_master WHERE LOWER(TRIM(item_name)) = LOWER(TRIM(?)) LIMIT 1',

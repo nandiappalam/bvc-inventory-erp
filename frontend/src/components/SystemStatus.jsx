@@ -39,8 +39,11 @@ export function SystemStatus() {
 
   useEffect(() => {
     checkHealth();
-    // Non-intrusive health polling every 60s
-    const interval = setInterval(checkHealth, 60000);
+    // Non-intrusive health polling every 120s when visible
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      checkHealth();
+    }, 120000);
     return () => clearInterval(interval);
   }, []);
 

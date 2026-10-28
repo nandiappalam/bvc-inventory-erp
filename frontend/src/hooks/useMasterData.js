@@ -1,13 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
-import { getMasters, safeArray } from '../services/masterservice.js';
+import { getMasters, getCachedMasters, safeArray } from '../services/masterservice.js';
 
 /**
  * useMasterData - Custom hook for caching master data dropdowns
  * Uses generic getMasters(type) - no mapping needed
  */
 export const useMasterData = (masterType) => {
-  const [data, setData] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState(() => getCachedMasters(masterType));
+  const [loading, setLoading] = useState(() => !getCachedMasters(masterType).length);
   const [error, setError] = useState(null);
 
   const fetchMaster = useCallback(async () => {
@@ -17,21 +17,29 @@ export const useMasterData = (masterType) => {
       return;
     }
 
-    setLoading(true);
+    const cached = getCachedMasters(masterType);
+    if (!cached || cached.length === 0) {
+      setLoading(true);
+    }
     setError(null);
     try {
       const result = await getMasters(masterType);
-      if (!result) {
-        setData([]);
-        return;
+      if (result) {
+        const masters = safeArray(result.data || result);
+        if (masters.length > 0) {
+          setData(masters);
+        } else if (cached && cached.length > 0) {
+          setData(cached);
+        } else {
+          setData([]);
+        }
       }
-      const masters = safeArray(result.data || result);
-      setData(masters);
-      setData(masters);
     } catch (err) {
       console.error(`Failed to fetch ${masterType}:`, err);
       setError(err.message);
-      setData([]);
+      if (!data || data.length === 0) {
+        setData([]);
+      }
     } finally {
       setLoading(false);
     }

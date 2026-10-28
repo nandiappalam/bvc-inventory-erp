@@ -425,7 +425,7 @@ const StockAlertContacts = () => {
 
       {/* Add / Edit Contact Modal */}
       <Dialog open={openModal} onClose={() => setOpenModal(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ backgroundColor: '#1f4fb2', color: '#ffffff', py: 1.5 }}>
+        <DialogTitle component="div" sx={{ backgroundColor: '#1f4fb2', color: '#ffffff', py: 1.5 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
               {editId ? 'Edit Alert Contact' : 'Add New Alert Contact'}
@@ -522,7 +522,7 @@ const StockAlertContacts = () => {
         maxWidth="md"
         fullWidth
       >
-        <DialogTitle sx={{ backgroundColor: '#0f172a', color: '#ffffff', py: 1.5 }}>
+        <DialogTitle component="div" sx={{ backgroundColor: '#0f172a', color: '#ffffff', py: 1.5 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
               <AlertBellIcon sx={{ color: '#f59e0b' }} />

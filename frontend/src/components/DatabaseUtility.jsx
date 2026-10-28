@@ -18,8 +18,26 @@ const DatabaseUtility = () => {
   const [uploading, setUploading] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [status, setStatus] = useState({ type: '', message: '' });
-
   const [initializingKiya, setInitializingKiya] = useState(false);
+
+  // Helper to build headers with auth token and company ID
+  const getAuthCompanyHeaders = () => {
+    const headers = {};
+    try {
+      const token = localStorage.getItem('erp_token');
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const selComp = localStorage.getItem('erp_selected_company') || localStorage.getItem('erp_company');
+      if (selComp) {
+        try {
+          const parsed = JSON.parse(selComp);
+          if (parsed?.id) headers['X-Company-Id'] = String(parsed.id);
+        } catch (_) {
+          headers['X-Company-Id'] = String(selComp);
+        }
+      }
+    } catch (_) {}
+    return headers;
+  };
 
   const handleInitKiya = async () => {
     const confirm = window.confirm(
@@ -30,19 +48,25 @@ const DatabaseUtility = () => {
     setInitializingKiya(true);
     setStatus({ type: '', message: '' });
 
-    const headers = { 'Content-Type': 'application/json' };
-    try {
-      const token = localStorage.getItem('erp_token');
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      headers['X-Company-Id'] = '7';
-    } catch (_) {}
+    const headers = { ...getAuthCompanyHeaders(), 'Content-Type': 'application/json' };
+    headers['X-Company-Id'] = '7';
 
     try {
       const response = await fetch('/api/db/init-kiya', {
         method: 'POST',
         headers,
       });
-      const data = await response.json();
+
+      const contentType = response.headers.get('content-type') || '';
+      let data = {};
+      if (contentType.includes('application/json')) {
+        data = await response.json();
+      } else {
+        const text = await response.text();
+        const isHtml = text.trim().toLowerCase().startsWith('<!doctype') || text.trim().toLowerCase().startsWith('<html');
+        throw new Error(isHtml ? `Server returned HTML response (Status ${response.status}). Please check API backend server status.` : text);
+      }
+
       if (response.ok && data.success) {
         setStatus({
           type: 'success',
@@ -52,7 +76,7 @@ const DatabaseUtility = () => {
           window.location.reload();
         }, 2000);
       } else {
-        throw new Error(data.message || 'Failed to initialize KIYA data');
+        throw new Error(data.message || data.error || 'Failed to initialize KIYA data');
       }
     } catch (err) {
       console.error('Init KIYA error:', err);
@@ -66,15 +90,15 @@ const DatabaseUtility = () => {
     setDownloading(true);
     setStatus({ type: '', message: '' });
     try {
-      // Trigger native download
-      const response = await fetch('/api/db/backup');
+      const headers = getAuthCompanyHeaders();
+      const response = await fetch('/api/db/backup', { headers });
       const contentType = response.headers.get('content-type') || '';
 
       if (!response.ok || contentType.includes('text/html')) {
         let errText = `Server returned status ${response.status}`;
         try {
           const text = await response.text();
-          if (text && !text.includes('<!DOCTYPE')) {
+          if (text && !text.trim().toLowerCase().startsWith('<!doctype') && !text.trim().toLowerCase().startsWith('<html')) {
             errText = text;
           }
         } catch (e) {}
@@ -134,20 +158,7 @@ const DatabaseUtility = () => {
     setRestoringJson(true);
     setStatus({ type: '', message: '' });
 
-    const headers = { 'Content-Type': 'application/json' };
-    try {
-      const token = localStorage.getItem('erp_token');
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      const selComp = localStorage.getItem('erp_selected_company') || localStorage.getItem('erp_company');
-      if (selComp) {
-        try {
-          const parsed = JSON.parse(selComp);
-          if (parsed?.id) headers['X-Company-Id'] = String(parsed.id);
-        } catch (_) {
-          headers['X-Company-Id'] = String(selComp);
-        }
-      }
-    } catch (_) {}
+    const headers = { ...getAuthCompanyHeaders(), 'Content-Type': 'application/json' };
 
     try {
       const response = await fetch('/api/db/restore-json', {
@@ -155,7 +166,17 @@ const DatabaseUtility = () => {
         headers,
         body: JSON.stringify({ jsonData: parsedData }),
       });
-      const data = await response.json();
+
+      const contentType = response.headers.get('content-type') || '';
+      let data = {};
+      if (contentType.includes('application/json')) {
+        data = await response.json();
+      } else {
+        const text = await response.text();
+        const isHtml = text.trim().toLowerCase().startsWith('<!doctype') || text.trim().toLowerCase().startsWith('<html');
+        throw new Error(isHtml ? `Server returned HTML response (Status ${response.status}). Please check API backend server status.` : text);
+      }
+
       if (response.ok && data.success) {
         setStatus({
           type: 'success',
@@ -193,33 +214,29 @@ const DatabaseUtility = () => {
     setUploading(true);
     setStatus({ type: '', message: '' });
 
-    const headers = {};
-    try {
-      const token = localStorage.getItem('erp_token');
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      const selComp = localStorage.getItem('erp_selected_company') || localStorage.getItem('erp_company');
-      if (selComp) {
-        try {
-          const parsed = JSON.parse(selComp);
-          if (parsed?.id) headers['X-Company-Id'] = String(parsed.id);
-        } catch (_) {
-          headers['X-Company-Id'] = String(selComp);
-        }
-      }
-    } catch (_) {}
-
     try {
       // If it's a JSON file, read it client-side and use pure JSON API (bypasses multer/disk storage entirely)
       if (lowerName.endsWith('.json')) {
         const fileContent = await file.text();
         const parsedJson = JSON.parse(fileContent);
-        headers['Content-Type'] = 'application/json';
+        const headers = { ...getAuthCompanyHeaders(), 'Content-Type': 'application/json' };
+
         const response = await fetch('/api/db/restore-json', {
           method: 'POST',
           headers,
           body: JSON.stringify({ jsonData: parsedJson }),
         });
-        const data = await response.json();
+
+        const contentType = response.headers.get('content-type') || '';
+        let data = {};
+        if (contentType.includes('application/json')) {
+          data = await response.json();
+        } else {
+          const text = await response.text();
+          const isHtml = text.trim().toLowerCase().startsWith('<!doctype') || text.trim().toLowerCase().startsWith('<html');
+          throw new Error(isHtml ? `Server returned HTML response (Status ${response.status}). Please check API backend server status.` : text);
+        }
+
         if (response.ok && data.success) {
           setStatus({
             type: 'success',
@@ -235,6 +252,10 @@ const DatabaseUtility = () => {
       }
 
       // For binary DB / SQL files, use standard multipart upload
+      // CRITICAL: DO NOT set 'Content-Type' header so fetch auto-generates multipart/form-data boundary
+      const headers = getAuthCompanyHeaders();
+      delete headers['Content-Type'];
+
       const formData = new FormData();
       formData.append('database', file);
 
@@ -250,7 +271,8 @@ const DatabaseUtility = () => {
         data = await response.json();
       } else {
         const responseText = await response.text();
-        throw new Error(`Server returned status ${response.status}: ${responseText.slice(0, 100)}`);
+        const isHtml = responseText.trim().toLowerCase().startsWith('<!doctype') || responseText.trim().toLowerCase().startsWith('<html');
+        throw new Error(isHtml ? `Server returned HTML response (Status ${response.status}). Please check API backend server status.` : responseText.slice(0, 100));
       }
 
       if (response.ok && data.success) {

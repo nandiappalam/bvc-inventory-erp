@@ -553,6 +553,59 @@ async function createPurchaseVoucherChain(purchaseData) {
     }
   }
 
+  const loadmanCharges = Number(purchaseData.loadmanCharges || 0);
+  const loadmanName = purchaseData.loadmanName || purchaseData.loadman_name;
+  if (loadmanCharges > 0) {
+    const workerLedger = loadmanName || 'Loadman / Unloading Worker';
+    voucherEntryRows.push({
+      ledgerName: 'Unloading / Loadman Charges',
+      debit: loadmanCharges,
+      credit: 0,
+      remarks: `Loadman charges for ${particulars}`
+    });
+    ledgerEntries.push(
+      createLedgerEntry({
+        ledgerName: 'Unloading / Loadman Charges',
+        date: voucherDate,
+        voucherType: 'Purchase',
+        voucherNo,
+        debit: loadmanCharges,
+        credit: 0,
+        referenceId: purchaseId,
+        referenceType: 'purchase',
+        particulars: `Loadman charges for ${particulars}`,
+        voucherId,
+        transactionId: purchaseId,
+        transactionType: 'purchase',
+        ledgerType: 'Expense'
+      })
+    );
+
+    voucherEntryRows.push({
+      ledgerName: workerLedger,
+      debit: 0,
+      credit: loadmanCharges,
+      remarks: `Loadman charges payable for ${particulars}`
+    });
+    ledgerEntries.push(
+      createLedgerEntry({
+        ledgerName: workerLedger,
+        date: voucherDate,
+        voucherType: 'Purchase',
+        voucherNo,
+        debit: 0,
+        credit: loadmanCharges,
+        referenceId: purchaseId,
+        referenceType: 'purchase',
+        particulars: `Loadman charges payable for ${particulars}`,
+        voucherId,
+        transactionId: purchaseId,
+        transactionType: 'purchase',
+        ledgerType: 'Worker'
+      })
+    );
+  }
+
   for (const entry of voucherEntryRows) {
     const ledgerId = await resolveLedgerId(entry.ledgerName)
     try {

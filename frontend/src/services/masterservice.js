@@ -29,6 +29,7 @@ export const normalizeMasterKey = (type) => {
   if (k === 'deduction_purchase' || k === 'deduction_purchases' || k === 'purchase_deductions' || k === 'deductions' || k === 'deduction') return 'deduction_purchase';
   if (k === 'deduction_sales' || k === 'sales_deductions' || k === 'deduction_sale') return 'deduction_sales';
   if (k === 'item_group' || k === 'item_groups') return 'item_groups';
+  if (k === 'worker' || k === 'workers' || k === 'worker_master' || k === 'loadman' || k === 'loadmen' || k === 'loadman_team' || k === 'loadman_name' || k === 'operational_parties') return 'workers';
   return k;
 };
 
@@ -44,6 +45,20 @@ export const invalidateMasterCache = (type) => {
   masterCache.delete(raw);
   masterCache.delete(`all_${key}`);
   masterCache.delete(`all_${raw}`);
+
+  if (key === 'workers' || raw === 'worker' || raw === 'loadman' || raw === 'operational_parties' || raw === 'worker_master') {
+    masterCache.delete('workers');
+    masterCache.delete('worker');
+    masterCache.delete('loadman');
+    masterCache.delete('loadmen');
+    masterCache.delete('loadman_team');
+    masterCache.delete('loadman_name');
+    masterCache.delete('operational_parties');
+    masterCache.delete('worker_master');
+    masterCache.delete('all_workers');
+    masterCache.delete('all_loadman');
+    masterCache.delete('all_operational_parties');
+  }
 
   if (key === 'weights' || raw === 'weight' || raw === 'weightmaster') {
     masterCache.delete('weights');
@@ -92,6 +107,15 @@ const makeDualArray = (list) => {
 
 export const FALLBACK_MASTERS = {};
 
+export const getCachedMasters = (type) => {
+  if (!type) return [];
+  const key = normalizeMasterKey(type);
+  if (masterCache.has(key)) {
+    return masterCache.get(key).data || [];
+  }
+  return [];
+};
+
 export const getMasters = async (type, options = {}) => {
   if (!type) return makeDualArray([]);
   const key = normalizeMasterKey(type);
@@ -110,7 +134,9 @@ export const getMasters = async (type, options = {}) => {
   if (inFlightRequests.has(key)) {
     try {
       const res = await inFlightRequests.get(key);
-      return makeDualArray(res);
+      if (res && res.length > 0) {
+        return makeDualArray(res);
+      }
     } catch (e) {
       // Fall through to retry if in-flight failed
     }
@@ -139,8 +165,10 @@ export const getMasters = async (type, options = {}) => {
           }
 
           if (list !== null) {
-            masterCache.set(key, { data: list, timestamp: Date.now() });
-            return list;
+            if (list.length > 0 || !masterCache.has(key)) {
+              masterCache.set(key, { data: list, timestamp: Date.now() });
+            }
+            return list.length > 0 ? list : (masterCache.get(key)?.data || []);
           }
         }
         lastError = new Error(result?.message || result?.error || `Failed to fetch master for ${key}`);

@@ -196,7 +196,7 @@ export const DynamicMasterDisplay = ({ configKey }) => {
   };
 
   const renderExtraActions = (row) => {
-    if (normalizedKey === 'ledger' || tableName === 'ledgermaster') {
+    if (normalizedKey === 'ledger' || tableName === 'ledgermaster' || normalizedKey === 'loadman' || tableName === 'operational_parties') {
       return (
         <button
           onClick={() => navigate(`/reports/ledger-statement?ledger=${encodeURIComponent(row.name)}&type=${encodeURIComponent(row.ledger_type || 'General')}`)}
