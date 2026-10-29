@@ -368,19 +368,30 @@ const PurchaseRequestApproval = () => {
 
           <TableContainer component={Paper} variant="outlined">
             <Table size="small">
-              <TableHead sx={{ backgroundColor: '#1f4fb2' }}>
+              <TableHead 
+                sx={{ 
+                  backgroundColor: '#1f4fb2 !important',
+                  '& .MuiTableCell-head': {
+                    color: '#ffffff !important',
+                    backgroundColor: '#1f4fb2 !important',
+                    fontWeight: 'bold',
+                    fontSize: '13px',
+                    borderBottom: '1px solid rgba(255, 255, 255, 0.2)'
+                  }
+                }}
+              >
                 <TableRow>
-                  <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>PR No</TableCell>
-                  <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Item Name(s)</TableCell>
-                  <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Department</TableCell>
-                  <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Requested By</TableCell>
-                  <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Priority</TableCell>
-                  <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Req Date</TableCell>
-                  <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Required Date</TableCell>
-                  <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Items</TableCell>
-                  <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Est. Value (₹)</TableCell>
-                  <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Status</TableCell>
-                  <TableCell sx={{ color: '#fff', fontWeight: 'bold', textAlign: 'center' }}>Action</TableCell>
+                  <TableCell>PR No</TableCell>
+                  <TableCell>Item Name(s)</TableCell>
+                  <TableCell>Department</TableCell>
+                  <TableCell>Requested By</TableCell>
+                  <TableCell>Priority</TableCell>
+                  <TableCell>Req Date</TableCell>
+                  <TableCell>Required Date</TableCell>
+                  <TableCell>Items</TableCell>
+                  <TableCell>Est. Value (₹)</TableCell>
+                  <TableCell>Status</TableCell>
+                  <TableCell sx={{ textAlign: 'center' }}>Action</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -509,14 +520,25 @@ const PurchaseRequestApproval = () => {
 
               <TableContainer component={Paper} variant="outlined" sx={{ mb: 3 }}>
                 <Table size="small">
-                  <TableHead sx={{ backgroundColor: '#1f4fb2' }}>
+                  <TableHead 
+                    sx={{ 
+                      backgroundColor: '#1f4fb2 !important',
+                      '& .MuiTableCell-head': {
+                        color: '#ffffff !important',
+                        backgroundColor: '#1f4fb2 !important',
+                        fontWeight: 'bold',
+                        fontSize: '13px',
+                        borderBottom: '1px solid rgba(255, 255, 255, 0.2)'
+                      }
+                    }}
+                  >
                     <TableRow>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Item Name</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Req Qty</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold', width: '130px' }}>Approved Qty *</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Unit</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Est Rate (₹)</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Est Total (₹)</TableCell>
+                      <TableCell>Item Name</TableCell>
+                      <TableCell>Req Qty</TableCell>
+                      <TableCell sx={{ width: '130px' }}>Approved Qty *</TableCell>
+                      <TableCell>Unit</TableCell>
+                      <TableCell>Est Rate (₹)</TableCell>
+                      <TableCell>Est Total (₹)</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>

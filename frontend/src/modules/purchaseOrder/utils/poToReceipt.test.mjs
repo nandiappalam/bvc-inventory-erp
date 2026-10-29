@@ -1,6 +1,30 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildReceiptDraftFromPurchaseOrder } from './poToReceipt.mjs';
+import {
+  buildReceiptDraftFromPurchaseOrder,
+  getPurchaseOrderItemsForInward
+} from './poToReceipt.mjs';
+
+test('inward uses only the item rows attached to the selected PO', () => {
+  const selectedOrder = {
+    id: 11,
+    items: [{ item_name: 'URAD SPLIT', qty: 200, rate: 0 }]
+  };
+  const fetchedDetails = {
+    id: 11,
+    items: [
+      { item_name: 'Ground Nut', qty: 450, rate: 4500 },
+      { item_name: 'URAD SPLIT', qty: 200, rate: 0 }
+    ]
+  };
+
+  const items = getPurchaseOrderItemsForInward(selectedOrder, fetchedDetails);
+  const draft = buildReceiptDraftFromPurchaseOrder({ ...fetchedDetails, items });
+
+  assert.equal(draft.tableData.length, 1);
+  assert.equal(draft.tableData[0].item_name, 'URAD SPLIT');
+  assert.equal(draft.tableData[0].qty, 200);
+});
 
 test('buildReceiptDraftFromPurchaseOrder maps a PO to receipt draft fields', () => {
   const order = {

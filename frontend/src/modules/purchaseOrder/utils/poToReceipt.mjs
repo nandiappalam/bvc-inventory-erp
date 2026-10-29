@@ -1,3 +1,9 @@
+export const getPurchaseOrderItemsForInward = (selectedOrder, fullOrder) => {
+  const selectedItems = selectedOrder?.items;
+  if (Array.isArray(selectedItems) && selectedItems.length > 0) return selectedItems;
+  return Array.isArray(fullOrder?.items) ? fullOrder.items : [];
+};
+
 export const buildReceiptDraftFromPurchaseOrder = (order = {}) => {
   const items = Array.isArray(order.items) ? order.items : [];
 

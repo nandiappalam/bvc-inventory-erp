@@ -104,12 +104,49 @@ const ensurePurchasesColumns = async (companyId = 1) => {
     'ALTER TABLE purchases ADD COLUMN total_deductions REAL DEFAULT 0',
     'ALTER TABLE purchases ADD COLUMN round_off REAL DEFAULT 0',
     'ALTER TABLE purchases ADD COLUMN loadman_name TEXT',
+    'ALTER TABLE purchases ADD COLUMN loadman_worker_id INTEGER',
+    'ALTER TABLE purchases ADD COLUMN loadman_qty_kg REAL DEFAULT 0',
     'ALTER TABLE purchases ADD COLUMN loadman_rate_per_kg REAL DEFAULT 0.50',
-    'ALTER TABLE purchases ADD COLUMN loadman_charges REAL DEFAULT 0'
+    'ALTER TABLE purchases ADD COLUMN loadman_charges REAL DEFAULT 0',
+    'ALTER TABLE purchases ADD COLUMN additional_charges REAL DEFAULT 0'
   ];
   for (const sql of columns) {
     try { await db.run(sql, [], cId); } catch (_) {}
   }
+};
+
+const resolvePurchaseLoadman = async (nameValue, idValue) => {
+  let name = String(nameValue || '').trim();
+  let id = Number(idValue) || null;
+
+  if (id) {
+    const result = await db.query(
+      `SELECT id, name FROM operational_parties WHERE id = ? LIMIT 1`,
+      [id]
+    );
+    const party = result.rows?.[0];
+    if (party) {
+      id = Number(party.id);
+      name = party.name || name;
+    } else {
+      id = null;
+    }
+  }
+
+  if (!id && name) {
+    const result = await db.query(
+      `SELECT id, name FROM operational_parties
+       WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))
+       ORDER BY id ASC LIMIT 2`,
+      [name]
+    );
+    if (result.rows?.length === 1) {
+      id = Number(result.rows[0].id);
+      name = result.rows[0].name || name;
+    }
+  }
+
+  return { id, name };
 };
  
 // GET all purchases
@@ -228,6 +265,8 @@ router.get('/purchase-list', async (req, res) => {
  
 router.get('/:id', async (req, res) => {
   try {
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    await ensurePurchasesColumns(activeCompanyId);
     const rawId = req.params.id;
     const isNum = !isNaN(Number(rawId)) && String(rawId).trim() !== '';
     const numVal = isNum ? Number(rawId) : null;
@@ -243,6 +282,97 @@ router.get('/:id', async (req, res) => {
     const purchaseData = purchaseResult.rows[0];
     const actualId = purchaseData.id;
     const sNo = purchaseData.s_no;
+
+    if (
+      !purchaseData.loadman_name ||
+      !purchaseData.loadman_worker_id ||
+      !Number(purchaseData.loadman_qty_kg) ||
+      !Number(purchaseData.loadman_rate_per_kg) ||
+      !Number(purchaseData.loadman_charges)
+    ) {
+      try {
+        const { ensureOperationalTables } = require('../services/operationalChargeEngine');
+        await ensureOperationalTables(activeCompanyId);
+        const companyPrefix = activeCompanyId > 1 ? `c${activeCompanyId}_` : '';
+        const chargeRes = await db.query(
+          `SELECT party_id, party_name, quantity, rate_per_unit, final_amount
+           FROM ${companyPrefix}operational_charges
+           WHERE source_module = 'PURCHASE' AND source_transaction_id = ?
+           ORDER BY id DESC LIMIT 1`,
+          [actualId]
+        );
+        const charge = chargeRes.rows?.[0];
+        if (charge) {
+          purchaseData.loadman_worker_id = purchaseData.loadman_worker_id || charge.party_id || '';
+          purchaseData.loadman_name = purchaseData.loadman_name || charge.party_name || '';
+          purchaseData.loadman_qty_kg = purchaseData.loadman_qty_kg || charge.quantity || 0;
+          purchaseData.loadman_rate_per_kg = purchaseData.loadman_rate_per_kg || charge.rate_per_unit || 0;
+          purchaseData.loadman_charges = purchaseData.loadman_charges || charge.final_amount || 0;
+        }
+      } catch (loadmanError) {
+        console.warn('Could not restore legacy purchase Loadman details from operational charges:', loadmanError.message);
+      }
+    }
+
+    if (
+      !purchaseData.loadman_name ||
+      !purchaseData.loadman_worker_id ||
+      !Number(purchaseData.loadman_qty_kg) ||
+      !Number(purchaseData.loadman_rate_per_kg) ||
+      !Number(purchaseData.loadman_charges) ||
+      !Number(purchaseData.additional_charges)
+    ) {
+      try {
+        const voucherRes = await db.query(
+          `SELECT loadman_worker_id, loadman_name, loadman_qty_kg,
+                  loadman_rate_per_kg, loadman_charges, additional_charges
+           FROM cold_storage_vouchers
+           WHERE purchase_id = ? AND voucher_type = 'IN'
+           ORDER BY id DESC LIMIT 1`,
+          [actualId]
+        );
+        const voucher = voucherRes.rows?.[0];
+        if (voucher) {
+          purchaseData.loadman_worker_id = purchaseData.loadman_worker_id || voucher.loadman_worker_id || '';
+          purchaseData.loadman_name = purchaseData.loadman_name || voucher.loadman_name || '';
+          purchaseData.loadman_qty_kg = purchaseData.loadman_qty_kg || voucher.loadman_qty_kg || 0;
+          purchaseData.loadman_rate_per_kg = purchaseData.loadman_rate_per_kg || voucher.loadman_rate_per_kg || 0;
+          purchaseData.loadman_charges = purchaseData.loadman_charges || voucher.loadman_charges || 0;
+          purchaseData.additional_charges = purchaseData.additional_charges || voucher.additional_charges || 0;
+        }
+      } catch (loadmanError) {
+        console.warn('Could not restore legacy purchase Loadman details from Cold Storage inward:', loadmanError.message);
+      }
+    }
+
+    if (!purchaseData.loadman_name || !purchaseData.loadman_worker_id) {
+      try {
+        if (purchaseData.loadman_worker_id) {
+          const workerRes = await db.query(
+            `SELECT id, name FROM operational_parties WHERE id = ? LIMIT 1`,
+            [purchaseData.loadman_worker_id]
+          );
+          const worker = workerRes.rows?.[0];
+          if (worker) {
+            purchaseData.loadman_worker_id = worker.id;
+            purchaseData.loadman_name = purchaseData.loadman_name || worker.name || '';
+          }
+        } else if (purchaseData.loadman_name) {
+          const workerRes = await db.query(
+            `SELECT id, name FROM operational_parties
+             WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))
+             ORDER BY id ASC LIMIT 2`,
+            [purchaseData.loadman_name]
+          );
+          if (workerRes.rows?.length === 1) {
+            purchaseData.loadman_worker_id = workerRes.rows[0].id;
+            purchaseData.loadman_name = workerRes.rows[0].name || purchaseData.loadman_name;
+          }
+        }
+      } catch (loadmanError) {
+        console.warn('Could not resolve purchase Loadman master details:', loadmanError.message);
+      }
+    }
 
     const itemsResult = await db.query(
       `SELECT pi.*, COALESCE(im.item_name, pi.item_name) as item_name
@@ -393,6 +523,18 @@ router.post('/', async (req, res) => {
     const transporterVal = formData.transporter || formData.transport || '';
     const vehicleNoVal = formData.vehicle_no || formData.lorry_no || '';
     const driverNameVal = formData.driver_name || formData.driver || '';
+    const loadmanDetails = await resolvePurchaseLoadman(
+      formData.loadman_name || formData.worker_name,
+      formData.loadman_worker_id
+    );
+    const loadmanName = loadmanDetails.name;
+    const loadmanWorkerId = loadmanDetails.id;
+    const loadmanQtyKg = Number(formData.loadman_qty_kg ?? calculatedTotals.totalWeight) || 0;
+    const loadmanRatePerKg = Number(formData.loadman_rate_per_kg ?? 0.50) || 0;
+    const additionalCharges = Number(formData.additional_charges || 0) || 0;
+    const loadmanCharges = formData.loadman_charges !== undefined && formData.loadman_charges !== null && formData.loadman_charges !== ''
+      ? Number(formData.loadman_charges) || 0
+      : Number((loadmanQtyKg * loadmanRatePerKg + additionalCharges).toFixed(2));
 
     const insertValues = [
       parseInt(formData.sno) || 1,
@@ -439,15 +581,22 @@ router.post('/', async (req, res) => {
       calculatedTotals.cgstAmount,
       calculatedTotals.sgstAmount,
       calculatedTotals.igstAmount,
-      calculatedTotals.cessAmount
+      calculatedTotals.cessAmount,
+      loadmanName,
+      loadmanWorkerId,
+      loadmanQtyKg,
+      loadmanRatePerKg,
+      loadmanCharges,
+      additionalCharges
     ];
  
     const purchaseResult = await db.run(`
       INSERT INTO purchases (
         s_no, date, inv_no, supplier, pay_type, inv_date, type, contact_person, address, area, phone, gst_no, email, tax_type, tax_percent, godown, godown_id, remarks, total_qty, total_weight, total_amount, base_amount, disc_amount, tax_amount, net_amount, deduction_amount, grand_total,
         gross_weight, tare_weight, net_weight, stock_type, transporter, transport, vehicle_no, lorry_no, driver_name,
-        company_state, party_state, company_state_code, party_state_code, tax_mode, cgst_amount, sgst_amount, igst_amount, cess_amount
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        company_state, party_state, company_state_code, party_state_code, tax_mode, cgst_amount, sgst_amount, igst_amount, cess_amount,
+        loadman_name, loadman_worker_id, loadman_qty_kg, loadman_rate_per_kg, loadman_charges, additional_charges
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, insertValues)
  
     const purchaseId = purchaseResult.lastID;
@@ -464,8 +613,6 @@ router.post('/', async (req, res) => {
     //  - Each item in this purchase gets a unique, sequentially incrementing lot.
     // ─────────────────────────────────────────────────────────────────
  
-    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
-
     for (const item of items) {
       const qty = parseFloat(item.qty) || 0
       const rate = parseFloat(item.rate) || 0
@@ -714,6 +861,49 @@ router.post('/', async (req, res) => {
       } catch (csErr) {
         console.error('Error auto-creating Cold Storage voucher for purchase:', csErr.message);
       }
+    } else {
+      // Record Loadman charges for non-cold storage purchases to ensure they show up in Loadman Ledger
+      if (formData.loadman_name && (parseFloat(formData.loadman_charges) > 0 || parseFloat(formData.loadman_rate_per_kg) > 0)) {
+        try {
+          const loadmanName = formData.loadman_name || '';
+          const loadmanQtyKg = parseFloat(formData.loadman_qty_kg || calculatedTotals.totalWeight) || 0;
+          const loadmanRatePerKg = parseFloat(formData.loadman_rate_per_kg) || 0.50;
+          const additionalCharges = parseFloat(formData.additional_charges || 0) || 0;
+          const loadmanTotalCharges = parseFloat(formData.loadman_charges) || Number(((loadmanQtyKg * loadmanRatePerKg) + additionalCharges).toFixed(2));
+
+          const engine = require('../services/operationalChargeEngine');
+          await engine.createOperationalCharge(activeCompanyId, {
+            charge_type: 'UNLOADING',
+            source_module: 'PURCHASE',
+            source_transaction_type: 'PURCHASE',
+            source_transaction_id: purchaseId,
+            source_transaction_no: formData.invNo || formData.inv_no || `PUR-${purchaseId}`,
+            charge_date: formData.date || new Date().toISOString().slice(0, 10),
+            party_id: loadmanWorkerId,
+            party_name: loadmanName,
+            party_category: 'LOADMEN',
+            item_name: items[0]?.item_name || 'Raw Material',
+            lot_no: items[0]?.lot_no || '',
+            from_location: formData.supplier || 'Supplier Facility',
+            to_location: resolvedGodownName || 'Main Godown',
+            vehicle_no: formData.vehicle_no || formData.lorry_no || '',
+            driver_name: formData.driver_name || formData.driver || '',
+            quantity: loadmanQtyKg,
+            rate: loadmanRatePerKg,
+            rate_basis: 'PER_KG',
+            uom: 'KG',
+            base_amount: Number((loadmanQtyKg * loadmanRatePerKg).toFixed(2)),
+            amount: loadmanTotalCharges,
+            total_amount: loadmanTotalCharges,
+            payment_status: 'PENDING',
+            remarks: `Unloading Charges for Purchase #${formData.invNo || purchaseId}`,
+            created_by: formData.createdBy || 'System / Purchase Creation'
+          });
+          console.log(`[LOADMAN] Recorded unloading charges for Purchase #${purchaseId} to Loadman ${loadmanName}`);
+        } catch (opErr) {
+          console.warn('[Purchase Loadman Charge Error]:', opErr.message);
+        }
+      }
     }
  
     // Insert purchase deductions
@@ -730,7 +920,9 @@ router.post('/', async (req, res) => {
     // Create ledger entries
     try {
       const loadmanRateVal = parseFloat(formData.loadman_rate_per_kg || 0);
-      const loadmanChargesVal = parseFloat(formData.loadman_charges) || Number((calculatedTotals.totalWeight * loadmanRateVal).toFixed(2));
+      const loadmanChargesVal = loadmanName
+        ? parseFloat(formData.loadman_charges) || Number((calculatedTotals.totalWeight * loadmanRateVal).toFixed(2))
+        : 0;
       await createPurchaseLedgerEntries({
         supplier: formData.supplier,
         date: formData.date,
@@ -740,7 +932,7 @@ router.post('/', async (req, res) => {
         taxAmount: calculatedTotals.taxAmount,
         discAmount: calculatedTotals.discAmount,
         netAmount: calculatedTotals.grandTotal,
-        loadmanName: formData.loadman_name || 'K. Murugan',
+        loadmanName,
         loadmanRatePerKg: loadmanRateVal,
         loadmanCharges: loadmanChargesVal
       })
@@ -884,6 +1076,18 @@ router.put('/:id', async (req, res) => {
     const transporterVal = formData.transporter || formData.transport || '';
     const vehicleNoVal = formData.vehicle_no || formData.lorry_no || '';
     const driverNameVal = formData.driver_name || formData.driver || '';
+    const loadmanDetails = await resolvePurchaseLoadman(
+      formData.loadman_name || formData.worker_name,
+      formData.loadman_worker_id
+    );
+    const loadmanName = loadmanDetails.name;
+    const loadmanWorkerId = loadmanDetails.id;
+    const loadmanQtyKg = Number(formData.loadman_qty_kg ?? calculatedTotals.totalWeight) || 0;
+    const loadmanRatePerKg = Number(formData.loadman_rate_per_kg ?? 0.50) || 0;
+    const additionalCharges = Number(formData.additional_charges || 0) || 0;
+    const loadmanCharges = formData.loadman_charges !== undefined && formData.loadman_charges !== null && formData.loadman_charges !== ''
+      ? Number(formData.loadman_charges) || 0
+      : Number((loadmanQtyKg * loadmanRatePerKg + additionalCharges).toFixed(2));
 
     const purchaseUpdate = await db.run(`
       UPDATE purchases SET
@@ -896,6 +1100,8 @@ router.put('/:id', async (req, res) => {
         transporter = ?, transport = ?, vehicle_no = ?, lorry_no = ?, driver_name = ?,
         company_state = ?, party_state = ?, company_state_code = ?, party_state_code = ?, tax_mode = ?,
         cgst_amount = ?, sgst_amount = ?, igst_amount = ?, cess_amount = ?,
+        loadman_name = ?, loadman_worker_id = ?, loadman_qty_kg = ?, loadman_rate_per_kg = ?,
+        loadman_charges = ?, additional_charges = ?,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `, [
@@ -917,6 +1123,12 @@ router.put('/:id', async (req, res) => {
       calculatedTotals.sgstAmount,
       calculatedTotals.igstAmount,
       calculatedTotals.cessAmount,
+      loadmanName,
+      loadmanWorkerId,
+      loadmanQtyKg,
+      loadmanRatePerKg,
+      loadmanCharges,
+      additionalCharges,
       purchaseId
     ])
     if (purchaseUpdate?.changes === 0) {
@@ -943,8 +1155,6 @@ router.put('/:id', async (req, res) => {
     await db.run('DELETE FROM purchase_deductions WHERE purchase_id = ?', [purchaseId]);
  
     // Get highest existing lot number
-    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
-
     for (const item of items) {
       const qty = parseFloat(item.qty) || 0
       const rate = parseFloat(item.rate) || 0
@@ -1072,8 +1282,8 @@ router.put('/:id', async (req, res) => {
           tariff = await getColdStorageTariff(resolvedGodownId, activeCompanyId);
         } catch (_) {}
 
-        let loadmanName = formData.loadman_name || formData.worker_name || 'K. Murugan';
-        let loadmanWorkerId = formData.loadman_worker_id || null;
+        let loadmanName = loadmanDetails.name;
+        let loadmanWorkerId = loadmanDetails.id;
         let loadmanQtyKg = parseFloat(formData.loadman_qty_kg !== undefined && formData.loadman_qty_kg !== null && formData.loadman_qty_kg !== '' ? formData.loadman_qty_kg : calculatedTotals.totalWeight) || 0;
         let loadmanRatePerKg = parseFloat(formData.loadman_rate_per_kg !== undefined && formData.loadman_rate_per_kg !== null && formData.loadman_rate_per_kg !== '' ? formData.loadman_rate_per_kg : (tariff?.inwardUnloadingRate || 0.50)) || 0.50;
         let additionalCharges = parseFloat(formData.additional_charges || 0) || 0;
@@ -1269,6 +1479,29 @@ router.put('/:id', async (req, res) => {
         INSERT INTO purchase_deductions (purchase_id, deduction_id, deduction_name, type, calculation_type, percentage, amount)
         VALUES (?, ?, ?, ?, ?, ?, ?)
       `, [purchaseId, ded.deduction_id, ded.deduction_name, ded.type, ded.calculation_type, ded.percentage, ded.amount])
+    }
+
+    try {
+      await createPurchaseLedgerEntries({
+        supplier: formData.supplier || formData.supplier_id,
+        date: formData.date,
+        invNo: formData.invNo || formData.inv_no || '',
+        purchaseId,
+        baseAmount: calculatedTotals.grossAmount,
+        taxAmount: calculatedTotals.taxAmount,
+        discAmount: calculatedTotals.discAmount,
+        netAmount: calculatedTotals.grandTotal,
+        cgstAmount: calculatedTotals.cgstAmount,
+        sgstAmount: calculatedTotals.sgstAmount,
+        igstAmount: calculatedTotals.igstAmount,
+        isInterstate: calculatedTotals.isInterstate,
+        loadmanName,
+        loadmanRatePerKg,
+        loadmanCharges
+      });
+    } catch (ledgerError) {
+      console.error('Error recreating purchase ledger entries after update:', ledgerError);
+      throw ledgerError;
     }
  
     try {

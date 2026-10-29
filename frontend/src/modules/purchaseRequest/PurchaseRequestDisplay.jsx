@@ -575,21 +575,32 @@ const PurchaseRequestDisplay = () => {
 
           <TableContainer component={Paper} variant="outlined">
             <Table size="small">
-              <TableHead sx={{ backgroundColor: '#0f172a' }}>
+              <TableHead 
+                sx={{ 
+                  backgroundColor: '#1f4fb2 !important',
+                  '& .MuiTableCell-head': {
+                    color: '#ffffff !important',
+                    backgroundColor: '#1f4fb2 !important',
+                    fontWeight: 'bold',
+                    fontSize: '13px',
+                    borderBottom: '1px solid rgba(255, 255, 255, 0.2)'
+                  }
+                }}
+              >
                 <TableRow>
-                  <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', textAlign: 'center', width: '55px', borderRight: '1px solid #334155' }}>S.No</TableCell>
-                  <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>PR No</TableCell>
-                  <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Item Name(s)</TableCell>
-                  <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Description / Details</TableCell>
-                  <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Req Date</TableCell>
-                  <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Department</TableCell>
-                  <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Requested By</TableCell>
-                  <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Priority</TableCell>
-                  <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Items</TableCell>
-                  <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Total Qty</TableCell>
-                  <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Est. Value (₹)</TableCell>
-                  <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Status</TableCell>
-                  <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', textAlign: 'center' }}>Actions</TableCell>
+                  <TableCell sx={{ textAlign: 'center', backgroundColor: '#1f4fb2 !important', color: '#ffffff !important', fontWeight: 'bold' }}>S.No</TableCell>
+                  <TableCell sx={{ backgroundColor: '#1f4fb2 !important', color: '#ffffff !important', fontWeight: 'bold' }}>PR No</TableCell>
+                  <TableCell sx={{ backgroundColor: '#1f4fb2 !important', color: '#ffffff !important', fontWeight: 'bold' }}>Item Name(s)</TableCell>
+                  <TableCell sx={{ backgroundColor: '#1f4fb2 !important', color: '#ffffff !important', fontWeight: 'bold' }}>Description / Details</TableCell>
+                  <TableCell sx={{ backgroundColor: '#1f4fb2 !important', color: '#ffffff !important', fontWeight: 'bold' }}>Req Date</TableCell>
+                  <TableCell sx={{ backgroundColor: '#1f4fb2 !important', color: '#ffffff !important', fontWeight: 'bold' }}>Department</TableCell>
+                  <TableCell sx={{ backgroundColor: '#1f4fb2 !important', color: '#ffffff !important', fontWeight: 'bold' }}>Requested By</TableCell>
+                  <TableCell sx={{ backgroundColor: '#1f4fb2 !important', color: '#ffffff !important', fontWeight: 'bold' }}>Priority</TableCell>
+                  <TableCell sx={{ backgroundColor: '#1f4fb2 !important', color: '#ffffff !important', fontWeight: 'bold' }}>Items</TableCell>
+                  <TableCell sx={{ backgroundColor: '#1f4fb2 !important', color: '#ffffff !important', fontWeight: 'bold' }}>Total Qty</TableCell>
+                  <TableCell sx={{ backgroundColor: '#1f4fb2 !important', color: '#ffffff !important', fontWeight: 'bold' }}>Est. Value (₹)</TableCell>
+                  <TableCell sx={{ backgroundColor: '#1f4fb2 !important', color: '#ffffff !important', fontWeight: 'bold' }}>Status</TableCell>
+                  <TableCell sx={{ textAlign: 'center', backgroundColor: '#1f4fb2 !important', color: '#ffffff !important', fontWeight: 'bold' }}>Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -761,17 +772,28 @@ const PurchaseRequestDisplay = () => {
               </Typography>
               <TableContainer component={Paper} variant="outlined" sx={{ mb: 3, borderRadius: 1.5, overflow: 'hidden' }}>
                 <Table size="small">
-                  <TableHead sx={{ backgroundColor: '#0f172a' }}>
+                  <TableHead 
+                    sx={{ 
+                      backgroundColor: '#1f4fb2 !important',
+                      '& .MuiTableCell-head': {
+                        color: '#ffffff !important',
+                        backgroundColor: '#1f4fb2 !important',
+                        fontWeight: '800',
+                        fontSize: '13px',
+                        borderRight: '1px solid rgba(255, 255, 255, 0.2)'
+                      }
+                    }}
+                  >
                     <TableRow>
-                      <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', textAlign: 'center', width: '55px', borderRight: '1px solid #334155' }}>S.No</TableCell>
-                      <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Item Name</TableCell>
-                      <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Weight</TableCell>
-                      <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Description / Specs</TableCell>
-                      <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Req Qty</TableCell>
-                      <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>App Qty</TableCell>
-                      <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Unit</TableCell>
-                      <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Est Rate (₹)</TableCell>
-                      <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px' }}>Est Amount (₹)</TableCell>
+                      <TableCell sx={{ textAlign: 'center', width: '55px' }}>S.No</TableCell>
+                      <TableCell>Item Name</TableCell>
+                      <TableCell>Weight</TableCell>
+                      <TableCell>Description / Specs</TableCell>
+                      <TableCell>Req Qty</TableCell>
+                      <TableCell>App Qty</TableCell>
+                      <TableCell>Unit</TableCell>
+                      <TableCell>Est Rate (₹)</TableCell>
+                      <TableCell sx={{ borderRight: 'none' }}>Est Amount (₹)</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -798,12 +820,23 @@ const PurchaseRequestDisplay = () => {
               </Typography>
               <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 1.5, overflow: 'hidden' }}>
                 <Table size="small">
-                  <TableHead sx={{ backgroundColor: '#0f172a' }}>
+                  <TableHead 
+                    sx={{ 
+                      backgroundColor: '#1f4fb2 !important',
+                      '& .MuiTableCell-head': {
+                        color: '#ffffff !important',
+                        backgroundColor: '#1f4fb2 !important',
+                        fontWeight: '800',
+                        fontSize: '13px',
+                        borderRight: '1px solid rgba(255, 255, 255, 0.2)'
+                      }
+                    }}
+                  >
                     <TableRow>
-                      <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Date & Time</TableCell>
-                      <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Action</TableCell>
-                      <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px', borderRight: '1px solid #334155' }}>Performed By</TableCell>
-                      <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13px' }}>Remarks</TableCell>
+                      <TableCell>Date & Time</TableCell>
+                      <TableCell>Action</TableCell>
+                      <TableCell>Performed By</TableCell>
+                      <TableCell sx={{ borderRight: 'none' }}>Remarks</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>

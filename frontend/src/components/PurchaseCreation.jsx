@@ -2,7 +2,10 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useLocation, useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, getMasters } from '../utils/api';
 import purchaseOrderService from '../modules/purchaseOrder/services/purchaseOrderService';
-import { buildReceiptDraftFromPurchaseOrder } from '../modules/purchaseOrder/utils/poToReceipt.mjs';
+import {
+  buildReceiptDraftFromPurchaseOrder,
+  getPurchaseOrderItemsForInward
+} from '../modules/purchaseOrder/utils/poToReceipt.mjs';
 import { saveModuleDraft, loadModuleDraft, clearModuleDraft } from '../utils/draftHelper';
 
 import EntryTopFrame from './entry/EntryTopFrame';
@@ -65,7 +68,7 @@ const PurchaseCreation = () => {
 
     // Cold Storage Inward & Loadman Unloading Details
     chamber_no: 'Chamber 1',
-    loadman_name: 'K. Murugan',
+    loadman_name: '',
     loadman_worker_id: '',
     loadman_qty_kg: '',
     loadman_rate_per_kg: '0.50',
@@ -242,7 +245,7 @@ const PurchaseCreation = () => {
       po_no: formData.po_no || formData.source_order_no,
       // Cold Storage & Loadman details
       chamber_no: formData.chamber_no || 'Chamber 1',
-      loadman_name: formData.loadman_name || 'K. Murugan',
+      loadman_name: formData.loadman_name || '',
       loadman_worker_id: formData.loadman_worker_id || null,
       loadman_qty_kg: formData.loadman_qty_kg || String(erpTotals?.totalWeight || 0),
       loadman_rate_per_kg: formData.loadman_rate_per_kg || '0.50',
@@ -363,7 +366,7 @@ const PurchaseCreation = () => {
     } catch (e) {}
 
     // Prioritize actual purchase order items over any stale cached draft to avoid unwanted rows
-    const baseItems = (order.items && order.items.length > 0) ? order.items : (draft.tableData || []);
+    const baseItems = Array.isArray(order.items) ? order.items : [];
     const mappedItems = baseItems.map((it, idx) => {
       const qty = Number(it.qty || 0);
       const rate = Number(it.rate || it.purc_rate || 0);
@@ -405,20 +408,26 @@ const PurchaseCreation = () => {
       };
     });
 
-    const filteredMappedItems = mappedItems.filter(it => Boolean(it.item_name || it.item_id) && (Number(it.qty) > 0 || Number(it.rate) > 0 || mappedItems.length === 1));
-    setTableData(filteredMappedItems.length > 0 ? filteredMappedItems : [{
-      sno: 1,
-      item_name: '',
-      lot_no: '',
-      qty: '',
-      weight: '',
-      total_wt: '',
-      rate: '',
-      disc: '',
-      tax_rate: 5,
-      amount: '',
-      lot_status: 'available'
-    }]);
+    const filteredMappedItems = mappedItems.filter(it => Boolean(it.item_name || it.item_id) && (Number(it.qty) > 0 || Number(it.rate) > 0));
+
+    // Explicitly replace table data to avoid merging with previous entries (e.g. from drafts)
+    if (filteredMappedItems.length > 0) {
+      setTableData(filteredMappedItems);
+    } else {
+      setTableData([{
+        sno: 1,
+        item_name: '',
+        lot_no: '',
+        qty: '',
+        weight: '',
+        total_wt: '',
+        rate: '',
+        disc: '',
+        tax_rate: 5,
+        amount: '',
+        lot_status: 'available'
+      }]);
+    }
 
     const orderDeductions = (order.deductions && order.deductions.length > 0) ? order.deductions : (draft.selectedDeductions || []);
     if (orderDeductions.length > 0) {
@@ -536,6 +545,12 @@ const PurchaseCreation = () => {
             stock_type: data.stock_type || data.stockType || 'RM',
             tax_type: data.tax_type || data.taxType || 'Exclusive',
             tax_rate: data.tax_percent ?? data.tax_rate ?? 0,
+            loadman_name: data.loadman_name || data.worker_name || '',
+            loadman_worker_id: data.loadman_worker_id ? String(data.loadman_worker_id) : '',
+            loadman_qty_kg: data.loadman_qty_kg ?? '',
+            loadman_rate_per_kg: data.loadman_rate_per_kg ?? '0.50',
+            loadman_charges: data.loadman_charges ?? '',
+            additional_charges: data.additional_charges ?? '0',
             gst_no: data.gst_no || data.supplier_gstin || '',
             email: data.email || data.supplier_email || '',
             type: data.type || 'Urad',
@@ -635,6 +650,7 @@ const PurchaseCreation = () => {
     const preloadFromPurchaseOrder = async () => {
       const params = new URLSearchParams(location.search);
       const sourceOrderId = params.get('sourcePurchaseOrderId') || params.get('po_id') || params.get('purchase_order_id') || params.get('po');
+      const selectedOrder = location.state?.sourcePurchaseOrder;
       if (!sourceOrderId || id) {
         // Check for saved draft if not loading from PO and not editing existing ID
         if (!id) {
@@ -647,6 +663,9 @@ const PurchaseCreation = () => {
         }
         return;
       }
+
+      // If loading from PO, ensure any existing draft for NEW creation is cleared to avoid mixing
+      if (!id) clearModuleDraft('purchase_create');
 
       try {
         let order = null;
@@ -665,6 +684,16 @@ const PurchaseCreation = () => {
         }
 
         if (order && (order.id || order.s_no || order.inv_no)) {
+          if (selectedOrder && String(selectedOrder.id) === String(sourceOrderId)) {
+            if (order.id && String(order.id) !== String(selectedOrder.id)) {
+              throw new Error('The selected Purchase Order does not match the order returned by the server.');
+            }
+            const selectedItems = getPurchaseOrderItemsForInward(selectedOrder, order);
+            if (selectedItems.length === 0) {
+              throw new Error(`No item details were returned for Purchase Order ${order.inv_no || order.invNo || sourceOrderId}.`);
+            }
+            order = { ...order, items: selectedItems };
+          }
           await applyPurchaseOrder(order);
           setSuccess(`Inward loaded from Purchase Order ${order.inv_no || order.invNo || ('#' + sourceOrderId)}`);
         } else {
@@ -680,7 +709,7 @@ const PurchaseCreation = () => {
     loadDeductions();
     fetchPurchase();
     preloadFromPurchaseOrder();
-  }, [id, location.search, applyPurchaseOrder]);
+  }, [id, location.search, location.state, applyPurchaseOrder]);
 
   // Auto-save draft when form changes (for new entries only)
   useEffect(() => {
@@ -762,6 +791,7 @@ const PurchaseCreation = () => {
 
   const handleSelectPo = async (po) => {
     try {
+      setError('');
       let fullPo = null;
       try {
         fullPo = await purchaseOrderService.get(po.id);
@@ -770,13 +800,30 @@ const PurchaseCreation = () => {
         const res = await api(`/purchase-orders/${po.id}`).catch(() => null);
         fullPo = res?.data || res || po;
       }
-      
-      if (fullPo) {
-        await applyPurchaseOrder(fullPo);
+
+      if (!fullPo) {
+        throw new Error(`Could not load Purchase Order ${po.inv_no || po.invNo || po.id}.`);
       }
+
+      if (po.id && fullPo.id && String(fullPo.id) !== String(po.id)) {
+        throw new Error(
+          `The selected Purchase Order ${po.inv_no || po.invNo || po.id} did not match the order returned by the server. Please refresh the PO list and try again.`
+        );
+      }
+
+      const selectedItems = getPurchaseOrderItemsForInward(po, fullPo);
+      if (!Array.isArray(selectedItems) || selectedItems.length === 0) {
+        throw new Error(
+          `No item details were returned for Purchase Order ${po.inv_no || po.invNo || po.id}. No rows were imported.`
+        );
+      }
+
+      clearModuleDraft('purchase_create');
+      await applyPurchaseOrder({ ...fullPo, items: selectedItems });
       setPoPickerOpen(false);
     } catch (err) {
       console.error('Error importing PO:', err);
+      setError(`Could not import Purchase Order: ${err.message}`);
     }
   };
 
@@ -1253,7 +1300,7 @@ const PurchaseCreation = () => {
 
           if (Array.isArray(data.items) && data.items.length > 0) {
             setTableData(data.items.map(it => {
-              const qty = Number(it.qty || 0);
+              const qty = Number(it.approved_qty ?? it.qty ?? 0);
               const rate = Number(it.rate || it.purc_rate || 0);
               const disc_percent = Number(it.disc_percent ?? it.discount_percent ?? 0);
               const tax_percent = Number(it.tax_percent ?? it.tax_rate ?? it.gst_rate ?? 0);
@@ -1524,7 +1571,7 @@ const PurchaseCreation = () => {
           columns={3}
           fieldAddon={(field, selected) => field.name === 'godown_id' ? (
             <GodownStockPopover
-              godownId={formData.godown_id}
+              godownId={selected.option?.id || formData.godown_id}
               godownName={selected.label}
               godownType={selected.option?.godown_type || ''}
             />

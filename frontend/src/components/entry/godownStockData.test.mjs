@@ -36,6 +36,19 @@ test('getRowsForGodown returns an empty list for a selected godown with no repor
   assert.deepEqual(getRowsForGodown([report(1, [])], 1), []);
 });
 
+test('getRowsForGodown accepts a godown name when the dropdown value is not its ID', () => {
+  const rows = getRowsForGodown([{
+    godown_id: 2,
+    godown_name: 'PJ',
+    items: [
+      { godown_id: 2, godown_name: 'PJ', item_name: 'Rice', qty: 8 },
+      { godown_id: 1, godown_name: 'Other', item_name: 'Other godown row', qty: 80 }
+    ]
+  }], 'PJ');
+
+  assert.deepEqual(rows.map(row => row.item_name), ['Rice']);
+});
+
 test('getRowsForGodown surfaces API errors and invalid responses', () => {
   assert.throws(() => getRowsForGodown({ success: false, message: 'Report unavailable' }, 1), /Report unavailable/);
   assert.throws(() => getRowsForGodown({ data: null }, 1), /invalid response/);

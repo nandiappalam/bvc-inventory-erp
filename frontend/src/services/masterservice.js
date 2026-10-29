@@ -165,7 +165,9 @@ export const getMasters = async (type, options = {}) => {
           }
 
           if (list !== null) {
-            if (list.length > 0 || !masterCache.has(key)) {
+            // Only cache if we actually got data, or if we already have a cache (to update it)
+            // This prevents caching an empty [] during a failed or partial initial load
+            if (list.length > 0 || (masterCache.has(key) && forceRefresh)) {
               masterCache.set(key, { data: list, timestamp: Date.now() });
             }
             return list.length > 0 ? list : (masterCache.get(key)?.data || []);

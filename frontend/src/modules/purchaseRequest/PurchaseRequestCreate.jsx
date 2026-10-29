@@ -640,19 +640,30 @@ const PurchaseRequestCreate = () => {
 
         <TableContainer component={Paper} elevation={0} sx={{ overflowX: 'auto' }}>
           <Table size="medium" sx={{ minWidth: 1050 }}>
-            <TableHead sx={{ backgroundColor: '#0f172a' }}>
+            <TableHead 
+              sx={{ 
+                backgroundColor: '#1f4fb2 !important',
+                '& .MuiTableCell-head': {
+                  color: '#ffffff !important',
+                  backgroundColor: '#1f4fb2 !important',
+                  fontWeight: 'bold',
+                  fontSize: '13px',
+                  borderBottom: '1px solid rgba(255, 255, 255, 0.2)'
+                }
+              }}
+            >
               <TableRow>
-                <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13.5px', width: '60px', textAlign: 'center', py: 1.8, borderRight: '1px solid #334155', letterSpacing: '0.3px' }}>S.No</TableCell>
-                <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13.5px', minWidth: '240px', py: 1.8, borderRight: '1px solid #334155', letterSpacing: '0.3px' }}>Item Name *</TableCell>
-                <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13.5px', minWidth: '150px', py: 1.8, borderRight: '1px solid #334155', letterSpacing: '0.3px' }}>Weight</TableCell>
-                <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13.5px', minWidth: '180px', py: 1.8, borderRight: '1px solid #334155', letterSpacing: '0.3px' }}>Description / Specs</TableCell>
-                <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13.5px', minWidth: '130px', py: 1.8, borderRight: '1px solid #334155', letterSpacing: '0.3px' }}>Req Qty *</TableCell>
-                <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13.5px', minWidth: '140px', py: 1.8, borderRight: '1px solid #334155', letterSpacing: '0.3px' }}>Curr. Stock (RM)</TableCell>
-                <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13.5px', minWidth: '140px', py: 1.8, borderRight: '1px solid #334155', letterSpacing: '0.3px' }}>Curr. Stock (FG)</TableCell>
-                <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13.5px', minWidth: '130px', py: 1.8, borderRight: '1px solid #334155', letterSpacing: '0.3px' }}>Est. Rate (₹)</TableCell>
-                <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13.5px', minWidth: '140px', py: 1.8, borderRight: '1px solid #334155', letterSpacing: '0.3px' }}>Est. Amount (₹)</TableCell>
-                <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13.5px', minWidth: '140px', py: 1.8, borderRight: '1px solid #334155', letterSpacing: '0.3px' }}>Remarks</TableCell>
-                <TableCell sx={{ color: '#ffffff !important', fontWeight: '800', fontSize: '13.5px', width: '70px', textAlign: 'center', py: 1.8, letterSpacing: '0.3px' }}>Action</TableCell>
+                <TableCell sx={{ textAlign: 'center' }}>S.No</TableCell>
+                <TableCell>Item Name *</TableCell>
+                <TableCell>Weight</TableCell>
+                <TableCell>Description / Specs</TableCell>
+                <TableCell>Req Qty *</TableCell>
+                <TableCell>Curr. Stock (RM)</TableCell>
+                <TableCell>Curr. Stock (FG)</TableCell>
+                <TableCell>Est. Rate (₹)</TableCell>
+                <TableCell>Est. Amount (₹)</TableCell>
+                <TableCell>Remarks</TableCell>
+                <TableCell sx={{ textAlign: 'center' }}>Action</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>

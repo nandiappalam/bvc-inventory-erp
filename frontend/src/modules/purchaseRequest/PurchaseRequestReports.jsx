@@ -365,50 +365,50 @@ const PurchaseRequestReports = () => {
 
           <TableContainer component={Paper} variant="outlined">
             <Table size="small">
-              <TableHead sx={{ backgroundColor: '#1f4fb2' }}>
+              <TableHead sx={{ backgroundColor: '#1f4fb2 !important' }}>
                 <TableRow>
                   {activeTab === 'department' ? (
                     <>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Department</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Total PRs</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Approved</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Pending</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Rejected</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Total Items</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Total Qty</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Total Value (₹)</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold', backgroundColor: '#1f4fb2 !important' }}>Department</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold', backgroundColor: '#1f4fb2 !important' }}>Total PRs</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold', backgroundColor: '#1f4fb2 !important' }}>Approved</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold', backgroundColor: '#1f4fb2 !important' }}>Pending</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold', backgroundColor: '#1f4fb2 !important' }}>Rejected</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold', backgroundColor: '#1f4fb2 !important' }}>Total Items</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold', backgroundColor: '#1f4fb2 !important' }}>Total Qty</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold', backgroundColor: '#1f4fb2 !important' }}>Total Value (₹)</TableCell>
                     </>
                   ) : activeTab === 'item' ? (
                     <>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Item Name</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Item Code</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>PR No</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Req Date</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Department</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Requested Qty</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Approved Qty</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Est. Rate (₹)</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Est. Amount (₹)</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Status</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold', backgroundColor: '#1f4fb2 !important' }}>Item Name</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold', backgroundColor: '#1f4fb2 !important' }}>Item Code</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold', backgroundColor: '#1f4fb2 !important' }}>PR No</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold', backgroundColor: '#1f4fb2 !important' }}>Req Date</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold', backgroundColor: '#1f4fb2 !important' }}>Department</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold', backgroundColor: '#1f4fb2 !important' }}>Requested Qty</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold', backgroundColor: '#1f4fb2 !important' }}>Approved Qty</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold', backgroundColor: '#1f4fb2 !important' }}>Est. Rate (₹)</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold', backgroundColor: '#1f4fb2 !important' }}>Est. Amount (₹)</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold', backgroundColor: '#1f4fb2 !important' }}>Status</TableCell>
                     </>
                   ) : activeTab === 'approval_status' || activeTab === 'priority' ? (
                     <>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Category / Group</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Total Count</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Total Estimated Value (₹)</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold', backgroundColor: '#1f4fb2 !important' }}>Category / Group</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold', backgroundColor: '#1f4fb2 !important' }}>Total Count</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold', backgroundColor: '#1f4fb2 !important' }}>Total Estimated Value (₹)</TableCell>
                     </>
                   ) : (
                     <>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>PR No</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Item Name(s)</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Req Date</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Department</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Requested By</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Priority</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Total Items</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Total Qty</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Est. Amount (₹)</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Status</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold', backgroundColor: '#1f4fb2 !important' }}>PR No</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold', backgroundColor: '#1f4fb2 !important' }}>Item Name(s)</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold', backgroundColor: '#1f4fb2 !important' }}>Req Date</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold', backgroundColor: '#1f4fb2 !important' }}>Department</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold', backgroundColor: '#1f4fb2 !important' }}>Requested By</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold', backgroundColor: '#1f4fb2 !important' }}>Priority</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold', backgroundColor: '#1f4fb2 !important' }}>Total Items</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold', backgroundColor: '#1f4fb2 !important' }}>Total Qty</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold', backgroundColor: '#1f4fb2 !important' }}>Est. Amount (₹)</TableCell>
+                      <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold', backgroundColor: '#1f4fb2 !important' }}>Status</TableCell>
                     </>
                   )}
                 </TableRow>

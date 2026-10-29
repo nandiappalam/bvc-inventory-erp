@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import api from '../../services/api.js';
 import { getMasters, getCachedMasters, safeArray, normalizeMasterKey } from '../../services/masterservice.js';
 import { InlineMasterModal, getCreateLabel, normalizeMasterType } from '../common/InlineMasterModal.jsx';
@@ -456,6 +456,8 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
     return cached && cached.length > 0 ? cached : [];
   });
   const [loading, setLoading] = useState(false);
+  const [masterError, setMasterError] = useState('');
+  const masterRequestId = useRef(0);
 
   const isTextarea = field.type === 'textarea' || field.name === 'address' || field.name === 'remarks';
 
@@ -478,20 +480,28 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
   const fetchMasterData = async (force = false) => {
     const key = normKey || normalizeMasterKey(masterKeyFromTypes) || normalizeMasterKey(field.name);
     if (!key) return;
+    const requestId = ++masterRequestId.current;
     setLoading(true);
+    setMasterError('');
     try {
       const rawResult = await getMasters(key, { forceRefresh: force });
       if (!rawResult) return;
+      if (rawResult.success === false) {
+        throw new Error(rawResult.message || `Unable to load ${key} master data.`);
+      }
       const resultData = safeArray(rawResult.data || rawResult);
-      if (resultData && resultData.length > 0) {
-        setMasterOptions(resultData);
-      } else if (!field.options || field.options.length <= 1) {
-        setMasterOptions(resultData);
+      if (requestId === masterRequestId.current) {
+        setMasterOptions(current => resultData.length > 0
+          ? resultData
+          : ((field.options?.length || 0) > 1 ? field.options : current));
       }
     } catch (err) {
-      console.error(`Error fetching master ${key}:`, err);
+      if (requestId === masterRequestId.current) {
+        setMasterError(err.message || `Unable to load ${key} master data.`);
+        console.error(`Error fetching master ${key}:`, err);
+      }
     } finally {
-      setLoading(false);
+      if (requestId === masterRequestId.current) setLoading(false);
     }
   };
 
@@ -502,6 +512,15 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
       setMasterOptions(field.options);
     }
   }, [field.masterType, field.name, isMasterField]);
+
+  useEffect(() => {
+    const handleCompanyChange = () => fetchMasterData(true);
+    window.addEventListener('erp_company_changed', handleCompanyChange);
+    return () => {
+      masterRequestId.current += 1;
+      window.removeEventListener('erp_company_changed', handleCompanyChange);
+    };
+  }, [normKey, field.masterType, field.name, isMasterField]);
 
   const handleDropdownFocus = () => {
     if ((isMasterField || MASTER_FIELD_TYPES[field.name]) && masterOptions.length === 0 && !loading) {
@@ -587,6 +606,10 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
       return;
     }
     onChange(field.name, value);
+    if (['loadman_name', 'loadman', 'loadman_team'].includes(field.name)) {
+      const selectedLoadman = masterOptions.find(option => getOptionValue(option) === value);
+      onChange('loadman_worker_id', selectedLoadman?.id ? String(selectedLoadman.id) : '');
+    }
     const key = normalizeMasterKey(field.masterType || field.name);
     const isAutofillMaster = 
       key === 'customers' || field.name === 'customer_id' || field.name === 'customer' || field.name === 'customerId' || field.name === 'customerName' ||
@@ -614,6 +637,9 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
       : (newId !== undefined && newId !== null ? String(newId) : createdName);
 
     onChange(field.name, targetVal);
+    if (['loadman_name', 'loadman', 'loadman_team'].includes(field.name)) {
+      onChange('loadman_worker_id', newId !== undefined && newId !== null ? String(newId) : '');
+    }
 
     if (newRecord || createdName) {
       setMasterOptions(prev => {
@@ -656,7 +682,7 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
 
   if (isSelectField || field.masterType || effectiveOptions.length > 0) {
     let rawVal = (data[field.name] !== undefined && data[field.name] !== null) ? String(data[field.name]) : '';
-    if (!rawVal) {
+    if (rawVal === '') {
       if (field.name.includes('_')) {
         const camel = field.name.replace(/_([a-z])/g, (_, g) => g.toUpperCase());
         if (data[camel] !== undefined && data[camel] !== null) rawVal = String(data[camel]);
@@ -665,7 +691,7 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
         if (data[snake] !== undefined && data[snake] !== null) rawVal = String(data[snake]);
       }
     }
-    if (!rawVal) {
+    if (rawVal === '') {
       if (['supplier_id', 'supplierId', 'supplier'].includes(field.name)) {
         rawVal = String(data.supplier_id || data.supplierId || data.supplier || data.supplierName || data.supplier_name || '');
       } else if (['customer_id', 'customerId', 'customer'].includes(field.name)) {
@@ -674,6 +700,18 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
         rawVal = String(data.godown_id || data.godownId || data.godown || data.godownName || data.godown_name || '');
       } else if (['transport_id', 'transportId', 'transporter', 'transport'].includes(field.name)) {
         rawVal = String(data.transporter || data.transport || data.transport_id || data.transportId || '');
+      }
+    }
+    if (
+      !rawVal &&
+      ['loadman_name', 'loadman', 'loadman_team'].includes(field.name) &&
+      data.loadman_worker_id
+    ) {
+      const selectedLoadman = effectiveOptions.find(option =>
+        String(option.id) === String(data.loadman_worker_id)
+      );
+      if (selectedLoadman) {
+        rawVal = getOptionValue(selectedLoadman);
       }
     }
     let selectValue = rawVal;
@@ -740,6 +778,11 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
             </option>
           )}
         </select>
+        {masterError && (
+          <span role="alert" style={{ color: '#b91c1c', fontSize: '11px', gridColumn: '3 / 4' }}>
+            {masterError}
+          </span>
+        )}
         {addon}
         {(isMasterField || field.masterType || MASTER_FIELD_TYPES[field.name]) && (
           <InlineMasterModal
@@ -778,10 +821,10 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
   }
 
   let rawInputValue = data[field.name] !== undefined && data[field.name] !== null ? data[field.name] : '';
-  if (!rawInputValue && field.name.includes('_')) {
+  if ((rawInputValue === '' || rawInputValue === null) && field.name.includes('_')) {
     const camel = field.name.replace(/_([a-z])/g, (_, g) => g.toUpperCase());
     if (data[camel] !== undefined && data[camel] !== null) rawInputValue = data[camel];
-  } else if (!rawInputValue) {
+  } else if (rawInputValue === '' || rawInputValue === null) {
     const snake = field.name.replace(/([A-Z])/g, '_$1').toLowerCase();
     if (data[snake] !== undefined && data[snake] !== null) rawInputValue = data[snake];
   }
@@ -797,7 +840,7 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
       <input
         type={field.type || 'text'}
         name={field.name}
-        value={rawInputValue || ''}
+        value={rawInputValue ?? ''}
         onChange={(e) => onChange(field.name, e.target.value)}
         readOnly={field.readOnly}
         min={field.min}

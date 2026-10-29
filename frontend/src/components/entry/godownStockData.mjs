@@ -8,9 +8,20 @@ export const getRowsForGodown = (response, godownId) => {
     throw new Error('The godown stock report returned an invalid response.');
   }
 
-  const selectedReport = reports.find(report => String(report.godown_id) === String(godownId));
+  const isSameGodown = (left, right) =>
+    left !== undefined &&
+    left !== null &&
+    right !== undefined &&
+    right !== null &&
+    String(left).trim().toLowerCase() === String(right).trim().toLowerCase();
+  const selectedReport = reports.find(report =>
+    isSameGodown(report.godown_id, godownId) || isSameGodown(report.godown_name, godownId)
+  );
+  const selectedId = selectedReport?.godown_id;
   return (selectedReport?.items || [])
-    .filter(item => String(item.godown_id) === String(godownId))
+    .filter(item => selectedId !== undefined && selectedId !== null
+      ? isSameGodown(item.godown_id, selectedId)
+      : isSameGodown(item.godown_name, selectedReport?.godown_name))
     .map(item => ({
       ...item,
       stock_category: getStockCategory(item),

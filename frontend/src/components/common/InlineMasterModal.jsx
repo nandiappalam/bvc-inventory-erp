@@ -98,7 +98,7 @@ export const MASTER_CONFIGS = {
     key: 'workers',
     labelField: 'name',
     fields: [
-      { name: 'name', label: 'Loadman / Worker Name', required: true, fullWidth: true, placeholder: 'e.g. K. Murugan' },
+      { name: 'name', label: 'Loadman / Worker Name', required: true, fullWidth: true, placeholder: 'e.g. ' },
       { name: 'category', label: 'Role Category', required: true, type: 'select', options: ['LOADMAN', 'UNLOAD_WORKER', 'HELPER', 'LABOUR', 'EXTERNAL_MILL'], defaultValue: 'LOADMAN' },
       { name: 'phone', label: 'Mobile Number', required: false, placeholder: 'e.g. 9842112345' },
       { name: 'payment_mode', label: 'Preferred Payment Mode', required: false, type: 'select', options: ['CASH', 'BANK', 'UPI'], defaultValue: 'CASH' },
@@ -111,7 +111,7 @@ export const MASTER_CONFIGS = {
     key: 'loadman',
     labelField: 'name',
     fields: [
-      { name: 'name', label: 'Loadman / Team Name', required: true, fullWidth: true, placeholder: 'e.g. K. Murugan' },
+      { name: 'name', label: 'Loadman / Team Name', required: true, fullWidth: true, placeholder: 'e.g. ' },
       { name: 'category', label: 'Role Category', required: true, type: 'select', options: ['LOADMAN', 'UNLOAD_WORKER', 'HELPER', 'LABOUR'], defaultValue: 'LOADMAN' },
       { name: 'phone', label: 'Mobile Number', required: false, placeholder: 'e.g. 9842112345' },
       { name: 'payment_mode', label: 'Preferred Payment Mode', required: false, type: 'select', options: ['CASH', 'BANK', 'UPI'], defaultValue: 'CASH' },

@@ -199,7 +199,11 @@ export const DynamicMasterDisplay = ({ configKey }) => {
     if (normalizedKey === 'ledger' || tableName === 'ledgermaster' || normalizedKey === 'loadman' || tableName === 'operational_parties') {
       return (
         <button
-          onClick={() => navigate(`/reports/ledger-statement?ledger=${encodeURIComponent(row.name)}&type=${encodeURIComponent(row.ledger_type || 'General')}`)}
+          onClick={() => {
+            const isLoadman = normalizedKey === 'loadman' || tableName === 'operational_parties';
+            const loadmanId = isLoadman ? `&loadman_id=${encodeURIComponent(row.id)}` : '';
+            navigate(`/reports/ledger-statement?ledger=${encodeURIComponent(row.name)}&type=${encodeURIComponent(isLoadman ? 'Loadman' : (row.ledger_type || 'General'))}${loadmanId}`);
+          }}
           className="action-btn statement-btn"
         >
           Statement

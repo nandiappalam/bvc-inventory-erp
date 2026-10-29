@@ -297,15 +297,26 @@ const PurchaseRequestDashboard = () => {
 
               <TableContainer component={Paper} variant="outlined">
                 <Table size="small">
-                  <TableHead sx={{ backgroundColor: '#1f4fb2' }}>
+                  <TableHead 
+                    sx={{ 
+                      backgroundColor: '#1f4fb2 !important',
+                      '& .MuiTableCell-head': {
+                        color: '#ffffff !important',
+                        backgroundColor: '#1f4fb2 !important',
+                        fontWeight: 'bold',
+                        fontSize: '13px',
+                        borderBottom: '1px solid rgba(255, 255, 255, 0.2)'
+                      }
+                    }}
+                  >
                     <TableRow>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>PR No</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Item Name(s)</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Department</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Date</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Priority</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Est Value (₹)</TableCell>
-                      <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Status</TableCell>
+                      <TableCell>PR No</TableCell>
+                      <TableCell>Item Name(s)</TableCell>
+                      <TableCell>Department</TableCell>
+                      <TableCell>Date</TableCell>
+                      <TableCell>Priority</TableCell>
+                      <TableCell>Est Value (₹)</TableCell>
+                      <TableCell>Status</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>

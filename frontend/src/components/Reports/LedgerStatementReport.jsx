@@ -13,6 +13,7 @@ const LedgerStatementReport = () => {
   const [ledgers, setLedgers] = useState([])
   const [selectedLedger, setSelectedLedger] = useState('')
   const [selectedType, setSelectedType] = useState('')
+  const [selectedLedgerId, setSelectedLedgerId] = useState('')
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [reportData, setReportData] = useState(null)
@@ -37,6 +38,7 @@ const LedgerStatementReport = () => {
     const typeParam = params.get('type')
     if (ledgerParam) {
       setSelectedLedger(ledgerParam)
+      setSelectedLedgerId(params.get('loadman_id') || params.get('ledger_id') || params.get('id') || '')
       if (typeParam) {
         setSelectedType(typeParam)
       }
@@ -47,11 +49,12 @@ const LedgerStatementReport = () => {
   useEffect(() => {
     const fetchLedgers = async () => {
       try {
-        const [suppliersRes, customersRes, papadRes, flourRes, lmRes] = await Promise.all([
+        const [suppliersRes, customersRes, papadRes, flourRes, opRes, lmRes] = await Promise.all([
           api.getMasters('suppliers'),
           api.getMasters('customers'),
           api.getMasters('papad_companies'),
           api.getMasters('flour_mills'),
+          api.getMasters('operational_parties'),
           api.get('/masters/all/ledgermaster').catch(() => null)
         ])
         
@@ -59,6 +62,7 @@ const LedgerStatementReport = () => {
         const customers = (customersRes?.success && Array.isArray(customersRes.data)) ? customersRes.data : []
         const papads = (papadRes?.success && Array.isArray(papadRes.data)) ? papadRes.data : []
         const flourMills = (flourRes?.success && Array.isArray(flourRes.data)) ? flourRes.data : []
+        const ops = (opRes?.success && Array.isArray(opRes.data)) ? opRes.data : []
         const generalLedgers = (lmRes?.data && Array.isArray(lmRes.data)) ? lmRes.data : (Array.isArray(lmRes) ? lmRes : [])
         
         const combined = []
@@ -99,12 +103,23 @@ const LedgerStatementReport = () => {
           }
         })
 
+        ops.forEach(o => {
+          const name = o.name
+          if (name) {
+            const key = `${name}_Loadman`
+            if (!seen.has(key)) {
+              seen.add(key)
+              combined.push({ id: o.id, name, type: 'Loadman' })
+            }
+          }
+        })
+
         generalLedgers.forEach(l => {
           const name = l.name
           const type = l.ledger_type || 'General'
           if (name) {
             const key = `${name}_${type}`
-            if (!seen.has(key) && !seen.has(`${name}_Supplier`) && !seen.has(`${name}_Customer`)) {
+            if (!seen.has(key) && !seen.has(`${name}_Supplier`) && !seen.has(`${name}_Customer`) && !seen.has(`${name}_Loadman`)) {
               seen.add(key)
               combined.push({ id: l.id, name, type })
             }
@@ -134,6 +149,9 @@ const LedgerStatementReport = () => {
       if (fromDate) params.from_date = fromDate
       if (toDate) params.to_date = toDate
       if (selectedType) params.type = selectedType
+      if (['loadman', 'loadmen'].includes(selectedType.toLowerCase()) && selectedLedgerId) {
+        params.loadman_id = selectedLedgerId
+      }
       
       const result = await api.get('/reports/ledger/' + encodeURIComponent(selectedLedger), { params })
       const data = (result && result.data && typeof result.data === 'object' && result.data.transactions) 
@@ -157,7 +175,11 @@ const LedgerStatementReport = () => {
     if (selectedLedger) {
       fetchReport()
     }
-  }, [selectedLedger, selectedType, fromDate, toDate])
+  }, [selectedLedger, selectedType, selectedLedgerId, fromDate, toDate])
+
+  const selectedLedgerOption = selectedLedger
+    ? JSON.stringify([selectedLedger, selectedType, selectedLedgerId])
+    : ''
 
   const handlePrint = () => {
     const rowsHtml = safeTransactions.map((row, idx) => `
@@ -229,22 +251,27 @@ const LedgerStatementReport = () => {
             <label>Select Ledger:</label>
             <select
               className="uniform-input"
-              value={selectedLedger ? `${selectedLedger}|${selectedType}` : ''}
+              value={selectedLedgerOption}
               onChange={(e) => {
                 const val = e.target.value
                 if (val) {
-                  const [name, type] = val.split('|')
+                  const [name, type, id] = JSON.parse(val)
                   setSelectedLedger(name)
                   setSelectedType(type)
+                  setSelectedLedgerId(id || '')
                 } else {
                   setSelectedLedger('')
                   setSelectedType('')
+                  setSelectedLedgerId('')
                 }
               }}
             >
               <option value="">Select Ledger</option>
               {ledgers.map((ledger, idx) => (
-                <option key={`${ledger.id || 'ledger'}-${idx}`} value={`${ledger.name}|${ledger.type}`}>
+                <option
+                  key={`${ledger.id || 'ledger'}-${idx}`}
+                  value={JSON.stringify([ledger.name, ledger.type, String(ledger.id || '')])}
+                >
                   {ledger.name} ({ledger.type})
                 </option>
               ))}

@@ -161,6 +161,24 @@ async function hasColumn(tableName, columnName) {
   }
 }
 
+async function ensurePurchaseLoadmanColumns(companyId) {
+  const cId = parseInt(companyId, 10) || 1;
+  const columns = [
+    'ALTER TABLE purchases ADD COLUMN loadman_name TEXT',
+    'ALTER TABLE purchases ADD COLUMN loadman_worker_id INTEGER',
+    'ALTER TABLE purchases ADD COLUMN loadman_qty_kg REAL DEFAULT 0',
+    'ALTER TABLE purchases ADD COLUMN loadman_rate_per_kg REAL DEFAULT 0.50',
+    'ALTER TABLE purchases ADD COLUMN loadman_charges REAL DEFAULT 0'
+  ];
+  for (const sql of columns) {
+    try {
+      await db.run(sql, [], cId);
+    } catch (error) {
+      if (!/already exists|duplicate column/i.test(error.message || '')) throw error;
+    }
+  }
+}
+
 // ============================================================
 // STOCK STATUS REPORT - Product-wise summary
 // GET /api/reports/stock-status?item_id=X&from_date=Y&to_date=Z
@@ -1934,7 +1952,14 @@ router.get('/profit-loss', async (req, res) => {
 router.get('/ledger/:ledgerName', async (req, res) => {
   try {
     const rawLedgerName = decodeURIComponent(req.params.ledgerName || '')
-    const { from_date, to_date, type, ledger_id: queryLedgerId, id: queryId } = req.query
+    const {
+      from_date,
+      to_date,
+      type,
+      ledger_id: queryLedgerId,
+      id: queryId,
+      loadman_id: queryLoadmanId
+    } = req.query
     
     // Detect type suffix like " (Supplier)", " (Customer)", " (Papad Company)", etc.
     let detectedType = type || null
@@ -2122,25 +2147,73 @@ router.get('/ledger/:ledgerName', async (req, res) => {
 
     // 6. Look in operational_parties (Workers, Loadmen, Drivers, Transporters, etc.)
     let operationalPartyIds = new Set()
+    const loadmanLegacyNames = new Set()
+    const loadmanDiagnostics = []
+    const isLoadmanLedger = ['loadman', 'loadmen'].includes(String(detectedType || '').toLowerCase())
+    const activeCompanyId = req.companyId || parseInt(req.headers['x-company-id'], 10) || 1;
     try {
       const { ensureOperationalTables } = require('../services/operationalChargeEngine');
-      await ensureOperationalTables(1);
+      await ensureOperationalTables(activeCompanyId);
     } catch (_) {}
 
-    try {
-      const opQuery = await db.query(
-        `SELECT id, name, party_code FROM operational_parties 
-         WHERE id = ? OR name = ? OR TRIM(name) = ? OR LOWER(TRIM(name)) = LOWER(?) 
-            OR LOWER(TRIM(name)) = LOWER(?) OR party_code = ?`,
-        [parseInt(cleanName) || -1, cleanName, cleanName, cleanName, rawLedgerName, cleanName]
-      )
-      if (opQuery.rows && opQuery.rows.length > 0) {
-        opQuery.rows.forEach(r => {
-          if (r.id) operationalPartyIds.add(Number(r.id))
-          if (r.name) exactLedgerNames.add(r.name.trim().toLowerCase())
-        })
+    if (isLoadmanLedger) {
+      try {
+        const categoryCondition = `(UPPER(COALESCE(category, '')) LIKE '%LOADMAN%' OR UPPER(COALESCE(category, '')) LIKE '%LOADMEN%' OR UPPER(COALESCE(party_category, '')) LIKE '%LOADMAN%' OR UPPER(COALESCE(party_category, '')) LIKE '%LOADMEN%')`;
+        let opQuery;
+        if (queryLoadmanId && /^\d+$/.test(String(queryLoadmanId))) {
+          opQuery = await db.query(
+            `SELECT id, name FROM operational_parties WHERE id = ?`,
+            [Number(queryLoadmanId)]
+          );
+        }
+        if (!opQuery?.rows?.length) {
+          opQuery = await db.query(
+            `SELECT id, name FROM operational_parties WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) AND ${categoryCondition}`,
+            [cleanName]
+          );
+        }
+
+        if (opQuery.rows?.length === 1) {
+          const party = opQuery.rows[0];
+          operationalPartyIds.add(Number(party.id));
+          officialName = party.name || officialName;
+          exactLedgerNames.add(String(party.name || '').trim().toLowerCase());
+          const nameCount = await db.query(
+            `SELECT COUNT(*) AS count FROM operational_parties
+             WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) AND ${categoryCondition}`,
+            [party.name]
+          );
+          if (Number(nameCount.rows?.[0]?.count || 0) === 1) {
+            loadmanLegacyNames.add(String(party.name || '').trim().toLowerCase());
+          } else {
+            loadmanDiagnostics.push(
+              'Multiple loadman masters use this name. Name-only historical purchases were excluded; select a specific loadman master record.'
+            );
+          }
+        } else if (opQuery.rows?.length > 1) {
+          loadmanDiagnostics.push(
+            'Multiple loadman masters use this name. Name-only historical purchases were excluded; select a specific loadman master record.'
+          );
+        }
+      } catch (error) {
+        console.warn('Error resolving loadman master for ledger statement:', error.message);
       }
-    } catch (e) {}
+    } else {
+      try {
+        const opQuery = await db.query(
+          `SELECT id, name, party_code FROM operational_parties
+           WHERE id = ? OR name = ? OR TRIM(name) = ? OR LOWER(TRIM(name)) = LOWER(?)
+              OR LOWER(TRIM(name)) = LOWER(?) OR party_code = ?`,
+          [parseInt(cleanName) || -1, cleanName, cleanName, cleanName, rawLedgerName, cleanName]
+        )
+        if (opQuery.rows && opQuery.rows.length > 0) {
+          opQuery.rows.forEach(r => {
+            if (r.id) operationalPartyIds.add(Number(r.id))
+            if (r.name) exactLedgerNames.add(r.name.trim().toLowerCase())
+          })
+        }
+      } catch (e) {}
+    }
 
     const lmIdList = Array.from(ledgerMasterIds)
     const nameList = Array.from(exactLedgerNames).filter(Boolean)
@@ -2148,6 +2221,8 @@ router.get('/ledger/:ledgerName', async (req, res) => {
     const custIdList = Array.from(customerIds)
     const papadIdList = Array.from(papadCompanyIds)
     const opPartyIdList = Array.from(operationalPartyIds)
+    const loadmanLegacyNameList = Array.from(loadmanLegacyNames).filter(Boolean)
+    const operationalNameList = isLoadmanLedger ? loadmanLegacyNameList : nameList
 
     if (lmIdList.length === 0 && nameList.length === 0) {
       nameList.push(cleanName.toLowerCase())
@@ -2284,10 +2359,11 @@ router.get('/ledger/:ledgerName', async (req, res) => {
     // -------------------------------------------------------------
     // SOURCE 8: operational_payments & operational_charges
     // -------------------------------------------------------------
-    if (opPartyIdList.length > 0 || (nameList.length > 0)) {
+    if (opPartyIdList.length > 0 || operationalNameList.length > 0) {
+      const companyPrefix = activeCompanyId > 1 ? `c${activeCompanyId}_` : '';
       try {
         const { ensureOperationalTables } = require('../services/operationalChargeEngine');
-        await ensureOperationalTables(1);
+        await ensureOperationalTables(activeCompanyId);
       } catch (_) {}
 
       try {
@@ -2297,41 +2373,221 @@ router.get('/ledger/:ledgerName', async (req, res) => {
           opConds.push(`party_id IN (${opPartyIdList.map(() => '?').join(', ')})`)
           opParams.push(...opPartyIdList)
         }
-        if (nameList.length > 0) {
-          opConds.push(`LOWER(TRIM(party_name)) IN (${nameList.map(() => '?').join(', ')})`)
-          opParams.push(...nameList)
+        if (operationalNameList.length > 0) {
+          opConds.push(`LOWER(TRIM(party_name)) IN (${operationalNameList.map(() => '?').join(', ')})`)
+          opParams.push(...operationalNameList)
         }
 
         if (opConds.length > 0) {
-          const payRes = await db.query(`
-            SELECT id, payment_no, payment_date, party_name, paid_amount, reference_no, 
-                   COALESCE(notes, remarks, '') as notes 
-            FROM operational_payments 
-            WHERE (${opConds.join(' OR ')})
-          `, opParams)
+          try {
+            const payRes = await db.query(`
+              SELECT id, payment_no, payment_date, party_name, paid_amount, reference_no,
+                     COALESCE(notes, remarks, '') as notes
+              FROM ${companyPrefix}operational_payments
+              WHERE (${opConds.join(' OR ')})
+            `, opParams)
 
-          for (const row of payRes.rows || []) {
-            const vNo = row.payment_no || `OPP-${row.id}`
-            const amt = parseFloat(row.paid_amount || 0)
-            const key = `${vNo}_${amt}_0`
+            for (const row of payRes.rows || []) {
+              const vNo = row.payment_no || `OPP-${row.id}`
+              const amt = parseFloat(row.paid_amount || 0)
+              const key = `${vNo}_${amt}_0`
 
-            if (!seenVoucherNos.has(vNo) && !seenKeys.has(key)) {
-              seenKeys.add(key)
-              seenVoucherNos.add(vNo)
-              allTransactions.push({
-                id: 700000 + row.id,
-                date: row.payment_date,
-                voucher_type: 'Payment',
-                voucher_no: vNo,
-                particulars: `Operational Payment to ${row.party_name || cleanName}${row.reference_no ? ' - Ref: ' + row.reference_no : ''}`,
-                debit: amt,
-                credit: 0,
-                ledger_id: row.party_id,
-                ledger_name: officialName
-              })
+              if (!seenVoucherNos.has(vNo) && !seenKeys.has(key)) {
+                seenKeys.add(key)
+                seenVoucherNos.add(vNo)
+                allTransactions.push({
+                  id: 700000 + row.id,
+                  date: row.payment_date,
+                  voucher_type: 'Payment',
+                  voucher_no: vNo,
+                  particulars: `Operational Payment to ${row.party_name || cleanName}${row.reference_no ? ' - Ref: ' + row.reference_no : ''}`,
+                  debit: amt,
+                  credit: 0,
+                  ledger_id: row.party_id,
+                  ledger_name: officialName
+                })
+              }
+            }
+          } catch (error) {
+            console.warn('Error fetching operational payments in ledger statement:', error.message)
+            if (!isLoadmanLedger) throw error
+          }
+        }
+
+          // -------------------------------------------------------------
+          // SOURCE 9: purchase activities assigned to a loadman
+          // These are informational activities, not ledger postings. They
+          // must not change debit, credit, or running-balance calculations.
+          // -------------------------------------------------------------
+          if (isLoadmanLedger && (opPartyIdList.length > 0 || loadmanLegacyNameList.length > 0)) {
+            try {
+              await ensurePurchaseLoadmanColumns(activeCompanyId);
+
+              const purchaseConditions = [];
+              const purchaseParams = [];
+              if (opPartyIdList.length > 0) {
+                purchaseConditions.push(`loadman_worker_id IN (${opPartyIdList.map(() => '?').join(', ')})`);
+                purchaseParams.push(...opPartyIdList);
+              }
+              if (loadmanLegacyNameList.length > 0) {
+                purchaseConditions.push(`LOWER(TRIM(loadman_name)) IN (${loadmanLegacyNameList.map(() => '?').join(', ')})`);
+                purchaseParams.push(...loadmanLegacyNameList);
+              }
+
+              const purchaseRes = await db.query(`
+                SELECT id, s_no, inv_no, date, supplier, loadman_worker_id, loadman_name,
+                       loadman_qty_kg, loadman_rate_per_kg, loadman_charges,
+                       total_qty, total_weight
+                FROM purchases
+                WHERE (${purchaseConditions.join(' OR ')})
+              `, purchaseParams);
+              const purchases = purchaseRes.rows || [];
+              const purchaseIds = purchases.map(purchase => purchase.id).filter(id => id !== null && id !== undefined);
+              const itemsByPurchase = new Map();
+
+              if (purchaseIds.length > 0) {
+                const itemRes = await db.query(`
+                  SELECT purchase_id, item_name, qty, total_weight
+                  FROM purchase_items
+                  WHERE purchase_id IN (${purchaseIds.map(() => '?').join(', ')})
+                  ORDER BY id ASC
+                `, purchaseIds);
+                for (const item of itemRes.rows || []) {
+                  const purchaseItems = itemsByPurchase.get(String(item.purchase_id)) || [];
+                  purchaseItems.push(item);
+                  itemsByPurchase.set(String(item.purchase_id), purchaseItems);
+                }
+              }
+
+              // Older Cold Storage inward records saved the loadman on the CSI voucher,
+              // but not on the related purchases row. Include those linked purchases.
+              if (isLoadmanLedger && (opPartyIdList.length > 0 || loadmanLegacyNameList.length > 0)) {
+                try {
+                  const conditions = [];
+                  const params = [];
+                  if (opPartyIdList.length > 0) {
+                    conditions.push(`csv.loadman_worker_id IN (${opPartyIdList.map(() => '?').join(', ')})`);
+                    params.push(...opPartyIdList);
+                  }
+                  if (loadmanLegacyNameList.length > 0) {
+                    conditions.push(`LOWER(TRIM(csv.loadman_name)) IN (${loadmanLegacyNameList.map(() => '?').join(', ')})`);
+                    params.push(...loadmanLegacyNameList);
+                  }
+
+                  const csiRes = await db.query(`
+                    SELECT csv.id, csv.voucher_no, csv.voucher_date, csv.purchase_id,
+                           csv.purchase_inv_no, csv.loadman_worker_id, csv.loadman_name,
+                           csv.loadman_qty_kg, csv.loadman_charges, csv.handling_amount,
+                           p.s_no, p.inv_no, p.date AS purchase_date, p.supplier,
+                           p.total_qty, p.total_weight
+                    FROM cold_storage_vouchers csv
+                    LEFT JOIN purchases p ON p.id = csv.purchase_id
+                    WHERE csv.voucher_type = 'IN' AND (${conditions.join(' OR ')})
+                  `, params);
+                  const csiRows = csiRes.rows || [];
+                  const purchaseIds = [...new Set(csiRows.map(row => row.purchase_id).filter(Boolean))];
+                  const itemsByPurchase = new Map();
+
+                  if (purchaseIds.length > 0) {
+                    const itemRes = await db.query(`
+                      SELECT purchase_id, item_name, qty, total_weight
+                      FROM purchase_items
+                      WHERE purchase_id IN (${purchaseIds.map(() => '?').join(', ')})
+                      ORDER BY id ASC
+                    `, purchaseIds);
+                    for (const item of itemRes.rows || []) {
+                      const purchaseItems = itemsByPurchase.get(String(item.purchase_id)) || [];
+                      purchaseItems.push(item);
+                      itemsByPurchase.set(String(item.purchase_id), purchaseItems);
+                    }
+                  }
+
+                  for (const row of csiRows) {
+                    const purchaseKey = row.purchase_id ? `PURCHASE-ACTIVITY-${row.purchase_id}` : '';
+                    if (purchaseKey && seenKeys.has(purchaseKey)) continue;
+                    if (purchaseKey) seenKeys.add(purchaseKey);
+                    const items = itemsByPurchase.get(String(row.purchase_id)) || [];
+                    const itemDetails = items.map(item =>
+                      `${item.item_name || 'Item'}: qty ${Number(item.qty || 0)}${Number(item.total_weight || 0) ? `, ${Number(item.total_weight)} kg` : ''}`
+                    );
+                    const quantity = Number(row.loadman_qty_kg || row.total_weight || 0);
+                    const charge = Number(row.loadman_charges ?? row.handling_amount ?? 0);
+                    const particulars = [
+                      `Loadman: ${row.loadman_name || officialName}`,
+                      `Cold Storage inward: ${row.voucher_no || '-'}`,
+                      row.purchase_inv_no || row.inv_no ? `Purchase: ${row.inv_no || row.purchase_inv_no}` : '',
+                      row.supplier ? `Supplier: ${row.supplier}` : '',
+                      itemDetails.length > 0 ? itemDetails.join('; ') : `Qty: ${Number(row.total_qty || 0)}, Weight: ${Number(row.total_weight || 0)} kg`,
+                      `Loadman quantity: ${quantity} kg`,
+                      charge > 0 ? `Recorded loadman charge: ₹${charge.toFixed(2)}` : ''
+                    ].filter(Boolean).join(' | ');
+
+                    allTransactions.push({
+                      id: 910000 + Number(row.id || 0),
+                      date: row.purchase_date || row.voucher_date,
+                      voucher_type: 'Purchase Activity (CSI)',
+                      voucher_no: row.inv_no || row.purchase_inv_no || row.voucher_no || `CSI-${row.id}`,
+                      particulars,
+                      debit: 0,
+                      credit: 0,
+                      ledger_id: row.loadman_worker_id || null,
+                      ledger_name: row.loadman_name || officialName,
+                      quantity,
+                      weight: Number(row.total_weight || 0),
+                      loadman_charges: charge
+                    });
+                  }
+                } catch (error) {
+                  console.error('Error fetching linked loadman Cold Storage inward activities:', error);
+                  throw error;
+                }
+              }
+
+              for (const purchase of purchases) {
+                const key = `PURCHASE-ACTIVITY-${purchase.id}`;
+                if (seenKeys.has(key)) continue;
+                seenKeys.add(key);
+
+                const items = itemsByPurchase.get(String(purchase.id)) || [];
+                const itemDetails = items.map(item => {
+                  const qty = Number(item.qty || 0);
+                  const weight = Number(item.total_weight || 0);
+                  return `${item.item_name || 'Item'}: qty ${qty}${weight ? `, ${weight} kg` : ''}`;
+                });
+                const qty = Number(purchase.loadman_qty_kg || purchase.total_weight || 0);
+                const loadmanName = purchase.loadman_name || officialName;
+                const recordedCharges = Number(purchase.loadman_charges || 0);
+                const particulars = [
+                  `Loadman: ${loadmanName}`,
+                  purchase.supplier ? `Supplier: ${purchase.supplier}` : '',
+                  itemDetails.length > 0 ? itemDetails.join('; ') : `Qty: ${Number(purchase.total_qty || 0)}, Weight: ${Number(purchase.total_weight || 0)} kg`,
+                  `Loadman quantity: ${qty} kg`,
+                  recordedCharges > 0 ? `Recorded loadman charge: ₹${recordedCharges.toFixed(2)}` : ''
+                ].filter(Boolean).join(' | ');
+                const voucherNo = purchase.inv_no || `PUR-${purchase.s_no || purchase.id}`;
+
+                allTransactions.push({
+                  id: 900000 + Number(purchase.id || 0),
+                  date: purchase.date,
+                  voucher_type: 'Purchase Activity',
+                  voucher_no: voucherNo,
+                  particulars,
+                  debit: 0,
+                  credit: 0,
+                  ledger_id: purchase.loadman_worker_id || null,
+                  ledger_name: loadmanName,
+                  quantity: qty,
+                  weight: Number(purchase.total_weight || 0),
+                  loadman_charges: recordedCharges
+                });
+              }
+            } catch (error) {
+              console.error('Error fetching loadman purchase activities:', error);
+              throw error;
             }
           }
 
+        if (opConds.length > 0) {
           const chgRes = await db.query(`
             SELECT id, charge_no, 
                    COALESCE(date, charge_date, '') as date, 
@@ -2339,7 +2595,7 @@ router.get('/ledger/:ledgerName', async (req, res) => {
                    COALESCE(final_amount, total_amount, amount, 0) as final_amount, 
                    operation_type, 
                    COALESCE(notes, remarks, '') as notes 
-            FROM operational_charges 
+            FROM ${companyPrefix}operational_charges
             WHERE (${opConds.join(' OR ')})
           `, opParams)
 
@@ -2367,6 +2623,7 @@ router.get('/ledger/:ledgerName', async (req, res) => {
         }
       } catch (e) {
         console.warn('Error checking operational payments/charges in ledger statement:', e.message)
+        if (isLoadmanLedger) throw e
       }
     }
 
@@ -2424,11 +2681,13 @@ router.get('/ledger/:ledgerName', async (req, res) => {
       openingBalance: Number(periodOpeningBalance.toFixed(2)),
       transactions: finalTransactions,
       closingBalance: Number(runningBalance.toFixed(2)),
+      diagnostics: loadmanDiagnostics,
       data: {
         ledgerName: officialName,
         openingBalance: Number(periodOpeningBalance.toFixed(2)),
         transactions: finalTransactions,
-        closingBalance: Number(runningBalance.toFixed(2))
+        closingBalance: Number(runningBalance.toFixed(2)),
+        diagnostics: loadmanDiagnostics
       }
     }
 

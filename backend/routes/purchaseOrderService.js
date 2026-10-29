@@ -376,27 +376,42 @@ exports.getPurchaseOrderById = async (id) => {
         const idStr = String(id || '').trim();
         const idNum = /^\d+$/.test(idStr) ? parseInt(idStr, 10) : null;
 
-        const purchaseOrderResult = await db.query(`
-            SELECT po.*, COALESCE(s.name, po.supplier_name) as supplier_name, g.godown_name
-            FROM purchase_orders po
-            LEFT JOIN supplier_master s ON CAST(po.supplier_id AS TEXT) = CAST(s.id AS TEXT)
-            LEFT JOIN godown_master g ON CAST(po.godown_id AS TEXT) = CAST(g.id AS TEXT)
-            WHERE ${idNum !== null ? 'po.id = ? OR po.s_no = ? OR ' : ''}po.inv_no = ? OR LOWER(po.inv_no) = LOWER(?)
-        `, idNum !== null ? [idNum, idNum, idStr, idStr] : [idStr, idStr]);
+        let purchaseOrderResult = { rows: [] };
+        if (idNum !== null) {
+            purchaseOrderResult = await db.query(`
+                SELECT po.*, COALESCE(s.name, po.supplier_name) as supplier_name, g.godown_name
+                FROM purchase_orders po
+                LEFT JOIN supplier_master s ON CAST(po.supplier_id AS TEXT) = CAST(s.id AS TEXT)
+                LEFT JOIN godown_master g ON CAST(po.godown_id AS TEXT) = CAST(g.id AS TEXT)
+                WHERE po.id = ?
+                LIMIT 1
+            `, [idNum]);
+        }
+
+        if (!purchaseOrderResult.rows || purchaseOrderResult.rows.length === 0) {
+            purchaseOrderResult = await db.query(`
+                SELECT po.*, COALESCE(s.name, po.supplier_name) as supplier_name, g.godown_name
+                FROM purchase_orders po
+                LEFT JOIN supplier_master s ON CAST(po.supplier_id AS TEXT) = CAST(s.id AS TEXT)
+                LEFT JOIN godown_master g ON CAST(po.godown_id AS TEXT) = CAST(g.id AS TEXT)
+                WHERE po.inv_no = ? OR LOWER(po.inv_no) = LOWER(?)
+                ORDER BY CASE WHEN po.inv_no = ? THEN 0 ELSE 1 END
+                LIMIT 1
+            `, [idStr, idStr, idStr]);
+        }
         if (!purchaseOrderResult.rows || purchaseOrderResult.rows.length === 0) return null;
 
         const purchaseOrder = purchaseOrderResult.rows[0];
         const actualPoId = purchaseOrder.id;
-        const sNo = purchaseOrder.s_no;
         let items = [];
         try {
             const itemsResult = await db.query(`
                 SELECT poi.*, COALESCE(i.item_name, poi.item_name) as item_name
                 FROM purchase_order_items poi
                 LEFT JOIN item_master i ON CAST(poi.item_id AS TEXT) = CAST(i.id AS TEXT)
-                WHERE poi.purchase_order_id = ? OR poi.purchase_order_id = ?
+                WHERE poi.purchase_order_id = ?
                 ORDER BY poi.id ASC
-            `, [actualPoId, sNo]);
+            `, [actualPoId]);
             items = itemsResult.rows || [];
         } catch (e) {}
 
@@ -404,9 +419,9 @@ exports.getPurchaseOrderById = async (id) => {
         try {
             const dedResult = await db.query(`
                 SELECT * FROM purchase_order_deductions 
-                WHERE purchase_order_id = ? OR purchase_order_id = ?
+                WHERE purchase_order_id = ?
                 ORDER BY id ASC
-            `, [actualPoId, sNo]);
+            `, [actualPoId]);
             deductions = dedResult.rows || [];
         } catch (e) {}
 

@@ -289,7 +289,9 @@ const PurchaseOrderList = () => {
             </button>
             <button
               type="button"
-              onClick={() => navigate(`/entry/purchase-create?sourcePurchaseOrderId=${row.id}`)}
+              onClick={() => navigate(`/entry/purchase-create?sourcePurchaseOrderId=${row.id}`, {
+                state: { sourcePurchaseOrder: row }
+              })}
               title="Convert to Inward Purchase"
               style={{
                 padding: '4px 8px',
