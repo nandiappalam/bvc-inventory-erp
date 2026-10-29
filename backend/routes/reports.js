@@ -2151,6 +2151,9 @@ router.get('/ledger/:ledgerName', async (req, res) => {
     const loadmanDiagnostics = []
     const isLoadmanLedger = ['loadman', 'loadmen'].includes(String(detectedType || '').toLowerCase())
     const activeCompanyId = req.companyId || parseInt(req.headers['x-company-id'], 10) || 1;
+    const operationalPartyTable = activeCompanyId > 1
+      ? `c${activeCompanyId}_operational_parties`
+      : 'operational_parties';
     try {
       const { ensureOperationalTables } = require('../services/operationalChargeEngine');
       await ensureOperationalTables(activeCompanyId);
@@ -2158,17 +2161,17 @@ router.get('/ledger/:ledgerName', async (req, res) => {
 
     if (isLoadmanLedger) {
       try {
-        const categoryCondition = `(UPPER(COALESCE(category, '')) LIKE '%LOADMAN%' OR UPPER(COALESCE(category, '')) LIKE '%LOADMEN%' OR UPPER(COALESCE(party_category, '')) LIKE '%LOADMAN%' OR UPPER(COALESCE(party_category, '')) LIKE '%LOADMEN%')`;
         let opQuery;
         if (queryLoadmanId && /^\d+$/.test(String(queryLoadmanId))) {
+          operationalPartyIds.add(Number(queryLoadmanId));
           opQuery = await db.query(
-            `SELECT id, name FROM operational_parties WHERE id = ?`,
+            `SELECT id, name FROM ${operationalPartyTable} WHERE id = ?`,
             [Number(queryLoadmanId)]
           );
         }
         if (!opQuery?.rows?.length) {
           opQuery = await db.query(
-            `SELECT id, name FROM operational_parties WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) AND ${categoryCondition}`,
+            `SELECT id, name FROM ${operationalPartyTable} WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))`,
             [cleanName]
           );
         }
@@ -2179,8 +2182,8 @@ router.get('/ledger/:ledgerName', async (req, res) => {
           officialName = party.name || officialName;
           exactLedgerNames.add(String(party.name || '').trim().toLowerCase());
           const nameCount = await db.query(
-            `SELECT COUNT(*) AS count FROM operational_parties
-             WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) AND ${categoryCondition}`,
+            `SELECT COUNT(*) AS count FROM ${operationalPartyTable}
+             WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))`,
             [party.name]
           );
           if (Number(nameCount.rows?.[0]?.count || 0) === 1) {
@@ -2201,7 +2204,7 @@ router.get('/ledger/:ledgerName', async (req, res) => {
     } else {
       try {
         const opQuery = await db.query(
-          `SELECT id, name, party_code FROM operational_parties
+          `SELECT id, name, party_code FROM ${operationalPartyTable}
            WHERE id = ? OR name = ? OR TRIM(name) = ? OR LOWER(TRIM(name)) = LOWER(?)
               OR LOWER(TRIM(name)) = LOWER(?) OR party_code = ?`,
           [parseInt(cleanName) || -1, cleanName, cleanName, cleanName, rawLedgerName, cleanName]

@@ -115,13 +115,18 @@ const ensurePurchasesColumns = async (companyId = 1) => {
   }
 };
 
-const resolvePurchaseLoadman = async (nameValue, idValue) => {
+const resolvePurchaseLoadman = async (nameValue, idValue, companyId = 1) => {
   let name = String(nameValue || '').trim();
   let id = Number(idValue) || null;
+  const activeCompanyId = parseInt(companyId, 10) || 1;
+  const partyTable = activeCompanyId > 1 ? `c${activeCompanyId}_operational_parties` : 'operational_parties';
+
+  const { ensureOperationalTables } = require('../services/operationalChargeEngine');
+  await ensureOperationalTables(activeCompanyId);
 
   if (id) {
     const result = await db.query(
-      `SELECT id, name FROM operational_parties WHERE id = ? LIMIT 1`,
+      `SELECT id, name FROM ${partyTable} WHERE id = ? LIMIT 1`,
       [id]
     );
     const party = result.rows?.[0];
@@ -135,7 +140,7 @@ const resolvePurchaseLoadman = async (nameValue, idValue) => {
 
   if (!id && name) {
     const result = await db.query(
-      `SELECT id, name FROM operational_parties
+      `SELECT id, name FROM ${partyTable}
        WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))
        ORDER BY id ASC LIMIT 2`,
       [name]
@@ -347,9 +352,12 @@ router.get('/:id', async (req, res) => {
 
     if (!purchaseData.loadman_name || !purchaseData.loadman_worker_id) {
       try {
+        const companyPrefix = activeCompanyId > 1 ? `c${activeCompanyId}_` : '';
+        const { ensureOperationalTables } = require('../services/operationalChargeEngine');
+        await ensureOperationalTables(activeCompanyId);
         if (purchaseData.loadman_worker_id) {
           const workerRes = await db.query(
-            `SELECT id, name FROM operational_parties WHERE id = ? LIMIT 1`,
+            `SELECT id, name FROM ${companyPrefix}operational_parties WHERE id = ? LIMIT 1`,
             [purchaseData.loadman_worker_id]
           );
           const worker = workerRes.rows?.[0];
@@ -359,7 +367,7 @@ router.get('/:id', async (req, res) => {
           }
         } else if (purchaseData.loadman_name) {
           const workerRes = await db.query(
-            `SELECT id, name FROM operational_parties
+            `SELECT id, name FROM ${companyPrefix}operational_parties
              WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))
              ORDER BY id ASC LIMIT 2`,
             [purchaseData.loadman_name]
@@ -525,7 +533,8 @@ router.post('/', async (req, res) => {
     const driverNameVal = formData.driver_name || formData.driver || '';
     const loadmanDetails = await resolvePurchaseLoadman(
       formData.loadman_name || formData.worker_name,
-      formData.loadman_worker_id
+      formData.loadman_worker_id,
+      activeCompanyId
     );
     const loadmanName = loadmanDetails.name;
     const loadmanWorkerId = loadmanDetails.id;
@@ -1078,7 +1087,8 @@ router.put('/:id', async (req, res) => {
     const driverNameVal = formData.driver_name || formData.driver || '';
     const loadmanDetails = await resolvePurchaseLoadman(
       formData.loadman_name || formData.worker_name,
-      formData.loadman_worker_id
+      formData.loadman_worker_id,
+      activeCompanyId
     );
     const loadmanName = loadmanDetails.name;
     const loadmanWorkerId = loadmanDetails.id;

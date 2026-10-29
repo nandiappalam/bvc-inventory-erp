@@ -64,6 +64,17 @@ async function columnExists(tableName, columnName) {
   }
 }
 
+async function resolveCompanyMasterTable(tableName, companyId) {
+  if (tableName !== 'operational_parties') return tableName;
+
+  const activeCompanyId = parseInt(companyId, 10) || 1;
+  if (activeCompanyId <= 1) return tableName;
+
+  const { ensureOperationalTables } = require('../services/operationalChargeEngine');
+  await ensureOperationalTables(activeCompanyId);
+  return `c${activeCompanyId}_${tableName}`;
+}
+
 // GET /api/masters/item-stock-details/:identifier
 router.get('/item-stock-details/:identifier', async (req, res) => {
   try {
@@ -662,7 +673,7 @@ router.get('/:type', async (req, res, next) => {
       return res.json({ success: true, data: [], message: 'Master configuration not found' })
     }
 
-    const tableName = config.table || type
+    const tableName = await resolveCompanyMasterTable(config.table || type, req.companyId)
     
     // Check if table exists
     const exists = await tableExists(tableName)
@@ -931,7 +942,7 @@ router.get('/:type', async (req, res, next) => {
 
       const allItemsList = Array.from(itemMap.values())
       return res.json({ success: true, data: allItemsList })
-    } else if (tableName === 'operational_parties') {
+    } else if (tableName.endsWith('operational_parties')) {
       query += ` WHERE (is_active = 1 OR is_active IS NULL)`;
       query += orderClause || ` ORDER BY name ASC`;
     } else {
@@ -999,12 +1010,13 @@ router.get('/:type', async (req, res, next) => {
 router.get('/all/:table', async (req, res) => {
   try {
     const tableNameParam = req.params.table
-    const { tableName, tableConfig } = resolveTableConfig(tableNameParam)
+    const { tableName: resolvedTableName, tableConfig } = resolveTableConfig(tableNameParam)
 
-    if (!tableName) {
+    if (!resolvedTableName) {
       return res.json({ success: true, data: [] })
     }
 
+    const tableName = await resolveCompanyMasterTable(resolvedTableName, req.companyId)
     const exists = await tableExists(tableName)
     if (!exists) {
       return res.json({ success: true, data: [] })
@@ -1058,12 +1070,13 @@ router.get('/all/:table', async (req, res) => {
 router.get('/record/:table/:id', async (req, res) => {
   try {
     const tableNameParam = req.params.table
-    const { tableName, tableConfig } = resolveTableConfig(tableNameParam)
+    const { tableName: resolvedTableName, tableConfig } = resolveTableConfig(tableNameParam)
 
-    if (!tableName) {
+    if (!resolvedTableName) {
       return res.status(400).json({ message: 'Invalid master table' })
     }
 
+    const tableName = await resolveCompanyMasterTable(resolvedTableName, req.companyId)
     const paramId = req.params.id
 
     // Try finding by id (with cast), then by unique field, item_code, code, or display field
@@ -1132,10 +1145,11 @@ router.post("/:table", async (req, res) => {
       });
     }
 
-    const { tableName, tableConfig } = resolveTableConfig(table);
-    if (!tableName) {
+    const { tableName: resolvedTableName, tableConfig } = resolveTableConfig(table);
+    if (!resolvedTableName) {
       return res.status(400).json({ message: 'Invalid master table' })
     }
+    const tableName = await resolveCompanyMasterTable(resolvedTableName, req.companyId)
 
     const filteredData = await normalizeMasterData(tableName, data);
     const validationError = await validateAndPrepareMasterData(tableName, filteredData);
@@ -1224,12 +1238,13 @@ router.post("/:table", async (req, res) => {
 router.post('/record/:table', async (req, res) => {
   try {
     const tableNameParam = req.params.table
-    const { tableName, tableConfig } = resolveTableConfig(tableNameParam)
+    const { tableName: resolvedTableName, tableConfig } = resolveTableConfig(tableNameParam)
 
-    if (!tableName) {
+    if (!resolvedTableName) {
       return res.status(400).json({ message: 'Invalid master table' })
     }
 
+    const tableName = await resolveCompanyMasterTable(resolvedTableName, req.companyId)
     const data = req.body
     const filteredData = await normalizeMasterData(tableName, data);
     const validationError = await validateAndPrepareMasterData(tableName, filteredData, req.params.id);
@@ -1310,12 +1325,13 @@ router.post('/record/:table', async (req, res) => {
 router.put('/:table/:id', async (req, res) => {
   try {
     const tableNameParam = req.params.table
-    const { tableName, tableConfig } = resolveTableConfig(tableNameParam)
+    const { tableName: resolvedTableName, tableConfig } = resolveTableConfig(tableNameParam)
 
-    if (!tableName) {
+    if (!resolvedTableName) {
       return res.status(400).json({ message: 'Invalid master table' })
     }
 
+    const tableName = await resolveCompanyMasterTable(resolvedTableName, req.companyId)
     const data = req.body
     const filteredData = await normalizeMasterData(tableName, data);
     const validationError = await validateAndPrepareMasterData(tableName, filteredData, req.params.id);
@@ -1390,12 +1406,13 @@ router.put('/:table/:id', async (req, res) => {
 router.put('/record/:table/:id', async (req, res) => {
   try {
     const tableNameParam = req.params.table
-    const { tableName, tableConfig } = resolveTableConfig(tableNameParam)
+    const { tableName: resolvedTableName, tableConfig } = resolveTableConfig(tableNameParam)
 
-    if (!tableName) {
+    if (!resolvedTableName) {
       return res.status(400).json({ message: 'Invalid master table' })
     }
 
+    const tableName = await resolveCompanyMasterTable(resolvedTableName, req.companyId)
     const data = req.body
     const filteredData = await normalizeMasterData(tableName, data);
     const validationError = await validateAndPrepareMasterData(tableName, filteredData, req.params.id);
@@ -1450,12 +1467,13 @@ router.put('/record/:table/:id', async (req, res) => {
 router.delete('/:table/:id', async (req, res) => {
   try {
     const tableNameParam = req.params.table;
-    const { tableName, tableConfig } = resolveTableConfig(tableNameParam);
+    const { tableName: resolvedTableName, tableConfig } = resolveTableConfig(tableNameParam);
 
-    if (!tableName) {
+    if (!resolvedTableName) {
       return res.status(400).json({ success: false, message: 'Invalid master table' });
     }
 
+    const tableName = await resolveCompanyMasterTable(resolvedTableName, req.companyId)
     const actualColumns = await getTableColumns(tableName);
     
     const rawId = String(req.params.id).trim();
@@ -1551,12 +1569,13 @@ router.delete('/:table/:id', async (req, res) => {
 router.delete('/record/:table/:id', async (req, res) => {
   try {
     const tableNameParam = req.params.table;
-    const { tableName, tableConfig } = resolveTableConfig(tableNameParam);
+    const { tableName: resolvedTableName, tableConfig } = resolveTableConfig(tableNameParam);
 
-    if (!tableName) {
+    if (!resolvedTableName) {
       return res.status(400).json({ success: false, message: 'Invalid master table' });
     }
 
+    const tableName = await resolveCompanyMasterTable(resolvedTableName, req.companyId)
     const actualColumns = await getTableColumns(tableName);
     
     const rawId = String(req.params.id).trim();

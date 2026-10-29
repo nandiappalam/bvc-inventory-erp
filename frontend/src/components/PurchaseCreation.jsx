@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useLocation, useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, getMasters } from '../utils/api';
 import purchaseOrderService from '../modules/purchaseOrder/services/purchaseOrderService';
@@ -25,6 +25,7 @@ import './SalesCreate.css';
  * - This page ONLY aggregates totals and builds backend payload
  */
 const PurchaseCreation = () => {
+  const skipLoadmanChargeSync = useRef(false);
   const { id: paramId } = useParams();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -191,6 +192,10 @@ const PurchaseCreation = () => {
 
   // Keep loadman_charges form field automatically synchronized with calculated charges
   useEffect(() => {
+    if (skipLoadmanChargeSync.current) {
+      skipLoadmanChargeSync.current = false;
+      return;
+    }
     const chargeStr = String(calculatedLoadmanCharges || 0);
     setFormData(prev => {
       if (prev.loadman_charges !== chargeStr) {
@@ -508,6 +513,10 @@ const PurchaseCreation = () => {
         }
         const data = result?.data || result;
         if (data && (data.id || data.s_no)) {
+          skipLoadmanChargeSync.current = data.loadman_charges !== undefined &&
+            data.loadman_charges !== null &&
+            data.loadman_charges !== '' &&
+            Number(data.loadman_charges) !== Number(calculatedLoadmanCharges);
           const formatDate = (d) => d ? String(d).split('T')[0].split(' ')[0] : '';
           const suppId = String(data.supplier || data.supplier_id || data.supplierId || '');
           const suppName = data.supplier_name || data.supplierName || '';
@@ -1251,6 +1260,10 @@ const PurchaseCreation = () => {
         const result = await api(`/purchases/${id}`);
         const data = result?.data || result;
         if (data) {
+          skipLoadmanChargeSync.current = data.loadman_charges !== undefined &&
+            data.loadman_charges !== null &&
+            data.loadman_charges !== '' &&
+            Number(data.loadman_charges) !== Number(calculatedLoadmanCharges);
           const formatDate = (d) => d ? String(d).split('T')[0].split(' ')[0] : '';
           const suppId = String(data.supplier || data.supplier_id || data.supplierId || '');
           const suppName = data.supplier_name || data.supplierName || '';
@@ -1288,6 +1301,12 @@ const PurchaseCreation = () => {
             stock_type: data.stock_type || data.stockType || 'RM',
             tax_type: data.tax_type || data.taxType || 'Exclusive',
             tax_rate: data.tax_percent ?? data.tax_rate ?? 0,
+            loadman_name: data.loadman_name || data.worker_name || '',
+            loadman_worker_id: data.loadman_worker_id ? String(data.loadman_worker_id) : '',
+            loadman_qty_kg: data.loadman_qty_kg ?? '',
+            loadman_rate_per_kg: data.loadman_rate_per_kg ?? '0.50',
+            loadman_charges: data.loadman_charges ?? '',
+            additional_charges: data.additional_charges ?? '0',
             gst_no: data.gst_no || data.supplier_gstin || '',
             email: data.email || data.supplier_email || '',
             type: data.type || 'Urad',
