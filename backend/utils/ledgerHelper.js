@@ -293,6 +293,17 @@ async function resolveLedgerId(ledgerName, ledgerType = null) {
       fields.push('ledger_type')
       values.push(ledgerType)
     }
+    if (columns.has('under')) {
+      const underVal = (ledgerType === 'Worker' || ledgerType === 'loadman')
+        ? 'Current Liabilities'
+        : (ledgerType === 'Supplier' || ledgerType === 'supplier'
+          ? 'Sundry Creditors'
+          : (ledgerType === 'Customer' || ledgerType === 'customer'
+            ? 'Sundry Debtors'
+            : (ledgerType === 'Expense' ? 'Direct Expenses' : 'Primary')));
+      fields.push('under')
+      values.push(underVal)
+    }
 
     const placeholders = fields.map(() => '?').join(', ')
     const insertSql = `INSERT INTO ledgermaster (${fields.join(', ')}) VALUES (${placeholders})`
@@ -559,6 +570,8 @@ async function createPurchaseVoucherChain(purchaseData) {
   const loadmanWorkerId = purchaseData.loadmanWorkerId || purchaseData.loadman_worker_id;
   if (loadmanCharges > 0) {
     const workerLedger = loadmanName || 'Loadman / Unloading Worker';
+    const resolvedWorkerLedgerId = await resolveLedgerId(workerLedger, 'Worker');
+
     voucherEntryRows.push({
       ledgerName: 'Unloading / Loadman Charges',
       debit: loadmanCharges,
@@ -604,7 +617,7 @@ async function createPurchaseVoucherChain(purchaseData) {
         transactionId: purchaseId,
         transactionType: 'purchase',
         ledgerType: 'Worker',
-        ledgerId: loadmanWorkerId // Ensure ledger lookup uses the worker ID if available
+        ledgerId: resolvedWorkerLedgerId
       })
     );
   }

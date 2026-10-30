@@ -251,7 +251,7 @@ const StandardDisplayPage = ({
                 <tr>
                   <th>S.No</th>
                   {columns.map((col, idx) => (
-                    <th key={idx}>{col}</th>
+                    <th key={idx}>{col.title || col}</th>
                   ))}
                   <th>Actions</th>
                 </tr>
@@ -261,8 +261,13 @@ const StandardDisplayPage = ({
                   <tr key={record.id || record._id || idx}>
                     <td>{idx + 1}</td>
                     {columns.map((col, cidx) => {
-                      const key = col.toLowerCase().replace(/\s+/g, '_');
-                      return <td key={cidx}>{record[key] || record[col] || '-'}</td>;
+                      const key = col.key || col.toLowerCase().replace(/\s+/g, '_');
+                      const value = record[key] || record[col.title || col];
+                      return (
+                        <td key={cidx}>
+                          {col.render ? col.render(value, record) : (value || '-')}
+                        </td>
+                      );
                     })}
                     <td className="actions-cell">
                       {canEdit && (

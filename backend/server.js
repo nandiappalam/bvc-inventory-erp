@@ -744,6 +744,56 @@ async function initializeMasterTables() {
       console.error(`Error seeding default ledger ${led.name} on startup:`, err.message);
     }
   }
+
+  // Seed default weightmaster if empty
+  try {
+    const existingWg = await db.query('SELECT COUNT(*) as cnt FROM weightmaster');
+    const wgCount = parseInt(existingWg.rows[0]?.cnt || existingWg.rows[0]?.count || 0, 10);
+    if (wgCount === 0) {
+      const defaultWeights = [
+        { name: '50 KG Bag', printname: '50 KG Bag', weight: 50 },
+        { name: '25 KG Bag', printname: '25 KG Bag', weight: 25 },
+        { name: '10 KG Bag', printname: '10 KG Bag', weight: 10 },
+        { name: '5 KG Pouch', printname: '5 KG Pouch', weight: 5 },
+        { name: '1 KG Pouch', printname: '1 KG Pouch', weight: 1 },
+        { name: '500 GM Pouch', printname: '500 GM Pouch', weight: 0.5 },
+        { name: '200 GM Pouch', printname: '200 GM Pouch', weight: 0.2 },
+        { name: '75 KG Bag', printname: '75 KG Bag', weight: 75 },
+        { name: '100 KG Bulk', printname: '100 KG Bulk', weight: 100 }
+      ];
+      for (const w of defaultWeights) {
+        await db.run(
+          'INSERT INTO weightmaster (name, printname, weight, status) VALUES (?, ?, ?, ?)',
+          [w.name, w.printname, w.weight, 'Active']
+        );
+      }
+      console.log('✓ Auto-seeded default weightmaster records on startup');
+    }
+  } catch (err) {
+    console.error('Error seeding default weightmaster:', err.message);
+  }
+
+  // Seed default godowns if empty
+  try {
+    const existingGd = await db.query('SELECT COUNT(*) as cnt FROM godown_master');
+    const gdCount = parseInt(existingGd.rows[0]?.cnt || existingGd.rows[0]?.count || 0, 10);
+    if (gdCount === 0) {
+      const defaultGodowns = [
+        { name: 'Main Godown', type: 'Normal', location: 'Inside Factory' },
+        { name: 'Factory Godown', type: 'Normal', location: 'Inside Factory' },
+        { name: 'BTS Cold Storage', type: 'Cold Storage', location: 'Outside Factory' }
+      ];
+      for (const g of defaultGodowns) {
+        await db.run(
+          'INSERT INTO godown_master (godown_name, print_name, godown_type, storage_location, status) VALUES (?, ?, ?, ?, ?)',
+          [g.name, g.name, g.type, g.location, 'Active']
+        );
+      }
+      console.log('✓ Auto-seeded default godown_master records on startup');
+    }
+  } catch (err) {
+    console.error('Error seeding default godowns:', err.message);
+  }
 }
 
 // Start server after initialization

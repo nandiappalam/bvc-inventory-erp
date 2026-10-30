@@ -36,6 +36,7 @@ const getOptionValue = (opt) => {
   if (opt === null || opt === undefined) return '';
   if (typeof opt === 'string' || typeof opt === 'number') return String(opt);
   return String(
+    (opt.id !== undefined && opt.id !== null ? opt.id : '') ||
     opt.worker_name ||
     opt.worker ||
     opt.full_name ||
@@ -45,7 +46,6 @@ const getOptionValue = (opt) => {
     opt.transport_name ||
     opt.transporter ||
     opt.godown_name ||
-    opt.id ||
     opt.value ||
     ''
   );
@@ -746,7 +746,8 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
     });
 
     if (['loadman_name', 'loadman', 'loadman_team'].includes(field.name)) {
-      const displayVal = data[field.name] || selectValue || '';
+      const matchedOption = effectiveOptions.find(opt => String(getOptionValue(opt)) === String(data[field.name]));
+      const displayVal = matchedOption ? getOptionLabel(matchedOption) : (data[field.name] || '');
       return (
         <div className="entry-top-field-group" style={{ ...styles.fieldGroup, ...(addon ? { position: 'relative' } : {}) }}>
           <label style={styles.label}>{field.label}</label>
@@ -779,7 +780,7 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
             />
             <datalist id={`datalist-${field.name}`}>
               {effectiveOptions.map((opt, idx) => (
-                <option key={`${getOptionValue(opt) || 'opt'}-${idx}`} value={getOptionValue(opt)}>
+                <option key={`${getOptionValue(opt) || 'opt'}-${idx}`} value={getOptionLabel(opt)}>
                   {getOptionLabel(opt)}
                 </option>
               ))}

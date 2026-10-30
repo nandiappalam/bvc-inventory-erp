@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import axios from 'axios'
 import { useAuth } from '../context/AuthContext'
 import { printElement } from '../utils/printHelper'
+import ItemStockDetailsModal from './common/ItemStockDetailsModal.jsx'
 import './erp-theme.css'
 
 /**
@@ -32,10 +33,16 @@ const StockReport = () => {
   const [purging, setPurging] = useState(false)
   const [expandedLot, setExpandedLot] = useState(null)
   const [selectedLotNoFilter, setSelectedLotNoFilter] = useState('')
-  const [isFGModalOpen, setIsFGModalOpen] = useState(false)
-  const [selectedFGItem, setSelectedFGItem] = useState(null)
-  const [fgLotDetails, setFgLotDetails] = useState([])
-  const [modalLoading, setModalLoading] = useState(false)
+  const [isStockModalOpen, setIsStockModalOpen] = useState(false)
+  const [selectedItemForModal, setSelectedItemForModal] = useState('')
+
+  const handleItemClick = (row) => {
+    const nameToUse = row.item_name || row.item_id || row.name || '';
+    if (nameToUse) {
+      setSelectedItemForModal(nameToUse);
+      setIsStockModalOpen(true);
+    }
+  };
 
   const { financialYear } = useAuth() || {}
 
@@ -560,17 +567,13 @@ const StockReport = () => {
                         {reportMode === 'summary' ? (
                           <>
                             <td style={{...styles.td, fontWeight: 'bold'}}>
-                              {row.category === 'FG' ? (
-                                <span 
-                                  onClick={() => handleFGClick(row)} 
-                                  title="Click to view full traceability & process log"
-                                  style={{ color: '#2563eb', cursor: 'pointer', textDecoration: 'underline' }}
-                                >
-                                  {row.item_name}
-                                </span>
-                              ) : (
-                                row.item_name
-                              )}
+                              <span 
+                                onClick={() => handleItemClick(row)} 
+                                title="Click to view live item stock details & godown breakdown popup"
+                                style={{ color: '#2563eb', cursor: 'pointer', textDecoration: 'underline' }}
+                              >
+                                {row.item_name}
+                              </span>
                             </td>
                             <td style={styles.td}>
                               <span style={{
@@ -619,8 +622,8 @@ const StockReport = () => {
                             </td>
                             <td style={{...styles.td, fontWeight: 'bold'}}>
                               <span 
-                                onClick={() => handleFGClick(row)} 
-                                title="Click to view full traceability & stock details"
+                                onClick={() => handleItemClick(row)} 
+                                title="Click to view live item stock details & godown breakdown popup"
                                 style={{ color: '#2563eb', cursor: 'pointer', textDecoration: 'underline' }}
                               >
                                 {row.item_name}
@@ -878,147 +881,13 @@ const StockReport = () => {
         </div>
       </div>
 
-      {/* Small Window Modal for FG Details */}
-      {isFGModalOpen && (
-        <div style={styles.modalOverlay}>
-          <div style={styles.modalContent}>
-            <div style={styles.modalHeader}>
-              <h3 style={styles.modalTitle}>📦 Item & Lot Stock Traceability Details</h3>
-              <button onClick={() => setIsFGModalOpen(false)} style={styles.modalCloseBtn}>×</button>
-            </div>
-            
-            <div style={styles.modalBody}>
-              <div style={styles.modalItemMeta}>
-                <strong>Item Name:</strong> <span style={{fontSize: '15px', color: '#1d4ed8', fontWeight: 'bold'}}>{selectedFGItem?.item_name}</span>
-              </div>
-              
-              {modalLoading ? (
-                <div style={styles.modalLoading}>Loading lot details & process trace...</div>
-              ) : fgLotDetails.length === 0 ? (
-                <div style={styles.noData}>No Finished Goods lots found for this item in the records.</div>
-              ) : (
-                <div style={styles.lotList}>
-                  {fgLotDetails.map((lot, idx) => (
-                    <div key={idx} style={styles.lotCard}>
-                      <div style={styles.lotCardHeader}>
-                        <span style={styles.lotNoLabel}>Lot No: <strong style={{fontFamily: 'monospace'}}>{lot.lot_no}</strong></span>
-                        <span style={{
-                          ...styles.tag,
-                          color: '#16a34a',
-                          background: '#dcfce7'
-                        }}>
-                          Active Stock: {parseFloat(lot.remaining_quantity || 0).toFixed(2)} Bags
-                        </span>
-                      </div>
-                      
-                      <div style={styles.lotMetaGrid}>
-                        <div><strong>Mfg Date:</strong> {lot.created_at ? new Date(lot.created_at).toLocaleDateString() : '-'}</div>
-                        <div><strong>Yielded Qty:</strong> {parseFloat(lot.purchased_qty || 0).toFixed(2)} Bags</div>
-                        <div><strong>Sold Qty:</strong> {parseFloat(lot.sold_qty || 0).toFixed(2)} Bags</div>
-                        <div><strong>Rate:</strong> {parseFloat(lot.rate || 0).toFixed(2)}</div>
-                      </div>
-
-                      {/* Process & Grinding Details */}
-                      <div style={styles.modalSection}>
-                        <h4 style={styles.modalSectionTitle}>🌾 Milling / Grinding Process Tracing</h4>
-                        {lot.source_details ? (
-                          <div>
-                            {/* Process Info */}
-                            {lot.source_details.process_info && lot.source_details.process_info.length > 0 && (
-                              <div style={{marginBottom: '10px', fontSize: '12px', background: '#f8fafc', padding: '8px', borderRadius: '4px', border: '1px solid #e2e8f0'}}>
-                                {lot.source_details.process_info.map((p, pIdx) => (
-                                  <div key={pIdx}>
-                                    ⚙️ <strong>Process Ref:</strong> #{p.reference_no} | 🏭 <strong>Mill:</strong> {p.mill} | 📅 <strong>Date:</strong> {p.date ? new Date(p.date).toLocaleDateString() : '-'}
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-
-                            <div style={styles.modalTraceGrid}>
-                              {/* Inputs */}
-                              <div style={styles.modalTraceCol}>
-                                <h5 style={{...styles.modalColTitle, color: '#b45309'}}>📥 Raw Material Inputs</h5>
-                                {lot.source_details.rm_inputs && lot.source_details.rm_inputs.length > 0 ? (
-                                  <ul style={styles.modalList}>
-                                    {lot.source_details.rm_inputs.map((inp, iIdx) => (
-                                      <li key={iIdx} style={styles.modalListItem}>
-                                        <strong>{inp.item_name}</strong>
-                                        <div style={{fontSize: '11px', color: '#475569'}}>
-                                          Lot: <span style={{fontFamily: 'monospace'}}>{inp.lot_no}</span>
-                                        </div>
-                                        <div style={{fontSize: '11px', color: '#047857', fontWeight: '600'}}>
-                                          {inp.qty} Bags / {inp.weight} kg
-                                        </div>
-                                      </li>
-                                    ))}
-                                  </ul>
-                                ) : (
-                                  <div style={styles.noNestedData}>No RM inputs recorded</div>
-                                )}
-                              </div>
-
-                              {/* Outputs */}
-                              <div style={styles.modalTraceCol}>
-                                <h5 style={{...styles.modalColTitle, color: '#16a34a'}}>📤 Process Output (FG)</h5>
-                                {lot.source_details.outputs && lot.source_details.outputs.length > 0 ? (
-                                  <ul style={styles.modalList}>
-                                    {lot.source_details.outputs.map((out, oIdx) => (
-                                      <li key={oIdx} style={styles.modalListItem}>
-                                        <strong style={{color: out.lot_no === lot.lot_no ? '#1d4ed8' : '#1e293b'}}>
-                                          {out.item_name} {out.lot_no === lot.lot_no && '(This Lot)'}
-                                        </strong>
-                                        <div style={{fontSize: '11px', color: '#475569'}}>
-                                          Lot: <span style={{fontFamily: 'monospace'}}>{out.lot_no}</span>
-                                        </div>
-                                        <div style={{fontSize: '11px', color: '#047857', fontWeight: '600'}}>
-                                          {out.qty} Bags / {out.weight} kg
-                                        </div>
-                                      </li>
-                                    ))}
-                                  </ul>
-                                ) : (
-                                  <div style={styles.noNestedData}>No process outputs recorded</div>
-                                )}
-                              </div>
-
-                              {/* Wastage */}
-                              <div style={styles.modalTraceCol}>
-                                <h5 style={{...styles.modalColTitle, color: '#dc2626'}}>🗑️ Process Wastage / Loss</h5>
-                                {lot.source_details.wastages && lot.source_details.wastages.length > 0 ? (
-                                  <ul style={styles.modalList}>
-                                    {lot.source_details.wastages.map((was, wIdx) => (
-                                      <li key={wIdx} style={styles.modalListItem}>
-                                        <strong>{was.item_name}</strong>
-                                        <div style={{fontSize: '11px', color: '#b91c1c', fontWeight: '600'}}>
-                                          {was.qty} Bags / {was.weight} kg
-                                        </div>
-                                      </li>
-                                    ))}
-                                  </ul>
-                                ) : (
-                                  <div style={styles.noNestedData}>No wastage recorded</div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        ) : (
-                          <div style={styles.noNestedData}>
-                            This FG lot was recorded directly as opening stock/initial adjustment rather than via milling/grinding.
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            
-            <div style={styles.modalFooter}>
-              <button onClick={() => setIsFGModalOpen(false)} style={styles.modalCloseBtnPrimary}>Close Window</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Item Stock Details Portal Overlay Modal */}
+      <ItemStockDetailsModal
+        isOpen={isStockModalOpen}
+        onClose={() => setIsStockModalOpen(false)}
+        itemName={selectedItemForModal}
+        itemId={selectedItemForModal}
+      />
     </div>
   )
 }

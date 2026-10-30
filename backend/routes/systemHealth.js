@@ -161,4 +161,82 @@ router.get('/system/tenant-context', async (req, res) => {
   }
 });
 
+// Comprehensive Production Data Health Diagnostic Endpoint
+router.get('/system/health-diagnostic', async (req, res) => {
+  try {
+    const isPg = db.isPostgres;
+    const companyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    const schema = req.companySchema || `company_${companyId}`;
+
+    let itemMasterCount = 0;
+    let weightMasterCount = 0;
+    let stockTotalEntries = 0;
+    let stockTotalQty = 0;
+    let activeLotsCount = 0;
+    let activeLotsQty = 0;
+    let godownsCount = 0;
+    let ledgersCount = 0;
+
+    try {
+      const imRes = await db.query('SELECT COUNT(*) as cnt FROM item_master');
+      itemMasterCount = parseInt(imRes.rows[0]?.cnt || imRes.rows[0]?.count || 0, 10);
+    } catch (_) {}
+
+    try {
+      const wmRes = await db.query('SELECT COUNT(*) as cnt FROM weightmaster');
+      weightMasterCount = parseInt(wmRes.rows[0]?.cnt || wmRes.rows[0]?.count || 0, 10);
+    } catch (_) {}
+
+    try {
+      const stRes = await db.query('SELECT COUNT(*) as cnt, SUM(COALESCE(qty, 0)) as total_qty FROM stock');
+      stockTotalEntries = parseInt(stRes.rows[0]?.cnt || stRes.rows[0]?.count || 0, 10);
+      stockTotalQty = parseFloat(stRes.rows[0]?.total_qty || 0);
+    } catch (_) {}
+
+    try {
+      const slRes = await db.query('SELECT COUNT(*) as cnt, SUM(COALESCE(remaining_quantity, 0)) as total_qty FROM stock_lots WHERE COALESCE(remaining_quantity, 0) > 0');
+      activeLotsCount = parseInt(slRes.rows[0]?.cnt || slRes.rows[0]?.count || 0, 10);
+      activeLotsQty = parseFloat(slRes.rows[0]?.total_qty || 0);
+    } catch (_) {}
+
+    try {
+      const gRes = await db.query('SELECT COUNT(*) as cnt FROM godown_master');
+      godownsCount = parseInt(gRes.rows[0]?.cnt || gRes.rows[0]?.count || 0, 10);
+    } catch (_) {}
+
+    try {
+      const lRes = await db.query('SELECT COUNT(*) as cnt FROM ledgermaster');
+      ledgersCount = parseInt(lRes.rows[0]?.cnt || lRes.rows[0]?.count || 0, 10);
+    } catch (_) {}
+
+    const health = await databaseHealth.checkDatabaseHealth();
+
+    res.json({
+      success: true,
+      timestamp: new Date().toISOString(),
+      environment: process.env.RENDER ? 'Render Production' : 'Development',
+      database: {
+        engine: isPg ? 'PostgreSQL' : 'SQLite',
+        status: health.database,
+        ready: health.ready,
+        companyId,
+        schema
+      },
+      counts: {
+        itemMasterCount,
+        weightMasterCount,
+        stockTotalEntries,
+        stockTotalQty,
+        activeLotsCount,
+        activeLotsQty,
+        godownsCount,
+        ledgersCount
+      }
+    });
+  } catch (err) {
+    console.error('Error in health diagnostic:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;

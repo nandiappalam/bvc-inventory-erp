@@ -22,6 +22,7 @@ export const normalizeMasterKey = (type) => {
   if (k === 'weight' || k === 'weights' || k === 'weight_id' || k === 'weightid' || k === 'wt' || k === 'weightmaster') return 'weights';
   if (k === 'area' || k === 'areas' || k === 'area_id') return 'areas';
   if (k === 'city' || k === 'cities' || k === 'city_id') return 'cities';
+  if (k === 'sign' || k === 'signs' || k === 'sign_id' || k === 'signid') return 'sign';
   if (k === 'sender' || k === 'senders' || k === 'sender_id' || k === 'senderid' || k === 'sender_name' || k === 'sender_group') return 'senders';
   if (k === 'consignee' || k === 'consignees' || k === 'consignee_id' || k === 'consigneeid' || k === 'consignee_name' || k === 'consigned_to' || k === 'consignedto' || k === 'consignee_group') return 'consignees';
   if (k === 'papad_company' || k === 'papad_companies' || k === 'papadcompany' || k === 'papadcomp' || k === 'papad_comp' || k === 'papad_company_id' || k === 'papad_company_name' || k === 'papadcompany') return 'papad_companies';

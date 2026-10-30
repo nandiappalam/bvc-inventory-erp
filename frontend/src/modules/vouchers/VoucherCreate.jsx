@@ -1129,7 +1129,9 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
                 >
                   <MenuItem value="">-- Select Party / Ledger --</MenuItem>
                   {ledgers.filter(l => l.ledger_type !== 'Cash' && l.ledger_type !== 'Bank' && !l.name.toLowerCase().includes('cash') && !l.name.toLowerCase().includes('bank') && !l.name.toLowerCase().includes('petty')).map(l => (
-                    <MenuItem key={l.id} value={l.id}>{l.name}</MenuItem>
+                    <MenuItem key={l.id} value={l.id}>
+                      {l.name} {l.group_name || l.under ? ` — ${l.group_name || l.under}` : ''}
+                    </MenuItem>
                   ))}
                   <MenuItem value="__CREATE_NEW_SUPPLIER__" sx={{ fontWeight: 'bold', color: '#1e3a8a', borderTop: '1px solid #e2e8f0', mt: 1 }}>
                     + Enter Supplier / Party Manually
@@ -1319,7 +1321,9 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
                 >
                   <MenuItem value="">-- Select Customer / Ledger --</MenuItem>
                   {ledgers.filter(l => l.ledger_type !== 'Cash' && l.ledger_type !== 'Bank' && !l.name.toLowerCase().includes('cash') && !l.name.toLowerCase().includes('bank') && !l.name.toLowerCase().includes('petty')).map(l => (
-                    <MenuItem key={l.id} value={l.id}>{l.name}</MenuItem>
+                    <MenuItem key={l.id} value={l.id}>
+                      {l.name} {l.group_name || l.under ? ` — ${l.group_name || l.under}` : ''}
+                    </MenuItem>
                   ))}
                   <MenuItem value="__CREATE_NEW_CUSTOMER__" sx={{ fontWeight: 'bold', color: '#1e3a8a', borderTop: '1px solid #e2e8f0', mt: 1 }}>
                     + Enter Customer Manually
@@ -1624,7 +1628,9 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
                         >
                           <MenuItem value="">-- Select Ledger --</MenuItem>
                           {ledgers.map(ledger => (
-                            <MenuItem key={ledger.id} value={ledger.id}>{ledger.name}</MenuItem>
+                            <MenuItem key={ledger.id} value={ledger.id}>
+                              {ledger.name} {ledger.group_name || ledger.under ? ` — ${ledger.group_name || ledger.under}` : ''}
+                            </MenuItem>
                           ))}
                           <MenuItem value="__CREATE_NEW_LEDGER__" sx={{ fontWeight: 'bold', color: '#1e3a8a', borderTop: '1px solid #e2e8f0', mt: 1 }}>
                             + Enter Master / Ledger Manually

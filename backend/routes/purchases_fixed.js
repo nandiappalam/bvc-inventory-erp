@@ -957,7 +957,10 @@ router.post('/', async (req, res) => {
         igstAmount: igstPur,
         discAmount: parseFloat(totals.discAmount) || 0,
         netAmount: parseFloat(totals.grandTotal) || 0,
-        deductions: deductions || []
+        deductions: deductions || [],
+        loadmanCharges: parseFloat(formData.loadman_charges || formData.unloading_charges || 0),
+        loadmanName: workerName,
+        loadmanWorkerId: formData.loadman_worker_id || null
       })
     } catch (ledgerError) {
       console.error('Error creating ledger entries:', ledgerError)

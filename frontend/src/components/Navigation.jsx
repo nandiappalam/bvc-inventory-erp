@@ -405,7 +405,7 @@ const Navigation = () => {
   const masterGroups = [
     {
       groupTitle: 'Items & Classification',
-      modules: ['Item', 'Item Group', 'Weight', 'Tax']
+      modules: ['Item', 'Item Group', 'Weight', 'Tax', 'Sign']
     },
     {
       groupTitle: 'Customers & Suppliers',

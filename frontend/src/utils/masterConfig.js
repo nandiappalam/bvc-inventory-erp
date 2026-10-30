@@ -694,5 +694,19 @@ export const MASTER_CONFIG = {
         ]
       }
     ]
+  },
+  sign: {
+    table: 'sign_master',
+    sections: [
+      {
+        title: 'Signature Information',
+        fields: [
+          { name: 'name', label: 'Signer Name', type: 'text', required: true },
+          { name: 'designation', label: 'Designation', type: 'text' },
+          { name: 'signature_image', label: 'Scanned Signature Image', type: 'text' },
+          { name: 'status', label: 'Status', type: 'select', options: [{ label: 'Active', value: 'Active' }, { label: 'Inactive', value: 'Inactive' }], defaultValue: 'Active' }
+        ]
+      }
+    ]
   }
 };

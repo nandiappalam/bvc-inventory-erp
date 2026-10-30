@@ -21,9 +21,9 @@ import { useNavigate } from 'react-router-dom';
  */
 export const EntryActions = ({
   onBack,
-  onCancel = () => {},
-  onPrint = () => {},
-  onRefresh = () => {},
+  onCancel = null,
+  onPrint = null,
+  onRefresh = null,
   onSave = () => {},
   showBack = true,
   showCancel = true,
@@ -40,6 +40,22 @@ export const EntryActions = ({
       onBack();
     } else {
       navigate(-1);
+    }
+  };
+
+  const handleCancel = () => {
+    if (onCancel) {
+      onCancel();
+    } else {
+      navigate(-1);
+    }
+  };
+
+  const handleRefresh = () => {
+    if (onRefresh) {
+      onRefresh();
+    } else {
+      window.location.reload();
     }
   };
 
@@ -80,7 +96,7 @@ export const EntryActions = ({
         {showCancel && (
           <button
             type="button"
-            onClick={onCancel}
+            onClick={handleCancel}
             style={{ 
               ...buttonStyle, 
               backgroundColor: '#ef4444', 
@@ -94,7 +110,7 @@ export const EntryActions = ({
         {showRefresh && (
           <button
             type="button"
-            onClick={onRefresh}
+            onClick={handleRefresh}
             style={{ 
               ...buttonStyle, 
               backgroundColor: '#f59e0b', 

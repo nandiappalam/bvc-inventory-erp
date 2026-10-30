@@ -267,6 +267,18 @@ export const MASTER_CONFIGS = {
       { name: 'ded_value', label: 'Default Value', required: false, type: 'number', defaultValue: '0' },
       { name: 'account_head', label: 'Account Head / Remarks', required: false, fullWidth: true }
     ]
+  },
+  sign: {
+    title: 'Create New Signature',
+    table: 'sign_master',
+    key: 'sign',
+    labelField: 'name',
+    fields: [
+      { name: 'name', label: 'Signer Name', required: true, fullWidth: true },
+      { name: 'designation', label: 'Designation', required: false },
+      { name: 'signature_image', label: 'Signature Image (Base64/URL)', required: false, multiline: true, fullWidth: true },
+      { name: 'status', label: 'Status', type: 'select', options: ['Active', 'Inactive'], defaultValue: 'Active' }
+    ]
   }
 };
 
@@ -284,6 +296,7 @@ export const normalizeMasterType = (rawType) => {
   if (k === 'driver' || k === 'drivers') return 'drivers';
   if (k === 'flour_mill' || k === 'flour_mills' || k === 'flourmill') return 'flour_mills';
   if (k === 'papad_company' || k === 'papad_companies' || k === 'papadcomp') return 'papad_companies';
+  if (k === 'sign' || k === 'signs' || k === 'sign_id' || k === 'signid') return 'sign';
   if (k === 'sender' || k === 'senders') return 'senders';
   if (k === 'consignee' || k === 'consignees') return 'consignees';
   if (k === 'area' || k === 'areas') return 'areas';

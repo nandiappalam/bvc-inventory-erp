@@ -1098,11 +1098,41 @@ router.get('/available-lots', async (req, res) => {
 // Required by ERP modules: returns lots with available_qty > 0
 // Param: itemId
 // ============================================================================
+// ============================================================================
 router.get('/available/:itemId', async (req, res) => {
   try {
-    const { itemId } = req.params
+    const rawParam = req.params.itemId ? decodeURIComponent(req.params.itemId).trim() : ''
+    const queryName = req.query.itemName ? decodeURIComponent(req.query.itemName).trim() : ''
+    if (!rawParam && !queryName) {
+      return res.json([])
+    }
 
-    const result = await db.query(`
+    // 1. Resolve canonical item from item_master
+    let canonicalItem = null
+    try {
+      const imRes = await db.query(`
+        SELECT id, item_name, print_name, item_code, weight
+        FROM item_master
+        WHERE CAST(id AS TEXT) = ? 
+           OR LOWER(TRIM(item_name)) = LOWER(TRIM(?))
+           OR LOWER(TRIM(print_name)) = LOWER(TRIM(?))
+           OR LOWER(TRIM(item_code)) = LOWER(TRIM(?))
+           OR (? != '' AND (LOWER(TRIM(item_name)) = LOWER(TRIM(?)) OR LOWER(TRIM(print_name)) = LOWER(TRIM(?))))
+        LIMIT 1
+      `, [rawParam, rawParam, rawParam, rawParam, queryName, queryName, queryName])
+      if (imRes.rows && imRes.rows.length > 0) {
+        canonicalItem = imRes.rows[0]
+      }
+    } catch (e) {
+      console.warn('Could not query item_master in /available/:itemId:', e.message)
+    }
+
+    const canonicalId = canonicalItem ? String(canonicalItem.id) : (/^\d+$/.test(rawParam) ? rawParam : null)
+    const canonicalName = canonicalItem ? canonicalItem.item_name : (queryName || rawParam)
+    const canonicalWeight = parseFloat(canonicalItem?.weight) || 0
+
+    // 2. Query stock_lots
+    const lotsRes = await db.query(`
       SELECT
         sl.id,
         sl.item_id,
@@ -1115,8 +1145,8 @@ router.get('/available/:itemId', async (req, res) => {
         sl.quantity,
         COALESCE(
           NULLIF(sl.rate, 0),
-          (SELECT pi.rate FROM purchase_items pi WHERE pi.lot_no = sl.lot_no AND (pi.item_id = sl.item_id OR LOWER(pi.item_name) = LOWER(sl.item_name)) AND pi.rate > 0 LIMIT 1),
-          (SELECT s.rate FROM stock s WHERE s.lot_no = sl.lot_no AND (s.item_id = sl.item_id OR LOWER(s.item_name) = LOWER(sl.item_name)) AND s.rate > 0 LIMIT 1),
+          (SELECT pi.rate FROM purchase_items pi WHERE pi.lot_no = sl.lot_no AND (CAST(pi.item_id AS TEXT) = CAST(sl.item_id AS TEXT) OR LOWER(TRIM(pi.item_name)) = LOWER(TRIM(sl.item_name))) AND pi.rate > 0 LIMIT 1),
+          (SELECT s.rate FROM stock s WHERE s.lot_no = sl.lot_no AND (CAST(s.item_id AS TEXT) = CAST(sl.item_id AS TEXT) OR LOWER(TRIM(s.item_name)) = LOWER(TRIM(sl.item_name))) AND s.rate > 0 LIMIT 1),
           0
         ) AS rate,
         COALESCE(
@@ -1131,22 +1161,22 @@ router.get('/available/:itemId', async (req, res) => {
         sl.created_at,
         sl.created_at AS purchase_date,
         COALESCE(
-          (SELECT pi.per_unit_weight FROM purchase_items pi WHERE pi.lot_no = sl.lot_no AND (pi.item_id = sl.item_id OR LOWER(pi.item_name) = LOWER(sl.item_name)) AND pi.per_unit_weight > 0 LIMIT 1),
-          (SELECT pi.weight FROM purchase_items pi WHERE pi.lot_no = sl.lot_no AND (pi.item_id = sl.item_id OR LOWER(pi.item_name) = LOWER(sl.item_name)) AND pi.weight > 0 LIMIT 1),
-          (SELECT go.weight FROM grain_output_items go WHERE go.lot_no = sl.lot_no AND LOWER(go.item_name) = LOWER(sl.item_name) AND go.weight > 0 LIMIT 1),
-          (SELECT pk.weight FROM packing_items pk WHERE pk.lot_no = sl.lot_no AND LOWER(pk.item_name) = LOWER(sl.item_name) AND pk.weight > 0 LIMIT 1),
-          (SELECT wc.weight FROM weight_conversion_items wc WHERE wc.lot_no = sl.lot_no AND LOWER(wc.item_name) = LOWER(sl.item_name) AND wc.weight > 0 LIMIT 1),
-          (SELECT ROUND(CAST(ABS(s.weight) / ABS(s.qty) AS NUMERIC), 2) FROM stock s WHERE s.lot_no = sl.lot_no AND (s.item_id = sl.item_id OR LOWER(s.item_name) = LOWER(sl.item_name)) AND s.qty > 0 AND s.weight > 0 LIMIT 1),
+          (SELECT pi.per_unit_weight FROM purchase_items pi WHERE pi.lot_no = sl.lot_no AND (CAST(pi.item_id AS TEXT) = CAST(sl.item_id AS TEXT) OR LOWER(TRIM(pi.item_name)) = LOWER(TRIM(sl.item_name))) AND pi.per_unit_weight > 0 LIMIT 1),
+          (SELECT pi.weight FROM purchase_items pi WHERE pi.lot_no = sl.lot_no AND (CAST(pi.item_id AS TEXT) = CAST(sl.item_id AS TEXT) OR LOWER(TRIM(pi.item_name)) = LOWER(TRIM(sl.item_name))) AND pi.weight > 0 LIMIT 1),
+          (SELECT go.weight FROM grain_output_items go WHERE go.lot_no = sl.lot_no AND LOWER(TRIM(go.item_name)) = LOWER(TRIM(sl.item_name)) AND go.weight > 0 LIMIT 1),
+          (SELECT pk.weight FROM packing_items pk WHERE pk.lot_no = sl.lot_no AND LOWER(TRIM(pk.item_name)) = LOWER(TRIM(sl.item_name)) AND pk.weight > 0 LIMIT 1),
+          (SELECT wc.weight FROM weight_conversion_items wc WHERE wc.lot_no = sl.lot_no AND LOWER(TRIM(wc.item_name)) = LOWER(TRIM(sl.item_name)) AND wc.weight > 0 LIMIT 1),
+          (SELECT ROUND(CAST(ABS(s.weight) / NULLIF(ABS(s.qty), 0) AS NUMERIC), 2) FROM stock s WHERE s.lot_no = sl.lot_no AND (CAST(s.item_id AS TEXT) = CAST(sl.item_id AS TEXT) OR LOWER(TRIM(s.item_name)) = LOWER(TRIM(sl.item_name))) AND s.qty > 0 AND s.weight > 0 LIMIT 1),
           0
         ) AS per_unit_weight
       FROM stock_lots sl
       LEFT JOIN purchases p ON CAST(p.id AS TEXT) = CAST(sl.purchase_id AS TEXT)
       LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = CAST(p.supplier AS TEXT) OR sm.print_name = CAST(p.supplier AS TEXT))
       WHERE (
-        CAST(sl.item_id AS TEXT) = ? 
-        OR LOWER(sl.item_name) = LOWER(?)
+        (? IS NOT NULL AND CAST(sl.item_id AS TEXT) = ?)
+        OR LOWER(TRIM(sl.item_name)) = LOWER(TRIM(?))
         OR sl.item_name LIKE ?
-        OR sl.item_id IN (SELECT id FROM item_master WHERE CAST(id AS TEXT) = ? OR LOWER(item_name) = LOWER(?))
+        OR LOWER(TRIM(sl.item_name)) = LOWER(TRIM(?))
       )
       AND COALESCE(sl.remaining_quantity, sl.quantity, 0) > 0
       AND (sl.unloading_status IS NULL OR sl.unloading_status != 'RETURNED')
@@ -1154,33 +1184,113 @@ router.get('/available/:itemId', async (req, res) => {
         SELECT DISTINCT lot_no FROM purchase_return_items WHERE lot_no IS NOT NULL AND lot_no != ''
       )
       ORDER BY sl.id DESC
-    `, [itemId, itemId, `%${itemId}%`, itemId, itemId])
+    `, [canonicalId, canonicalId, canonicalName, `%${canonicalName}%`, rawParam])
 
-    res.json(result.rows.map(r => {
-      const rateVal = parseFloat(r.rate) || 0;
-      const wt = parseFloat(r.per_unit_weight) || 0;
-      const supplierName = r.supplier_name || '-';
-      return {
+    const seenLots = new Set()
+    const lots = []
+
+    for (const r of (lotsRes.rows || [])) {
+      const lotNo = String(r.lot_no || '').trim()
+      if (!lotNo || seenLots.has(lotNo.toLowerCase())) continue
+      seenLots.add(lotNo.toLowerCase())
+
+      const rateVal = parseFloat(r.rate) || 0
+      let wt = parseFloat(r.per_unit_weight) || 0
+      if (!wt && canonicalWeight > 0) wt = canonicalWeight
+      const supplierName = r.supplier_name || '-'
+      const stockQty = parseFloat(r.available_qty) || 0
+
+      lots.push({
         id: r.id,
-        item_id: r.item_id,
-        item_name: r.item_name,
-        lot_no: r.lot_no,
-        available_qty: r.available_qty,
-        remaining_quantity: r.available_qty,
-        balance_qty: r.available_qty,
-        stock: r.available_qty,
+        item_id: r.item_id || canonicalId,
+        item_name: r.item_name || canonicalName,
+        lot_no: lotNo,
+        available_qty: stockQty,
+        remaining_quantity: stockQty,
+        balance_qty: stockQty,
+        stock: stockQty,
         rate: rateVal,
         purchase_rate: rateVal,
         purc_rate: rateVal,
         supplier_name: supplierName,
         supplier: supplierName,
         created_at: r.created_at,
-        purchase_date: r.purchase_date,
+        purchase_date: r.purchase_date || r.created_at,
         weight: wt,
         per_unit_weight: wt,
-        display: `${r.lot_no} | Wt: ${wt} kg | Stock: ${r.available_qty} | Rate: ₹${rateVal} | ${supplierName}`
-      };
-    }))
+        display: `${lotNo} | Wt: ${wt} kg | Stock: ${stockQty} | Rate: ₹${rateVal} | ${supplierName}`
+      })
+    }
+
+    // 3. Fallback: Check stock table for any lots with active quantity not present in stock_lots
+    try {
+      const stockRes = await db.query(`
+        SELECT
+          s.lot_no,
+          SUM(COALESCE(s.qty, 0)) AS available_qty,
+          COALESCE(NULLIF(MAX(s.rate), 0), 0) AS rate,
+          COALESCE(
+            ROUND(CAST(ABS(SUM(s.weight)) / NULLIF(ABS(SUM(s.qty)), 0) AS NUMERIC), 2),
+            MAX(s.weight),
+            0
+          ) AS per_unit_weight,
+          COALESCE(MAX(s.godown), '-') AS godown_name,
+          MAX(s.created_at) AS created_at,
+          COALESCE(
+            (SELECT sm.name FROM purchase_items pi JOIN purchases p ON p.id = pi.purchase_id LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = p.supplier) WHERE pi.lot_no = s.lot_no AND sm.name IS NOT NULL LIMIT 1),
+            (SELECT p.supplier FROM purchase_items pi JOIN purchases p ON p.id = pi.purchase_id WHERE pi.lot_no = s.lot_no AND p.supplier IS NOT NULL LIMIT 1),
+            '-'
+          ) AS supplier_name
+        FROM stock s
+        WHERE (
+          (? IS NOT NULL AND CAST(s.item_id AS TEXT) = ?)
+          OR LOWER(TRIM(s.item_name)) = LOWER(TRIM(?))
+          OR s.item_name LIKE ?
+          OR LOWER(TRIM(s.item_name)) = LOWER(TRIM(?))
+        )
+        AND s.lot_no IS NOT NULL AND TRIM(s.lot_no) != ''
+        GROUP BY s.lot_no
+        HAVING SUM(COALESCE(s.qty, 0)) > 0
+        ORDER BY MAX(s.id) DESC
+      `, [canonicalId, canonicalId, canonicalName, `%${canonicalName}%`, rawParam])
+
+      for (const sRow of (stockRes.rows || [])) {
+        const lotNo = String(sRow.lot_no || '').trim()
+        if (!lotNo || seenLots.has(lotNo.toLowerCase())) continue
+        seenLots.add(lotNo.toLowerCase())
+
+        const rateVal = parseFloat(sRow.rate) || 0
+        let wt = parseFloat(sRow.per_unit_weight) || 0
+        if (!wt && canonicalWeight > 0) wt = canonicalWeight
+        const supplierName = sRow.supplier_name || '-'
+        const stockQty = parseFloat(sRow.available_qty) || 0
+
+        lots.push({
+          id: `stock_${lotNo}`,
+          item_id: canonicalId,
+          item_name: canonicalName,
+          lot_no: lotNo,
+          available_qty: stockQty,
+          remaining_quantity: stockQty,
+          balance_qty: stockQty,
+          stock: stockQty,
+          rate: rateVal,
+          purchase_rate: rateVal,
+          purc_rate: rateVal,
+          supplier_name: supplierName,
+          supplier: supplierName,
+          created_at: sRow.created_at,
+          purchase_date: sRow.created_at,
+          weight: wt,
+          per_unit_weight: wt,
+          display: `${lotNo} | Wt: ${wt} kg | Stock: ${stockQty} | Rate: ₹${rateVal} | ${supplierName}`
+        })
+      }
+    } catch (stockErr) {
+      console.warn('Fallback stock query error in /available/:itemId:', stockErr.message)
+    }
+
+    res.json(lots)
   } catch (error) {
     console.error('Error fetching available stock (by item_id):', error)
     res.status(500).json({ message: 'Error fetching available stock', error: error.message })

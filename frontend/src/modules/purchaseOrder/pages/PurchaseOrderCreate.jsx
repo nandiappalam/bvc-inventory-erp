@@ -822,7 +822,7 @@ const PurchaseOrderCreate = () => {
     { name: 'poDate', label: 'P.O. Date', type: 'date', col: 2 },
 
     // Column 3
-    { name: 'sign', label: 'Sign', type: 'text', col: 3 },
+    { name: 'sign', label: 'Sign', type: 'masterSelect', masterType: 'sign', col: 3 },
 
     { name: 'supplierId', label: 'Supplier', type: 'masterSelect', masterType: 'suppliers', col: 3 },
     { name: 'address', label: 'Address', type: 'textarea', col: 3 },

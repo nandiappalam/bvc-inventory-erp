@@ -37,22 +37,36 @@ const ExistingLotDropdownCell = ({
   const currentItemKey = row?.item_id || row?.item_name || row?.name || '';
   const currentLotNo = value || row?.lot_no || '';
 
+  const [errorMsg, setErrorMsg] = useState(null);
+
   // Fetch available lots when the item changes or when opened
   const fetchAvailableLots = useCallback(async (force = false) => {
     if (!currentItemKey) {
       setLots([]);
+      setErrorMsg(null);
       return;
     }
 
     if (!force && row?.available_lots && Array.isArray(row.available_lots) && row.available_lots.length > 0) {
       setLots(row.available_lots);
+      setErrorMsg(null);
       return;
     }
 
     setLoading(true);
+    setErrorMsg(null);
     try {
-      const endpoint = `/stock/available/${encodeURIComponent(currentItemKey)}`;
+      const itemNameParam = row?.item_name || row?.name || '';
+      const queryStr = itemNameParam ? `?itemName=${encodeURIComponent(itemNameParam)}` : '';
+      const endpoint = `/stock/available/${encodeURIComponent(currentItemKey)}${queryStr}`;
       const res = await api(endpoint);
+
+      if (res && res.success === false) {
+        setErrorMsg(res.message || 'Failed to fetch available stock lots');
+        setLots([]);
+        return;
+      }
+
       const list = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : []);
       
       const parsedLots = list.map(item => {
@@ -73,6 +87,7 @@ const ExistingLotDropdownCell = ({
       }).filter(l => l.stock > 0 || l.lot_no === currentLotNo);
 
       setLots(parsedLots);
+      setErrorMsg(null);
 
       // Also cache onto row batch if needed
       onChange(rowIndex, '__batch__', {
@@ -82,6 +97,7 @@ const ExistingLotDropdownCell = ({
       });
     } catch (err) {
       console.error('Failed to fetch available lots:', err);
+      setErrorMsg(err.message || 'Network error fetching lots');
       setLots([]);
     } finally {
       setLoading(false);
@@ -93,6 +109,7 @@ const ExistingLotDropdownCell = ({
       fetchAvailableLots();
     } else {
       setLots([]);
+      setErrorMsg(null);
     }
   }, [currentItemKey]);
 
@@ -393,6 +410,29 @@ const ExistingLotDropdownCell = ({
             {loading ? (
               <div style={{ padding: '16px', textAlign: 'center', color: '#64748b', fontSize: '12px' }}>
                 Loading available lots...
+              </div>
+            ) : errorMsg ? (
+              <div style={{ padding: '14px', textAlign: 'center', background: '#fef2f2', borderBottom: '1px solid #fee2e2' }}>
+                <p style={{ margin: '0 0 8px 0', color: '#dc2626', fontSize: '12px', fontWeight: '500' }}>{errorMsg}</p>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    fetchAvailableLots(true);
+                  }}
+                  style={{
+                    padding: '3px 10px',
+                    fontSize: '11px',
+                    fontWeight: '600',
+                    color: '#ffffff',
+                    background: '#dc2626',
+                    border: 'none',
+                    borderRadius: '3px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Retry Fetching Lots
+                </button>
               </div>
             ) : filteredLots.length === 0 ? (
               <div style={{ padding: '16px', textAlign: 'center', color: '#ef4444', fontSize: '12px' }}>

@@ -525,11 +525,26 @@ router.get('/ledgers', async (req, res) => {
 
     // 1. Fetch ledgermaster
     try {
-      const ledgers = await db.query('SELECT id, name, ledger_type FROM ledgermaster', []);
+      const ledgers = await db.query(`
+        SELECT 
+          lm.id, 
+          lm.name, 
+          lm.under, 
+          lm.ledger_type, 
+          COALESCE(lgm.name, lm.under, lm.ledger_type, 'General') AS group_name
+        FROM ledgermaster lm
+        LEFT JOIN ledgergroupmaster lgm ON (CAST(lgm.id AS TEXT) = CAST(lm.under AS TEXT) OR LOWER(TRIM(lgm.name)) = LOWER(TRIM(lm.under)))
+      `, []);
       for (const row of ledgers.rows || []) {
         if (row.name && !seenNames.has(row.name.toLowerCase())) {
           seenNames.add(row.name.toLowerCase());
-          combinedLedgers.push({ id: row.id, name: row.name, ledger_type: row.ledger_type || 'General' });
+          combinedLedgers.push({ 
+            id: row.id, 
+            name: row.name, 
+            under: row.under || 'General',
+            group_name: row.group_name || row.under || 'General',
+            ledger_type: row.ledger_type || 'General' 
+          });
         }
       }
     } catch (err) {
@@ -544,7 +559,13 @@ router.get('/ledgers', async (req, res) => {
         if (name && !seenNames.has(name.toLowerCase())) {
           seenNames.add(name.toLowerCase());
           const ledgerId = await resolveLedgerId(name, 'Supplier');
-          combinedLedgers.push({ id: ledgerId, name: `${name} (Supplier)`, ledger_type: 'Supplier' });
+          combinedLedgers.push({ 
+            id: ledgerId, 
+            name: `${name} (Supplier)`, 
+            under: 'Sundry Creditors',
+            group_name: 'Sundry Creditors',
+            ledger_type: 'Supplier' 
+          });
         }
       }
     } catch (err) {
@@ -559,7 +580,13 @@ router.get('/ledgers', async (req, res) => {
         if (name && !seenNames.has(name.toLowerCase())) {
           seenNames.add(name.toLowerCase());
           const ledgerId = await resolveLedgerId(name, 'Customer');
-          combinedLedgers.push({ id: ledgerId, name: `${name} (Customer)`, ledger_type: 'Customer' });
+          combinedLedgers.push({ 
+            id: ledgerId, 
+            name: `${name} (Customer)`, 
+            under: 'Sundry Debtors',
+            group_name: 'Sundry Debtors',
+            ledger_type: 'Customer' 
+          });
         }
       }
     } catch (err) {
@@ -574,7 +601,13 @@ router.get('/ledgers', async (req, res) => {
         if (name && !seenNames.has(name.toLowerCase())) {
           seenNames.add(name.toLowerCase());
           const ledgerId = await resolveLedgerId(name, 'Supplier');
-          combinedLedgers.push({ id: ledgerId, name: `${name} (Papad Co)`, ledger_type: 'Supplier' });
+          combinedLedgers.push({ 
+            id: ledgerId, 
+            name: `${name} (Papad Co)`, 
+            under: 'Sundry Creditors',
+            group_name: 'Sundry Creditors',
+            ledger_type: 'Supplier' 
+          });
         }
       }
     } catch (err) {
@@ -589,7 +622,13 @@ router.get('/ledgers', async (req, res) => {
         if (name && !seenNames.has(name.toLowerCase())) {
           seenNames.add(name.toLowerCase());
           const ledgerId = await resolveLedgerId(name, 'Supplier');
-          combinedLedgers.push({ id: ledgerId, name: `${name} (Flour Mill)`, ledger_type: 'Supplier' });
+          combinedLedgers.push({ 
+            id: ledgerId, 
+            name: `${name} (Flour Mill)`, 
+            under: 'Sundry Creditors',
+            group_name: 'Sundry Creditors',
+            ledger_type: 'Supplier' 
+          });
         }
       }
     } catch (err) {
@@ -605,7 +644,13 @@ router.get('/ledgers', async (req, res) => {
         if (name && !seenNames.has(name.toLowerCase())) {
           seenNames.add(name.toLowerCase());
           const ledgerId = await resolveLedgerId(name, 'Worker');
-          combinedLedgers.push({ id: ledgerId, name: `${name} (${row.cat || 'Worker'})`, ledger_type: 'Worker' });
+          combinedLedgers.push({ 
+            id: ledgerId, 
+            name: `${name} (${row.cat || 'Worker'})`, 
+            under: 'Current Liabilities',
+            group_name: 'Current Liabilities',
+            ledger_type: 'Worker' 
+          });
         }
       }
     } catch (err) {
@@ -620,7 +665,13 @@ router.get('/ledgers', async (req, res) => {
         if (name && !seenNames.has(name.toLowerCase())) {
           seenNames.add(name.toLowerCase());
           const ledgerId = await resolveLedgerId(name, 'Transporter');
-          combinedLedgers.push({ id: ledgerId, name: `${name} (Transporter)`, ledger_type: 'Transporter' });
+          combinedLedgers.push({ 
+            id: ledgerId, 
+            name: `${name} (Transporter)`, 
+            under: 'Current Liabilities',
+            group_name: 'Current Liabilities',
+            ledger_type: 'Transporter' 
+          });
         }
       }
     } catch (err) {

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import axios from 'axios'
 import { useAuth } from '../../context/AuthContext'
 import { printHtml } from '../../utils/printHelper'
+import ItemStockDetailsModal from '../common/ItemStockDetailsModal.jsx'
 import './ReportPage.css'
 
 /**
@@ -34,6 +35,17 @@ const StockStatusReport = () => {
   const [selectedFGItem, setSelectedFGItem] = useState(null)
   const [fgLotDetails, setFgLotDetails] = useState([])
   const [modalLoading, setModalLoading] = useState(false)
+
+  const [isStockModalOpen, setIsStockModalOpen] = useState(false)
+  const [selectedItemForModal, setSelectedItemForModal] = useState('')
+
+  const handleItemClick = (row) => {
+    const nameToUse = row.item_name || row.item_id || row.name || '';
+    if (nameToUse) {
+      setSelectedItemForModal(nameToUse);
+      setIsStockModalOpen(true);
+    }
+  };
 
   const { financialYear } = useAuth() || {}
 
@@ -522,17 +534,13 @@ const StockStatusReport = () => {
                   return (
                     <tr key={index} style={{ background: index % 2 === 0 ? '#ffffff' : '#f8fafc' }}>
                       <td style={{...styles.td, fontWeight: 'bold'}}>
-                        {row.category === 'FG' ? (
-                          <span 
-                            onClick={() => handleFGClick(row)} 
-                            title="Click to view full traceability & process log"
-                            style={{ color: '#2563eb', cursor: 'pointer', textDecoration: 'underline' }}
-                          >
-                            {row.item_name}
-                          </span>
-                        ) : (
-                          row.item_name
-                        )}
+                        <span 
+                          onClick={() => handleItemClick(row)} 
+                          title="Click to view live item stock details & godown breakdown popup"
+                          style={{ color: '#2563eb', cursor: 'pointer', textDecoration: 'underline' }}
+                        >
+                          {row.item_name}
+                        </span>
                       </td>
                       <td style={styles.td}>
                         <span style={{
@@ -995,6 +1003,14 @@ const StockStatusReport = () => {
           </div>
         </div>
       )}
+
+      {/* Item Stock Details Popup Modal */}
+      <ItemStockDetailsModal
+        isOpen={isStockModalOpen}
+        onClose={() => setIsStockModalOpen(false)}
+        itemName={selectedItemForModal}
+        itemId={selectedItemForModal}
+      />
     </div>
   )
 }

@@ -240,11 +240,12 @@ router.post('/', async (req, res) => {
         AND COALESCE(remaining_quantity, 0) > 0
         AND (
           CAST(godown_id AS TEXT) = ?
-          OR (godown_id IS NULL AND LOWER(TRIM(COALESCE(godown_name, ''))) = LOWER(TRIM(?)))
+          OR LOWER(TRIM(COALESCE(godown_name, ''))) = LOWER(TRIM(?))
+          OR LOWER(TRIM(COALESCE(godown_name, ''))) = LOWER(TRIM(?))
           OR (? = '1' AND godown_id IS NULL AND (godown_name IS NULL OR TRIM(godown_name) = ''))
         )
       ORDER BY id
-    `, [item_name, lot_no, String(sourceGodown.id), sourceGodown.godown_name, String(sourceGodown.id)]);
+    `, [item_name, lot_no, String(sourceGodown.id), sourceGodown.godown_name, from_godown_name || '', String(sourceGodown.id)]);
     const sourceAvailable = sourceLots.rows.reduce((sum, row) => sum + (Number(row.remaining_quantity) || 0), 0);
     if (transferQty > sourceAvailable) {
       return res.status(400).json({
@@ -280,11 +281,12 @@ router.post('/', async (req, res) => {
           AND COALESCE(remaining_quantity, 0) > 0
           AND (
             CAST(godown_id AS TEXT) = ?
-            OR (godown_id IS NULL AND LOWER(TRIM(COALESCE(godown_name, ''))) = LOWER(TRIM(?)))
+            OR LOWER(TRIM(COALESCE(godown_name, ''))) = LOWER(TRIM(?))
+            OR LOWER(TRIM(COALESCE(godown_name, ''))) = LOWER(TRIM(?))
             OR (? = '1' AND godown_id IS NULL AND (godown_name IS NULL OR TRIM(godown_name) = ''))
           )
         ORDER BY id
-      `, [item_name, lot_no, String(sourceGodown.id), sourceGodown.godown_name, String(sourceGodown.id)]);
+      `, [item_name, lot_no, String(sourceGodown.id), sourceGodown.godown_name, from_godown_name || '', String(sourceGodown.id)]);
       const currentSourceAvailable = sourceLots.rows.reduce((sum, row) => sum + (Number(row.remaining_quantity) || 0), 0);
       if (transferQty > currentSourceAvailable) {
         const insufficientStockError = new Error(

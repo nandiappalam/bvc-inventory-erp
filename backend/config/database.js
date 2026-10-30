@@ -1047,6 +1047,12 @@ function getCompanyDatabaseInstance(companyId = 1) {
       'ALTER TABLE purchases ADD COLUMN sub_total REAL DEFAULT 0',
       'ALTER TABLE purchases ADD COLUMN total_deductions REAL DEFAULT 0',
       'ALTER TABLE purchases ADD COLUMN round_off REAL DEFAULT 0',
+      'ALTER TABLE purchases ADD COLUMN loadman_name TEXT',
+      'ALTER TABLE purchases ADD COLUMN loadman_worker_id INTEGER',
+      'ALTER TABLE purchases ADD COLUMN loadman_qty_kg REAL DEFAULT 0',
+      'ALTER TABLE purchases ADD COLUMN loadman_rate_per_kg REAL DEFAULT 0.50',
+      'ALTER TABLE purchases ADD COLUMN loadman_charges REAL DEFAULT 0',
+      'ALTER TABLE purchases ADD COLUMN additional_charges REAL DEFAULT 0',
       'ALTER TABLE godown_master ADD COLUMN capacity REAL DEFAULT 0',
       'ALTER TABLE godown_master ADD COLUMN capacity_unit TEXT DEFAULT "KG"',
       'ALTER TABLE godown_master ADD COLUMN temperature_range TEXT',
@@ -2973,5 +2979,13 @@ module.exports = {
       return new SqliteDbConnection(targetDb, activeCompanyId);
     },
   },
-  isPostgres: isPostgres,
 };
+
+// Compatibility shim: allow both boolean property access and function call
+const isPostgresVal = isPostgres;
+
+Object.defineProperty(module.exports, 'isPostgres', {
+  get: () => isPostgresVal,
+  configurable: true,
+  enumerable: true
+});

@@ -629,7 +629,7 @@ const SalesCreate = () => {
     { name: 'p_o_no', label: 'P.O No', type: 'text', col: 2 },
     { name: 'driver', label: 'Driver', type: 'text', col: 2 },
     { name: 'pur_trans', label: 'Pur. Trans', type: 'masterSelect', masterType: 'transports', col: 2 },
-    { name: 'sign', label: 'Sign', type: 'text', col: 2 },
+    { name: 'sign', label: 'Sign', type: 'masterSelect', masterType: 'sign', col: 2 },
     { name: 'remarks', label: 'Remarks', type: 'textarea', col: 2 },
 
     // Column 3: Party Details

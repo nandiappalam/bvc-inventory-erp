@@ -154,6 +154,8 @@ import OpenCreate from './components/OpenCreate'
 import OpenDisplay from './components/OpenDisplay'
 import WeightConversionCreate from './components/WeightConversionCreate'
 import WeightConversionDisplay from './components/WeightConversionDisplay'
+import SignCreate from './components/SignCreate'
+import SignDisplay from './components/SignDisplay'
 import VoucherCreate from './modules/vouchers/VoucherCreate'
 import VoucherList from './modules/vouchers/VoucherList'
 import PurchaseOrderList from './modules/purchaseOrder/pages/PurchaseOrderList'
@@ -577,6 +579,9 @@ const AppLayout = () => {
           <Route path="/master/godown-display" element={<DynamicMasterDisplay configKey="godown" key="godown" />} />
           <Route path="/master/terms-create" element={<DynamicMasterForm configKey="terms" key="terms" />} />
           <Route path="/master/terms-display" element={<DynamicMasterDisplay configKey="terms" key="terms" />} />
+          <Route path="/master/sign-create" element={<SignCreate />} />
+          <Route path="/master/sign-display" element={<SignDisplay />} />
+          <Route path="/master/signs-display" element={<SignDisplay />} />
 
           {/* Tax Master Routes */}
           <Route path="/master/tax-create" element={<TaxMasterCreate />} />

@@ -36,8 +36,8 @@ test.describe('API: Godown Stock Transfers', () => {
       to_godown_name: 'Godown 2',
       item_name: createdItem.item_name,
       lot_no: lotNo,
-      qty: 100,
-      weight: 100,
+      qty: 10,
+      weight: 500,
       remarks: 'Automated godown transfer test'
     };
 
