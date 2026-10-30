@@ -9,8 +9,8 @@ const db = require('./config/database')
 
 const app = express()
 // Production allows PORT override (unless set to 8080 by container reverse proxy or 3000 by frontend), defaults to 3001 for clean local frontend dev proxying
-const PORT = (process.env.PORT && process.env.PORT !== '8080' && process.env.PORT !== '3000') ? process.env.PORT : 3001
-let actualPort = PORT
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3001;
+let actualPort = PORT;
 
 // Process-level crash protection (prevents 502s from uncaught errors)
 process.on('uncaughtException', (err) => {
@@ -754,7 +754,7 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
   
   // Run full database initialization and migrations (master & company databases)
   try {
-    const isPg = typeof db.isPostgres === 'function' ? db.isPostgres() : db.isPostgres;
+    const isPg = db.isPostgres;
     if (isPg && typeof db.ensurePostgresMasterSchema === 'function') {
       console.log('🔧 Ensuring PostgreSQL master schema...');
       await db.ensurePostgresMasterSchema();

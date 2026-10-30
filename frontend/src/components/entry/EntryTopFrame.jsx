@@ -703,7 +703,7 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
       }
     }
     if (
-      !rawVal &&
+      (!rawVal || rawVal === '0' || rawVal === 'null' || rawVal === 'undefined') &&
       ['loadman_name', 'loadman', 'loadman_team'].includes(field.name) &&
       data.loadman_worker_id
     ) {
@@ -720,15 +720,20 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
       const match = effectiveOptions.find(opt => {
         const optVal = getOptionValue(opt);
         const optLabel = getOptionLabel(opt);
-        return String(optVal).toLowerCase() === rawVal.toLowerCase() ||
-               String(optLabel).toLowerCase() === rawVal.toLowerCase() ||
-               String(opt.id) === rawVal;
+        const cleanRaw = String(rawVal).trim().toLowerCase();
+        return String(optVal).trim().toLowerCase() === cleanRaw ||
+               String(optLabel).trim().toLowerCase() === cleanRaw ||
+               String(opt.id) === String(rawVal) ||
+               (data.loadman_worker_id && String(opt.id) === String(data.loadman_worker_id));
       });
       if (match) {
         selectValue = getOptionValue(match);
         if (rawVal !== selectValue && (field.name.includes('name') || field.masterType === 'workers')) {
           setTimeout(() => {
             onChange(field.name, selectValue);
+            if (['loadman_name', 'loadman', 'loadman_team'].includes(field.name) && match.id) {
+              onChange('loadman_worker_id', String(match.id));
+            }
           }, 0);
         }
       }
@@ -739,6 +744,81 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
       label: selectedOption ? getOptionLabel(selectedOption) : '',
       option: selectedOption
     });
+
+    if (['loadman_name', 'loadman', 'loadman_team'].includes(field.name)) {
+      const displayVal = data[field.name] || selectValue || '';
+      return (
+        <div className="entry-top-field-group" style={{ ...styles.fieldGroup, ...(addon ? { position: 'relative' } : {}) }}>
+          <label style={styles.label}>{field.label}</label>
+          <span style={styles.colon}>:</span>
+          <div style={{ display: 'flex', gap: '4px', width: '100%', alignItems: 'center' }}>
+            <input
+              type="text"
+              list={`datalist-${field.name}`}
+              name={field.name}
+              value={displayVal}
+              placeholder={field.placeholder || 'Select or enter loadman'}
+              onChange={(e) => {
+                const val = e.target.value;
+                onChange(field.name, val);
+                const matched = effectiveOptions.find(o =>
+                  String(getOptionValue(o)).trim().toLowerCase() === val.trim().toLowerCase() ||
+                  String(getOptionLabel(o)).trim().toLowerCase() === val.trim().toLowerCase()
+                );
+                onChange('loadman_worker_id', matched?.id ? String(matched.id) : '');
+              }}
+              onFocus={handleDropdownFocus}
+              style={{
+                ...styles.input,
+                cursor: (field.disabled || field.readOnly) ? 'not-allowed' : 'text',
+                backgroundColor: (field.disabled || field.readOnly) ? '#f4f6fa' : '#ffffff'
+              }}
+              disabled={field.disabled || field.readOnly}
+              className="form-control"
+              autoComplete="off"
+            />
+            <datalist id={`datalist-${field.name}`}>
+              {effectiveOptions.map((opt, idx) => (
+                <option key={`${getOptionValue(opt) || 'opt'}-${idx}`} value={getOptionValue(opt)}>
+                  {getOptionLabel(opt)}
+                </option>
+              ))}
+            </datalist>
+            <button
+              type="button"
+              onClick={() => setInlineModalOpen(true)}
+              style={{
+                height: '28px',
+                padding: '0 8px',
+                fontSize: '11px',
+                backgroundColor: '#2563eb',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '3px',
+                cursor: 'pointer',
+                fontWeight: 'bold',
+                whiteSpace: 'nowrap'
+              }}
+              title="Create New Loadman Master"
+            >
+              + New
+            </button>
+          </div>
+          {masterError && (
+            <span role="alert" style={{ color: '#b91c1c', fontSize: '11px', gridColumn: '3 / 4' }}>
+              {masterError}
+            </span>
+          )}
+          {addon}
+          <InlineMasterModal
+            open={inlineModalOpen}
+            onClose={() => setInlineModalOpen(false)}
+            masterType="workers"
+            onSuccess={handleInlineCreated}
+          />
+        </div>
+      );
+    }
 
     return (
       <div className="entry-top-field-group" style={{ ...styles.fieldGroup, ...(addon ? { position: 'relative' } : {}) }}>

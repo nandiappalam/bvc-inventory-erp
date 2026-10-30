@@ -7,6 +7,8 @@ import { FormSection } from './FormSection';
 import SmartField from './SmartField';
 import './master.css';
 
+import { createMaster, invalidateMasterCache } from '../../services/masterservice.js';
+
 const LoadmanCreate = () => {
   const config = MASTER_CONFIG.loadman || {};
   const sections = safeArray(config.sections);
@@ -49,18 +51,28 @@ const LoadmanCreate = () => {
     }
     setLoading(true);
     try {
-      const result = await api.post('/api/masters/table/operational_parties', { ...formData, category: 'LOADMAN', party_category: 'LOADMAN', is_active: formData.is_active || 1 });
-      if (result.success !== false) {
+      const payload = {
+        ...formData,
+        category: 'LOADMAN',
+        party_category: 'LOADMAN',
+        phone: formData.mobile,
+        is_active: formData.is_active !== undefined && formData.is_active !== '' ? Number(formData.is_active) : 1
+      };
+      const result = await createMaster('operational_parties', payload);
+      if (result && (result.success !== false || result.id)) {
+        invalidateMasterCache('loadman');
+        invalidateMasterCache('workers');
+        invalidateMasterCache('operational_parties');
         setMessage('Loadman saved successfully!');
         setMessageType('success');
         setFormData({});
         setTimeout(() => setMessage(''), 3000);
       } else {
-        setMessage('Error: ' + (result.message || 'Unknown error'));
+        setMessage('Error: ' + (result?.message || result?.error || 'Unknown error'));
         setMessageType('error');
       }
     } catch (err) {
-      setMessage('Error saving loadman');
+      setMessage('Error saving loadman: ' + (err.message || 'Unknown error'));
       setMessageType('error');
     } finally {
       setLoading(false);

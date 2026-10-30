@@ -91,7 +91,13 @@ export const DynamicMasterDisplay = ({ configKey }) => {
         if (copy.ded_name !== undefined && copy.name === undefined) copy.name = copy.ded_name;
         if (copy.deduction_name !== undefined && copy.ded_name === undefined) copy.ded_name = copy.deduction_name;
         if (copy.code !== undefined && copy.ded_code === undefined) copy.ded_code = copy.code;
-        if (copy.ded_code !== undefined && copy.code === undefined) copy.code = copy.ded_code;
+        // Status & is_active mappings
+        if (copy.is_active !== undefined) {
+          copy.status = Number(copy.is_active) === 1 ? 'Active' : 'Inactive';
+        }
+        if (copy.status !== undefined && copy.is_active === undefined) {
+          copy.is_active = String(copy.status).toLowerCase() === 'active' ? 1 : 0;
+        }
         
         return copy;
       });
@@ -106,9 +112,9 @@ export const DynamicMasterDisplay = ({ configKey }) => {
   };
 
   useEffect(() => {
-    loadData();
+    loadData(true);
     const handleCompanyChange = () => {
-      loadData();
+      loadData(true);
     };
     window.addEventListener('erp_company_changed', handleCompanyChange);
     return () => window.removeEventListener('erp_company_changed', handleCompanyChange);

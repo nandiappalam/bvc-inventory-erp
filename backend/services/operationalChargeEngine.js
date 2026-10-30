@@ -17,7 +17,7 @@ function getPrefix(companyId) {
  */
 async function ensureOperationalTables(companyId = 1) {
   const pfx = getPrefix(companyId);
-  const isPostgres = db.isPostgres && db.isPostgres();
+  const isPostgres = db.isPostgres;
   const idCol = isPostgres ? 'SERIAL PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
 
   const queries = [
@@ -25,18 +25,25 @@ async function ensureOperationalTables(companyId = 1) {
       id ${idCol},
       party_code VARCHAR(50) UNIQUE,
       name VARCHAR(150) NOT NULL,
+      print_name VARCHAR(150),
+      contact_person VARCHAR(100),
       category VARCHAR(50) DEFAULT 'LOADMAN',
       party_category VARCHAR(50) DEFAULT 'LOADMAN',
       phone VARCHAR(30),
+      phone_res VARCHAR(30),
+      phone_off VARCHAR(30),
       whatsapp_number VARCHAR(30),
       email VARCHAR(100),
       default_payment_mode VARCHAR(30) DEFAULT 'CASH',
       payment_mode VARCHAR(30) DEFAULT 'CASH',
       address TEXT,
+      area VARCHAR(100),
       bank_name VARCHAR(100),
       account_no VARCHAR(50),
       ifsc_code VARCHAR(30),
       upi_id VARCHAR(80),
+      opening_balance NUMERIC(15,2) DEFAULT 0,
+      opening_balance_date DATE,
       ledger_id INTEGER,
       linked_ledger_id INTEGER,
       linked_ledger_name TEXT,
@@ -169,6 +176,13 @@ async function ensureOperationalTables(companyId = 1) {
     `ALTER TABLE ${pfx}operational_parties ADD COLUMN party_code VARCHAR(50)`,
     `ALTER TABLE ${pfx}operational_parties ADD COLUMN category VARCHAR(50)`,
     `ALTER TABLE ${pfx}operational_parties ADD COLUMN party_category VARCHAR(50)`,
+    `ALTER TABLE ${pfx}operational_parties ADD COLUMN print_name VARCHAR(150)`,
+    `ALTER TABLE ${pfx}operational_parties ADD COLUMN contact_person VARCHAR(100)`,
+    `ALTER TABLE ${pfx}operational_parties ADD COLUMN area VARCHAR(100)`,
+    `ALTER TABLE ${pfx}operational_parties ADD COLUMN phone_res VARCHAR(30)`,
+    `ALTER TABLE ${pfx}operational_parties ADD COLUMN phone_off VARCHAR(30)`,
+    `ALTER TABLE ${pfx}operational_parties ADD COLUMN opening_balance NUMERIC(15,2) DEFAULT 0`,
+    `ALTER TABLE ${pfx}operational_parties ADD COLUMN opening_balance_date DATE`,
     `ALTER TABLE ${pfx}operational_parties ADD COLUMN default_payment_mode VARCHAR(30) DEFAULT 'CASH'`,
     `ALTER TABLE ${pfx}operational_parties ADD COLUMN payment_mode VARCHAR(30) DEFAULT 'CASH'`,
     `ALTER TABLE ${pfx}operational_parties ADD COLUMN address TEXT`,
@@ -299,7 +313,7 @@ async function seedDefaultParties(companyId = 1) {
   try {
     const existing = await db.get(`SELECT id FROM ${pfx}operational_parties WHERE id = 1 OR party_code = 'OPP-GEN-0001' LIMIT 1`);
     if (!existing) {
-      const isPostgres = db.isPostgres && db.isPostgres();
+      const isPostgres = db.isPostgres;
       if (isPostgres) {
         await db.run(
           `INSERT INTO ${pfx}operational_parties (id, party_code, name, category, party_category, default_payment_mode, payment_mode, is_active)
@@ -358,7 +372,7 @@ async function seedDefaultRateMasters(companyId = 1) {
       const exists = await db.get(`SELECT id FROM ${pfx}operational_rate_masters WHERE rate_code = ?`, [r.code]);
       if (!exists) {
         const uom = r.basis === 'PER_BAG' ? 'BAG' : r.basis === 'PER_TONNE' ? 'MT' : 'TRIP';
-        const isPostgres = db.isPostgres && db.isPostgres();
+        const isPostgres = db.isPostgres;
         if (isPostgres) {
           await db.run(
             `INSERT INTO ${pfx}operational_rate_masters (rate_code, operation_type, charge_category, rate_basis, rate_per_unit, min_charge, description, uom, is_active)

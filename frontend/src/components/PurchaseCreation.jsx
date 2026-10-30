@@ -26,6 +26,7 @@ import './SalesCreate.css';
  */
 const PurchaseCreation = () => {
   const skipLoadmanChargeSync = useRef(false);
+  const isEditPurchaseLoaded = useRef(false);
   const { id: paramId } = useParams();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -111,8 +112,10 @@ const PurchaseCreation = () => {
   // 1. Calculate Unloading / Loadman Charges from active items weight and rates
   const calculatedLoadmanCharges = useMemo(() => {
     const totalWt = validItems.reduce((acc, r) => acc + (parseFloat(r.total_wt || r.total_weight || (Number(r.qty || 0) * Number(r.weight || 50))) || 0), 0);
-    const qty = parseFloat(formData.loadman_qty_kg !== undefined && formData.loadman_qty_kg !== '' ? formData.loadman_qty_kg : totalWt) || 0;
-    const rate = parseFloat(formData.loadman_rate_per_kg !== undefined && formData.loadman_rate_per_kg !== '' ? formData.loadman_rate_per_kg : 0.50) || 0;
+    const userQty = parseFloat(formData.loadman_qty_kg);
+    const qty = (Number.isFinite(userQty) && userQty > 0) ? userQty : totalWt;
+    const userRate = parseFloat(formData.loadman_rate_per_kg);
+    const rate = (Number.isFinite(userRate) && userRate >= 0) ? userRate : 0.50;
     const add = parseFloat(formData.additional_charges || 0) || 0;
     return Number(((qty * rate) + add).toFixed(2));
   }, [formData.loadman_qty_kg, formData.loadman_rate_per_kg, formData.additional_charges, validItems]);
@@ -194,6 +197,10 @@ const PurchaseCreation = () => {
   useEffect(() => {
     if (skipLoadmanChargeSync.current) {
       skipLoadmanChargeSync.current = false;
+      return;
+    }
+    // Prevent overwriting existing loaded charges on initial edit load
+    if (isEditPurchaseLoaded.current) {
       return;
     }
     const chargeStr = String(calculatedLoadmanCharges || 0);
@@ -413,7 +420,17 @@ const PurchaseCreation = () => {
       };
     });
 
-    const filteredMappedItems = mappedItems.filter(it => Boolean(it.item_name || it.item_id) && (Number(it.qty) > 0 || Number(it.rate) > 0));
+    const hasPricedItems = mappedItems.some(it => Number(it.rate) > 0 || Number(it.amount) > 0);
+    const filteredMappedItems = mappedItems.filter(it => {
+      const hasName = Boolean(it.item_name || it.item_id);
+      const hasQtyOrRate = Number(it.qty) > 0 || Number(it.rate) > 0;
+      if (!hasName || !hasQtyOrRate) return false;
+      // If PO has priced items, filter out zero-rate zero-amount auxiliary entries (e.g. Vacuum Bag with rate 0, amount 0)
+      if (hasPricedItems) {
+        return Number(it.rate) > 0 || Number(it.amount) > 0;
+      }
+      return true;
+    });
 
     // Explicitly replace table data to avoid merging with previous entries (e.g. from drafts)
     if (filteredMappedItems.length > 0) {
@@ -556,10 +573,10 @@ const PurchaseCreation = () => {
             tax_rate: data.tax_percent ?? data.tax_rate ?? 0,
             loadman_name: data.loadman_name || data.worker_name || '',
             loadman_worker_id: data.loadman_worker_id ? String(data.loadman_worker_id) : '',
-            loadman_qty_kg: data.loadman_qty_kg ?? '',
-            loadman_rate_per_kg: data.loadman_rate_per_kg ?? '0.50',
-            loadman_charges: data.loadman_charges ?? '',
-            additional_charges: data.additional_charges ?? '0',
+            loadman_qty_kg: data.loadman_qty_kg !== undefined && data.loadman_qty_kg !== null ? String(data.loadman_qty_kg) : '',
+            loadman_rate_per_kg: (data.loadman_rate_per_kg !== undefined && data.loadman_rate_per_kg !== null && String(data.loadman_rate_per_kg) !== '') ? String(data.loadman_rate_per_kg) : '0.50',
+            loadman_charges: (data.loadman_charges !== undefined && data.loadman_charges !== null && String(data.loadman_charges) !== '') ? String(data.loadman_charges) : '',
+            additional_charges: data.additional_charges !== undefined && data.additional_charges !== null ? String(data.additional_charges) : '0',
             gst_no: data.gst_no || data.supplier_gstin || '',
             email: data.email || data.supplier_email || '',
             type: data.type || 'Urad',
@@ -569,6 +586,7 @@ const PurchaseCreation = () => {
             purchase_order_id: data.purchase_order_id || data.source_order_id || '',
             po_no: data.po_no || data.source_order_no || ''
           });
+          isEditPurchaseLoaded.current = true;
 
           if (Array.isArray(data.items) && data.items.length > 0) {
             setTableData(data.items.map(it => {
@@ -851,6 +869,10 @@ const PurchaseCreation = () => {
       return;
     }
 
+    if (name === 'loadman_rate_per_kg' || name === 'loadman_qty_kg' || name === 'loadman_charges') {
+      isEditPurchaseLoaded.current = false;
+    }
+
     setFormData(prev => {
       if (name !== 'gross_weight' && name !== 'tare_weight') {
         return { ...prev, [name]: value };
@@ -866,6 +888,7 @@ const PurchaseCreation = () => {
   }, []);
 
   const handleRowChange = useCallback((index, key, value) => {
+    isEditPurchaseLoaded.current = false;
     setTableData((prevRows) => {
       const newRows = [...prevRows]
       if (key === '__batch__' && typeof value === 'object') {
@@ -1071,6 +1094,12 @@ const PurchaseCreation = () => {
 
       if (result.success) {
         clearModuleDraft('purchase_create');
+        try {
+          const { invalidateMasterCache } = await import('../services/masterservice.js');
+          invalidateMasterCache('loadman');
+          invalidateMasterCache('workers');
+          invalidateMasterCache('operational_parties');
+        } catch (_) {}
         alert(`Purchase ${id ? 'updated' : 'saved'} successfully!`);
         navigate('/entry/purchase-display');
       } else {
@@ -1304,8 +1333,8 @@ const PurchaseCreation = () => {
             loadman_name: data.loadman_name || data.worker_name || '',
             loadman_worker_id: data.loadman_worker_id ? String(data.loadman_worker_id) : '',
             loadman_qty_kg: data.loadman_qty_kg ?? '',
-            loadman_rate_per_kg: data.loadman_rate_per_kg ?? '0.50',
-            loadman_charges: data.loadman_charges ?? '',
+            loadman_rate_per_kg: (data.loadman_rate_per_kg !== undefined && data.loadman_rate_per_kg !== null && String(data.loadman_rate_per_kg) !== '') ? String(data.loadman_rate_per_kg) : '0.50',
+            loadman_charges: (data.loadman_charges !== undefined && data.loadman_charges !== null && String(data.loadman_charges) !== '') ? String(data.loadman_charges) : '',
             additional_charges: data.additional_charges ?? '0',
             gst_no: data.gst_no || data.supplier_gstin || '',
             email: data.email || data.supplier_email || '',
@@ -1316,6 +1345,7 @@ const PurchaseCreation = () => {
             purchase_order_id: data.purchase_order_id || data.source_order_id || '',
             po_no: data.po_no || data.source_order_no || ''
           });
+          isEditPurchaseLoaded.current = true;
 
           if (Array.isArray(data.items) && data.items.length > 0) {
             setTableData(data.items.map(it => {

@@ -149,8 +149,10 @@ const LedgerStatementReport = () => {
       if (fromDate) params.from_date = fromDate
       if (toDate) params.to_date = toDate
       if (selectedType) params.type = selectedType
-      if (['loadman', 'loadmen'].includes(selectedType.toLowerCase()) && selectedLedgerId) {
+      if (selectedLedgerId) {
         params.loadman_id = selectedLedgerId
+        params.ledger_id = selectedLedgerId
+        params.id = selectedLedgerId
       }
       
       const result = await api.get('/reports/ledger/' + encodeURIComponent(selectedLedger), { params })

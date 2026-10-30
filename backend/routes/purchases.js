@@ -115,6 +115,26 @@ const ensurePurchasesColumns = async (companyId = 1) => {
   }
 };
 
+const ensurePartyColumns = async (tbl) => {
+  try {
+    const alters = [
+      `ALTER TABLE ${tbl} ADD COLUMN party_code VARCHAR(50)`,
+      `ALTER TABLE ${tbl} ADD COLUMN category VARCHAR(50) DEFAULT 'LOADMAN'`,
+      `ALTER TABLE ${tbl} ADD COLUMN party_category VARCHAR(50) DEFAULT 'LOADMAN'`,
+      `ALTER TABLE ${tbl} ADD COLUMN payment_mode VARCHAR(30) DEFAULT 'Per load'`,
+      `ALTER TABLE ${tbl} ADD COLUMN default_payment_mode VARCHAR(30) DEFAULT 'Per load'`,
+      `ALTER TABLE ${tbl} ADD COLUMN is_active INTEGER DEFAULT 1`,
+      `ALTER TABLE ${tbl} ADD COLUMN phone VARCHAR(30)`,
+      `ALTER TABLE ${tbl} ADD COLUMN address TEXT`,
+      `ALTER TABLE ${tbl} ADD COLUMN rate_configuration TEXT`,
+      `ALTER TABLE ${tbl} ADD COLUMN notes TEXT`
+    ];
+    for (const sql of alters) {
+      try { await db.run(sql); } catch (_) {}
+    }
+  } catch (_) {}
+};
+
 const resolvePurchaseLoadman = async (nameValue, idValue, companyId = 1) => {
   let name = String(nameValue || '').trim();
   let id = Number(idValue) || null;
@@ -123,6 +143,10 @@ const resolvePurchaseLoadman = async (nameValue, idValue, companyId = 1) => {
 
   const { ensureOperationalTables } = require('../services/operationalChargeEngine');
   await ensureOperationalTables(activeCompanyId);
+  await ensurePartyColumns(partyTable);
+  if (activeCompanyId > 1) {
+    await ensurePartyColumns('operational_parties');
+  }
 
   if (id) {
     const result = await db.query(
@@ -134,20 +158,97 @@ const resolvePurchaseLoadman = async (nameValue, idValue, companyId = 1) => {
       id = Number(party.id);
       name = party.name || name;
     } else {
-      id = null;
+      // Check in default operational_parties as well
+      try {
+        const globalRes = await db.query(`SELECT id, name FROM operational_parties WHERE id = ? LIMIT 1`, [id]);
+        if (globalRes.rows?.[0]) {
+          id = Number(globalRes.rows[0].id);
+          name = globalRes.rows[0].name || name;
+        } else {
+          id = null;
+        }
+      } catch (_) {
+        id = null;
+      }
     }
   }
 
   if (!id && name) {
-    const result = await db.query(
+    // 1. Look in company table
+    let result = await db.query(
       `SELECT id, name FROM ${partyTable}
        WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))
        ORDER BY id ASC LIMIT 2`,
       [name]
     );
-    if (result.rows?.length === 1) {
+
+    // 2. If not found and tenant, look in default operational_parties
+    if ((!result.rows || result.rows.length === 0) && activeCompanyId > 1) {
+      try {
+        result = await db.query(
+          `SELECT id, name FROM operational_parties
+           WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))
+           ORDER BY id ASC LIMIT 2`,
+          [name]
+        );
+      } catch (_) {}
+    }
+
+    if (result.rows && result.rows.length >= 1) {
       id = Number(result.rows[0].id);
       name = result.rows[0].name || name;
+    } else {
+      // Auto-create missing loadman master record on the fly so it appears in Master Loadman module
+      try {
+        let maxNum = 0;
+        try {
+          const codesRes = await db.query(`SELECT party_code FROM ${partyTable} WHERE party_code LIKE 'LM-%'`);
+          for (const r of codesRes.rows || []) {
+            const num = parseInt(String(r.party_code || '').replace(/[^0-9]/g, ''), 10);
+            if (num > maxNum) maxNum = num;
+          }
+        } catch (_) {}
+        const partyCode = `LM-${String(maxNum + 1).padStart(3, '0')}`;
+
+        const ins = await db.run(
+          `INSERT INTO ${partyTable} (party_code, name, category, party_category, payment_mode, default_payment_mode, is_active, created_at)
+           VALUES (?, ?, 'LOADMAN', 'LOADMAN', 'Per load', 'Per load', 1, CURRENT_TIMESTAMP)`,
+          [partyCode, name]
+        );
+        id = ins.lastID || ins.lastInsertRowid;
+
+        // Mirror into global operational_parties and tenant operational_parties table if different
+        try {
+          if (partyTable !== 'operational_parties') {
+            await db.run(
+              `INSERT INTO operational_parties (party_code, name, category, party_category, payment_mode, default_payment_mode, is_active, created_at)
+               VALUES (?, ?, 'LOADMAN', 'LOADMAN', 'Per load', 'Per load', 1, CURRENT_TIMESTAMP)`,
+              [partyCode, name]
+            ).catch(() => {});
+          }
+          if (activeCompanyId > 1 && partyTable !== `c${activeCompanyId}_operational_parties`) {
+            await db.run(
+              `INSERT INTO c${activeCompanyId}_operational_parties (party_code, name, category, party_category, payment_mode, default_payment_mode, is_active, created_at)
+               VALUES (?, ?, 'LOADMAN', 'LOADMAN', 'Per load', 'Per load', 1, CURRENT_TIMESTAMP)`,
+              [partyCode, name]
+            ).catch(() => {});
+          }
+        } catch (_) {}
+
+        // Sync with ledgermaster so it appears in ledgers and reports
+        try {
+          const { resolveLedgerId } = require('../utils/ledgerHelper');
+          await resolveLedgerId(name, 'Loadman');
+          await db.run(
+            `UPDATE ledgermaster SET under = 'Direct Expenses', ledger_type = 'Worker' WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) AND (under IS NULL OR under = '')`,
+            [name]
+          ).catch(() => {});
+        } catch (_) {}
+
+        console.log(`[LOADMAN AUTO-CREATE] Created new master record for Loadman "${name}" (${partyCode}) with ID #${id}`);
+      } catch (createErr) {
+        console.warn('[Loadman Auto-Create Notice]:', createErr.message);
+      }
     }
   }
 
@@ -249,6 +350,12 @@ router.get('/purchase-list', async (req, res) => {
       p.lr_no,
       p.lr_date,
       p.remarks,
+      COALESCE(p.loadman_name, '') AS loadman_name,
+      COALESCE(p.loadman_worker_id, '') AS loadman_worker_id,
+      COALESCE(p.loadman_qty_kg, 0) AS loadman_qty_kg,
+      COALESCE(p.loadman_rate_per_kg, 0.50) AS loadman_rate_per_kg,
+      COALESCE(p.loadman_charges, 0) AS loadman_charges,
+      COALESCE(p.additional_charges, 0) AS additional_charges,
       COALESCE(gm.godown_name, p.godown, 'Main Godown') AS godown_name,
       COALESCE(qi.id, (SELECT id FROM qc_inspections WHERE rm_lot_no = pi.lot_no OR CAST(purchase_id AS TEXT) = CAST(p.id AS TEXT) LIMIT 1)) AS qc_id
     FROM purchases p
@@ -372,7 +479,7 @@ router.get('/:id', async (req, res) => {
              ORDER BY id ASC LIMIT 2`,
             [purchaseData.loadman_name]
           );
-          if (workerRes.rows?.length === 1) {
+          if (workerRes.rows?.length >= 1) {
             purchaseData.loadman_worker_id = workerRes.rows[0].id;
             purchaseData.loadman_name = workerRes.rows[0].name || purchaseData.loadman_name;
           }
@@ -1482,6 +1589,49 @@ router.put('/:id', async (req, res) => {
       } catch (csErr) {
         console.error('Error auto-managing Cold Storage voucher on update purchase:', csErr.message);
       }
+    } else {
+      // Record/Update Loadman charges for non-cold storage purchases to ensure they show up in Loadman Ledger
+      if (loadmanName && (loadmanCharges > 0 || loadmanRatePerKg > 0)) {
+        try {
+          const engine = require('../services/operationalChargeEngine');
+          // Clean up old charge for this purchase if updating
+          await db.run(
+            `DELETE FROM operational_charges WHERE source_module = 'PURCHASE' AND source_transaction_id = ?`,
+            [purchaseId]
+          );
+
+          await engine.createOperationalCharge(activeCompanyId, {
+            charge_type: 'UNLOADING',
+            source_module: 'PURCHASE',
+            source_transaction_type: 'PURCHASE',
+            source_transaction_id: purchaseId,
+            source_transaction_no: formData.invNo || formData.inv_no || `PUR-${purchaseId}`,
+            charge_date: formData.date || new Date().toISOString().slice(0, 10),
+            party_id: loadmanWorkerId,
+            party_name: loadmanName,
+            party_category: 'LOADMAN',
+            item_name: items[0]?.item_name || 'Raw Material',
+            lot_no: items[0]?.lot_no || '',
+            from_location: formData.supplier || 'Supplier Facility',
+            to_location: resolvedGodownName || 'Main Godown',
+            vehicle_no: formData.vehicle_no || formData.lorry_no || '',
+            driver_name: formData.driver_name || formData.driver || '',
+            quantity: loadmanQtyKg,
+            rate: loadmanRatePerKg,
+            rate_basis: 'PER_KG',
+            uom: 'KG',
+            base_amount: Number((loadmanQtyKg * loadmanRatePerKg).toFixed(2)),
+            amount: loadmanCharges,
+            total_amount: loadmanCharges,
+            payment_status: 'PENDING',
+            remarks: `Unloading Charges for Purchase #${formData.invNo || purchaseId}`,
+            created_by: formData.createdBy || 'System / Purchase Update'
+          });
+          console.log(`[LOADMAN] Updated unloading charges for Purchase #${purchaseId} to Loadman ${loadmanName}`);
+        } catch (opErr) {
+          console.warn('[Purchase Loadman Charge Update Error]:', opErr.message);
+        }
+      }
     }
  
     for (const ded of (deductions || [])) {
@@ -1506,6 +1656,7 @@ router.put('/:id', async (req, res) => {
         igstAmount: calculatedTotals.igstAmount,
         isInterstate: calculatedTotals.isInterstate,
         loadmanName,
+        loadmanWorkerId,
         loadmanRatePerKg,
         loadmanCharges
       });

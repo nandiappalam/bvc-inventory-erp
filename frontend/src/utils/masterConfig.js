@@ -659,24 +659,38 @@ export const MASTER_CONFIG = {
       {
         title: 'Basic Information',
         fields: [
-          { name: 'party_code', label: 'Loadman Code', type: 'text', readOnly: true },
-          { name: 'name', label: 'Loadman Name', type: 'text', required: true },
-          { name: 'phone', label: 'Mobile Number', type: 'text' },
+          { name: 'name', label: 'Name', type: 'text', required: true },
+          { name: 'print_name', label: 'Print Name', type: 'text' },
+          { name: 'contact_person', label: 'Contact Person', type: 'text' },
+        ]
+      },
+      {
+        title: 'Address & Area',
+        fields: [
+          { name: 'address', label: 'Address', type: 'textarea' },
+          { name: 'area', label: 'Area', type: 'text' },
+        ]
+      },
+      {
+        title: 'Contact Information',
+        fields: [
+          { name: 'phone_res', label: 'Phone (Res)', type: 'text' },
+          { name: 'phone_off', label: 'Phone (Off)', type: 'text' },
+          { name: 'mobile', label: 'Mobile', type: 'text' },
+          { name: 'email', label: 'Email', type: 'email' },
+        ]
+      },
+      {
+        title: 'Financial Information',
+        fields: [
+          { name: 'opening_balance', label: 'Opening Balance', type: 'number', defaultValue: 0 },
+          { name: 'opening_balance_date', label: 'Opening Balance Date', type: 'date' },
+        ]
+      },
+      {
+        title: 'Status',
+        fields: [
           { name: 'is_active', label: 'Status', type: 'select', options: [{ label: 'Active', value: 1 }, { label: 'Inactive', value: 0 }], defaultValue: 1 }
-        ]
-      },
-      {
-        title: 'Labour Payment Details',
-        fields: [
-          { name: 'payment_mode', label: 'Payment Type', type: 'select', options: [{label: 'Per load', value: 'Per load'}, {label: 'Per bag', value: 'Per bag'}, {label: 'Daily wage', value: 'Daily wage'}, {label: 'Other / variable', value: 'Other / variable'}], defaultValue: 'Per load' },
-          { name: 'rate_configuration', label: 'Default Rate (₹)', type: 'number' },
-        ]
-      },
-      {
-        title: 'Address & Notes',
-        fields: [
-          { name: 'address', label: 'Address / Location', type: 'textarea' },
-          { name: 'notes', label: 'Remarks', type: 'textarea' },
         ]
       }
     ]

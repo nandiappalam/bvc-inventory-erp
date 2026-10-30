@@ -337,10 +337,11 @@ async function createLedgerEntry({
   transactionId = null,
   transactionType = null,
   ledgerType = null,
+  ledgerId = null,
 }) {
   try {
     const safeLedgerName = ledgerName || 'General Ledger'
-    const ledgerId = await resolveLedgerId(safeLedgerName, ledgerType)
+    const lId = ledgerId || await resolveLedgerId(safeLedgerName, ledgerType)
     const cleanEntryDate = sanitizeDate(date) || new Date().toISOString().slice(0, 10)
 
     await db.run(`
@@ -350,7 +351,7 @@ async function createLedgerEntry({
       )
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
-      ledgerId,
+      lId,
       safeLedgerName,
       cleanEntryDate,
       voucherType || 'General',
@@ -555,6 +556,7 @@ async function createPurchaseVoucherChain(purchaseData) {
 
   const loadmanCharges = Number(purchaseData.loadmanCharges || 0);
   const loadmanName = purchaseData.loadmanName || purchaseData.loadman_name;
+  const loadmanWorkerId = purchaseData.loadmanWorkerId || purchaseData.loadman_worker_id;
   if (loadmanCharges > 0) {
     const workerLedger = loadmanName || 'Loadman / Unloading Worker';
     voucherEntryRows.push({
@@ -601,7 +603,8 @@ async function createPurchaseVoucherChain(purchaseData) {
         voucherId,
         transactionId: purchaseId,
         transactionType: 'purchase',
-        ledgerType: 'Worker'
+        ledgerType: 'Worker',
+        ledgerId: loadmanWorkerId // Ensure ledger lookup uses the worker ID if available
       })
     );
   }

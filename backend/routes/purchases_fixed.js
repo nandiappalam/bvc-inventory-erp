@@ -13,6 +13,7 @@ const { reserveNextLotNumber, recordLotNumber } = require('../utils/lotHelper')
 const { calculateLineTax } = require('../services/taxEngine')
 const { getColdStorageTariff, calculateLabourCharge, createOrUpdateColdStorageBill } = require('../services/ColdStorageBillingService')
 const { ensureColdStorageSchema } = require('../utils/coldStorageSchema')
+const OpChargeEngine = require('../services/operationalChargeEngine')
 
 // Middleware to ensure cold storage schema exists for purchase auto-inward actions
 router.use(async (req, res, next) => {
@@ -614,6 +615,43 @@ router.post('/', async (req, res) => {
     }
 
     // Check if the target godown is Cold Storage and automatically create/update linked Cold Storage IN voucher & items
+    // ------------------------------------------------------------------------
+    // UNIVERSAL OPERATIONAL CHARGE RECORDING (LOADMAN / UNLOADING)
+    // ------------------------------------------------------------------------
+    const workerName = formData.loadman_name || formData.worker_name || null;
+    if (workerName) {
+      try {
+        const handledKg = parseFloat(totals.totalWeight) || (parseFloat(totals.totalQty) * 50) || 0;
+        const loadmanRate = parseFloat(formData.loadman_rate_per_kg ?? formData.unloading_rate ?? 0.50);
+        const addlLabourCharges = parseFloat(formData.additional_labour_charges || formData.additional_charges || 0);
+        
+        await OpChargeEngine.recordOperationalCharge({
+          companyId: activeCompanyId,
+          sourceModule: 'PURCHASE',
+          sourceTransactionId: purchaseId,
+          sourceTransactionNo: finalInvNo,
+          date: formData.date || new Date().toISOString().split('T')[0],
+          operationType: 'UNLOADING',
+          chargeCategory: 'LABOUR',
+          partyId: formData.loadman_worker_id || null,
+          partyName: workerName,
+          rateBasis: 'PER_KG',
+          ratePerUnit: loadmanRate,
+          quantity: handledKg,
+          uom: 'KG',
+          adjustmentAmount: addlLabourCharges,
+          vehicleNo: vehicle_no,
+          driverName: driver_name,
+          notes: `Auto-recorded from Purchase #${finalInvNo}`,
+          createdBy: req.user?.username || 'System'
+        });
+        console.log(`✅ [OpCharge] Successfully recorded loadman charges for Purchase #${finalInvNo}`);
+      } catch (opErr) {
+        console.warn('⚠️ [OpCharge] Error recording loadman charges:', opErr.message);
+      }
+    }
+
+    // Check if the target godown is Cold Storage and automatically create/update linked Cold Storage IN voucher & items
     const isColdStorage = (resolvedGodownName || '').toLowerCase().includes('cold') || String(resolvedGodownId) === '2';
     if (isColdStorage) {
       try {
@@ -624,9 +662,9 @@ router.post('/', async (req, res) => {
 
         // Calculate Loadman / Unloading charges based on actual kilograms handled
         const handledKg = parseFloat(totals.totalWeight) || (parseFloat(totals.totalQty) * 50) || 0;
-        const workerName = formData.loadman_name || formData.worker_name || formData.driver_name || 'Inward Loadman Team';
+        const effectiveWorkerName = workerName || formData.driver_name || 'Inward Loadman Team';
         const loadmanRate = parseFloat(formData.loadman_rate_per_kg ?? formData.unloading_rate ?? tariff.inwardUnloadingRate ?? 0.50);
-        const addlLabourCharges = parseFloat(formData.additional_labour_charges || 0);
+        const addlLabourCharges = parseFloat(formData.additional_labour_charges || formData.additional_charges || 0);
 
         const labourCalc = calculateLabourCharge({
           qtyKg: handledKg,
@@ -688,7 +726,7 @@ router.post('/', async (req, res) => {
             vehicle_no || '',
             driver_name || '',
             transporter || '',
-            workerName,
+            effectiveWorkerName,
             handledKg,
             loadmanRate,
             loadmanCharges,
@@ -735,7 +773,7 @@ router.post('/', async (req, res) => {
             vehicle_no || '',
             driver_name || '',
             transporter || '',
-            workerName,
+            effectiveWorkerName,
             handledKg,
             loadmanRate,
             loadmanCharges,
@@ -782,45 +820,6 @@ router.post('/', async (req, res) => {
             totWt,
             lineLabourShare
           ], activeCompanyId);
-        }
-
-        // Link Loadman / Labour charge to Operational Charges system without duplication
-        try {
-          const opChargesExist = await db.query(
-            `SELECT id FROM operational_charges WHERE source_transaction_id = ? AND charge_type IN ('UNLOADING', 'HAMALI', 'LABOUR') LIMIT 1`,
-            [purchaseId],
-            activeCompanyId
-          );
-          if (!opChargesExist.rows || opChargesExist.rows.length === 0) {
-            await db.run(`
-              INSERT INTO operational_charges (
-                company_id, charge_no, charge_type, source_module, source_transaction_type, source_transaction_id, source_transaction_no,
-                charge_date, party_name, item_name, lot_no, from_location, to_location, vehicle_no, driver_name,
-                quantity, rate, base_amount, total_amount, payment_status, remarks, created_by
-              ) VALUES (?, ?, 'UNLOADING', 'PURCHASE', 'PURCHASE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)
-            `, [
-              activeCompanyId,
-              `CHG-UNL-${purchaseId}`,
-              purchaseId,
-              formData.invNo || formData.inv_no || `PUR-${purchaseId}`,
-              formData.date || new Date().toISOString().slice(0, 10),
-              workerName,
-              items[0]?.item_name || 'Raw Commodity',
-              items[0]?.lot_no || '',
-              formData.supplier || 'Supplier Facility',
-              csGodownName,
-              vehicle_no || '',
-              driver_name || '',
-              handledKg,
-              loadmanRate,
-              loadmanCharges,
-              loadmanCharges,
-              `Inward Loadman Unloading for Purchase #${formData.invNo || purchaseId} in ${csGodownName}`,
-              formData.createdBy || 'System'
-            ]);
-          }
-        } catch (opErr) {
-          console.warn('[Operational Charge Link Notice]:', opErr.message);
         }
 
         // Automatically generate linked Cold Storage Inward Bill with all loadman, driver, vehicle, and payment calculations

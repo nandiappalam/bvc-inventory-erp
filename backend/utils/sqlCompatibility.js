@@ -14,7 +14,8 @@ function convertGroupConcatForPostgres(sql) {
     return sql;
   }
   
-  if (!db.isPostgres()) {
+  const isPg = db.isPostgres;
+  if (!isPg) {
     return sql; // Return unchanged for SQLite
   }
   

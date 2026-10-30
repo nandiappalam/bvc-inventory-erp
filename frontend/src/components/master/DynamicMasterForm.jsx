@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { MASTER_CONFIG } from "../../utils/masterConfig.js";
 import { safeArray } from "../../utils/safeArray.js";
-import { createMaster, updateMaster, api } from "../../services/masterservice.js";
+import { createMaster, updateMaster, invalidateMasterCache, api } from "../../services/masterservice.js";
 import MasterFormLayout from "./MasterFormLayout";
 import SmartField from "./SmartField";
 import "./master.css";
@@ -28,6 +28,7 @@ const API_NAME_MAP = {
   deduction_sales: "deduction_sales",
   deduction_purchase: "deduction_purchase",
   tax: "taxes",
+  loadman: "loadman",
 };
 
 export const DynamicMasterForm = ({ configKey }) => {
@@ -84,6 +85,7 @@ export const DynamicMasterForm = ({ configKey }) => {
       item: "ITM",
       item_group: "GRP",
       deduction_purchase: "DP",
+      loadman: "LM",
     };
 
     const prefix = prefixes[configKey];

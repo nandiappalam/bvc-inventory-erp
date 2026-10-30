@@ -165,9 +165,9 @@ export const getMasters = async (type, options = {}) => {
           }
 
           if (list !== null) {
-            // Only cache if we actually got data, or if we already have a cache (to update it)
-            // This prevents caching an empty [] during a failed or partial initial load
-            if (list.length > 0 || (masterCache.has(key) && forceRefresh)) {
+            // Only cache if we actually got non-empty data
+            // This prevents caching an empty [] during cold starts or transient network failures on Render
+            if (list.length > 0) {
               masterCache.set(key, { data: list, timestamp: Date.now() });
             }
             return list.length > 0 ? list : (masterCache.get(key)?.data || []);
@@ -183,8 +183,8 @@ export const getMasters = async (type, options = {}) => {
       }
     }
 
-    // If all retries failed but cached data exists, return cached list
-    if (masterCache.has(key)) {
+    // If all retries failed but cached non-empty data exists, return cached list
+    if (masterCache.has(key) && masterCache.get(key).data?.length > 0) {
       return masterCache.get(key).data;
     }
 
@@ -213,7 +213,7 @@ export const getAllMasters = async (table, options = {}) => {
   const now = Date.now();
   const forceRefresh = options?.forceRefresh || false;
 
-  if (!forceRefresh && masterCache.has(key)) {
+  if (!forceRefresh && masterCache.has(key) && masterCache.get(key).data?.length > 0) {
     const cached = masterCache.get(key);
     if (now - cached.timestamp < CACHE_TTL_MS) {
       return makeDualArray(cached.data);
@@ -223,7 +223,9 @@ export const getAllMasters = async (table, options = {}) => {
   if (inFlightRequests.has(key)) {
     try {
       const res = await inFlightRequests.get(key);
-      return makeDualArray(res);
+      if (res && res.length > 0) {
+        return makeDualArray(res);
+      }
     } catch (e) {}
   }
 
@@ -233,14 +235,16 @@ export const getAllMasters = async (table, options = {}) => {
       if (result && (Array.isArray(result) || result.success)) {
         const rawData = Array.isArray(result) ? result : (result.data || []);
         const list = Array.isArray(rawData) ? rawData : [];
-        masterCache.set(key, { data: list, timestamp: Date.now() });
+        if (list.length > 0) {
+          masterCache.set(key, { data: list, timestamp: Date.now() });
+        }
         return list;
       }
     } catch (e) {
       console.error(`Error in getAllMasters for ${table}:`, e);
     }
 
-    if (masterCache.has(key)) {
+    if (masterCache.has(key) && masterCache.get(key).data?.length > 0) {
       return masterCache.get(key).data;
     }
     return [];

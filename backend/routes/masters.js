@@ -6,10 +6,10 @@ const recycleBinService = require('../services/RecycleBinService')
 // Helper function to check if table exists
 async function tableExists(tableName) {
   try {
-    const isPg = typeof db.isPostgres === 'function' ? db.isPostgres() : db.isPostgres;
+    const isPg = db.isPostgres;
     if (isPg) {
       const result = await db.query(
-        "SELECT table_name as name FROM information_schema.tables WHERE lower(table_name) = lower(?)",
+        "SELECT table_name as name FROM information_schema.tables WHERE lower(table_name) = lower($1)",
         [tableName]
       );
       return (result && result.rows && result.rows.length > 0);
@@ -28,18 +28,18 @@ async function tableExists(tableName) {
 // Helper function to safely get column names for a table (works on both Postgres and SQLite)
 async function getTableColumns(tableName) {
   try {
-    const isPg = typeof db.isPostgres === 'function' ? db.isPostgres() : db.isPostgres;
+    const isPg = db.isPostgres;
     if (isPg) {
       const res = await db.query(
-        "SELECT column_name as name FROM information_schema.columns WHERE lower(table_name) = lower(?)",
+        "SELECT column_name as name FROM information_schema.columns WHERE lower(table_name) = lower($1)",
         [tableName]
       );
       const rows = res?.rows || (Array.isArray(res) ? res : []);
-      return new Set(rows.map(col => col.name));
+      return new Set(rows.map(col => col.name.toLowerCase()));
     } else {
       const res = await db.query(`PRAGMA table_info(${tableName})`);
       const rows = res?.rows || (Array.isArray(res) ? res : []);
-      return new Set(rows.map(col => col.name));
+      return new Set(rows.map(col => col.name.toLowerCase()));
     }
   } catch (err) {
     console.error(`Error inspecting columns for table '${tableName}':`, err.message);
@@ -224,6 +224,8 @@ const normalizeMasterData = async (tableName, rawData) => {
     flour_mill: 'flourmill',
     flourmill_name: 'flourmill',
     papad_company_name: 'name',
+    mobile: 'phone',
+    whatsapp: 'whatsapp_number',
   };
 
   const filteredData = {};
@@ -235,18 +237,21 @@ const normalizeMasterData = async (tableName, rawData) => {
       }
     }
   } else {
+    // Standard mapping: only columns that exist in the table
     for (const col of actualColumns) {
       if (rawData[col] !== undefined) {
         filteredData[col] = rawData[col];
       }
     }
 
+    // Synonym mapping: map alternate names if target column exists but hasn't been set yet
     for (const [syn, col] of Object.entries(fieldSynonyms)) {
       if (actualColumns.has(col) && filteredData[col] === undefined && rawData[syn] !== undefined) {
         filteredData[col] = rawData[syn];
       }
     }
 
+    // Auto-generate deduction code if missing
     if (actualColumns.has('ded_code') && (!filteredData.ded_code || String(filteredData.ded_code).trim() === '')) {
       const nameToUse = filteredData.ded_name || rawData.ded_name || rawData.deduction_name || 'DED';
       const cleanName = nameToUse.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 6);
@@ -254,16 +259,41 @@ const normalizeMasterData = async (tableName, rawData) => {
       filteredData.ded_code = `${cleanName}${randomSuffix}`;
     }
 
+    // Default status
     if (actualColumns.has('status') && filteredData.status === undefined) {
       filteredData.status = 'Active';
     }
+  }
+
+  // Force categories for operational parties ALWAYS
+  if (tableName === 'operational_parties' || tableName.endsWith('_operational_parties')) {
+    // Auto-generate party code if missing
+    if (!filteredData.party_code || String(filteredData.party_code).trim() === '') {
+      let maxNum = 0;
+      try {
+        const codesRes = await db.query(`SELECT party_code FROM ${tableName} WHERE party_code LIKE 'LM-%'`);
+        for (const r of codesRes.rows || []) {
+          const num = parseInt(String(r.party_code || '').replace(/[^0-9]/g, ''), 10);
+          if (num > maxNum) maxNum = num;
+        }
+      } catch (_) {}
+      filteredData.party_code = `LM-${String(maxNum + 1).padStart(3, '0')}`;
+    }
+
+    if (!filteredData.category) filteredData.category = 'LOADMAN';
+    if (!filteredData.party_category) filteredData.party_category = 'LOADMAN';
+    filteredData.party_category = 'LOADMAN'; // Hard force to satisfy NOT NULL constraint
+    if (filteredData.is_active === undefined) filteredData.is_active = 1;
+    
+    // Ensure name is present (mapping from rawData if filteredData skipped it due to missing 'name' col in actualColumns - though unlikely)
+    if (!filteredData.name && rawData.name) filteredData.name = rawData.name;
   }
 
   // ========================================================================
   // PostgreSQL Compatibility: Convert empty strings to NULL for numeric fields
   // This prevents "invalid input syntax for type numeric" errors
   // ========================================================================
-  const isPg = typeof db.isPostgres === 'function' ? db.isPostgres() : db.isPostgres;
+  const isPg = db.isPostgres;
   const godownBillingNumericFields = ['storage_duration', 'rate_per_kg', 'rate_per_ton', 'min_billable_days'];
   for (const field of godownBillingNumericFields) {
     if (field in filteredData && filteredData[field] === '') {
@@ -1193,13 +1223,20 @@ router.post("/:table", async (req, res) => {
       const result = await db.run(query, values);
       const createdId = result.lastID || result.lastInsertRowid || result.rows?.[0]?.id;
 
-      // Also auto-sync to ledgermaster if supplier or customer
-      if (tableName === 'supplier_master' || tableName === 'customer_master') {
+      // Also auto-sync to ledgermaster if supplier, customer, or operational party (loadman)
+      if (tableName === 'supplier_master' || tableName === 'customer_master' || tableName === 'operational_parties' || tableName.endsWith('_operational_parties')) {
         try {
           const { resolveLedgerId } = require('../utils/ledgerHelper');
           const partyName = filteredData.name || data.name;
           if (partyName) {
-            await resolveLedgerId(partyName, tableName === 'customer_master' ? 'Customer' : 'Supplier');
+            const role = tableName === 'customer_master' ? 'Customer' : (tableName === 'supplier_master' ? 'Supplier' : 'Loadman');
+            await resolveLedgerId(partyName, role);
+            if (role === 'Loadman') {
+              await db.run(
+                `UPDATE ledgermaster SET under = 'Direct Expenses', ledger_type = 'Worker' WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) AND (under IS NULL OR under = '')`,
+                [partyName]
+              ).catch(() => {});
+            }
           }
         } catch (lErr) {}
       }
