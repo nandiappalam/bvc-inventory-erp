@@ -8,6 +8,8 @@ import { generatePurchasePrintHtml } from '../utils/purchasePrintHelper';
 import { useAuth } from '../context/AuthContext';
 import DigitalDocumentModal from './documents/DigitalDocumentModal';
 import ColdStoragePurchaseStatementModal from './coldStorage/ColdStoragePurchaseStatementModal';
+import PurchaseLedgerDetailsModal from './purchase/PurchaseLedgerDetailsModal';
+import WeightEntryModal from './purchase/WeightEntryModal';
 import './PurchaseDisplay.css';
 
 // Classic ERP Column definitions for Purchase Display
@@ -130,6 +132,9 @@ const PurchaseDisplay = () => {
   const { isAdmin, hasPermission, selectedCompany } = useAuth();
   const [activeDoc, setActiveDoc] = useState(null);
   const [selectedCsPurchase, setSelectedCsPurchase] = useState(null);
+  const [selectedLedgerPurchaseId, setSelectedLedgerPurchaseId] = useState(null);
+  const [ledgerModalOpen, setLedgerModalOpen] = useState(false);
+  const [weightModalPurchase, setWeightModalPurchase] = useState(null);
 
   const canEdit = isAdmin || hasPermission('Purchase', 'Display', 'can_edit') || hasPermission('Purchase', 'can_edit');
   const canDelete = isAdmin || hasPermission('Purchase', 'Display', 'can_delete') || hasPermission('Purchase', 'can_delete');
@@ -153,6 +158,27 @@ const PurchaseDisplay = () => {
         title="Open Digital Document, BVC QR, PDF & Signatures"
       >
         Digital Doc
+      </button>
+      <button 
+        className="action-btn" 
+        style={{ backgroundColor: '#4338ca', color: '#ffffff', border: 'none', padding: '5px 11px', borderRadius: '4px', fontWeight: 700, fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+        onClick={() => {
+          setSelectedLedgerPurchaseId(row.id || row.s_no);
+          setLedgerModalOpen(true);
+        }}
+        title="Open Purchase-wise Transaction Ledger & Double-Entry Statement"
+      >
+        <span>📑</span>
+        <span>Ledger</span>
+      </button>
+      <button 
+        className="action-btn" 
+        style={{ backgroundColor: '#047857', color: '#ffffff', border: 'none', padding: '5px 11px', borderRadius: '4px', fontWeight: 700, fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+        onClick={() => setWeightModalPurchase(row)}
+        title="Record Tare Weight post-unloading"
+      >
+        <span>⚖️</span>
+        <span>Tare Wt</span>
       </button>
       {canEdit && (
         <button 
@@ -303,6 +329,27 @@ const PurchaseDisplay = () => {
           onClose={() => setSelectedCsPurchase(null)}
           purchaseRow={selectedCsPurchase}
           navigate={navigate}
+        />
+      )}
+      <PurchaseLedgerDetailsModal
+        isOpen={ledgerModalOpen}
+        onClose={() => {
+          setLedgerModalOpen(false);
+          setSelectedLedgerPurchaseId(null);
+        }}
+        purchaseId={selectedLedgerPurchaseId}
+      />
+      {weightModalPurchase && (
+        <WeightEntryModal
+          isOpen={Boolean(weightModalPurchase)}
+          onClose={() => setWeightModalPurchase(null)}
+          purchaseId={weightModalPurchase.id || weightModalPurchase.s_no}
+          voucherNo={weightModalPurchase.inv_no || `PUR-${weightModalPurchase.s_no || weightModalPurchase.id}`}
+          initialData={weightModalPurchase}
+          onSave={() => {
+            setWeightModalPurchase(null);
+            window.location.reload();
+          }}
         />
       )}
     </>

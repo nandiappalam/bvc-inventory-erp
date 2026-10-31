@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { api, getMasters } from '../../services/api.js';
 import { safeArray } from './safeArray.js';
-import ItemStockDetailsModal from '../common/ItemStockDetailsModal.jsx';
 import InlineMasterModal from '../common/InlineMasterModal.jsx';
 
 /**
@@ -138,7 +137,6 @@ const ItemDropdownCell = ({
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
-  const [stockModalOpen, setStockModalOpen] = useState(false);
   const [inlineModalOpen, setInlineModalOpen] = useState(false);
 
   const containerRef = useRef(null);
@@ -670,14 +668,9 @@ const ItemDropdownCell = ({
                 {selectedName}
               </span>
 
-              {/* Stock Type & Clickable Stock Mini Badge */}
+              {/* Stock Type & Stock Mini Badge (Read-only) */}
               {selectedItem && (
                 <span
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    if (selectedName) setStockModalOpen(true);
-                  }}
                   style={{
                     fontSize: '10px',
                     fontWeight: '800',
@@ -687,10 +680,9 @@ const ItemDropdownCell = ({
                     color: '#ffffff',
                     whiteSpace: 'nowrap',
                     flexShrink: 0,
-                    cursor: 'pointer',
                     boxShadow: '0 1px 2px rgba(0,0,0,0.15)'
                   }}
-                  title="Click to view live godown-wise stock breakdown popup"
+                  title={`Live stock: ${Number(selectedItem.stock_qty || 0).toFixed(2)}`}
                 >
                   📊 Stk: {Number(selectedItem.stock_qty || 0).toFixed(0)}
                 </span>
@@ -1051,13 +1043,7 @@ const ItemDropdownCell = ({
           </div>
         </div>
       )}
-      {/* Item Stock Details Popup Modal */}
-      <ItemStockDetailsModal
-        isOpen={stockModalOpen}
-        onClose={() => setStockModalOpen(false)}
-        itemName={selectedName}
-        itemId={selectedItem?.id}
-      />
+
       {/* Inline Item Master Creation Modal */}
       <InlineMasterModal
         open={inlineModalOpen}

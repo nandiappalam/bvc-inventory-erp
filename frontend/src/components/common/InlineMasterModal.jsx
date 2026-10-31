@@ -101,6 +101,8 @@ export const MASTER_CONFIGS = {
       { name: 'name', label: 'Loadman / Worker Name', required: true, fullWidth: true, placeholder: 'e.g. ' },
       { name: 'category', label: 'Role Category', required: true, type: 'select', options: ['LOADMAN', 'UNLOAD_WORKER', 'HELPER', 'LABOUR', 'EXTERNAL_MILL'], defaultValue: 'LOADMAN' },
       { name: 'phone', label: 'Mobile Number', required: false, placeholder: 'e.g. 9842112345' },
+      { name: 'per_kg_amount', label: 'Per KG Method Amount', type: 'number', defaultValue: 0 },
+      { name: 'period_duration', label: 'Amount Period Duration', type: 'text', placeholder: 'e.g. Weekly, Monthly' },
       { name: 'payment_mode', label: 'Preferred Payment Mode', required: false, type: 'select', options: ['CASH', 'BANK', 'UPI'], defaultValue: 'CASH' },
       { name: 'upi_id', label: 'UPI / Bank Details', required: false, fullWidth: true }
     ]
@@ -114,6 +116,8 @@ export const MASTER_CONFIGS = {
       { name: 'name', label: 'Loadman / Team Name', required: true, fullWidth: true, placeholder: 'e.g. ' },
       { name: 'category', label: 'Role Category', required: true, type: 'select', options: ['LOADMAN', 'UNLOAD_WORKER', 'HELPER', 'LABOUR'], defaultValue: 'LOADMAN' },
       { name: 'phone', label: 'Mobile Number', required: false, placeholder: 'e.g. 9842112345' },
+      { name: 'per_kg_amount', label: 'Per KG Method Amount', type: 'number', defaultValue: 0 },
+      { name: 'period_duration', label: 'Amount Period Duration', type: 'text', placeholder: 'e.g. Weekly, Monthly' },
       { name: 'payment_mode', label: 'Preferred Payment Mode', required: false, type: 'select', options: ['CASH', 'BANK', 'UPI'], defaultValue: 'CASH' },
       { name: 'upi_id', label: 'UPI / Bank Details', required: false, fullWidth: true }
     ]
@@ -279,6 +283,16 @@ export const MASTER_CONFIGS = {
       { name: 'signature_image', label: 'Signature Image (Base64/URL)', required: false, multiline: true, fullWidth: true },
       { name: 'status', label: 'Status', type: 'select', options: ['Active', 'Inactive'], defaultValue: 'Active' }
     ]
+  },
+  terms: {
+    title: 'Create New Terms',
+    table: 'terms_master',
+    key: 'terms',
+    labelField: 'term_name',
+    fields: [
+      { name: 'term_name', label: 'Term Name', required: true, fullWidth: true },
+      { name: 'description', label: 'Description', required: false, multiline: true, fullWidth: true }
+    ]
   }
 };
 
@@ -297,6 +311,7 @@ export const normalizeMasterType = (rawType) => {
   if (k === 'flour_mill' || k === 'flour_mills' || k === 'flourmill') return 'flour_mills';
   if (k === 'papad_company' || k === 'papad_companies' || k === 'papadcomp') return 'papad_companies';
   if (k === 'sign' || k === 'signs' || k === 'sign_id' || k === 'signid') return 'sign';
+  if (k === 'term' || k === 'terms') return 'terms';
   if (k === 'sender' || k === 'senders') return 'senders';
   if (k === 'consignee' || k === 'consignees') return 'consignees';
   if (k === 'area' || k === 'areas') return 'areas';

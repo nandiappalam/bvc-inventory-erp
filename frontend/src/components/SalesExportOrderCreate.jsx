@@ -378,6 +378,17 @@ const SalesExportOrderCreate = () => {
 
       <EntryActions 
         onSave={handleSubmit}
+        onCancel={() => {
+          if (window.confirm('Are you sure you want to cancel? Any unsaved changes will be discarded.')) {
+            navigate('/entry/sales-export-order-display');
+          }
+        }}
+        onRefresh={() => {
+          if (window.confirm('Refresh page and clear all entries?')) {
+            window.location.reload();
+          }
+        }}
+        onBack={() => navigate('/entry/sales-export-order-display')}
         saving={loading}
         saveText={editId ? "Update Export Sales Order" : "Save Export Sales Order"}
       />

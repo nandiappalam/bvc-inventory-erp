@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react'
 import axios from 'axios'
 import { useAuth } from '../context/AuthContext'
 import { printElement } from '../utils/printHelper'
-import ItemStockDetailsModal from './common/ItemStockDetailsModal.jsx'
 import './erp-theme.css'
 
 /**
@@ -33,16 +32,9 @@ const StockReport = () => {
   const [purging, setPurging] = useState(false)
   const [expandedLot, setExpandedLot] = useState(null)
   const [selectedLotNoFilter, setSelectedLotNoFilter] = useState('')
-  const [isStockModalOpen, setIsStockModalOpen] = useState(false)
-  const [selectedItemForModal, setSelectedItemForModal] = useState('')
 
-  const handleItemClick = (row) => {
-    const nameToUse = row.item_name || row.item_id || row.name || '';
-    if (nameToUse) {
-      setSelectedItemForModal(nameToUse);
-      setIsStockModalOpen(true);
-    }
-  };
+
+
 
   const { financialYear } = useAuth() || {}
 
@@ -248,37 +240,6 @@ const StockReport = () => {
       alert('Failed to purge legacy data: ' + (err.response?.data?.message || err.message));
     } finally {
       setPurging(false);
-    }
-  };
-
-  const handleFGClick = async (row) => {
-    setSelectedFGItem(row);
-    setIsFGModalOpen(true);
-    setModalLoading(true);
-    setFgLotDetails([]);
-    try {
-      const itemId = row.item_id || items.find(i => (i.name || i.item_name) === row.item_name)?.id;
-      let url = '/api/stock/lots';
-      if (itemId) {
-        url += `?item_id=${itemId}`;
-      }
-      const response = await axios.get(url);
-      let responseData = [];
-      if (response.data) {
-        if (Array.isArray(response.data)) {
-          responseData = response.data;
-        } else if (typeof response.data === 'object') {
-          responseData = Array.isArray(response.data.data) ? response.data.data : [];
-        }
-      }
-      if (!itemId) {
-        responseData = responseData.filter(r => r.item_name === row.item_name);
-      }
-      setFgLotDetails(responseData.filter(r => !row.item_name || r.item_name === row.item_name));
-    } catch (err) {
-      console.error('Error fetching item lot details:', err);
-    } finally {
-      setModalLoading(false);
     }
   };
 
@@ -567,13 +528,7 @@ const StockReport = () => {
                         {reportMode === 'summary' ? (
                           <>
                             <td style={{...styles.td, fontWeight: 'bold'}}>
-                              <span 
-                                onClick={() => handleItemClick(row)} 
-                                title="Click to view live item stock details & godown breakdown popup"
-                                style={{ color: '#2563eb', cursor: 'pointer', textDecoration: 'underline' }}
-                              >
-                                {row.item_name}
-                              </span>
+{row.item_name}
                             </td>
                             <td style={styles.td}>
                               <span style={{
@@ -621,13 +576,7 @@ const StockReport = () => {
                               </span>
                             </td>
                             <td style={{...styles.td, fontWeight: 'bold'}}>
-                              <span 
-                                onClick={() => handleItemClick(row)} 
-                                title="Click to view live item stock details & godown breakdown popup"
-                                style={{ color: '#2563eb', cursor: 'pointer', textDecoration: 'underline' }}
-                              >
-                                {row.item_name}
-                              </span>
+{row.item_name}
                               {row.lot_no && (
                                 <span style={{
                                   fontSize: '11px', 
@@ -881,13 +830,7 @@ const StockReport = () => {
         </div>
       </div>
 
-      {/* Item Stock Details Portal Overlay Modal */}
-      <ItemStockDetailsModal
-        isOpen={isStockModalOpen}
-        onClose={() => setIsStockModalOpen(false)}
-        itemName={selectedItemForModal}
-        itemId={selectedItemForModal}
-      />
+
     </div>
   )
 }
@@ -1215,176 +1158,6 @@ const styles = {
     fontWeight: '600',
     borderRadius: '6px'
   },
-  // Modal Styles
-  modalOverlay: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(15, 23, 42, 0.6)',
-    backdropFilter: 'blur(4px)',
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 9999,
-    padding: '20px'
-  },
-  modalContent: {
-    backgroundColor: '#ffffff',
-    borderRadius: '12px',
-    boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)',
-    width: '100%',
-    maxWidth: '900px',
-    maxHeight: '90vh',
-    display: 'flex',
-    flexDirection: 'column',
-    border: '1px solid #cbd5e1',
-    overflow: 'hidden'
-  },
-  modalHeader: {
-    padding: '16px 20px',
-    borderBottom: '1px solid #e2e8f0',
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#f8fafc'
-  },
-  modalTitle: {
-    margin: 0,
-    fontSize: '16px',
-    fontWeight: '700',
-    color: '#1e293b'
-  },
-  modalCloseBtn: {
-    background: 'none',
-    border: 'none',
-    fontSize: '24px',
-    color: '#64748b',
-    cursor: 'pointer',
-    lineHeight: '1',
-    padding: '4px'
-  },
-  modalBody: {
-    padding: '20px',
-    overflowY: 'auto',
-    flex: 1,
-    backgroundColor: '#f1f5f9'
-  },
-  modalItemMeta: {
-    backgroundColor: '#ffffff',
-    padding: '12px 16px',
-    borderRadius: '8px',
-    border: '1px solid #cbd5e1',
-    marginBottom: '16px',
-    fontSize: '14px',
-    color: '#334155'
-  },
-  modalLoading: {
-    textAlign: 'center',
-    padding: '40px',
-    color: '#2563eb',
-    fontWeight: '600',
-    fontSize: '14px'
-  },
-  lotList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '16px'
-  },
-  lotCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: '8px',
-    border: '1px solid #cbd5e1',
-    padding: '16px',
-    boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
-  },
-  lotCardHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderBottom: '1px solid #f1f5f9',
-    paddingBottom: '8px',
-    marginBottom: '12px'
-  },
-  lotNoLabel: {
-    fontSize: '14px',
-    fontWeight: '700',
-    color: '#1e293b'
-  },
-  lotMetaGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
-    gap: '12px',
-    fontSize: '12px',
-    color: '#475569',
-    backgroundColor: '#f8fafc',
-    padding: '8px 12px',
-    borderRadius: '6px',
-    border: '1px solid #e2e8f0',
-    marginBottom: '16px'
-  },
-  modalSection: {
-    borderTop: '1px solid #e2e8f0',
-    paddingTop: '12px'
-  },
-  modalSectionTitle: {
-    margin: '0 0 10px 0',
-    fontSize: '12px',
-    fontWeight: '700',
-    color: '#475569',
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em'
-  },
-  modalTraceGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-    gap: '12px',
-    marginTop: '10px'
-  },
-  modalTraceCol: {
-    backgroundColor: '#f8fafc',
-    borderRadius: '6px',
-    border: '1px solid #e2e8f0',
-    padding: '12px'
-  },
-  modalColTitle: {
-    margin: '0 0 10px 0',
-    fontSize: '12px',
-    fontWeight: '700',
-    borderBottom: '1px solid #e2e8f0',
-    paddingBottom: '6px'
-  },
-  modalList: {
-    margin: 0,
-    padding: 0,
-    listStyle: 'none',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px'
-  },
-  modalListItem: {
-    fontSize: '12px',
-    paddingBottom: '6px',
-    borderBottom: '1px dashed #e2e8f0'
-  },
-  modalFooter: {
-    padding: '12px 20px',
-    borderTop: '1px solid #e2e8f0',
-    display: 'flex',
-    justifyContent: 'flex-end',
-    backgroundColor: '#f8fafc'
-  },
-  modalCloseBtnPrimary: {
-    backgroundColor: '#2563eb',
-    color: '#ffffff',
-    border: 'none',
-    padding: '8px 16px',
-    borderRadius: '6px',
-    fontSize: '13px',
-    fontWeight: '600',
-    cursor: 'pointer'
-  }
 }
 
 export default StockReport

@@ -16,6 +16,9 @@ import EntryActions from './entry/EntryActions';
 import EntryTaxBillDetails from './entry/EntryTaxBillDetails';
 import { calculateInvoiceTax, calculateLineTax } from '../services/taxService';
 import { InlineMasterModal, getCreateLabel } from './common/InlineMasterModal.jsx';
+import PurchaseLedgerDetailsModal from './purchase/PurchaseLedgerDetailsModal';
+import TransportFreightDetailsModal from './purchase/TransportFreightDetailsModal';
+import WeightEntryModal from './purchase/WeightEntryModal';
 import './SalesCreate.css';
 
 /**
@@ -50,13 +53,30 @@ const PurchaseCreation = () => {
     // Transport & Vehicle fields
     transporter: '',
     transport: '',
+    transport_charges: 0,
+    freight_amount: 0,
+    advance_amount: 0,
+    mamool_amount: 0,
+    weight_cash: 0,
+    other_additional_charges: 0,
+    other_deductions: 0,
+    net_transport_amount: 0,
+    transport_payable_type: 'SEPARATE',
     vehicle_no: '',
     lorry_no: '',
     driver_name: '',
     driver: '',
+    driver_mobile: '',
+    transport_date: '',
     gross_weight: '',
     tare_weight: '',
     net_weight: '',
+    weighbridge_location: 'Main Factory',
+    unloading_date: '',
+    unloading_time: '',
+    weighment_ref_no: '',
+    operator_name: '',
+    weight_status: 'TARE_PENDING',
 
     tax_type: 'Exclusive',
     tax_rate: 5,
@@ -74,8 +94,50 @@ const PurchaseCreation = () => {
     loadman_worker_id: '',
     loadman_qty_kg: '',
     loadman_rate_per_kg: '0.50',
+    loadman_payable_type: 'SEPARATE',
     additional_charges: '0'
   })
+
+  const [ledgerModalOpen, setLedgerModalOpen] = useState(false);
+  const [transportModalOpen, setTransportModalOpen] = useState(false);
+  const [weightModalOpen, setWeightModalOpen] = useState(false);
+
+  // Date-wise Loadman rate auto-calculation from Loadman master duration period
+  useEffect(() => {
+    if (!formData.loadman_name) return;
+    const loadWorkerRate = async () => {
+      try {
+        const workersRes = await getMasters('workers');
+        const list = Array.isArray(workersRes) ? workersRes : (workersRes?.data || []);
+        const matched = list.find(w => 
+          (w.name && w.name.trim().toLowerCase() === formData.loadman_name.trim().toLowerCase()) ||
+          String(w.id) === String(formData.loadman_worker_id)
+        );
+        if (matched && matched.per_kg_amount !== undefined && matched.per_kg_amount !== null && Number(matched.per_kg_amount) > 0) {
+          const transDate = formData.date ? new Date(formData.date) : new Date();
+          let applies = true;
+          if (matched.from_date || matched.effective_from) {
+            const fDate = new Date(matched.from_date || matched.effective_from);
+            if (transDate < fDate) applies = false;
+          }
+          if (matched.till_date || matched.effective_to) {
+            const tDate = new Date(matched.till_date || matched.effective_to);
+            if (transDate > tDate) applies = false;
+          }
+          if (applies) {
+            setFormData(prev => ({
+              ...prev,
+              loadman_rate_per_kg: String(matched.per_kg_amount),
+              loadman_worker_id: matched.id || prev.loadman_worker_id
+            }));
+          }
+        }
+      } catch (err) {
+        console.warn('Notice loading worker rate:', err.message);
+      }
+    };
+    loadWorkerRate();
+  }, [formData.loadman_name, formData.date]);
 
   const [poPickerOpen, setPoPickerOpen] = useState(false);
   const [poList, setPoList] = useState([]);
@@ -150,8 +212,18 @@ const PurchaseCreation = () => {
       .reduce((s, d) => s + (Number(d.amount || 0) || 0), 0);
 
     const totalDeductions = addDeductions - lessDeductions;
-    // Grand Total including Unloading / Loadman Charges as requested by user
-    const grandTotal = Number((invoiceResult.netAmount + totalDeductions + calculatedLoadmanCharges).toFixed(2));
+    // Grand Total (Supplier Net Payable): only add loadman/transport if included in supplier bill
+    const isLoadmanSupplier = String(formData.loadman_payable_type || '').toUpperCase().includes('SUPPLIER') || String(formData.loadman_payable_type || '').toUpperCase().includes('INCLUDED');
+    const isTransportSupplier = String(formData.transport_payable_type || '').toUpperCase().includes('SUPPLIER') || String(formData.transport_payable_type || '').toUpperCase().includes('INCLUDED');
+
+    let rawGrandTotal = invoiceResult.netAmount + totalDeductions;
+    if (isLoadmanSupplier) {
+      rawGrandTotal += calculatedLoadmanCharges;
+    }
+    if (isTransportSupplier) {
+      rawGrandTotal += parseFloat(formData.net_transport_amount || formData.transport_charges || formData.freight_amount || 0);
+    }
+    const grandTotal = Number(rawGrandTotal.toFixed(2));
 
     const activeTaxRate = Number(invoiceResult.rateSummaries
       .find(rate => Number(rate.gstRate) > 0)?.gstRate || 0);
@@ -550,16 +622,33 @@ const PurchaseCreation = () => {
             supplier_state_code: data.supplier_state_code || data.party_state_code || data.state_code || '33',
             transporter: data.transporter || data.transport || '',
             transport: data.transporter || data.transport || '',
+            transport_charges: parseFloat(data.transport_charges || data.freight_amount || 0),
+            freight_amount: parseFloat(data.freight_amount || data.transport_charges || 0),
+            advance_amount: parseFloat(data.advance_amount || 0),
+            mamool_amount: parseFloat(data.mamool_amount || 0),
+            weight_cash: parseFloat(data.weight_cash || 0),
+            other_additional_charges: parseFloat(data.other_additional_charges || 0),
+            other_deductions: parseFloat(data.other_deductions || 0),
+            net_transport_amount: parseFloat(data.net_transport_amount || 0),
+            transport_payable_type: data.transport_payable_type || 'SEPARATE',
             vehicle_no: data.vehicle_no || data.lorry_no || '',
             lorry_no: data.vehicle_no || data.lorry_no || '',
             driver_name: data.driver_name || data.driver || '',
             driver: data.driver_name || data.driver || '',
+            driver_mobile: data.driver_mobile || '',
+            transport_date: data.transport_date || '',
             contact_person: data.supplier_contact_person || data.contact_person || '',
             area: data.area || '',
             phone: data.supplier_phone || data.phone || '',
             gross_weight: data.gross_weight ?? data.cross_weight ?? '',
             tare_weight: data.tare_weight ?? '',
             net_weight: data.net_weight ?? '',
+            weighbridge_location: data.weighbridge_location || 'Main Factory',
+            unloading_date: data.unloading_date || '',
+            unloading_time: data.unloading_time || '',
+            weighment_ref_no: data.weighment_ref_no || '',
+            operator_name: data.operator_name || '',
+            weight_status: data.weight_status || (Number(data.tare_weight || 0) > 0 ? 'COMPLETED' : 'TARE_PENDING'),
             date: formatDate(data.date),
             inv_no: data.inv_no || data.invNo || '',
             invNo: data.inv_no || data.invNo || '',
@@ -576,6 +665,7 @@ const PurchaseCreation = () => {
             loadman_qty_kg: data.loadman_qty_kg !== undefined && data.loadman_qty_kg !== null ? String(data.loadman_qty_kg) : '',
             loadman_rate_per_kg: (data.loadman_rate_per_kg !== undefined && data.loadman_rate_per_kg !== null && String(data.loadman_rate_per_kg) !== '') ? String(data.loadman_rate_per_kg) : '0.50',
             loadman_charges: (data.loadman_charges !== undefined && data.loadman_charges !== null && String(data.loadman_charges) !== '') ? String(data.loadman_charges) : '',
+            loadman_payable_type: data.loadman_payable_type || 'SEPARATE',
             additional_charges: data.additional_charges !== undefined && data.additional_charges !== null ? String(data.additional_charges) : '0',
             gst_no: data.gst_no || data.supplier_gstin || '',
             email: data.email || data.supplier_email || '',
@@ -1211,12 +1301,13 @@ const PurchaseCreation = () => {
     // Column 2
     { name: 'inv_no', label: 'Invoice No', type: 'text', col: 2 },
     { name: 'inv_date', label: 'Invoice Date', type: 'date', col: 2 },
-    { name: 'transporter', label: 'Transporter', type: 'masterSelect', masterType: 'transports', placeholder: 'Select/Enter Transporter', col: 2 },
-    { name: 'vehicle_no', label: 'Vehicle No', type: 'text', placeholder: 'e.g. TN-38-AB-1234', col: 2 },
-    { name: 'driver_name', label: 'Driver Name', type: 'text', placeholder: 'Driver Name', col: 2 },
     { name: 'loadman_name', label: 'Loadman Team', type: 'masterSelect', masterType: 'workers', placeholder: 'e.g. K. Murugan', col: 2 },
     { name: 'loadman_rate_per_kg', label: 'Loadman (₹/Kg)', type: 'number', min: 0, step: '0.01', placeholder: '0.50', col: 2 },
     { name: 'loadman_charges', label: 'Unloading Fee (₹)', type: 'number', readOnly: true, col: 2 },
+    { name: 'loadman_payable_type', label: 'Loadman Payment', type: 'select', options: [
+      { value: 'SEPARATE', label: 'Separately Payable to Loadman' },
+      { value: 'SUPPLIER_INVOICE', label: 'Included in Supplier Bill' }
+    ], col: 2 },
 
     // Column 3
     { name: 'supplier_id', label: 'Supplier', type: 'masterSelect', masterType: 'suppliers', col: 3 },
@@ -1627,6 +1718,159 @@ const PurchaseCreation = () => {
           ) : null}
         />
 
+        {/* Transport Freight Summary & Post-Unloading Weight Management Cards */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', margin: '14px 0' }}>
+          
+          {/* Card A: Consolidated Transport Freight Summary */}
+          <div style={{ background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '12px 16px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', borderBottom: '1px solid #f1f5f9', paddingBottom: '6px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '18px' }}>🚚</span>
+                <span style={{ fontWeight: 'bold', fontSize: '13px', color: '#1e293b' }}>Transport Freight Details</span>
+                <span style={{
+                  fontSize: '11px',
+                  fontWeight: '600',
+                  padding: '2px 8px',
+                  borderRadius: '12px',
+                  backgroundColor: Number(formData.net_transport_amount || formData.transport_charges || 0) > 0 ? '#dcfce7' : '#f1f5f9',
+                  color: Number(formData.net_transport_amount || formData.transport_charges || 0) > 0 ? '#166534' : '#64748b',
+                  border: '1px solid #cbd5e1'
+                }}>
+                  {Number(formData.net_transport_amount || formData.transport_charges || 0) > 0 ? 'Details Saved' : 'Not Added'}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTransportModalOpen(true)}
+                style={{
+                  padding: '4px 10px',
+                  backgroundColor: '#1e40af',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontWeight: 'bold',
+                  fontSize: '11px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}
+              >
+                <span>✏️</span>
+                <span>{Number(formData.net_transport_amount || formData.transport_charges || 0) > 0 ? 'Edit Details' : 'Add Freight Details'}</span>
+              </button>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', fontSize: '12px' }}>
+              <div>
+                <span style={{ color: '#64748b', fontSize: '11px', display: 'block' }}>Transporter:</span>
+                <strong style={{ color: '#0f172a' }}>{formData.transporter || formData.transport || 'Not Selected'}</strong>
+              </div>
+              <div>
+                <span style={{ color: '#64748b', fontSize: '11px', display: 'block' }}>Vehicle No:</span>
+                <strong style={{ color: '#0f172a', textTransform: 'uppercase' }}>{formData.vehicle_no || 'Not Entered'}</strong>
+              </div>
+              <div>
+                <span style={{ color: '#64748b', fontSize: '11px', display: 'block' }}>Net Transport Amount:</span>
+                <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#15803d' }}>
+                  ₹{Number(formData.net_transport_amount || formData.transport_charges || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Card B: Weight Details Display Table (Strictly Non-Editable Format) */}
+          <div style={{ background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '12px 16px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', borderBottom: '1px solid #f1f5f9', paddingBottom: '6px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '18px' }}>⚖️</span>
+                <span style={{ fontWeight: 'bold', fontSize: '13px', color: '#1e293b' }}>Purchase Weight Details</span>
+                <span style={{
+                  fontSize: '11px',
+                  fontWeight: '600',
+                  padding: '2px 8px',
+                  borderRadius: '12px',
+                  backgroundColor: Number(formData.tare_weight || 0) > 0 ? '#dcfce7' : '#fef3c7',
+                  color: Number(formData.tare_weight || 0) > 0 ? '#166534' : '#92400e',
+                  border: '1px solid #cbd5e1'
+                }}>
+                  {Number(formData.tare_weight || 0) > 0 ? 'Completed' : 'Tare Pending'}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setWeightModalOpen(true)}
+                style={{
+                  padding: '4px 10px',
+                  backgroundColor: '#047857',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontWeight: 'bold',
+                  fontSize: '11px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}
+              >
+                <span>⚖️</span>
+                <span>{Number(formData.tare_weight || 0) > 0 ? 'Tare Weight Recorded' : 'Record Tare Weight'}</span>
+              </button>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 1fr', gap: '8px', fontSize: '12px', alignItems: 'center' }}>
+              <div>
+                <span style={{ color: '#64748b', fontSize: '11px', display: 'block' }}>Gross Weight:</span>
+                <strong style={{ color: '#0f172a', fontSize: '13px' }}>
+                  {formData.gross_weight ? `${Number(formData.gross_weight).toLocaleString('en-IN')} kg` : `${erpTotals.totalWeight || 0} kg`}
+                </strong>
+              </div>
+
+              {/* Tare Weight with Single Scale Icon */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <div>
+                  <span style={{ color: '#64748b', fontSize: '11px', display: 'block' }}>Tare Weight:</span>
+                  <strong style={{ color: Number(formData.tare_weight || 0) > 0 ? '#0f172a' : '#d97706', fontSize: '13px' }}>
+                    {Number(formData.tare_weight || 0) > 0 ? `${Number(formData.tare_weight).toLocaleString('en-IN')} kg` : 'Pending'}
+                  </strong>
+                </div>
+                {/* Single Weight Scale Icon for Post-Unloading Entry */}
+                <button
+                  type="button"
+                  onClick={() => setWeightModalOpen(true)}
+                  title="Click scale icon to enter Tare Weight post-unloading"
+                  style={{
+                    border: '1px solid #a7f3d0',
+                    background: '#ecfdf5',
+                    borderRadius: '50%',
+                    width: '30px',
+                    height: '30px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    color: '#047857',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  ⚖️
+                </button>
+              </div>
+
+              <div>
+                <span style={{ color: '#64748b', fontSize: '11px', display: 'block' }}>Calculated Net Weight:</span>
+                <strong style={{ color: Number(formData.net_weight || 0) > 0 ? '#15803d' : '#d97706', fontSize: '13px' }}>
+                  {Number(formData.net_weight || 0) > 0 ? `${Number(formData.net_weight).toLocaleString('en-IN')} kg` : 'Pending'}
+                </strong>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
 
 
         <EntryItemsTable
@@ -1881,6 +2125,29 @@ const PurchaseCreation = () => {
           onBack={handleBack}
           saving={loading}
           saveText={id ? 'Update' : 'Save'}
+          extraButtons={
+            <button
+              type="button"
+              onClick={() => setLedgerModalOpen(true)}
+              style={{
+                backgroundColor: '#0f766e',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '4px',
+                padding: '6px 14px',
+                fontSize: '13px',
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+              title="Open complete purchase-wise transaction ledger statement"
+            >
+              <span>📑</span>
+              <span>View Ledger Details</span>
+            </button>
+          }
         />
       </form>
 
@@ -2051,6 +2318,81 @@ const PurchaseCreation = () => {
         onClose={() => setInlineDeductionOpen(false)}
         masterType="deduction_purchase"
         onSuccess={handleInlineDeductionCreated}
+      />
+
+      {/* Transport Freight Details Modal */}
+      <TransportFreightDetailsModal
+        isOpen={transportModalOpen}
+        onClose={() => setTransportModalOpen(false)}
+        voucherNo={formData.inv_no || formData.s_no ? `PUR-${formData.inv_no || formData.s_no}` : 'PUR-NEW'}
+        initialData={formData}
+        onSave={(tData) => {
+          setFormData(prev => ({
+            ...prev,
+            ...tData,
+            transporter: tData.transporter || prev.transporter,
+            transport: tData.transporter || prev.transporter,
+            vehicle_no: tData.vehicle_no || prev.vehicle_no,
+            lorry_no: tData.vehicle_no || prev.vehicle_no,
+            driver_name: tData.driver_name || prev.driver_name,
+            driver: tData.driver_name || prev.driver_name,
+            driver_mobile: tData.driver_mobile || prev.driver_mobile,
+            transport_charges: tData.freight_amount || prev.transport_charges,
+            freight_amount: tData.freight_amount || prev.freight_amount,
+            advance_amount: tData.advance_amount || 0,
+            mamool_amount: tData.mamool_amount || 0,
+            weight_cash: tData.weight_cash || 0,
+            other_additional_charges: tData.other_additional_charges || 0,
+            other_deductions: tData.other_deductions || 0,
+            net_transport_amount: tData.net_transport_amount || 0,
+            transport_payable_type: tData.transport_payable_type || prev.transport_payable_type || 'SEPARATE'
+          }));
+        }}
+      />
+
+      {/* Controlled Post-Unloading Tare Weight Entry Modal */}
+      <WeightEntryModal
+        isOpen={weightModalOpen}
+        onClose={() => setWeightModalOpen(false)}
+        voucherNo={formData.inv_no || formData.s_no ? `PUR-${formData.inv_no || formData.s_no}` : 'PUR-NEW'}
+        purchaseId={id || null}
+        initialData={{
+          gross_weight: formData.gross_weight || erpTotals.totalWeight || 0,
+          tare_weight: formData.tare_weight || 0,
+          net_weight: formData.net_weight || 0,
+          weighbridge_location: formData.weighbridge_location || 'Main Factory',
+          unloading_date: formData.unloading_date || formData.date,
+          unloading_time: formData.unloading_time || '',
+          weighment_ref_no: formData.weighment_ref_no || '',
+          operator_name: formData.operator_name || ''
+        }}
+        onSave={(wData) => {
+          setFormData(prev => ({
+            ...prev,
+            gross_weight: wData.gross_weight,
+            tare_weight: wData.tare_weight,
+            net_weight: wData.net_weight,
+            weighbridge_location: wData.weighbridge_location,
+            unloading_date: wData.unloading_date,
+            unloading_time: wData.unloading_time,
+            weighment_ref_no: wData.weighment_ref_no,
+            operator_name: wData.operator_name,
+            weight_status: wData.weight_status
+          }));
+        }}
+      />
+
+      {/* Purchase-wise Transaction Ledger Details Modal */}
+      <PurchaseLedgerDetailsModal
+        isOpen={ledgerModalOpen}
+        onClose={() => setLedgerModalOpen(false)}
+        purchaseId={id}
+        purchaseData={{
+          formData,
+          items: validItems,
+          totals: erpTotals,
+          deductions: selectedDeductions
+        }}
       />
     </div>
   )

@@ -24,7 +24,7 @@ import ERPHeader from '../../../components/erp/ERPHeader';
 import ERPTable from '../../../components/erp/ERPTable';
 import api from '../../../services/api';
 import IQRUnloadGodownModal from '../../../components/common/IQRUnloadGodownModal';
-import ItemStockDetailsModal from '../../../components/common/ItemStockDetailsModal';
+
 
 const columns = [
   { key: 'iqr_no', label: 'IQR Number', sx: { width: '15%' } },
@@ -49,8 +49,7 @@ export default function IncomingQualityList() {
   // Modals state
   const [unloadModalOpen, setUnloadModalOpen] = useState(false);
   const [selectedUnloadRow, setSelectedUnloadRow] = useState(null);
-  const [stockModalOpen, setStockModalOpen] = useState(false);
-  const [selectedStockItem, setSelectedStockItem] = useState('');
+
 
   const loadData = () => {
     setLoading(true);
@@ -90,11 +89,7 @@ export default function IncomingQualityList() {
     setUnloadModalOpen(true);
   };
 
-  const handleItemClick = (itemName) => {
-    if (!itemName) return;
-    setSelectedStockItem(itemName);
-    setStockModalOpen(true);
-  };
+
 
   const handleUnloadLot = (lotNo) => {
     if (!lotNo) return;
@@ -226,16 +221,9 @@ export default function IncomingQualityList() {
                     <TableCell style={{ padding: '12px' }}>
                       <Box
                         component="span"
-                        onClick={() => handleItemClick(row.item_name)}
                         sx={{
-                          color: '#1d4ed8',
+                          color: '#1e293b',
                           fontWeight: 700,
-                          cursor: 'pointer',
-                          textDecoration: 'underline',
-                          '&:hover': { color: '#1e40af', backgroundColor: '#eff6ff' },
-                          px: 1,
-                          py: 0.5,
-                          borderRadius: 1
                         }}
                       >
                         {row.item_name}
@@ -341,12 +329,7 @@ export default function IncomingQualityList() {
           }}
         />
 
-        {/* Item Stock Details Popup Modal */}
-        <ItemStockDetailsModal
-          isOpen={stockModalOpen}
-          onClose={() => setStockModalOpen(false)}
-          itemName={selectedStockItem}
-        />
+
 
         {/* Toast Alerts */}
         <Snackbar 

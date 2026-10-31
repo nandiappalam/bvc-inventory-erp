@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react'
 import axios from 'axios'
 import { useAuth } from '../../context/AuthContext'
 import { printHtml } from '../../utils/printHelper'
-import ItemStockDetailsModal from '../common/ItemStockDetailsModal.jsx'
 import './ReportPage.css'
 
 /**
@@ -31,21 +30,10 @@ const StockStatusReport = () => {
   const [purging, setPurging] = useState(false)
   const [expandedLot, setExpandedLot] = useState(null)
   const [selectedLotNoFilter, setSelectedLotNoFilter] = useState('')
-  const [isFGModalOpen, setIsFGModalOpen] = useState(false)
-  const [selectedFGItem, setSelectedFGItem] = useState(null)
-  const [fgLotDetails, setFgLotDetails] = useState([])
-  const [modalLoading, setModalLoading] = useState(false)
 
-  const [isStockModalOpen, setIsStockModalOpen] = useState(false)
-  const [selectedItemForModal, setSelectedItemForModal] = useState('')
 
-  const handleItemClick = (row) => {
-    const nameToUse = row.item_name || row.item_id || row.name || '';
-    if (nameToUse) {
-      setSelectedItemForModal(nameToUse);
-      setIsStockModalOpen(true);
-    }
-  };
+
+
 
   const { financialYear } = useAuth() || {}
 
@@ -143,36 +131,9 @@ const StockStatusReport = () => {
     fetchReport()
   }, [reportMode, selectedItem, fromDate, toDate])
 
-  const handleFGClick = async (row) => {
-    setSelectedFGItem(row);
-    setIsFGModalOpen(true);
-    setModalLoading(true);
-    setFgLotDetails([]);
-    try {
-      const itemId = row.item_id || items.find(i => (i.name || i.item_name) === row.item_name)?.id;
-      let url = '/api/stock/lots';
-      if (itemId) {
-        url += `?item_id=${itemId}`;
-      }
-      const response = await axios.get(url);
-      let responseData = [];
-      if (response.data) {
-        if (Array.isArray(response.data)) {
-          responseData = response.data;
-        } else if (typeof response.data === 'object') {
-          responseData = Array.isArray(response.data.data) ? response.data.data : [];
-        }
-      }
-      if (!itemId) {
-        responseData = responseData.filter(r => r.item_name === row.item_name);
-      }
-      setFgLotDetails(responseData.filter(r => r.category === 'FG'));
-    } catch (err) {
-      console.error('Error fetching FG lot details:', err);
-    } finally {
-      setModalLoading(false);
-    }
-  };
+  useEffect(() => {
+    fetchReport()
+  }, [reportMode, selectedItem, fromDate, toDate])
 
   const handlePurgeLegacyData = async () => {
     if (!window.confirm("Are you sure you want to purge old legacy Tauri test records (prior to April 2025) and recalculate stock balances? This will clear stale historical data.")) {
@@ -534,13 +495,7 @@ const StockStatusReport = () => {
                   return (
                     <tr key={index} style={{ background: index % 2 === 0 ? '#ffffff' : '#f8fafc' }}>
                       <td style={{...styles.td, fontWeight: 'bold'}}>
-                        <span 
-                          onClick={() => handleItemClick(row)} 
-                          title="Click to view live item stock details & godown breakdown popup"
-                          style={{ color: '#2563eb', cursor: 'pointer', textDecoration: 'underline' }}
-                        >
-                          {row.item_name}
-                        </span>
+{row.item_name}
                       </td>
                       <td style={styles.td}>
                         <span style={{
@@ -626,17 +581,7 @@ const StockStatusReport = () => {
                           </span>
                         </td>
                         <td style={{...styles.td, fontWeight: 'bold'}}>
-                          {row.category === 'FG' ? (
-                            <span 
-                              onClick={() => handleFGClick(row)} 
-                              title="Click to view full traceability & process log"
-                              style={{ color: '#2563eb', cursor: 'pointer', textDecoration: 'underline' }}
-                            >
-                              {row.item_name}
-                            </span>
-                          ) : (
-                            row.item_name
-                          )}
+{row.item_name}
                           {row.lot_no && (
                             <span style={{
                               fontSize: '11px', 
@@ -862,155 +807,8 @@ const StockStatusReport = () => {
         </div>
       </div>
 
-      {/* Small Window Modal for FG Details */}
-      {isFGModalOpen && (
-        <div style={styles.modalOverlay}>
-          <div style={styles.modalContent}>
-            <div style={styles.modalHeader}>
-              <h3 style={styles.modalTitle}>📦 Finished Goods (FG) Traceability Details</h3>
-              <button onClick={() => setIsFGModalOpen(false)} style={styles.modalCloseBtn}>×</button>
-            </div>
-            
-            <div style={styles.modalBody}>
-              <div style={styles.modalItemMeta}>
-                <strong>Item Name:</strong> <span style={{fontSize: '15px', color: '#1d4ed8', fontWeight: 'bold'}}>{selectedFGItem?.item_name}</span>
-              </div>
-              
-              {modalLoading ? (
-                <div style={styles.modalLoading}>Loading lot details & process trace...</div>
-              ) : fgLotDetails.length === 0 ? (
-                <div style={styles.noData}>No Finished Goods lots found for this item in the records.</div>
-              ) : (
-                <div style={styles.lotList}>
-                  {fgLotDetails.map((lot, idx) => (
-                    <div key={idx} style={styles.lotCard}>
-                      <div style={styles.lotCardHeader}>
-                        <span style={styles.lotNoLabel}>Lot No: <strong style={{fontFamily: 'monospace'}}>{lot.lot_no}</strong></span>
-                        <span style={{
-                          ...styles.tag,
-                          color: '#16a34a',
-                          background: '#dcfce7'
-                        }}>
-                          Active Stock: {parseFloat(lot.remaining_quantity || 0).toFixed(2)} Bags
-                        </span>
-                      </div>
-                      
-                      <div style={styles.lotMetaGrid}>
-                        <div><strong>Mfg Date:</strong> {lot.created_at ? new Date(lot.created_at).toLocaleDateString() : '-'}</div>
-                        <div><strong>Yielded Qty:</strong> {parseFloat(lot.purchased_qty || 0).toFixed(2)} Bags</div>
-                        <div><strong>Sold Qty:</strong> {parseFloat(lot.sold_qty || 0).toFixed(2)} Bags</div>
-                        <div><strong>Rate:</strong> {parseFloat(lot.rate || 0).toFixed(2)}</div>
-                      </div>
 
-                      {/* Process & Grinding Details */}
-                      <div style={styles.modalSection}>
-                        <h4 style={styles.modalSectionTitle}>🌾 Milling / Grinding Process Tracing</h4>
-                        {lot.source_details ? (
-                          <div>
-                            {/* Process Info */}
-                            {lot.source_details.process_info && lot.source_details.process_info.length > 0 && (
-                              <div style={{marginBottom: '10px', fontSize: '12px', background: '#f8fafc', padding: '8px', borderRadius: '4px', border: '1px solid #e2e8f0'}}>
-                                {lot.source_details.process_info.map((p, pIdx) => (
-                                  <div key={pIdx}>
-                                    ⚙️ <strong>Process Ref:</strong> #{p.reference_no} | 🏭 <strong>Mill:</strong> {p.mill} | 📅 <strong>Date:</strong> {p.date ? new Date(p.date).toLocaleDateString() : '-'}
-                                  </div>
-                                ))}
-                              </div>
-                            )}
 
-                            <div style={styles.modalTraceGrid}>
-                              {/* Inputs */}
-                              <div style={styles.modalTraceCol}>
-                                <h5 style={{...styles.modalColTitle, color: '#b45309'}}>📥 Raw Material Inputs</h5>
-                                {lot.source_details.rm_inputs && lot.source_details.rm_inputs.length > 0 ? (
-                                  <ul style={styles.modalList}>
-                                    {lot.source_details.rm_inputs.map((inp, iIdx) => (
-                                      <li key={iIdx} style={styles.modalListItem}>
-                                        <strong>{inp.item_name}</strong>
-                                        <div style={{fontSize: '11px', color: '#475569'}}>
-                                          Lot: <span style={{fontFamily: 'monospace'}}>{inp.lot_no}</span>
-                                        </div>
-                                        <div style={{fontSize: '11px', color: '#047857', fontWeight: '600'}}>
-                                          {inp.qty} Bags / {inp.weight} kg
-                                        </div>
-                                      </li>
-                                    ))}
-                                  </ul>
-                                ) : (
-                                  <div style={styles.noNestedData}>No RM inputs recorded</div>
-                                )}
-                              </div>
-
-                              {/* Outputs */}
-                              <div style={styles.modalTraceCol}>
-                                <h5 style={{...styles.modalColTitle, color: '#16a34a'}}>📤 Process Output (FG)</h5>
-                                {lot.source_details.outputs && lot.source_details.outputs.length > 0 ? (
-                                  <ul style={styles.modalList}>
-                                    {lot.source_details.outputs.map((out, oIdx) => (
-                                      <li key={oIdx} style={styles.modalListItem}>
-                                        <strong style={{color: out.lot_no === lot.lot_no ? '#1d4ed8' : '#1e293b'}}>
-                                          {out.item_name} {out.lot_no === lot.lot_no && '(This Lot)'}
-                                        </strong>
-                                        <div style={{fontSize: '11px', color: '#475569'}}>
-                                          Lot: <span style={{fontFamily: 'monospace'}}>{out.lot_no}</span>
-                                        </div>
-                                        <div style={{fontSize: '11px', color: '#047857', fontWeight: '600'}}>
-                                          {out.qty} Bags / {out.weight} kg
-                                        </div>
-                                      </li>
-                                    ))}
-                                  </ul>
-                                ) : (
-                                  <div style={styles.noNestedData}>No process outputs recorded</div>
-                                )}
-                              </div>
-
-                              {/* Wastage */}
-                              <div style={styles.modalTraceCol}>
-                                <h5 style={{...styles.modalColTitle, color: '#dc2626'}}>🗑️ Process Wastage / Loss</h5>
-                                {lot.source_details.wastages && lot.source_details.wastages.length > 0 ? (
-                                  <ul style={styles.modalList}>
-                                    {lot.source_details.wastages.map((was, wIdx) => (
-                                      <li key={wIdx} style={styles.modalListItem}>
-                                        <strong>{was.item_name}</strong>
-                                        <div style={{fontSize: '11px', color: '#b91c1c', fontWeight: '600'}}>
-                                          {was.qty} Bags / {was.weight} kg
-                                        </div>
-                                      </li>
-                                    ))}
-                                  </ul>
-                                ) : (
-                                  <div style={styles.noNestedData}>No wastage recorded</div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        ) : (
-                          <div style={styles.noNestedData}>
-                            This FG lot was recorded directly as opening stock/initial adjustment rather than via milling/grinding.
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            
-            <div style={styles.modalFooter}>
-              <button onClick={() => setIsFGModalOpen(false)} style={styles.modalCloseBtnPrimary}>Close Window</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Item Stock Details Popup Modal */}
-      <ItemStockDetailsModal
-        isOpen={isStockModalOpen}
-        onClose={() => setIsStockModalOpen(false)}
-        itemName={selectedItemForModal}
-        itemId={selectedItemForModal}
-      />
     </div>
   )
 }
@@ -1311,175 +1109,6 @@ const styles = {
     color: '#0f172a'
   },
   // Modal Styles
-  modalOverlay: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(15, 23, 42, 0.6)',
-    backdropFilter: 'blur(4px)',
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 9999,
-    padding: '20px'
-  },
-  modalContent: {
-    backgroundColor: '#ffffff',
-    borderRadius: '12px',
-    boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)',
-    width: '100%',
-    maxWidth: '900px',
-    maxHeight: '90vh',
-    display: 'flex',
-    flexDirection: 'column',
-    border: '1px solid #cbd5e1',
-    overflow: 'hidden'
-  },
-  modalHeader: {
-    padding: '16px 20px',
-    borderBottom: '1px solid #e2e8f0',
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#f8fafc'
-  },
-  modalTitle: {
-    margin: 0,
-    fontSize: '16px',
-    fontWeight: '700',
-    color: '#1e293b'
-  },
-  modalCloseBtn: {
-    background: 'none',
-    border: 'none',
-    fontSize: '24px',
-    color: '#64748b',
-    cursor: 'pointer',
-    lineHeight: '1',
-    padding: '4px'
-  },
-  modalBody: {
-    padding: '20px',
-    overflowY: 'auto',
-    flex: 1,
-    backgroundColor: '#f1f5f9'
-  },
-  modalItemMeta: {
-    backgroundColor: '#ffffff',
-    padding: '12px 16px',
-    borderRadius: '8px',
-    border: '1px solid #cbd5e1',
-    marginBottom: '16px',
-    fontSize: '14px',
-    color: '#334155'
-  },
-  modalLoading: {
-    textAlign: 'center',
-    padding: '40px',
-    color: '#2563eb',
-    fontWeight: '600',
-    fontSize: '14px'
-  },
-  lotList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '16px'
-  },
-  lotCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: '8px',
-    border: '1px solid #cbd5e1',
-    padding: '16px',
-    boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
-  },
-  lotCardHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderBottom: '1px solid #f1f5f9',
-    paddingBottom: '8px',
-    marginBottom: '12px'
-  },
-  lotNoLabel: {
-    fontSize: '14px',
-    fontWeight: '700',
-    color: '#1e293b'
-  },
-  lotMetaGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
-    gap: '12px',
-    fontSize: '12px',
-    color: '#475569',
-    backgroundColor: '#f8fafc',
-    padding: '8px 12px',
-    borderRadius: '6px',
-    border: '1px solid #e2e8f0',
-    marginBottom: '16px'
-  },
-  modalSection: {
-    borderTop: '1px solid #e2e8f0',
-    paddingTop: '12px'
-  },
-  modalSectionTitle: {
-    margin: '0 0 10px 0',
-    fontSize: '12px',
-    fontWeight: '700',
-    color: '#475569',
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em'
-  },
-  modalTraceGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-    gap: '12px',
-    marginTop: '10px'
-  },
-  modalTraceCol: {
-    backgroundColor: '#f8fafc',
-    borderRadius: '6px',
-    border: '1px solid #e2e8f0',
-    padding: '12px'
-  },
-  modalColTitle: {
-    margin: '0 0 10px 0',
-    fontSize: '12px',
-    fontWeight: '700',
-    borderBottom: '1px solid #e2e8f0',
-    paddingBottom: '6px'
-  },
-  modalList: {
-    margin: 0,
-    padding: 0,
-    listStyle: 'none',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px'
-  },
-  modalListItem: {
-    fontSize: '12px',
-    paddingBottom: '6px',
-    borderBottom: '1px dashed #e2e8f0'
-  },
-  modalFooter: {
-    padding: '12px 20px',
-    borderTop: '1px solid #e2e8f0',
-    display: 'flex',
-    justifyContent: 'flex-end',
-    backgroundColor: '#f8fafc'
-  },
-  modalCloseBtnPrimary: {
-    backgroundColor: '#2563eb',
-    color: '#ffffff',
-    border: 'none',
-    padding: '8px 16px',
-    borderRadius: '6px',
-    fontSize: '13px',
-    fontWeight: '600',
-    cursor: 'pointer'
-  }
 }
 
 export default StockStatusReport

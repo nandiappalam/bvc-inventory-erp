@@ -51,6 +51,12 @@ async function ensureOperationalTables(companyId = 1) {
       bank_details_json TEXT,
       notes TEXT,
       is_active INTEGER DEFAULT 1,
+      per_kg_amount NUMERIC(12,2) DEFAULT 0.00,
+      period_duration VARCHAR(100),
+      from_date DATE,
+      till_date DATE,
+      effective_from DATE,
+      effective_to DATE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`,
@@ -199,6 +205,12 @@ async function ensureOperationalTables(companyId = 1) {
     `ALTER TABLE ${pfx}operational_parties ADD COLUMN bank_details_json TEXT`,
     `ALTER TABLE ${pfx}operational_parties ADD COLUMN notes TEXT`,
     `ALTER TABLE ${pfx}operational_parties ADD COLUMN is_active INTEGER DEFAULT 1`,
+    `ALTER TABLE ${pfx}operational_parties ADD COLUMN per_kg_amount NUMERIC(12,2) DEFAULT 0.00`,
+    `ALTER TABLE ${pfx}operational_parties ADD COLUMN period_duration VARCHAR(100)`,
+    `ALTER TABLE ${pfx}operational_parties ADD COLUMN from_date DATE`,
+    `ALTER TABLE ${pfx}operational_parties ADD COLUMN till_date DATE`,
+    `ALTER TABLE ${pfx}operational_parties ADD COLUMN effective_from DATE`,
+    `ALTER TABLE ${pfx}operational_parties ADD COLUMN effective_to DATE`,
 
     // Rate Masters missing columns
     `ALTER TABLE ${pfx}operational_rate_masters ADD COLUMN uom VARCHAR(20) DEFAULT 'BAG'`,

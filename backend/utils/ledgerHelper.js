@@ -421,39 +421,14 @@ async function createPurchaseVoucherChain(purchaseData) {
 
   const voucherEntryRows = []
 
-  if (resolvedSupplier) {
-
-    voucherEntryRows.push({
-      ledgerName: resolvedSupplier,
-      debit: 0,
-      credit: Number(netAmount || 0),
-      remarks: particulars,
-    })
-    ledgerEntries.push(
-      createLedgerEntry({
-        ledgerName: resolvedSupplier,
-        date: voucherDate,
-        voucherType: 'Purchase',
-        voucherNo,
-        debit: 0,
-        credit: Number(netAmount || 0),
-        referenceId: purchaseId,
-        referenceType: 'purchase',
-        particulars,
-        voucherId,
-        transactionId: purchaseId,
-        transactionType: 'purchase',
-        ledgerType: 'Supplier',
-      })
-    )
-  }
-
+  // 1. Purchase Account (Taxable Base Value)
   if (Number(baseAmount || 0) > 0) {
     voucherEntryRows.push({
       ledgerName: 'Purchase Account',
       debit: Number(baseAmount || 0),
       credit: 0,
-      remarks: particulars,
+      remarks: `Purchase #${invNo || purchaseId} - ${resolvedSupplier || 'Supplier'}`,
+      ledgerType: 'Expense',
     })
     ledgerEntries.push(
       createLedgerEntry({
@@ -465,22 +440,23 @@ async function createPurchaseVoucherChain(purchaseData) {
         credit: 0,
         referenceId: purchaseId,
         referenceType: 'purchase',
-        particulars,
+        particulars: `Purchase #${invNo || purchaseId} - ${resolvedSupplier || 'Supplier'}`,
         voucherId,
         transactionId: purchaseId,
         transactionType: 'purchase',
+        ledgerType: 'Expense',
       })
     )
   }
 
-  // Enhanced GST tax posting (CGST/SGST/IGST split or aggregate)
+  // 2. Input GST Tax Posting (CGST / SGST for Intra-State or IGST for Inter-State)
   let cgst = Number(purchaseData.cgstAmount || 0);
   let sgst = Number(purchaseData.sgstAmount || 0);
   let igst = Number(purchaseData.igstAmount || 0);
   const totalTax = Number(taxAmount || 0);
 
   if (cgst === 0 && sgst === 0 && igst === 0 && totalTax > 0) {
-    if (purchaseData.isInterstate) {
+    if (purchaseData.isInterstate || purchaseData.isInterState) {
       igst = totalTax;
     } else {
       cgst = Number((totalTax / 2).toFixed(2));
@@ -488,27 +464,27 @@ async function createPurchaseVoucherChain(purchaseData) {
     }
   }
 
-  if (cgst > 0 || sgst > 0 || igst > 0) {
-    if (cgst > 0) {
-      voucherEntryRows.push({ ledgerName: 'Input CGST', debit: cgst, credit: 0, remarks: `CGST on ${particulars}` });
-      ledgerEntries.push(createLedgerEntry({ ledgerName: 'Input CGST', date: voucherDate, voucherType: 'Purchase', voucherNo, debit: cgst, credit: 0, referenceId: purchaseId, referenceType: 'purchase', particulars: `CGST on ${particulars}`, voucherId, transactionId: purchaseId, transactionType: 'purchase' }));
-    }
-    if (sgst > 0) {
-      voucherEntryRows.push({ ledgerName: 'Input SGST', debit: sgst, credit: 0, remarks: `SGST on ${particulars}` });
-      ledgerEntries.push(createLedgerEntry({ ledgerName: 'Input SGST', date: voucherDate, voucherType: 'Purchase', voucherNo, debit: sgst, credit: 0, referenceId: purchaseId, referenceType: 'purchase', particulars: `SGST on ${particulars}`, voucherId, transactionId: purchaseId, transactionType: 'purchase' }));
-    }
-    if (igst > 0) {
-      voucherEntryRows.push({ ledgerName: 'Input IGST', debit: igst, credit: 0, remarks: `IGST on ${particulars}` });
-      ledgerEntries.push(createLedgerEntry({ ledgerName: 'Input IGST', date: voucherDate, voucherType: 'Purchase', voucherNo, debit: igst, credit: 0, referenceId: purchaseId, referenceType: 'purchase', particulars: `IGST on ${particulars}`, voucherId, transactionId: purchaseId, transactionType: 'purchase' }));
-    }
+  if (cgst > 0) {
+    voucherEntryRows.push({ ledgerName: 'Input CGST', debit: cgst, credit: 0, remarks: `CGST on Purchase #${invNo || purchaseId}`, ledgerType: 'Tax' });
+    ledgerEntries.push(createLedgerEntry({ ledgerName: 'Input CGST', date: voucherDate, voucherType: 'Purchase', voucherNo, debit: cgst, credit: 0, referenceId: purchaseId, referenceType: 'purchase', particulars: `CGST on Purchase #${invNo || purchaseId}`, voucherId, transactionId: purchaseId, transactionType: 'purchase', ledgerType: 'Tax' }));
+  }
+  if (sgst > 0) {
+    voucherEntryRows.push({ ledgerName: 'Input SGST', debit: sgst, credit: 0, remarks: `SGST on Purchase #${invNo || purchaseId}`, ledgerType: 'Tax' });
+    ledgerEntries.push(createLedgerEntry({ ledgerName: 'Input SGST', date: voucherDate, voucherType: 'Purchase', voucherNo, debit: sgst, credit: 0, referenceId: purchaseId, referenceType: 'purchase', particulars: `SGST on Purchase #${invNo || purchaseId}`, voucherId, transactionId: purchaseId, transactionType: 'purchase', ledgerType: 'Tax' }));
+  }
+  if (igst > 0) {
+    voucherEntryRows.push({ ledgerName: 'Input IGST', debit: igst, credit: 0, remarks: `IGST on Purchase #${invNo || purchaseId}`, ledgerType: 'Tax' });
+    ledgerEntries.push(createLedgerEntry({ ledgerName: 'Input IGST', date: voucherDate, voucherType: 'Purchase', voucherNo, debit: igst, credit: 0, referenceId: purchaseId, referenceType: 'purchase', particulars: `IGST on Purchase #${invNo || purchaseId}`, voucherId, transactionId: purchaseId, transactionType: 'purchase', ledgerType: 'Tax' }));
   }
 
+  // 3. Discount Received (Credit)
   if (Number(discAmount || 0) > 0) {
     voucherEntryRows.push({
       ledgerName: 'Discount Received',
       debit: 0,
       credit: Number(discAmount || 0),
-      remarks: `Discount on ${particulars}`,
+      remarks: `Discount on Purchase #${invNo || purchaseId}`,
+      ledgerType: 'Income',
     })
     ledgerEntries.push(
       createLedgerEntry({
@@ -520,67 +496,230 @@ async function createPurchaseVoucherChain(purchaseData) {
         credit: Number(discAmount || 0),
         referenceId: purchaseId,
         referenceType: 'purchase',
-        particulars: `Discount on ${particulars}`,
+        particulars: `Discount on Purchase #${invNo || purchaseId}`,
         voucherId,
         transactionId: purchaseId,
         transactionType: 'purchase',
+        ledgerType: 'Income',
       })
     )
   }
 
+  // Transport & Loadman parameter handling
+  const transportCharges = Number(purchaseData.transportCharges || purchaseData.freightAmount || purchaseData.transport_charges || 0);
+  const transporterName = purchaseData.transporter || purchaseData.transporterName || purchaseData.transport || '';
+  const transportPayableType = String(purchaseData.transportPayableType || purchaseData.transport_payable_type || 'SEPARATE').toUpperCase();
+
+  const loadmanCharges = Number(purchaseData.loadmanCharges || purchaseData.loadman_charges || 0);
+  const loadmanName = purchaseData.loadmanName || purchaseData.loadman_name || '';
+  const loadmanWorkerId = purchaseData.loadmanWorkerId || purchaseData.loadman_worker_id;
+  const loadmanPayableType = String(purchaseData.loadmanPayableType || purchaseData.loadman_payable_type || 'SEPARATE').toUpperCase();
+
+  // 4. Supplier Account (Gross Invoice Value = Base + Tax - Discount)
+  // If transport or loadman is billed inside supplier invoice, add to gross invoice
+  let supplierGrossInvoice = Number((Number(baseAmount || 0) + totalTax - Number(discAmount || 0)).toFixed(2));
+  if (transportPayableType === 'SUPPLIER_INVOICE' && transportCharges > 0) {
+    supplierGrossInvoice = Number((supplierGrossInvoice + transportCharges).toFixed(2));
+  }
+  if (loadmanPayableType === 'SUPPLIER_INVOICE' && loadmanCharges > 0) {
+    supplierGrossInvoice = Number((supplierGrossInvoice + loadmanCharges).toFixed(2));
+  }
+
+  if (resolvedSupplier && supplierGrossInvoice > 0) {
+    voucherEntryRows.push({
+      ledgerName: resolvedSupplier,
+      debit: 0,
+      credit: supplierGrossInvoice,
+      remarks: `Purchase invoice #${invNo || purchaseId}`,
+      ledgerType: 'Supplier',
+    })
+    ledgerEntries.push(
+      createLedgerEntry({
+        ledgerName: resolvedSupplier,
+        date: voucherDate,
+        voucherType: 'Purchase',
+        voucherNo,
+        debit: 0,
+        credit: supplierGrossInvoice,
+        referenceId: purchaseId,
+        referenceType: 'purchase',
+        particulars: `Purchase invoice #${invNo || purchaseId}`,
+        voucherId,
+        transactionId: purchaseId,
+        transactionType: 'purchase',
+        ledgerType: 'Supplier',
+      })
+    )
+  }
+
+  // 5. Deductions Handling (Quality / Shortage / Return claim)
+  // Deductions reduce the amount payable to the supplier:
+  // Dr: Supplier Account (Supplier - deduction)
+  // Cr: Purchase Deduction Recovery
   if (deductions && deductions.length > 0) {
     for (const d of deductions) {
       const dAmount = Number(d.amount || 0);
       if (dAmount > 0) {
-        const dName = d.deduction_name || d.name || 'Purchase Deduction';
+        const dName = d.deduction_name || d.name || 'Quality/Shortage Deduction';
         const isLess = !d.type || String(d.type).toUpperCase() === 'LESS';
-        
-        const debit = isLess ? 0 : dAmount;
-        const credit = isLess ? dAmount : 0;
-        
-        voucherEntryRows.push({
-          ledgerName: dName,
-          debit: debit,
-          credit: credit,
-          remarks: `${dName} on ${particulars}`,
-        });
-        
-        ledgerEntries.push(
-          createLedgerEntry({
+
+        if (isLess) {
+          // Debit supplier to reduce payable
+          if (resolvedSupplier) {
+            voucherEntryRows.push({
+              ledgerName: resolvedSupplier,
+              debit: dAmount,
+              credit: 0,
+              remarks: `Deduction adjustment (${dName}) on #${invNo || purchaseId}`,
+              ledgerType: 'Supplier',
+            });
+            ledgerEntries.push(
+              createLedgerEntry({
+                ledgerName: resolvedSupplier,
+                date: voucherDate,
+                voucherType: 'Purchase',
+                voucherNo,
+                debit: dAmount,
+                credit: 0,
+                referenceId: purchaseId,
+                referenceType: 'purchase',
+                particulars: `Quality/shortage deduction (${dName})`,
+                voucherId,
+                transactionId: purchaseId,
+                transactionType: 'purchase',
+                ledgerType: 'Supplier',
+              })
+            );
+          }
+
+          // Credit Purchase Deduction Recovery account
+          const recoveryLedgerName = d.account_head || 'Purchase Deduction Recovery';
+          voucherEntryRows.push({
+            ledgerName: recoveryLedgerName,
+            debit: 0,
+            credit: dAmount,
+            remarks: `Supplier ${dName} claim recovery on #${invNo || purchaseId}`,
+            ledgerType: 'Income',
+          });
+          ledgerEntries.push(
+            createLedgerEntry({
+              ledgerName: recoveryLedgerName,
+              date: voucherDate,
+              voucherType: 'Purchase',
+              voucherNo,
+              debit: 0,
+              credit: dAmount,
+              referenceId: purchaseId,
+              referenceType: 'purchase',
+              particulars: `Supplier ${dName} claim recovery on #${invNo || purchaseId}`,
+              voucherId,
+              transactionId: purchaseId,
+              transactionType: 'purchase',
+              ledgerType: 'Income',
+            })
+          );
+        } else {
+          // Additional charge (Type = ADD)
+          voucherEntryRows.push({
             ledgerName: dName,
-            date: voucherDate,
-            voucherType: 'Purchase',
-            voucherNo,
-            debit: debit,
-            credit: credit,
-            referenceId: purchaseId,
-            referenceType: 'purchase',
-            particulars: `${dName} on ${particulars}`,
-            voucherId,
-            transactionId: purchaseId,
-            transactionType: 'purchase',
-          })
-        );
+            debit: dAmount,
+            credit: 0,
+            remarks: `${dName} on #${invNo || purchaseId}`,
+            ledgerType: 'Expense',
+          });
+          ledgerEntries.push(
+            createLedgerEntry({
+              ledgerName: dName,
+              date: voucherDate,
+              voucherType: 'Purchase',
+              voucherNo,
+              debit: dAmount,
+              credit: 0,
+              referenceId: purchaseId,
+              referenceType: 'purchase',
+              particulars: `${dName} on #${invNo || purchaseId}`,
+              voucherId,
+              transactionId: purchaseId,
+              transactionType: 'purchase',
+              ledgerType: 'Expense',
+            })
+          );
+        }
       }
     }
   }
 
-  const loadmanCharges = Number(purchaseData.loadmanCharges || 0);
-  const loadmanName = purchaseData.loadmanName || purchaseData.loadman_name;
-  const loadmanWorkerId = purchaseData.loadmanWorkerId || purchaseData.loadman_worker_id;
-  if (loadmanCharges > 0) {
-    const workerLedger = loadmanName || 'Loadman / Unloading Worker';
-    const resolvedWorkerLedgerId = await resolveLedgerId(workerLedger, 'Worker');
-
+  // 6. Transport / Freight Charges
+  if (transportCharges > 0) {
     voucherEntryRows.push({
-      ledgerName: 'Unloading / Loadman Charges',
-      debit: loadmanCharges,
+      ledgerName: 'Transport Charges',
+      debit: transportCharges,
       credit: 0,
-      remarks: `Loadman charges for ${particulars}`
+      remarks: `Transport charges for #${invNo || purchaseId}`,
+      ledgerType: 'Expense',
     });
     ledgerEntries.push(
       createLedgerEntry({
-        ledgerName: 'Unloading / Loadman Charges',
+        ledgerName: 'Transport Charges',
+        date: voucherDate,
+        voucherType: 'Purchase',
+        voucherNo,
+        debit: transportCharges,
+        credit: 0,
+        referenceId: purchaseId,
+        referenceType: 'purchase',
+        particulars: `Transport charges for #${invNo || purchaseId}`,
+        voucherId,
+        transactionId: purchaseId,
+        transactionType: 'purchase',
+        ledgerType: 'Expense',
+      })
+    );
+
+    if (transportPayableType !== 'SUPPLIER_INVOICE') {
+      const transporterLedger = transporterName || 'Transporter Payable';
+      const resolvedTransporterLedgerId = await resolveLedgerId(transporterLedger, 'Transporter');
+
+      voucherEntryRows.push({
+        ledgerName: transporterLedger,
+        debit: 0,
+        credit: transportCharges,
+        remarks: `Transport charges payable for #${invNo || purchaseId}`,
+        ledgerType: 'Transporter',
+      });
+      ledgerEntries.push(
+        createLedgerEntry({
+          ledgerName: transporterLedger,
+          date: voucherDate,
+          voucherType: 'Purchase',
+          voucherNo,
+          debit: 0,
+          credit: transportCharges,
+          referenceId: purchaseId,
+          referenceType: 'purchase',
+          particulars: `Transport charges payable for #${invNo || purchaseId}`,
+          voucherId,
+          transactionId: purchaseId,
+          transactionType: 'purchase',
+          ledgerType: 'Transporter',
+          ledgerId: resolvedTransporterLedgerId,
+        })
+      );
+    }
+  }
+
+  // 7. Loadman / Unloading Charges
+  if (loadmanCharges > 0) {
+    voucherEntryRows.push({
+      ledgerName: 'Loadman Charges',
+      debit: loadmanCharges,
+      credit: 0,
+      remarks: `Loading/unloading charges for #${invNo || purchaseId}`,
+      ledgerType: 'Expense',
+    });
+    ledgerEntries.push(
+      createLedgerEntry({
+        ledgerName: 'Loadman Charges',
         date: voucherDate,
         voucherType: 'Purchase',
         voucherNo,
@@ -588,38 +727,44 @@ async function createPurchaseVoucherChain(purchaseData) {
         credit: 0,
         referenceId: purchaseId,
         referenceType: 'purchase',
-        particulars: `Loadman charges for ${particulars}`,
+        particulars: `Loading/unloading charges for #${invNo || purchaseId}`,
         voucherId,
         transactionId: purchaseId,
         transactionType: 'purchase',
-        ledgerType: 'Expense'
+        ledgerType: 'Expense',
       })
     );
 
-    voucherEntryRows.push({
-      ledgerName: workerLedger,
-      debit: 0,
-      credit: loadmanCharges,
-      remarks: `Loadman charges payable for ${particulars}`
-    });
-    ledgerEntries.push(
-      createLedgerEntry({
+    if (loadmanPayableType !== 'SUPPLIER_INVOICE') {
+      const workerLedger = loadmanName || 'Loadman Payable';
+      const resolvedWorkerLedgerId = await resolveLedgerId(workerLedger, 'Worker');
+
+      voucherEntryRows.push({
         ledgerName: workerLedger,
-        date: voucherDate,
-        voucherType: 'Purchase',
-        voucherNo,
         debit: 0,
         credit: loadmanCharges,
-        referenceId: purchaseId,
-        referenceType: 'purchase',
-        particulars: `Loadman charges payable for ${particulars}`,
-        voucherId,
-        transactionId: purchaseId,
-        transactionType: 'purchase',
+        remarks: `Loading charges payable for #${invNo || purchaseId}`,
         ledgerType: 'Worker',
-        ledgerId: resolvedWorkerLedgerId
-      })
-    );
+      });
+      ledgerEntries.push(
+        createLedgerEntry({
+          ledgerName: workerLedger,
+          date: voucherDate,
+          voucherType: 'Purchase',
+          voucherNo,
+          debit: 0,
+          credit: loadmanCharges,
+          referenceId: purchaseId,
+          referenceType: 'purchase',
+          particulars: `Loading charges payable for #${invNo || purchaseId}`,
+          voucherId,
+          transactionId: purchaseId,
+          transactionType: 'purchase',
+          ledgerType: 'Worker',
+          ledgerId: resolvedWorkerLedgerId,
+        })
+      );
+    }
   }
 
   for (const entry of voucherEntryRows) {

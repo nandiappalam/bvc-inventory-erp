@@ -158,6 +158,16 @@ import SignCreate from './components/SignCreate'
 import SignDisplay from './components/SignDisplay'
 import VoucherCreate from './modules/vouchers/VoucherCreate'
 import VoucherList from './modules/vouchers/VoucherList'
+
+// Tally-Style Accounting & Finance Components
+import AccountingDashboard from './components/accounting/AccountingDashboard'
+import TallyLedgerStatementPage from './components/accounting/TallyLedgerStatementPage'
+import TallyGroupLedgerStatementPage from './components/accounting/TallyGroupLedgerStatementPage'
+import TallyDayBookPage from './components/accounting/TallyDayBookPage'
+import TallyTrialBalancePage from './components/accounting/TallyTrialBalancePage'
+import TallyProfitLossPage from './components/accounting/TallyProfitLossPage'
+import TallyBalanceSheetPage from './components/accounting/TallyBalanceSheetPage'
+import TallyImportExportPage from './components/accounting/TallyImportExportPage'
 import PurchaseOrderList from './modules/purchaseOrder/pages/PurchaseOrderList'
 import PurchaseOrderCreate from './modules/purchaseOrder/pages/PurchaseOrderCreate'
 import PurchaseOrderView from './modules/purchaseOrder/pages/PurchaseOrderView'
@@ -518,6 +528,17 @@ const AppLayout = () => {
           <Route path="/entry/voucher-create" element={<VoucherCreate />} />
           <Route path="/entry/voucher-create/:id" element={<VoucherCreate />} />
           <Route path="/entry/voucher-display" element={<VoucherList />} />
+
+          {/* Accounts & Finance Modules (Tally-Style Accounting) */}
+          <Route path="/accounting" element={<AccountingDashboard />} />
+          <Route path="/accounting/dashboard" element={<AccountingDashboard />} />
+          <Route path="/accounting/ledger-statement" element={<TallyLedgerStatementPage />} />
+          <Route path="/accounting/group-statement" element={<TallyGroupLedgerStatementPage />} />
+          <Route path="/accounting/day-book" element={<TallyDayBookPage />} />
+          <Route path="/accounting/trial-balance" element={<TallyTrialBalancePage />} />
+          <Route path="/accounting/profit-loss" element={<TallyProfitLossPage />} />
+          <Route path="/accounting/balance-sheet" element={<TallyBalanceSheetPage />} />
+          <Route path="/accounting/tally-exchange" element={<TallyImportExportPage />} />
           
           {/* Vehicle Movement - NEW */}
           <Route path="/entry/vehicle-movement-create" element={<VehicleCreate />} />

@@ -31,8 +31,12 @@ export const EntryActions = ({
   showPrint = false,
   showSave = true,
   saving = false,
+  loading = false,
   saveText = 'Save',
+  extraButtons = null,
+  children = null,
 }) => {
+  const isSaving = saving || loading;
   const navigate = useNavigate();
 
   const handleBack = () => {
@@ -137,21 +141,23 @@ export const EntryActions = ({
         )}
         {showSave && (
           <button
-            type="submit"
+            type="button"
             onClick={onSave}
-            disabled={saving}
+            disabled={isSaving}
             style={{ 
               ...buttonStyle, 
               backgroundColor: '#1f4fb2', 
               color: '#ffffff',
-              opacity: saving ? 0.7 : 1,
-              cursor: saving ? 'not-allowed' : 'pointer'
+              opacity: isSaving ? 0.7 : 1,
+              cursor: isSaving ? 'not-allowed' : 'pointer'
             }}
             title="Save record"
           >
-            {saving ? '⏳ Saving...' : `💾 ${saveText}`}
+            {isSaving ? '⏳ Saving...' : `💾 ${saveText}`}
           </button>
         )}
+        {extraButtons}
+        {children}
       </div>
     </div>
   );

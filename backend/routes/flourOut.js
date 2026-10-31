@@ -223,9 +223,11 @@ router.post('/', async (req, res) => {
 
     // Insert flour out record
     const flourOutResult = await db.run(`
-      INSERT INTO flour_out (s_no, date, papad_company, address, remarks, total_qty, total_weight, total_wages)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `, [sNoVal, formData.date, companyName, formData.address || '', formData.remarks || '', totalQty, totalWeight, totalWages]);
+      INSERT INTO flour_out (s_no, date, papad_company, address, remarks, total_qty, total_weight, total_wages,
+                             loadman_name, loadman_worker_id, loadman_rate_per_kg, loadman_charges)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [sNoVal, formData.date, companyName, formData.address || '', formData.remarks || '', totalQty, totalWeight, totalWages,
+        formData.loadman_name || '', formData.loadman_worker_id || null, parseFloat(formData.loadman_rate_per_kg) || 0.50, parseFloat(formData.loadman_charges) || 0]);
 
     const flourOutId = flourOutResult.lastID;
 
@@ -335,9 +337,12 @@ router.put('/:id', async (req, res) => {
     // Update flour out header
     await db.run(`
       UPDATE flour_out 
-      SET s_no = ?, date = ?, papad_company = ?, address = ?, remarks = ?, total_qty = ?, total_weight = ?, total_wages = ?, updated_at = CURRENT_TIMESTAMP
+      SET s_no = ?, date = ?, papad_company = ?, address = ?, remarks = ?, total_qty = ?, total_weight = ?, total_wages = ?,
+          loadman_name = ?, loadman_worker_id = ?, loadman_rate_per_kg = ?, loadman_charges = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
-    `, [sNoVal, cleanDate, compVal, formData.address || '', formData.remarks || '', totalQty, totalWeight, totalWages, flourOutId]);
+    `, [sNoVal, cleanDate, compVal, formData.address || '', formData.remarks || '', totalQty, totalWeight, totalWages,
+        formData.loadman_name || '', formData.loadman_worker_id || null, parseFloat(formData.loadman_rate_per_kg) || 0.50, parseFloat(formData.loadman_charges) || 0,
+        flourOutId]);
 
     // Delete existing items
     await db.run('DELETE FROM flour_out_items WHERE flour_out_id = ?', [flourOutId]);

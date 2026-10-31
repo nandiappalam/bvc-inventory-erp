@@ -55,7 +55,13 @@ const LoadmanCreate = () => {
         ...formData,
         category: 'LOADMAN',
         party_category: 'LOADMAN',
-        phone: formData.mobile,
+        phone: formData.mobile || formData.phone,
+        from_date: formData.from_date || formData.effective_from || '',
+        till_date: formData.till_date || formData.effective_to || '',
+        effective_from: formData.from_date || formData.effective_from || '',
+        effective_to: formData.till_date || formData.effective_to || '',
+        per_kg_amount: parseFloat(formData.per_kg_amount || 0),
+        period_duration: formData.period_duration || '',
         is_active: formData.is_active !== undefined && formData.is_active !== '' ? Number(formData.is_active) : 1
       };
       const result = await createMaster('operational_parties', payload);

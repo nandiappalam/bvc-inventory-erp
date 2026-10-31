@@ -421,6 +421,17 @@ const SalesExportCreate = () => {
 
       <EntryActions 
         onSave={handleSubmit}
+        onCancel={() => {
+          if (window.confirm('Are you sure you want to cancel? Any unsaved changes will be discarded.')) {
+            navigate('/entry/sales-export-display');
+          }
+        }}
+        onRefresh={() => {
+          if (window.confirm('Refresh page and clear all entries?')) {
+            window.location.reload();
+          }
+        }}
+        onBack={() => navigate('/entry/sales-export-display')}
         saving={loading}
         saveText={editId ? "Update Export Sales" : "Save Export Sales"}
       />

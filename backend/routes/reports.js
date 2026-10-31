@@ -832,6 +832,7 @@ router.get('/purchase-register', async (req, res) => {
     
     let query = `
       SELECT 
+        p.id as purchase_id,
         p.date,
         COALESCE(p.inv_no, CAST(p.s_no AS TEXT)) as bill_no,
         COALESCE(s.name, s.print_name, p.supplier) as supplier,

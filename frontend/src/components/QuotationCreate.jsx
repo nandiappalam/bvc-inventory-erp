@@ -46,7 +46,11 @@ const QuotationCreate = () => {
     deduction: '',
     percent: '',
     deduction_amount: '0.00',
-    deduction_remarks: ''
+    deduction_remarks: '',
+    loadman_name: '',
+    loadman_worker_id: '',
+    loadman_rate_per_kg: '0.50',
+    loadman_charges: '0.00'
   });
 
   const [items, setItems] = useState([
@@ -130,7 +134,11 @@ const QuotationCreate = () => {
               deduction: String(res.deduction || ''),
               percent: String(res.percent || ''),
               deduction_amount: String(res.deduction_amount || '0.00'),
-              deduction_remarks: res.deduction_remarks || ''
+              deduction_remarks: res.deduction_remarks || '',
+              loadman_name: res.loadman_name || '',
+              loadman_worker_id: res.loadman_worker_id || '',
+              loadman_rate_per_kg: res.loadman_rate_per_kg !== undefined ? String(res.loadman_rate_per_kg) : '0.50',
+              loadman_charges: String(res.loadman_charges || '0.00')
             }));
 
             let mappedItems = [];
@@ -201,6 +209,54 @@ const QuotationCreate = () => {
     };
     fetchInitialData();
   }, [editId]);
+
+  // Date-wise Loadman rate auto-calculation from Loadman master duration period
+  useEffect(() => {
+    if (!formData.loadman_name) return;
+    const loadWorkerRate = async () => {
+      try {
+        const workersRes = await api('/masters/operational_parties');
+        const list = Array.isArray(workersRes) ? workersRes : (workersRes?.data || []);
+        const matched = list.find(w => 
+          (w.name && w.name.trim().toLowerCase() === formData.loadman_name.trim().toLowerCase()) ||
+          String(w.id) === String(formData.loadman_worker_id)
+        );
+        if (matched && matched.per_kg_amount !== undefined && matched.per_kg_amount !== null && Number(matched.per_kg_amount) > 0) {
+          const transDate = formData.date ? new Date(formData.date) : new Date();
+          let applies = true;
+          if (matched.from_date || matched.effective_from) {
+            const fDate = new Date(matched.from_date || matched.effective_from);
+            if (transDate < fDate) applies = false;
+          }
+          if (matched.till_date || matched.effective_to) {
+            const tDate = new Date(matched.till_date || matched.effective_to);
+            if (transDate > tDate) applies = false;
+          }
+          if (applies) {
+            setFormData(prev => ({
+              ...prev,
+              loadman_rate_per_kg: String(matched.per_kg_amount),
+              loadman_worker_id: matched.id || prev.loadman_worker_id
+            }));
+          }
+        }
+      } catch (err) {
+        console.warn('Notice loading loadman rate:', err.message);
+      }
+    };
+    loadWorkerRate();
+  }, [formData.loadman_name, formData.date]);
+
+  // Recalculate loadman charges whenever items or loadman_rate_per_kg change
+  useEffect(() => {
+    const totalWt = items.reduce((sum, it) => sum + (parseFloat(it.qty) || 0) * (parseFloat(it.weight) || 50), 0);
+    const rate = parseFloat(formData.loadman_rate_per_kg) || 0;
+    const charges = (totalWt * rate).toFixed(2);
+    setFormData(prev => ({
+      ...prev,
+      loadman_charges: charges
+    }));
+  }, [items, formData.loadman_rate_per_kg]);
 
   const handleInputChange = (nameOrEvent, maybeValue) => {
     let fieldName = '';
@@ -432,7 +488,11 @@ const QuotationCreate = () => {
           deduction: '',
           percent: '',
           deduction_amount: '0.00',
-          deduction_remarks: ''
+          deduction_remarks: '',
+          loadman_name: '',
+          loadman_worker_id: '',
+          loadman_rate_per_kg: '0.50',
+          loadman_charges: '0.00'
         });
         setItems([
           { item_name: '', lot_no: '', qty: '', box: '', rate: '', disc: '', tax: '', amount: '' }
@@ -479,6 +539,9 @@ const QuotationCreate = () => {
       { value: 'Urad', label: 'Urad' },
       { value: 'Loose', label: 'Loose' }
     ], value: formData.type, col: 2 },
+    { name: 'loadman_name', label: 'Loadman', type: 'masterSelect', masterType: 'workers', value: formData.loadman_name, col: 2 },
+    { name: 'loadman_rate_per_kg', label: 'Loadman Rate/KG', type: 'number', step: '0.01', value: formData.loadman_rate_per_kg, col: 2 },
+    { name: 'loadman_charges', label: 'Loadman Charges', type: 'number', step: '0.01', readOnly: true, value: formData.loadman_charges, col: 2 },
     { name: 'remarks', label: 'Remarks', type: 'textarea', value: formData.remarks, col: 2 },
     { name: 'customer', label: 'Customer', type: 'masterSelect', masterType: 'customers', value: formData.customer, col: 3 },
     { name: 'address', label: 'Address', type: 'textarea', value: formData.address, col: 3 },
@@ -699,6 +762,17 @@ const QuotationCreate = () => {
 
       <EntryActions 
         onSave={handleSave}
+        onCancel={() => {
+          if (window.confirm('Are you sure you want to cancel? Any unsaved changes will be discarded.')) {
+            navigate('/entry/quotation-display');
+          }
+        }}
+        onRefresh={() => {
+          if (window.confirm('Refresh page and clear all entries?')) {
+            window.location.reload();
+          }
+        }}
+        onBack={() => navigate('/entry/quotation-display')}
         saving={loading}
         saveText={editId ? "Update Quotation" : "Save Quotation"}
       />

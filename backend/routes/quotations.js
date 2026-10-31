@@ -100,7 +100,8 @@ router.post('/', async (req, res) => {
     const {
       bill_no, date, pay_type, tax_type, type, remarks, customer, address,
       tax_percent, amount, bill_amt, tax_amt, total_amt, deduction, percent,
-      deduction_amount, deduction_remarks, items
+      deduction_amount, deduction_remarks, items,
+      loadman_name, loadman_worker_id, loadman_rate_per_kg, loadman_charges
     } = req.body
 
     // First, insert quotation
@@ -109,8 +110,9 @@ router.post('/', async (req, res) => {
         s_no, date, customer, item_name, lot_no, qty, amount,
         bill_no, pay_type, tax_type, type, remarks, address,
         tax_percent, bill_amt, tax_amt, total_amt, deduction,
-        percent, deduction_amount, deduction_remarks
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        percent, deduction_amount, deduction_remarks,
+        loadman_name, loadman_worker_id, loadman_rate_per_kg, loadman_charges
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
     
     // We can extract first item's name & lot as summary values if items exist
@@ -124,7 +126,8 @@ router.post('/', async (req, res) => {
       bill_no || '', pay_type || '', tax_type || '', type || '', remarks || '', address || '',
       parseFloat(tax_percent) || 0, parseFloat(bill_amt) || 0, parseFloat(tax_amt) || 0,
       parseFloat(total_amt) || 0, parseFloat(deduction) || 0, parseFloat(percent) || 0,
-      parseFloat(deduction_amount) || 0, deduction_remarks || ''
+      parseFloat(deduction_amount) || 0, deduction_remarks || '',
+      loadman_name || '', loadman_worker_id || null, parseFloat(loadman_rate_per_kg) || 0.50, parseFloat(loadman_charges) || 0
     ])
 
     const quotationId = quotationResult.lastInsertRowid || quotationResult.lastID
@@ -191,7 +194,8 @@ router.put('/:id', async (req, res) => {
     const {
       bill_no, date, pay_type, tax_type, type, remarks, customer, address,
       tax_percent, bill_amt, tax_amt, total_amt, deduction, percent,
-      deduction_amount, deduction_remarks, items
+      deduction_amount, deduction_remarks, items,
+      loadman_name, loadman_worker_id, loadman_rate_per_kg, loadman_charges
     } = req.body;
 
     const firstItemName = items && items[0] ? items[0].item_name : '';
@@ -204,14 +208,17 @@ router.put('/:id', async (req, res) => {
         s_no = ?, date = ?, customer = ?, item_name = ?, lot_no = ?, qty = ?, amount = ?,
         bill_no = ?, pay_type = ?, tax_type = ?, type = ?, remarks = ?, address = ?,
         tax_percent = ?, bill_amt = ?, tax_amt = ?, total_amt = ?, deduction = ?,
-        percent = ?, deduction_amount = ?, deduction_remarks = ?
+        percent = ?, deduction_amount = ?, deduction_remarks = ?,
+        loadman_name = ?, loadman_worker_id = ?, loadman_rate_per_kg = ?, loadman_charges = ?
       WHERE id = ?
     `, [
       bill_no || '', date || '', customer || '', firstItemName, firstLotNo, totalQty, totalItemAmt,
       bill_no || '', pay_type || '', tax_type || '', type || '', remarks || '', address || '',
       parseFloat(tax_percent) || 0, parseFloat(bill_amt) || 0, parseFloat(tax_amt) || 0,
       parseFloat(total_amt) || 0, parseFloat(deduction) || 0, parseFloat(percent) || 0,
-      parseFloat(deduction_amount) || 0, deduction_remarks || '', id
+      parseFloat(deduction_amount) || 0, deduction_remarks || '',
+      loadman_name || '', loadman_worker_id || null, parseFloat(loadman_rate_per_kg) || 0.50, parseFloat(loadman_charges) || 0,
+      id
     ]);
 
     await connection.run('DELETE FROM quotation_items WHERE quotation_id = ?', [id]);

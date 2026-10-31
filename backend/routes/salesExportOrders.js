@@ -137,15 +137,17 @@ router.post('/', async (req, res) => {
                                       net_wt, advance, exporter, consignee, buyer_other, other_ref, pre_carriage,
                                       vessel_flt_no, consigned_to, gross_wt, sign, place_of_rcpt, loading_port,
                                       origin_country, delivery_terms, payment_terms, pur_transport, driver,
-                                      lorry_no, remarks, total_qty, total_usd_amt, total_inr_amt, is_order)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                      lorry_no, remarks, total_qty, total_usd_amt, total_inr_amt, is_order,
+                                      loadman_name, loadman_worker_id, loadman_rate_per_kg, loadman_charges)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [formData.billNo, formData.date, formData.orderNoDt, formData.disPort, formData.destCountry,
          formData.finalDestin, formData.sender, formData.netWt, formData.advance, formData.exporter,
          formData.consignee, formData.buyerOther, formData.otherRef, formData.preCarriage,
          formData.vesselFltNo, formData.consignedTo, formData.grossWt, formData.sign,
          formData.placeOfRcpt, formData.loadingPort, formData.originCountry, formData.deliveryTerms,
          formData.paymentTerms, formData.purTransport, formData.driver, formData.lorryNo,
-         formData.remarks, totalQty, totalUsdAmt, totalInrAmt, isOrderValue])
+         formData.remarks, totalQty, totalUsdAmt, totalInrAmt, isOrderValue,
+         formData.loadman_name || '', formData.loadman_worker_id || null, parseFloat(formData.loadman_rate_per_kg) || 0.50, parseFloat(formData.loadman_charges) || 0])
 
     const exportOrderId = exportOrderResult.lastID
 
@@ -294,7 +296,9 @@ router.put('/:id', async (req, res) => {
                                      place_of_rcpt = ?, loading_port = ?, origin_country = ?,
                                      delivery_terms = ?, payment_terms = ?, pur_transport = ?, driver = ?,
                                      lorry_no = ?, remarks = ?, total_qty = ?, total_usd_amt = ?, total_inr_amt = ?,
-                                     is_order = ?, updated_at = CURRENT_TIMESTAMP
+                                     is_order = ?,
+                                     loadman_name = ?, loadman_worker_id = ?, loadman_rate_per_kg = ?, loadman_charges = ?,
+                                     updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `, [formData.billNo, formData.date, formData.orderNoDt, formData.disPort, formData.destCountry,
          formData.finalDestin, formData.sender, formData.netWt, formData.advance, formData.exporter,
@@ -302,7 +306,9 @@ router.put('/:id', async (req, res) => {
          formData.vesselFltNo, formData.consignedTo, formData.grossWt, formData.sign,
          formData.placeOfRcpt, formData.loadingPort, formData.originCountry, formData.deliveryTerms,
          formData.paymentTerms, formData.purTransport, formData.driver, formData.lorryNo,
-         formData.remarks, totalQty, totalUsdAmt, totalInrAmt, isOrderValue, exportOrderId])
+         formData.remarks, totalQty, totalUsdAmt, totalInrAmt, isOrderValue,
+         formData.loadman_name || '', formData.loadman_worker_id || null, parseFloat(formData.loadman_rate_per_kg) || 0.50, parseFloat(formData.loadman_charges) || 0,
+         exportOrderId])
 
     // Delete existing items
     await db.run('DELETE FROM sales_export_order_items WHERE sales_export_order_id = ?', [exportOrderId])

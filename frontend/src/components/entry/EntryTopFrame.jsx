@@ -29,7 +29,9 @@ const masterTableMap = {
   item_groups: 'item_groups',
   workers: 'operational_parties',
   loadman: 'operational_parties',
-  loadmen: 'operational_parties'
+  loadmen: 'operational_parties',
+  sign: 'sign_master',
+  terms: 'terms_master'
 };
 
 const getOptionValue = (opt) => {
@@ -167,7 +169,9 @@ const MASTER_FIELD_TYPES = {
   loadmen: 'workers',
   loadman_worker: 'workers',
   worker_name: 'workers',
-  workers: 'workers'
+  workers: 'workers',
+  terms: 'terms',
+  sign: 'sign'
 };
 const DEBUG = false;
 
@@ -727,8 +731,18 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
                (data.loadman_worker_id && String(opt.id) === String(data.loadman_worker_id));
       });
       if (match) {
-        selectValue = getOptionValue(match);
-        if (rawVal !== selectValue && (field.name.includes('name') || field.masterType === 'workers')) {
+        const optVal = getOptionValue(match);
+        const optLabel = getOptionLabel(match);
+        const isNameBased = field.name.includes('name') || 
+                           field.name === 'transporter' || 
+                           field.name === 'driver' || 
+                           field.name === 'loadman_team' || 
+                           field.name === 'loadman' ||
+                           field.masterType === 'workers';
+        
+        selectValue = isNameBased ? optLabel : optVal;
+
+        if (rawVal !== selectValue && (isNameBased || field.masterType === 'workers')) {
           setTimeout(() => {
             onChange(field.name, selectValue);
             if (['loadman_name', 'loadman', 'loadman_team'].includes(field.name) && match.id) {

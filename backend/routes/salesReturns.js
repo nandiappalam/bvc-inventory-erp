@@ -7,7 +7,8 @@ const rebuildStockLedger = require('../utils/stockRebuilder')
 // Ensure deduction columns exist in sales_return
 async function ensureReturnColumns() {
   const returnCols = [
-    "deduction TEXT", "deduction_remarks TEXT", "deduction_amount REAL DEFAULT 0", "grand_total REAL DEFAULT 0"
+    "deduction TEXT", "deduction_remarks TEXT", "deduction_amount REAL DEFAULT 0", "grand_total REAL DEFAULT 0",
+    "loadman_name TEXT", "loadman_worker_id INTEGER", "loadman_rate_per_kg REAL DEFAULT 0.50", "loadman_charges REAL DEFAULT 0"
   ];
   for (const col of returnCols) {
     try {
@@ -145,15 +146,17 @@ router.post('/', async (req, res) => {
     const { 
       s_no, date, customer, pay_type, tax_type, address, remarks, 
       total_qty, total_wt, total_amt, items,
-      deduction, deduction_remarks, deduction_amount, grand_total 
+      deduction, deduction_remarks, deduction_amount, grand_total,
+      loadman_name, loadman_worker_id, loadman_rate_per_kg, loadman_charges
     } = req.body
 
     const sql = `
       INSERT INTO sales_return (
         s_no, date, customer, pay_type, tax_type, address, remarks, 
-        total_qty, total_wt, total_amt, deduction, deduction_remarks, deduction_amount, grand_total
+        total_qty, total_wt, total_amt, deduction, deduction_remarks, deduction_amount, grand_total,
+        loadman_name, loadman_worker_id, loadman_rate_per_kg, loadman_charges
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
 
     const result = await db.run(sql, [
@@ -170,7 +173,11 @@ router.post('/', async (req, res) => {
       deduction || '',
       deduction_remarks || '',
       parseFloat(deduction_amount) || 0,
-      parseFloat(grand_total) || parseFloat(total_amt) || 0
+      parseFloat(grand_total) || parseFloat(total_amt) || 0,
+      loadman_name || '',
+      loadman_worker_id || null,
+      parseFloat(loadman_rate_per_kg) || 0.50,
+      parseFloat(loadman_charges) || 0
     ])
     const salesReturnId = result.lastID || result.lastInsertRowid
 
@@ -272,21 +279,26 @@ router.put('/:id', async (req, res) => {
     const { 
       s_no, date, customer, pay_type, tax_type, address, remarks, 
       total_qty, total_wt, total_amt,
-      deduction, deduction_remarks, deduction_amount, grand_total 
+      deduction, deduction_remarks, deduction_amount, grand_total,
+      loadman_name, loadman_worker_id, loadman_rate_per_kg, loadman_charges
     } = req.body
 
     const sql = `
       UPDATE sales_return
       SET s_no = ?, date = ?, customer = ?, pay_type = ?, tax_type = ?, address = ?, remarks = ?, 
           total_qty = ?, total_wt = ?, total_amt = ?, deduction = ?, deduction_remarks = ?, 
-          deduction_amount = ?, grand_total = ?, updated_at = CURRENT_TIMESTAMP
+          deduction_amount = ?, grand_total = ?,
+          loadman_name = ?, loadman_worker_id = ?, loadman_rate_per_kg = ?, loadman_charges = ?,
+          updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `
 
     const result = await db.run(sql, [
       s_no, date, customer, pay_type, tax_type, address, remarks, 
       total_qty, total_wt, total_amt, deduction, deduction_remarks, 
-      deduction_amount, grand_total, id
+      deduction_amount, grand_total,
+      loadman_name || '', loadman_worker_id || null, parseFloat(loadman_rate_per_kg) || 0.50, parseFloat(loadman_charges) || 0,
+      id
     ])
 
     if (result.changes === 0) {

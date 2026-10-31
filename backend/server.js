@@ -138,6 +138,9 @@ app.use('/api/quotations', require('./routes/quotations'))
 app.use('/api', require('./routes/purchaseOrderRoutes'))
 app.use('/api/open', openRouter)
 
+// Central Tally-Style Accounting & Finance Engine API
+app.use('/api/accounting', require('./routes/accounting'))
+
 // Accounts Reports API - Mounted under /api/accounts
 app.use('/api/accounts', reportsRouter)
 

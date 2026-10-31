@@ -655,6 +655,7 @@ export const MASTER_CONFIG = {
   },
   loadman: {
     table: 'operational_parties',
+    displayFields: ['name', 'mobile', 'per_kg_amount', 'from_date', 'till_date', 'period_duration', 'is_active'],
     sections: [
       {
         title: 'Basic Information',
@@ -685,6 +686,15 @@ export const MASTER_CONFIG = {
         fields: [
           { name: 'opening_balance', label: 'Opening Balance', type: 'number', defaultValue: 0 },
           { name: 'opening_balance_date', label: 'Opening Balance Date', type: 'date' },
+        ]
+      },
+      {
+        title: 'Operational Rates & Charge Duration',
+        fields: [
+          { name: 'per_kg_amount', label: 'Per KG Method Amount (₹)', type: 'number', defaultValue: 0, step: '0.01' },
+          { name: 'from_date', label: 'Charges Period From (This Date)', type: 'date' },
+          { name: 'till_date', label: 'Charges Period Till (Till Date)', type: 'date' },
+          { name: 'period_duration', label: 'Charge Period Duration (Description)', type: 'text', placeholder: 'e.g. Current Month / Season Duration' },
         ]
       },
       {

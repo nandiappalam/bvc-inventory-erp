@@ -11,7 +11,7 @@ async function ensureSalesColumns() {
     "sender_id INTEGER", "consignee_id INTEGER", "godown_from_id INTEGER",
     "bill_amt REAL DEFAULT 0", "tax_amt REAL DEFAULT 0", "total_amt REAL DEFAULT 0",
     "base_amt REAL DEFAULT 0", "grand_total REAL DEFAULT 0", "deduction TEXT", "deduction_remarks TEXT",
-    "is_order INTEGER DEFAULT 0"
+    "is_order INTEGER DEFAULT 0", "loadman_name TEXT", "loadman_worker_id INTEGER", "loadman_rate_per_kg REAL DEFAULT 0.50", "loadman_charges REAL DEFAULT 0"
   ];
   for (const col of salesColumns) {
     try {
@@ -62,8 +62,8 @@ router.post('/sale', async (req, res) => {
         pay_type, tax_type, lorry_no, p_o_no, driver, pur_trans,
         customer_id, address, phone, sender_id, consignee_id, godown_from_id,
         bill_amt, tax_amt, base_amt, grand_total, deduction, deduction_remarks, deduction_amount, deductions_json,
-        is_order
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        is_order, loadman_name, loadman_worker_id, loadman_rate_per_kg, loadman_charges
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       s_no,
       formData.date || new Date().toISOString().split('T')[0],
@@ -92,7 +92,11 @@ router.post('/sale', async (req, res) => {
       formData.deduction_remarks || '',
       parseFloat(formData.deduction_amount) || 0,
       deductionsJson,
-      formData.is_order ? 1 : 0
+      formData.is_order ? 1 : 0,
+      formData.loadman_name || '',
+      formData.loadman_worker_id || null,
+      parseFloat(formData.loadman_rate_per_kg) || 0.50,
+      parseFloat(formData.loadman_charges) || 0
     ]);
 
     const salesId = salesResult.lastID;

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import axios from 'axios'
 import { printHtml } from '../../utils/printHelper'
+import PurchaseLedgerDetailsModal from '../purchase/PurchaseLedgerDetailsModal'
 import './ReportPage.css'
 
 /**
@@ -15,6 +16,8 @@ const PurchaseRegisterReport = () => {
   const [reportData, setReportData] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [selectedPurchaseId, setSelectedPurchaseId] = useState(null)
+  const [ledgerModalOpen, setLedgerModalOpen] = useState(false)
 
   // Fetch suppliers for dropdown
   useEffect(() => {
@@ -219,12 +222,13 @@ const PurchaseRegisterReport = () => {
                 <th className="text-right">Rate</th>
                 <th className="text-right">Amount</th>
                 <th>Transport</th>
+                <th className="text-center">Action</th>
               </tr>
             </thead>
             <tbody>
               {safeReportData.length === 0 ? (
                 <tr>
-                  <td colSpan="11" className="text-center">No data available</td>
+                  <td colSpan="12" className="text-center">No data available</td>
                 </tr>
               ) : (
                 <>
@@ -241,6 +245,18 @@ const PurchaseRegisterReport = () => {
                       <td className="text-right">{parseFloat(row.rate || 0).toFixed(2)}</td>
                       <td className="text-right">{parseFloat(row.amount || 0).toFixed(2)}</td>
                       <td>{row.transport || '-'}</td>
+                      <td className="text-center">
+                        <button
+                          type="button"
+                          className="px-2 py-1 text-xs font-semibold rounded bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 shadow-sm"
+                          onClick={() => {
+                            setSelectedPurchaseId(row.purchase_id || row.id || row.bill_no);
+                            setLedgerModalOpen(true);
+                          }}
+                        >
+                          📑 Ledger
+                        </button>
+                      </td>
                     </tr>
                   ))}
                   <tr className="total-row">
@@ -250,6 +266,7 @@ const PurchaseRegisterReport = () => {
                     <td></td>
                     <td className="text-right"><strong>{totalAmount.toFixed(2)}</strong></td>
                     <td></td>
+                    <td></td>
                   </tr>
                 </>
               )}
@@ -257,6 +274,16 @@ const PurchaseRegisterReport = () => {
           </table>
         </div>
       )}
+
+      {/* Purchase Double-Entry Ledger Statement Modal */}
+      <PurchaseLedgerDetailsModal
+        isOpen={ledgerModalOpen}
+        onClose={() => {
+          setLedgerModalOpen(false);
+          setSelectedPurchaseId(null);
+        }}
+        purchaseId={selectedPurchaseId}
+      />
     </div>
   )
 }

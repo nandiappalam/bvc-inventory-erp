@@ -182,8 +182,8 @@ router.post('/', async (req, res) => {
         pay_type, tax_type, lorry_no, p_o_no, driver, pur_trans,
         customer_id, address, phone, sender_id, consignee_id, godown_from_id,
         bill_amt, tax_amt, base_amt, grand_total, deduction, deduction_remarks, deduction_amount, deductions_json,
-        is_order
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        is_order, loadman_name, loadman_worker_id, loadman_rate_per_kg, loadman_charges
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       billNo,
       formData.date || new Date().toISOString().split('T')[0],
@@ -212,7 +212,11 @@ router.post('/', async (req, res) => {
       formData.deduction_remarks || '',
       parseFloat(formData.deduction_amount) || 0,
       deductionsJson,
-      formData.is_order ? 1 : 0
+      formData.is_order ? 1 : 0,
+      formData.loadman_name || '',
+      formData.loadman_worker_id || null,
+      parseFloat(formData.loadman_rate_per_kg) || 0.50,
+      parseFloat(formData.loadman_charges) || 0
     ]);
 
     const salesId = salesResult.lastID
@@ -528,7 +532,7 @@ router.put('/:id', async (req, res) => {
         pay_type = ?, tax_type = ?, lorry_no = ?, p_o_no = ?, driver = ?, pur_trans = ?,
         customer_id = ?, address = ?, phone = ?, sender_id = ?, consignee_id = ?, godown_from_id = ?,
         bill_amt = ?, tax_amt = ?, base_amt = ?, grand_total = ?, deduction = ?, deduction_remarks = ?, deduction_amount = ?, deductions_json = ?,
-        is_order = ?
+        is_order = ?, loadman_name = ?, loadman_worker_id = ?, loadman_rate_per_kg = ?, loadman_charges = ?
       WHERE id = ?
     `, [
       formData.sNo || formData.bill_no || formData.s_no || salesId,
@@ -559,6 +563,10 @@ router.put('/:id', async (req, res) => {
       parseFloat(formData.deduction_amount) || 0,
       deductionsJson,
       isOrder ? 1 : 0,
+      formData.loadman_name || '',
+      formData.loadman_worker_id || null,
+      parseFloat(formData.loadman_rate_per_kg) || 0.50,
+      parseFloat(formData.loadman_charges) || 0,
       salesId
     ])
 

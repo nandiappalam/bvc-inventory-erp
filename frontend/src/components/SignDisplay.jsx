@@ -5,7 +5,7 @@ const SignDisplay = () => {
   return (
     <StandardDisplayPage
       pageTitle="Signature Management"
-      apiEndpoint="/api/masters/sign"
+      apiEndpoint="/api/masters/sign_master"
       columns={[
         { key: 'name', title: 'Signer Name' },
         { key: 'designation', title: 'Designation' },

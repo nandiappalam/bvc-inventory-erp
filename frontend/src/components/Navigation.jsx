@@ -587,9 +587,19 @@ const Navigation = () => {
       ]
     },
     {
-      groupTitle: 'Finance',
+      groupTitle: 'Accounts & Finance (Tally System)',
       items: [
-        { name: 'Financial Control Center', path: '/financial-intelligence' }
+        { name: 'Accounting Dashboard', path: '/accounting/dashboard' },
+        { name: 'Ledger Group Master', path: '/master/ledger-group-display' },
+        { name: 'Ledger Master', path: '/master/ledger-display' },
+        { name: 'Voucher Entry Register', path: '/entry/voucher-display' },
+        { name: 'Individual Ledger Statement', path: '/accounting/ledger-statement' },
+        { name: 'Group-Wise Ledger Statement', path: '/accounting/group-statement' },
+        { name: 'Day Book (Journal)', path: '/accounting/day-book' },
+        { name: 'Trial Balance Statement', path: '/accounting/trial-balance' },
+        { name: 'Profit & Loss Statement', path: '/accounting/profit-loss' },
+        { name: 'Balance Sheet Statement', path: '/accounting/balance-sheet' },
+        { name: 'Tally XML Import / Export', path: '/accounting/tally-exchange' }
       ]
     },
     {
@@ -1037,16 +1047,16 @@ const Navigation = () => {
                 Command Center
               </Button>
             </Tooltip>
-            <Tooltip title="Operational Charges & Worker/Driver Payments Hub">
+            <Tooltip title="Accounts & Finance Command Center & Dashboard">
               <Button
                 component={Link}
-                to="/operational-charges"
+                to="/accounting/dashboard"
                 size="small"
                 startIcon={<AccountBalanceWalletIcon sx={{ fontSize: 16 }} />}
                 sx={{
                   color: '#ffffff',
-                  backgroundColor: location.pathname === '/operational-charges' ? 'rgba(255, 255, 255, 0.32)' : 'rgba(255, 255, 255, 0.15)',
-                  border: location.pathname === '/operational-charges' ? '1px solid rgba(255, 255, 255, 0.7)' : '1px solid rgba(255, 255, 255, 0.3)',
+                  backgroundColor: location.pathname.startsWith('/accounting') ? 'rgba(255, 255, 255, 0.32)' : 'rgba(255, 255, 255, 0.15)',
+                  border: location.pathname.startsWith('/accounting') ? '1px solid rgba(255, 255, 255, 0.7)' : '1px solid rgba(255, 255, 255, 0.3)',
                   fontWeight: 600,
                   fontSize: '12px',
                   textTransform: 'none',
@@ -1059,7 +1069,7 @@ const Navigation = () => {
                   }
                 }}
               >
-                Ops Charges & Payments
+                Accounts Dashboard
               </Button>
             </Tooltip>
             <Tooltip title="Calculator Tool">

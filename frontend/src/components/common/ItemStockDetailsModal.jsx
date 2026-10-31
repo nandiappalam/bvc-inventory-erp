@@ -134,7 +134,7 @@ export default function ItemStockDetailsModal({ isOpen, onClose, itemName, itemI
       }}
     >
       <div 
-        className="bg-white rounded-2xl shadow-2xl border border-slate-300 w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden text-slate-800"
+        className="bg-white rounded-2xl shadow-2xl border border-slate-300 w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden text-slate-800"
         onClick={(e) => e.stopPropagation()}
         style={{
           boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.4)'

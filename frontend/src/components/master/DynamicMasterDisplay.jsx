@@ -56,6 +56,23 @@ export const DynamicMasterDisplay = ({ configKey }) => {
       setLoading(true);
       let result = await getAllMasters(tableName, { forceRefresh });
 
+      // Dedicated fallback for ledger groups
+      if ((!result || (Array.isArray(result) && result.length === 0)) && (tableName === 'ledger_groups' || tableName === 'ledgergroupmaster' || normalizedKey === 'ledger_group')) {
+        try {
+          const res = await api('/accounting/groups');
+          if (res && res.success && Array.isArray(res.data) && res.data.length > 0) {
+            result = res.data.map(g => ({
+              id: g.id,
+              name: g.group_name,
+              printname: g.parent_group_name || g.group_name,
+              account_nature: g.account_nature,
+              financial_statement: g.financial_statement,
+              status: g.status || 'Active'
+            }));
+          }
+        } catch (e) {}
+      }
+
       // Dedicated fallback for papad company master to ensure entries and custom properties load
       if ((!result || (Array.isArray(result) && result.length === 0)) && (tableName === 'papad_company_master' || tableName === 'papad_company')) {
         try {

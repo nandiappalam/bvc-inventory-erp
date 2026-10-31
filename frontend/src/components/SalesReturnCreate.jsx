@@ -45,7 +45,11 @@ const SalesReturnCreate = () => {
     deduction: '',
     deduction_remarks: '',
     deduction_amount: 0,
-    grand_total: 0
+    grand_total: 0,
+    loadman_name: '',
+    loadman_worker_id: '',
+    loadman_rate_per_kg: '0.50',
+    loadman_charges: 0
   });
 
   const [items, setItems] = useState([{}]);
@@ -100,7 +104,11 @@ const SalesReturnCreate = () => {
               deduction: data.deduction || '',
               deduction_remarks: data.deduction_remarks || '',
               deduction_amount: data.deduction_amount || 0,
-              grand_total: data.grand_total || 0
+              grand_total: data.grand_total || 0,
+              loadman_name: data.loadman_name || '',
+              loadman_worker_id: data.loadman_worker_id || '',
+              loadman_rate_per_kg: data.loadman_rate_per_kg !== undefined ? String(data.loadman_rate_per_kg) : '0.50',
+              loadman_charges: data.loadman_charges || 0
             });
             if (data.items && data.items.length > 0) {
               setItems(data.items);
@@ -132,11 +140,53 @@ const SalesReturnCreate = () => {
     }
   }, [editId]);
 
+  // Date-wise Loadman rate auto-calculation from Loadman master duration period
   useEffect(() => {
-    if (items.length === 0) {
-      setItems([{}]);
-    }
-  }, []);
+    if (!formData.loadman_name) return;
+    const loadWorkerRate = async () => {
+      try {
+        const workersRes = await api('/masters/operational_parties');
+        const list = Array.isArray(workersRes) ? workersRes : (workersRes?.data || []);
+        const matched = list.find(w => 
+          (w.name && w.name.trim().toLowerCase() === formData.loadman_name.trim().toLowerCase()) ||
+          String(w.id) === String(formData.loadman_worker_id)
+        );
+        if (matched && matched.per_kg_amount !== undefined && matched.per_kg_amount !== null && Number(matched.per_kg_amount) > 0) {
+          const transDate = formData.date ? new Date(formData.date) : new Date();
+          let applies = true;
+          if (matched.from_date || matched.effective_from) {
+            const fDate = new Date(matched.from_date || matched.effective_from);
+            if (transDate < fDate) applies = false;
+          }
+          if (matched.till_date || matched.effective_to) {
+            const tDate = new Date(matched.till_date || matched.effective_to);
+            if (transDate > tDate) applies = false;
+          }
+          if (applies) {
+            setFormData(prev => ({
+              ...prev,
+              loadman_rate_per_kg: String(matched.per_kg_amount),
+              loadman_worker_id: matched.id || prev.loadman_worker_id
+            }));
+          }
+        }
+      } catch (err) {
+        console.warn('Notice loading loadman rate:', err.message);
+      }
+    };
+    loadWorkerRate();
+  }, [formData.loadman_name, formData.date]);
+
+  // Recalculate loadman charges whenever items or loadman_rate_per_kg change
+  useEffect(() => {
+    const totalWt = items.reduce((sum, r) => sum + (parseFloat(r.total_wt || r.total_weight) || ((parseFloat(r.qty) || 0) * (parseFloat(r.weight) || 0))), 0);
+    const rate = parseFloat(formData.loadman_rate_per_kg) || 0;
+    const charges = parseFloat((totalWt * rate).toFixed(2));
+    setFormData(prev => ({
+      ...prev,
+      loadman_charges: charges
+    }));
+  }, [items, formData.loadman_rate_per_kg]);
 
   // Recalculate totals when items or tax type change
   useEffect(() => {
@@ -487,6 +537,9 @@ const SalesReturnCreate = () => {
       {value: 'Moong', label: 'Moong'},
       {value: 'Others', label: 'Others'}
     ], col: 2 },
+    { name: 'loadman_name', label: 'Loadman', type: 'masterSelect', masterType: 'workers', col: 2 },
+    { name: 'loadman_rate_per_kg', label: 'Loadman Rate/KG', type: 'number', step: '0.01', col: 2 },
+    { name: 'loadman_charges', label: 'Loadman Charges', type: 'number', step: '0.01', readOnly: true, col: 2 },
     { name: 'customer_id', label: 'Customer', type: 'masterSelect', masterType: 'customers', col: 3 },
     { name: 'address', label: 'Address', type: 'textarea', readOnly: true, col: 3 }
   ];
@@ -752,6 +805,17 @@ const SalesReturnCreate = () => {
 
       <EntryActions 
         onSave={handleSave}
+        onCancel={() => {
+          if (window.confirm('Are you sure you want to cancel? Any unsaved changes will be discarded.')) {
+            navigate('/entry/sales-return-display');
+          }
+        }}
+        onRefresh={() => {
+          if (window.confirm('Refresh page and clear all entries?')) {
+            window.location.reload();
+          }
+        }}
+        onBack={() => navigate('/entry/sales-return-display')}
         saving={loading}
         saveText="Save Sales Return"
       />
