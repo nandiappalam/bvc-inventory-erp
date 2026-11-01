@@ -15,11 +15,81 @@ const { getColdStorageTariff, calculateLabourCharge, createOrUpdateColdStorageBi
 const { ensureColdStorageSchema } = require('../utils/coldStorageSchema')
 const OpChargeEngine = require('../services/operationalChargeEngine')
 
+async function ensurePurchasesTableSchema() {
+  try {
+    const tableInfo = await db.query('PRAGMA table_info(purchases)');
+    const columns = new Set((tableInfo.rows || []).map(r => r.name));
+
+    const colsToAdd = [
+      { name: 'transport_charges', type: 'REAL DEFAULT 0' },
+      { name: 'freight_amount', type: 'REAL DEFAULT 0' },
+      { name: 'transport_payable_type', type: 'TEXT DEFAULT "SEPARATE"' },
+      { name: 'loadman_payable_type', type: 'TEXT DEFAULT "SEPARATE"' },
+      { name: 'loadman_name', type: 'TEXT' },
+      { name: 'loadman_worker_id', type: 'INTEGER' },
+      { name: 'loadman_rate_per_kg', type: 'REAL DEFAULT 0.50' },
+      { name: 'loadman_charges', type: 'REAL DEFAULT 0' },
+      { name: 'advance_amount', type: 'REAL DEFAULT 0' },
+      { name: 'mamool_amount', type: 'REAL DEFAULT 0' },
+      { name: 'weight_cash_amount', type: 'REAL DEFAULT 0' },
+      { name: 'weight_cash', type: 'REAL DEFAULT 0' },
+      { name: 'other_additional_charges', type: 'REAL DEFAULT 0' },
+      { name: 'other_deductions', type: 'REAL DEFAULT 0' },
+      { name: 'remarks_narration', type: 'TEXT' },
+      { name: 'tare_weight_status', type: 'TEXT DEFAULT "Pending"' },
+      { name: 'tare_weight_date', type: 'TEXT' },
+      { name: 'tare_weight_time', type: 'TEXT' },
+      { name: 'weighbridge_location', type: 'TEXT' },
+      { name: 'weighment_slip_no', type: 'TEXT' },
+      { name: 'weighment_ref_no', type: 'TEXT' },
+      { name: 'unloading_date', type: 'TEXT' },
+      { name: 'unloading_time', type: 'TEXT' },
+      { name: 'weighbridge_operator', type: 'TEXT' },
+      { name: 'operator_name', type: 'TEXT' },
+      { name: 'weight_status', type: 'TEXT DEFAULT "TARE_PENDING"' },
+      { name: 'transporter', type: 'TEXT' },
+      { name: 'transport', type: 'TEXT' },
+      { name: 'vehicle_no', type: 'TEXT' },
+      { name: 'lorry_no', type: 'TEXT' },
+      { name: 'driver_name', type: 'TEXT' },
+      { name: 'driver', type: 'TEXT' },
+      { name: 'driver_mobile', type: 'TEXT' },
+      { name: 'transport_date', type: 'TEXT' },
+      { name: 'net_transport_amount', type: 'REAL DEFAULT 0' },
+      { name: 'gross_weight', type: 'REAL DEFAULT 0' },
+      { name: 'tare_weight', type: 'REAL DEFAULT 0' },
+      { name: 'net_weight', type: 'REAL DEFAULT 0' },
+      { name: 'stock_type', type: 'TEXT' },
+      { name: 'purchase_order_id', type: 'INTEGER' },
+      { name: 'po_no', type: 'TEXT' },
+      { name: 'source_order_id', type: 'INTEGER' },
+      { name: 'source_order_no', type: 'TEXT' },
+      { name: 'tax_percent', type: 'REAL DEFAULT 0' },
+      { name: 'deduction_amount', type: 'REAL DEFAULT 0' }
+    ];
+
+    for (const col of colsToAdd) {
+      if (!columns.has(col.name)) {
+        try {
+          await db.run(`ALTER TABLE purchases ADD COLUMN ${col.name} ${col.type}`);
+        } catch (e) {
+          console.warn(`[purchases] Failed to add column ${col.name}:`, e.message);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Error ensuring purchases table schema:', err.message);
+  }
+}
+
+ensurePurchasesTableSchema();
+
 // Middleware to ensure cold storage schema exists for purchase auto-inward actions
 router.use(async (req, res, next) => {
   try {
     const cId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
     await ensureColdStorageSchema(cId);
+    await ensurePurchasesTableSchema();
   } catch (err) {
     console.warn('[purchases] Cold storage schema check notice:', err.message);
   }
@@ -94,6 +164,7 @@ const ensurePurchaseDeductions = async (companyId = 1) => {
       'ALTER TABLE purchases ADD COLUMN driver_mobile TEXT',
       'ALTER TABLE purchases ADD COLUMN transport_date TEXT',
       'ALTER TABLE purchases ADD COLUMN freight_amount REAL DEFAULT 0',
+      'ALTER TABLE purchases ADD COLUMN transport_charges REAL DEFAULT 0',
       'ALTER TABLE purchases ADD COLUMN advance_amount REAL DEFAULT 0',
       'ALTER TABLE purchases ADD COLUMN mamool_amount REAL DEFAULT 0',
       'ALTER TABLE purchases ADD COLUMN weight_cash REAL DEFAULT 0',

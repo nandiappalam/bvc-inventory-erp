@@ -1,6 +1,7 @@
 export const MASTER_CONFIG = {
   ledger: {
     table: 'ledgermaster',
+    displayFields: ['name', 'printname', 'under', 'ledger_type', 'openingbalance', 'opening_type', 'status'],
     sections: [
       {
         title: 'Basic Information',
@@ -40,6 +41,7 @@ export const MASTER_CONFIG = {
         fields: [
           { name: 'name', label: 'Group Name', type: 'text', required: true },
           { name: 'printname', label: 'Print Name', type: 'text' },
+          { name: 'under', label: 'Parent Group', type: 'text', defaultValue: 'Primary' },
         ]
       },
       {

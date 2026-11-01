@@ -243,14 +243,27 @@ const LedgerStatementReport = () => {
   const safeTransactions = reportData?.transactions || []
 
   return (
-    <div className="window">
-      <div className="screen-title">Ledger Statement</div>
+    <div className="window ledger-statement-page">
+      <div className="screen-header">
+        <button className="header-btn back-btn" onClick={() => navigate(-1)}>
+          <svg className="btn-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
+          </svg>
+          Back
+        </button>
+        <div className="screen-title-text">Ledger Statement</div>
+        <button className="header-btn refresh-btn" onClick={fetchReport}>
+          <svg className="btn-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 8H18"></path>
+          </svg>
+          Refresh
+        </button>
+      </div>
 
-      {/* Filter Section */}
-      <div className="report-filters">
+      <div className="report-filters-card">
         <div className="filter-row">
-          <div className="filter-group">
-            <label>Select Ledger:</label>
+          <div className="filter-group flex-2">
+            <label>Select Ledger Account</label>
             <select
               className="uniform-input"
               value={selectedLedgerOption}
@@ -268,7 +281,7 @@ const LedgerStatementReport = () => {
                 }
               }}
             >
-              <option value="">Select Ledger</option>
+              <option value="">-- Choose Account --</option>
               {ledgers.map((ledger, idx) => (
                 <option
                   key={`${ledger.id || 'ledger'}-${idx}`}
@@ -281,7 +294,7 @@ const LedgerStatementReport = () => {
           </div>
 
           <div className="filter-group">
-            <label>From Date:</label>
+            <label>From Date</label>
             <input
               type="date"
               className="uniform-input"
@@ -291,7 +304,7 @@ const LedgerStatementReport = () => {
           </div>
 
           <div className="filter-group">
-            <label>To Date:</label>
+            <label>To Date</label>
             <input
               type="date"
               className="uniform-input"
@@ -300,16 +313,11 @@ const LedgerStatementReport = () => {
             />
           </div>
 
-          <div className="filter-group">
-            <label>&nbsp;</label>
-            <button className="btn btn-primary" onClick={fetchReport}>
-              Search
+          <div className="filter-actions">
+            <button className="btn btn-primary" onClick={fetchReport} disabled={loading}>
+              {loading ? 'Loading...' : 'Search'}
             </button>
-          </div>
-
-          <div className="filter-group">
-            <label>&nbsp;</label>
-            <button className="btn btn-secondary" onClick={handlePrint}>
+            <button className="btn btn-secondary" onClick={handlePrint} disabled={!reportData}>
               Print
             </button>
           </div>
@@ -317,35 +325,51 @@ const LedgerStatementReport = () => {
       </div>
 
       {error && <div className="message-box error">{error}</div>}
-      {loading && <div className="loading">Loading...</div>}
 
-      {/* Ledger Header */}
+      {/* Ledger Header & Opening Balance Card */}
       {!loading && reportData && (
-        <div className="ledger-header">
-          <h3>{reportData.ledgerName}</h3>
-          <p>Opening Balance: {parseFloat(reportData.openingBalance || 0).toFixed(2)}</p>
+        <div className="ledger-summary-card">
+          <div className="summary-main">
+            <div className="ledger-info">
+              <span className="label">Account Name</span>
+              <span className="value">{reportData.ledgerName}</span>
+            </div>
+            <div className="ledger-info">
+              <span className="label">Statement Period</span>
+              <span className="value small">{new Date(fromDate).toLocaleDateString()} to {new Date(toDate).toLocaleDateString()}</span>
+            </div>
+          </div>
+          <div className="summary-stats">
+            <div className="stat-box">
+              <span className="label">Opening Balance</span>
+              <span className={`value ${parseFloat(reportData.openingBalance || 0) >= 0 ? 'debit' : 'credit'}`}>
+                ₹ {Math.abs(parseFloat(reportData.openingBalance || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                {parseFloat(reportData.openingBalance || 0) >= 0 ? ' Dr' : ' Cr'}
+              </span>
+            </div>
+          </div>
         </div>
       )}
 
       {/* Report Table */}
       {!loading && reportData && (
-        <div className="report-table-container">
+        <div className="report-table-wrapper">
           <table className="report-table">
             <thead>
               <tr>
-                <th>Date</th>
-                <th>Voucher Type</th>
-                <th>Voucher No</th>
+                <th width="100">Date</th>
+                <th width="150">Voucher Type</th>
+                <th width="120">Voucher No</th>
                 <th>Particulars</th>
-                <th className="text-right">Debit</th>
-                <th className="text-right">Credit</th>
-                <th className="text-right">Balance</th>
+                <th className="text-right" width="120">Debit (₹)</th>
+                <th className="text-right" width="120">Credit (₹)</th>
+                <th className="text-right" width="150">Balance (₹)</th>
               </tr>
             </thead>
             <tbody>
               {safeTransactions.length === 0 ? (
                 <tr>
-                  <td colSpan="7" className="text-center">No transactions found</td>
+                  <td colSpan="7" className="text-center no-data">No transactions found for the selected period</td>
                 </tr>
               ) : (
                 <>
@@ -366,35 +390,52 @@ const LedgerStatementReport = () => {
 
                     return (
                       <tr key={index}>
-                        <td>{row.date ? new Date(row.date).toLocaleDateString() : '-'}</td>
+                        <td className="text-center">{row.date ? new Date(row.date).toLocaleDateString('en-GB') : '-'}</td>
                         <td>{row.voucher_type || '-'}</td>
                         <td 
-                          style={isClickable ? { color: '#1976d2', cursor: 'pointer', textDecoration: 'underline', fontWeight: 'bold' } : {}}
+                          className={isClickable ? 'clickable-voucher' : ''}
                           onClick={handleVoucherClick}
                         >
                           {row.voucher_no || '-'}
                         </td>
-                        <td>{row.particulars || '-'}</td>
-                        <td className="text-right">{parseFloat(row.debit || 0).toFixed(2)}</td>
-                        <td className="text-right">{parseFloat(row.credit || 0).toFixed(2)}</td>
-                        <td className="text-right">{Math.abs(parseFloat(row.balance || 0)).toFixed(2)}</td>
+                        <td className="particulars-cell">{row.particulars || '-'}</td>
+                        <td className="text-right debit-val">{parseFloat(row.debit || 0) > 0 ? parseFloat(row.debit).toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '-'}</td>
+                        <td className="text-right credit-val">{parseFloat(row.credit || 0) > 0 ? parseFloat(row.credit).toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '-'}</td>
+                        <td className="text-right balance-val">
+                          {Math.abs(parseFloat(row.balance || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                          {parseFloat(row.balance || 0) >= 0 ? ' Dr' : ' Cr'}
+                        </td>
                       </tr>
                     );
                   })}
-                  <tr className="total-row">
-                    <td colSpan="4"><strong>Closing Balance</strong></td>
-                    <td></td>
-                    <td></td>
-                    <td className="text-right"><strong>{Math.abs(parseFloat(reportData.closingBalance || 0)).toFixed(2)}</strong></td>
-                  </tr>
                 </>
               )}
             </tbody>
+            <tfoot>
+              <tr className="closing-balance-row">
+                <td colSpan="6" className="text-right"><strong>Closing Balance:</strong></td>
+                <td className="text-right">
+                  <strong>
+                    ₹ {Math.abs(parseFloat(reportData.closingBalance || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                    {parseFloat(reportData.closingBalance || 0) >= 0 ? ' Dr' : ' Cr'}
+                  </strong>
+                </td>
+              </tr>
+            </tfoot>
           </table>
+        </div>
+      )}
+      
+      {!loading && !reportData && !error && (
+        <div className="empty-state">
+          <div className="empty-icon">📊</div>
+          <h3>Select an account to view statement</h3>
+          <p>Choose a ledger from the dropdown above and click Search.</p>
         </div>
       )}
     </div>
   )
+
 }
 
 export default LedgerStatementReport

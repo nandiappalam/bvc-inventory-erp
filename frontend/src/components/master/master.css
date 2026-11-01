@@ -412,4 +412,25 @@
   color: #fff !important;
 }
 
+/* ============================================================================
+   WINDOW - Main container for standalone pages (Reports, etc.)
+   ============================================================================ */
+.window {
+  width: 100%;
+  padding: 16px 24px;
+  box-sizing: border-box;
+  overflow-y: auto;
+  min-height: calc(100vh - 80px);
+  background: #f8fafc;
+  display: block;
+}
+
+.window .screen-title {
+  margin-top: 0;
+  border-bottom: 2px solid #1f4fb2;
+  color: #1f4fb2;
+  text-transform: uppercase;
+  padding-bottom: 10px;
+}
+
 

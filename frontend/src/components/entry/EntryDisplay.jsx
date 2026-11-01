@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import api from "../../services/api";
 import { safeArray } from "../../utils/safeArray";
 import { printHtml } from "../../utils/printHelper";
@@ -190,9 +190,11 @@ const EntryDisplay = ({
     }
   };
 
+  const location = useLocation();
+
   useEffect(() => {
     fetchData();
-  }, [apiEndpoint, tableName]);
+  }, [apiEndpoint, tableName, location]);
 
   const handleDeleteDirect = async (row) => {
     const id = row.id;

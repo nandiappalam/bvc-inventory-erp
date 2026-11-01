@@ -281,7 +281,7 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
             </button>
           </div>
         ) : statementData ? (
-          <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50/50">
+          <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50/50" style={{ minHeight: 0 }}>
             {/* Top Cards: Total Dr, Total Cr & Outstanding Balances */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '16px' }}>
               <div className="bg-white p-3.5 rounded-lg border border-slate-200 shadow-sm">

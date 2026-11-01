@@ -628,6 +628,16 @@ module.exports = async function autoMigrate() {
   await safeAddColumn('purchases', 'lorry_no', 'TEXT');
   await safeAddColumn('purchases', 'driver_name', 'TEXT');
   await safeAddColumn('purchases', 'driver', 'TEXT');
+  await safeAddColumn('purchases', 'transport_charges', 'REAL DEFAULT 0');
+  await safeAddColumn('purchases', 'freight_amount', 'REAL DEFAULT 0');
+  await safeAddColumn('purchases', 'weighment_ref_no', 'TEXT');
+  await safeAddColumn('purchases', 'transport_payable_type', "TEXT DEFAULT 'SEPARATE'");
+  await safeAddColumn('purchases', 'loadman_payable_type', "TEXT DEFAULT 'SEPARATE'");
+  await safeAddColumn('purchases', 'operator_name', 'TEXT');
+  await safeAddColumn('purchases', 'weight_status', "TEXT DEFAULT 'TARE_PENDING'");
+  await safeAddColumn('purchases', 'unloading_date', 'TEXT');
+  await safeAddColumn('purchases', 'unloading_time', 'TEXT');
+  await safeAddColumn('purchases', 'weighbridge_location', 'TEXT');
 
   await safeAddColumn('sales', 'sub_total', 'REAL DEFAULT 0');
   await safeAddColumn('sales', 'tax_amount', 'REAL DEFAULT 0');

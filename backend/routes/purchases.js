@@ -68,6 +68,28 @@ const getPurchaseWeights = (formData = {}) => {
   return { grossWeight, tareWeight, netWeight };
 };
 
+const ensurePurchaseItemsColumns = async (companyId = 1) => {
+  const cId = parseInt(companyId, 10) || 1;
+  const columns = [
+    'ALTER TABLE purchase_items ADD COLUMN hsn_code TEXT',
+    'ALTER TABLE purchase_items ADD COLUMN tax_type TEXT DEFAULT "Taxable"',
+    'ALTER TABLE purchase_items ADD COLUMN gst_rate REAL DEFAULT 0',
+    'ALTER TABLE purchase_items ADD COLUMN cgst_rate REAL DEFAULT 0',
+    'ALTER TABLE purchase_items ADD COLUMN cgst_amount REAL DEFAULT 0',
+    'ALTER TABLE purchase_items ADD COLUMN sgst_rate REAL DEFAULT 0',
+    'ALTER TABLE purchase_items ADD COLUMN sgst_amount REAL DEFAULT 0',
+    'ALTER TABLE purchase_items ADD COLUMN igst_rate REAL DEFAULT 0',
+    'ALTER TABLE purchase_items ADD COLUMN igst_amount REAL DEFAULT 0',
+    'ALTER TABLE purchase_items ADD COLUMN cess_rate REAL DEFAULT 0',
+    'ALTER TABLE purchase_items ADD COLUMN cess_amount REAL DEFAULT 0',
+    'ALTER TABLE purchase_items ADD COLUMN total_amt REAL DEFAULT 0',
+    'ALTER TABLE purchase_items ADD COLUMN total_amount REAL DEFAULT 0'
+  ];
+  for (const sql of columns) {
+    try { await db.run(sql, [], cId); } catch (_) {}
+  }
+};
+
 const ensurePurchasesColumns = async (companyId = 1) => {
   const cId = parseInt(companyId, 10) || 1;
   const columns = [
@@ -108,7 +130,17 @@ const ensurePurchasesColumns = async (companyId = 1) => {
     'ALTER TABLE purchases ADD COLUMN loadman_qty_kg REAL DEFAULT 0',
     'ALTER TABLE purchases ADD COLUMN loadman_rate_per_kg REAL DEFAULT 0.50',
     'ALTER TABLE purchases ADD COLUMN loadman_charges REAL DEFAULT 0',
-    'ALTER TABLE purchases ADD COLUMN additional_charges REAL DEFAULT 0'
+    'ALTER TABLE purchases ADD COLUMN additional_charges REAL DEFAULT 0',
+    'ALTER TABLE purchases ADD COLUMN transport_charges REAL DEFAULT 0',
+    'ALTER TABLE purchases ADD COLUMN total_qty REAL DEFAULT 0',
+    'ALTER TABLE purchases ADD COLUMN total_weight REAL DEFAULT 0',
+    'ALTER TABLE purchases ADD COLUMN total_amount REAL DEFAULT 0',
+    'ALTER TABLE purchases ADD COLUMN base_amount REAL DEFAULT 0',
+    'ALTER TABLE purchases ADD COLUMN disc_amount REAL DEFAULT 0',
+    'ALTER TABLE purchases ADD COLUMN tax_amount REAL DEFAULT 0',
+    'ALTER TABLE purchases ADD COLUMN net_amount REAL DEFAULT 0',
+    'ALTER TABLE purchases ADD COLUMN deduction_amount REAL DEFAULT 0',
+    'ALTER TABLE purchases ADD COLUMN grand_total REAL DEFAULT 0'
   ];
   for (const sql of columns) {
     try { await db.run(sql, [], cId); } catch (_) {}
@@ -379,6 +411,7 @@ router.get('/:id', async (req, res) => {
   try {
     const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
     await ensurePurchasesColumns(activeCompanyId);
+    await ensurePurchaseItemsColumns(activeCompanyId);
     const rawId = req.params.id;
     const isNum = !isNaN(Number(rawId)) && String(rawId).trim() !== '';
     const numVal = isNum ? Number(rawId) : null;
@@ -581,6 +614,7 @@ router.post('/', async (req, res) => {
     const { formData, items, deductions } = req.body
     const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
     await ensurePurchasesColumns(activeCompanyId);
+    await ensurePurchaseItemsColumns(activeCompanyId);
  
     // Validation
     if (!formData?.date || !formData?.supplier) {
@@ -689,6 +723,7 @@ router.post('/', async (req, res) => {
       vehicleNoVal,
       vehicleNoVal,
       driverNameVal,
+      formData.driver || '',
       formData.company_state || formData.companyState || 'Tamil Nadu',
       formData.supplier_state || formData.party_state || 'Tamil Nadu',
       formData.company_state_code || '33',
@@ -709,11 +744,11 @@ router.post('/', async (req, res) => {
     const purchaseResult = await db.run(`
       INSERT INTO purchases (
         s_no, date, inv_no, supplier, pay_type, inv_date, type, contact_person, address, area, phone, gst_no, email, tax_type, tax_percent, godown, godown_id, remarks, total_qty, total_weight, total_amount, base_amount, disc_amount, tax_amount, net_amount, deduction_amount, grand_total,
-        gross_weight, tare_weight, net_weight, stock_type, transporter, transport, vehicle_no, lorry_no, driver_name,
+        gross_weight, tare_weight, net_weight, stock_type, transporter, transport, vehicle_no, lorry_no, driver_name, driver,
         company_state, party_state, company_state_code, party_state_code, tax_mode, cgst_amount, sgst_amount, igst_amount, cess_amount,
-        loadman_name, loadman_worker_id, loadman_qty_kg, loadman_rate_per_kg, loadman_charges, additional_charges
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, insertValues)
+        loadman_name, loadman_worker_id, loadman_qty_kg, loadman_rate_per_kg, loadman_charges, additional_charges, transport_charges
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [...insertValues, Number(formData.transport_charges || 0)])
  
     const purchaseId = purchaseResult.lastID;
  
@@ -1124,6 +1159,7 @@ router.put('/:id', async (req, res) => {
     const { formData, items, deductions } = req.body
     const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
     await ensurePurchasesColumns(activeCompanyId);
+    await ensurePurchaseItemsColumns(activeCompanyId);
     const routeId = String(req.params.id || '');
     let purchaseId = routeId;
     const purchaseById = await db.query('SELECT id FROM purchases WHERE CAST(id AS TEXT) = ? LIMIT 1', [routeId]);
