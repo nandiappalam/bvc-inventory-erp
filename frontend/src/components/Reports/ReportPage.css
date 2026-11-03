@@ -257,3 +257,247 @@
     background: none;
   }
 }
+
+/* Ledger Statement Report Specific - Ultra-Compact High-Density Layout */
+.ledger-statement-page {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 16px;
+  background-color: #f8fafc;
+  min-height: 100vh;
+}
+
+.report-filters-card {
+  background: white;
+  padding: 10px 16px;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  border: 1px solid #e2e8f0;
+}
+
+.flex-2 {
+  flex: 2 !important;
+}
+
+.filter-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+/* Compact Horizontal Summary Bar replacing massive vertical blue box */
+.ledger-summary-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%);
+  color: white;
+  padding: 8px 16px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.summary-main {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.ledger-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ledger-info .label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #93c5fd;
+  font-weight: 700;
+}
+
+.ledger-info .value {
+  font-size: 15px;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.ledger-info .value.small {
+  font-size: 12px;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.summary-stats {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.stat-box {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: right;
+}
+
+.stat-box .label {
+  display: inline-block;
+  font-size: 10px;
+  text-transform: uppercase;
+  color: #cbd5e1;
+  font-weight: 700;
+}
+
+.stat-box .value {
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.stat-box .value.debit { color: #34d399; }
+.stat-box .value.credit { color: #fcd34d; }
+
+.report-table-wrapper {
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  border: 1px solid #e2e8f0;
+  overflow-x: auto;
+  overflow-y: auto;
+  flex: 1;
+  max-height: calc(100vh - 180px);
+  min-height: 400px;
+}
+
+.report-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.report-table th {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: #f1f5f9;
+  color: #334155;
+  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  padding: 8px 12px;
+  border-bottom: 2px solid #cbd5e1;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+
+.report-table td {
+  padding: 6px 12px;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 12px;
+  color: #0f172a;
+  vertical-align: middle;
+}
+
+.report-table tr:hover td {
+  background-color: #f8fafc;
+}
+
+.clickable-voucher {
+  color: #1d4ed8;
+  font-weight: 700;
+  font-family: monospace;
+  cursor: pointer;
+  text-decoration: underline;
+  background: #eff6ff;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid #bfdbfe;
+  display: inline-block;
+}
+
+.clickable-voucher:hover {
+  color: #1e40af;
+  background: #dbeafe;
+}
+
+.particulars-cell {
+  color: #0f172a !important;
+  font-size: 12px !important;
+  font-weight: 600;
+}
+
+.particulars-subtext {
+  display: block;
+  font-size: 11px;
+  color: #64748b;
+  font-weight: normal;
+  margin-top: 2px;
+}
+
+.debit-val { color: #047857 !important; font-weight: 700; text-align: right; }
+.credit-val { color: #b45309 !important; font-weight: 700; text-align: right; }
+.balance-val { font-weight: 800; text-align: right; color: #0f172a; }
+
+.closing-balance-row td {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  background-color: #0f172a;
+  color: #ffffff !important;
+  border-top: 2px solid #334155;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 800;
+  box-shadow: 0 -2px 4px rgba(0,0,0,0.06);
+}
+
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  background: white;
+  border-radius: 8px;
+  border: 2px dashed #e2e8f0;
+}
+
+.empty-icon {
+  font-size: 48px;
+  margin-bottom: 15px;
+}
+
+.empty-state h3 {
+  color: #1e293b;
+  margin-bottom: 8px;
+}
+
+.empty-state p {
+  color: #64748b;
+}
+
+@media print {
+  .ledger-statement-page {
+    padding: 0;
+    background: white;
+  }
+  .report-filters-card, .screen-header, .empty-state {
+    display: none !important;
+  }
+  .ledger-summary-card {
+    background: white !important;
+    color: black !important;
+    border: 1px solid #ccc;
+    box-shadow: none !important;
+  }
+  .stat-box {
+    background: white !important;
+    color: black !important;
+    border: 1px solid #eee;
+  }
+}

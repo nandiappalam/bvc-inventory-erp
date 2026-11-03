@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../../utils/api.js'
 import { printHtml } from '../../utils/printHelper.js'
+import PurchaseLedgerDetailsModal from '../purchase/PurchaseLedgerDetailsModal'
 import './ReportPage.css'
 
 /**
@@ -19,6 +20,7 @@ const LedgerStatementReport = () => {
   const [reportData, setReportData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [selectedPurchaseModal, setSelectedPurchaseModal] = useState(null)
 
   // Set default dates (current financial year starting April 1st)
   useEffect(() => {
@@ -49,13 +51,14 @@ const LedgerStatementReport = () => {
   useEffect(() => {
     const fetchLedgers = async () => {
       try {
-        const [suppliersRes, customersRes, papadRes, flourRes, opRes, lmRes] = await Promise.all([
+        const [suppliersRes, customersRes, papadRes, flourRes, opRes, lmRes, transRes] = await Promise.all([
           api.getMasters('suppliers'),
           api.getMasters('customers'),
           api.getMasters('papad_companies'),
           api.getMasters('flour_mills'),
           api.getMasters('operational_parties'),
-          api.get('/masters/all/ledgermaster').catch(() => null)
+          api.get('/masters/all/ledgermaster').catch(() => null),
+          api.getMasters('transporters').catch(() => null)
         ])
         
         const suppliers = (suppliersRes?.success && Array.isArray(suppliersRes.data)) ? suppliersRes.data : []
@@ -64,6 +67,7 @@ const LedgerStatementReport = () => {
         const flourMills = (flourRes?.success && Array.isArray(flourRes.data)) ? flourRes.data : []
         const ops = (opRes?.success && Array.isArray(opRes.data)) ? opRes.data : []
         const generalLedgers = (lmRes?.data && Array.isArray(lmRes.data)) ? lmRes.data : (Array.isArray(lmRes) ? lmRes : [])
+        const transporters = (transRes?.success && Array.isArray(transRes.data)) ? transRes.data : (Array.isArray(transRes) ? transRes : [])
         
         const combined = []
         const seen = new Set()
@@ -114,12 +118,23 @@ const LedgerStatementReport = () => {
           }
         })
 
+        transporters.forEach(t => {
+          const name = t.name || t.transporter_name || t.print_name
+          if (name) {
+            const key = `${name}_Transporter`
+            if (!seen.has(key)) {
+              seen.add(key)
+              combined.push({ id: t.id, name, type: 'Transporter' })
+            }
+          }
+        })
+
         generalLedgers.forEach(l => {
           const name = l.name
           const type = l.ledger_type || 'General'
           if (name) {
             const key = `${name}_${type}`
-            if (!seen.has(key) && !seen.has(`${name}_Supplier`) && !seen.has(`${name}_Customer`) && !seen.has(`${name}_Loadman`)) {
+            if (!seen.has(key) && !seen.has(`${name}_Supplier`) && !seen.has(`${name}_Customer`) && !seen.has(`${name}_Loadman`) && !seen.has(`${name}_Transporter`)) {
               seen.add(key)
               combined.push({ id: l.id, name, type })
             }
@@ -326,50 +341,76 @@ const LedgerStatementReport = () => {
 
       {error && <div className="message-box error">{error}</div>}
 
-      {/* Ledger Header & Opening Balance Card */}
+      {/* Compact Horizontal Ledger Header & Balance Summary Bar */}
       {!loading && reportData && (
         <div className="ledger-summary-card">
           <div className="summary-main">
             <div className="ledger-info">
-              <span className="label">Account Name</span>
+              <span className="label">Account:</span>
               <span className="value">{reportData.ledgerName}</span>
             </div>
             <div className="ledger-info">
-              <span className="label">Statement Period</span>
-              <span className="value small">{new Date(fromDate).toLocaleDateString()} to {new Date(toDate).toLocaleDateString()}</span>
+              <span className="label">Period:</span>
+              <span className="value small">
+                {fromDate ? new Date(fromDate).toLocaleDateString('en-GB') : 'Start'} to {toDate ? new Date(toDate).toLocaleDateString('en-GB') : 'Today'}
+              </span>
             </div>
           </div>
+
           <div className="summary-stats">
             <div className="stat-box">
-              <span className="label">Opening Balance</span>
-              <span className={`value ${parseFloat(reportData.openingBalance || 0) >= 0 ? 'debit' : 'credit'}`}>
+              <span className="label">Opening:</span>
+              <span className="value">
                 ₹ {Math.abs(parseFloat(reportData.openingBalance || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                {parseFloat(reportData.openingBalance || 0) >= 0 ? ' Dr' : ' Cr'}
+                <small style={{ marginLeft: '4px', opacity: 0.9 }}>{parseFloat(reportData.openingBalance || 0) >= 0 ? 'Dr' : 'Cr'}</small>
+              </span>
+            </div>
+            <div className="stat-box">
+              <span className="label">Period Dr:</span>
+              <span className="value debit">
+                ₹ {Number(reportData.periodDebitTotal || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </span>
+            </div>
+            <div className="stat-box">
+              <span className="label">Period Cr:</span>
+              <span className="value credit">
+                ₹ {Number(reportData.periodCreditTotal || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </span>
+            </div>
+            <div className="stat-box" style={{ backgroundColor: 'rgba(59, 130, 246, 0.25)', borderColor: 'rgba(147, 197, 253, 0.4)' }}>
+              <span className="label" style={{ color: '#ffffff' }}>Closing:</span>
+              <span className="value" style={{ color: '#ffffff' }}>
+                ₹ {Math.abs(parseFloat(reportData.closingBalance || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                <small style={{ marginLeft: '4px', opacity: 0.9 }}>{parseFloat(reportData.closingBalance || 0) >= 0 ? 'Dr' : 'Cr'}</small>
               </span>
             </div>
           </div>
         </div>
       )}
 
-      {/* Report Table */}
+      {/* High-Density Statement Table */}
       {!loading && reportData && (
         <div className="report-table-wrapper">
           <table className="report-table">
             <thead>
               <tr>
-                <th width="100">Date</th>
-                <th width="150">Voucher Type</th>
+                <th width="40" style={{ textAlign: 'center' }}>#</th>
+                <th width="90">Date</th>
+                <th width="120">Voucher Type</th>
                 <th width="120">Voucher No</th>
-                <th>Particulars</th>
-                <th className="text-right" width="120">Debit (₹)</th>
-                <th className="text-right" width="120">Credit (₹)</th>
+                <th>Particulars & Transaction Details</th>
+                <th className="text-right" width="130">Debit (₹)</th>
+                <th className="text-right" width="130">Credit (₹)</th>
                 <th className="text-right" width="150">Balance (₹)</th>
+                <th width="90" style={{ textAlign: 'center' }}>Action</th>
               </tr>
             </thead>
             <tbody>
               {safeTransactions.length === 0 ? (
                 <tr>
-                  <td colSpan="7" className="text-center no-data">No transactions found for the selected period</td>
+                  <td colSpan="9" style={{ textAlign: 'center', padding: '30px', color: '#64748b' }}>
+                    No transactions found for the selected account in this period.
+                  </td>
                 </tr>
               ) : (
                 <>
@@ -379,8 +420,8 @@ const LedgerStatementReport = () => {
                     
                     const handleVoucherClick = () => {
                       if (!isClickable) return;
-                      if (typeLower.includes('purchase')) {
-                        navigate(`/entry/purchase-display?search=${encodeURIComponent(row.voucher_no)}`);
+                      if (typeLower.includes('purchase') || String(row.voucher_no || '').startsWith('PUR') || row.voucher_type === 'Purchase Unloading' || typeLower.includes('debit note')) {
+                        setSelectedPurchaseModal(row.reference_id || row.voucher_no);
                       } else if (typeLower.includes('sales')) {
                         navigate(`/entry/sales-display?search=${encodeURIComponent(row.voucher_no)}`);
                       } else {
@@ -388,22 +429,66 @@ const LedgerStatementReport = () => {
                       }
                     };
 
+                    // Voucher badge styling helper
+                    const getBadge = (vt) => {
+                      const t = String(vt || '').toLowerCase();
+                      if (t.includes('purchase') || t.includes('papad in')) return { bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe' };
+                      if (t.includes('sales') || t.includes('papad return')) return { bg: '#ecfdf5', color: '#047857', border: '#a7f3d0' };
+                      if (t.includes('debit note') || t.includes('return')) return { bg: '#fef2f2', color: '#b91c1c', border: '#fca5a5' };
+                      if (t.includes('credit note')) return { bg: '#fffbe3', color: '#b45309', border: '#fde68a' };
+                      if (t.includes('payment') || t.includes('advance')) return { bg: '#f5f3ff', color: '#6d28d9', border: '#ddd6fe' };
+                      if (t.includes('receipt')) return { bg: '#f0fdf4', color: '#15803d', border: '#bbf7d0' };
+                      return { bg: '#f8fafc', color: '#334155', border: '#cbd5e1' };
+                    };
+                    const badge = getBadge(row.voucher_type);
+
+                    const debitVal = parseFloat(row.debit || 0);
+                    const creditVal = parseFloat(row.credit || 0);
+                    const balVal = parseFloat(row.balance || 0);
+
                     return (
-                      <tr key={index}>
-                        <td className="text-center">{row.date ? new Date(row.date).toLocaleDateString('en-GB') : '-'}</td>
-                        <td>{row.voucher_type || '-'}</td>
-                        <td 
-                          className={isClickable ? 'clickable-voucher' : ''}
-                          onClick={handleVoucherClick}
-                        >
-                          {row.voucher_no || '-'}
+                      <tr key={index} style={{ backgroundColor: index % 2 === 0 ? '#ffffff' : '#f8fafc' }}>
+                        <td style={{ textAlign: 'center', color: '#94a3b8', fontWeight: '600', fontSize: '11px' }}>{index + 1}</td>
+                        <td style={{ color: '#334155', fontWeight: '600' }}>{row.date ? new Date(row.date).toLocaleDateString('en-GB') : '-'}</td>
+                        <td>
+                          <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px', backgroundColor: badge.bg, color: badge.color, border: `1px solid ${badge.border}`, fontWeight: '700', display: 'inline-block' }}>
+                            {row.voucher_type || 'General'}
+                          </span>
                         </td>
-                        <td className="particulars-cell">{row.particulars || '-'}</td>
-                        <td className="text-right debit-val">{parseFloat(row.debit || 0) > 0 ? parseFloat(row.debit).toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '-'}</td>
-                        <td className="text-right credit-val">{parseFloat(row.credit || 0) > 0 ? parseFloat(row.credit).toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '-'}</td>
-                        <td className="text-right balance-val">
-                          {Math.abs(parseFloat(row.balance || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                          {parseFloat(row.balance || 0) >= 0 ? ' Dr' : ' Cr'}
+                        <td>
+                          <button 
+                            className={isClickable ? 'clickable-voucher' : ''}
+                            onClick={handleVoucherClick}
+                            title="Click to view full voucher & transaction details"
+                            style={{ background: isClickable ? '#eff6ff' : 'none', border: isClickable ? '1px solid #bfdbfe' : 'none', cursor: isClickable ? 'pointer' : 'default' }}
+                          >
+                            {row.voucher_no || '-'}
+                          </button>
+                        </td>
+                        <td className="particulars-cell">
+                          {row.particulars || '-'}
+                          {(row.narration || row.remarks) && (
+                            <span className="particulars-subtext">
+                              Note: {row.narration || row.remarks}
+                            </span>
+                          )}
+                        </td>
+                        <td className="debit-val">{debitVal > 0 ? `₹${debitVal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '-'}</td>
+                        <td className="credit-val">{creditVal > 0 ? `₹${creditVal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '-'}</td>
+                        <td className="balance-val">
+                          ₹ {Math.abs(balVal).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                          <span style={{ marginLeft: '4px', fontSize: '11px', color: balVal >= 0 ? '#047857' : '#b45309' }}>
+                            {balVal >= 0 ? 'Dr' : 'Cr'}
+                          </span>
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          <button
+                            onClick={handleVoucherClick}
+                            style={{ padding: '4px 10px', backgroundColor: '#e2e8f0', color: '#1e293b', border: 'none', borderRadius: '4px', fontSize: '11px', fontWeight: '700', cursor: 'pointer' }}
+                            title="Open voucher & journal details"
+                          >
+                            View Details
+                          </button>
                         </td>
                       </tr>
                     );
@@ -413,13 +498,18 @@ const LedgerStatementReport = () => {
             </tbody>
             <tfoot>
               <tr className="closing-balance-row">
-                <td colSpan="6" className="text-right"><strong>Closing Balance:</strong></td>
-                <td className="text-right">
-                  <strong>
-                    ₹ {Math.abs(parseFloat(reportData.closingBalance || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                    {parseFloat(reportData.closingBalance || 0) >= 0 ? ' Dr' : ' Cr'}
-                  </strong>
+                <td colSpan="5" style={{ textAlign: 'right', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Period Total & Closing Balance:</td>
+                <td style={{ textAlign: 'right', color: '#34d399', fontWeight: '800' }}>
+                  ₹ {Number(reportData.periodDebitTotal || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                 </td>
+                <td style={{ textAlign: 'right', color: '#fcd34d', fontWeight: '800' }}>
+                  ₹ {Number(reportData.periodCreditTotal || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                </td>
+                <td style={{ textAlign: 'right', color: '#ffffff', fontWeight: '800' }}>
+                  ₹ {Math.abs(parseFloat(reportData.closingBalance || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                  <small style={{ marginLeft: '4px' }}>{parseFloat(reportData.closingBalance || 0) >= 0 ? 'Dr' : 'Cr'}</small>
+                </td>
+                <td></td>
               </tr>
             </tfoot>
           </table>
@@ -432,6 +522,15 @@ const LedgerStatementReport = () => {
           <h3>Select an account to view statement</h3>
           <p>Choose a ledger from the dropdown above and click Search.</p>
         </div>
+      )}
+
+      {/* Direct Modal for Purchase Transaction Ledger & Double-Entry Details */}
+      {selectedPurchaseModal && (
+        <PurchaseLedgerDetailsModal
+          isOpen={Boolean(selectedPurchaseModal)}
+          onClose={() => setSelectedPurchaseModal(null)}
+          purchaseId={selectedPurchaseModal}
+        />
       )}
     </div>
   )

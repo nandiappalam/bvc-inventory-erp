@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../../services/api';
 import PurchaseLedgerDetailsModal from '../purchase/PurchaseLedgerDetailsModal';
 
 const TallyDayBookPage = () => {
+  const navigate = useNavigate();
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
   const [dayBookData, setDayBookData] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -51,6 +53,26 @@ const TallyDayBookPage = () => {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button
+            onClick={() => {
+              if (window.history.length > 1) {
+                navigate(-1);
+              } else {
+                navigate('/accounting/dashboard');
+              }
+            }}
+            style={{ padding: '8px 14px', backgroundColor: 'rgba(255,255,255,0.15)', color: '#ffffff', fontWeight: '700', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.25)', fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            <span>←</span>
+            <span>Back</span>
+          </button>
+          <button
+            onClick={() => navigate('/accounting/dashboard')}
+            style={{ padding: '8px 14px', backgroundColor: 'rgba(255,255,255,0.1)', color: '#ffffff', fontWeight: '700', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.2)', fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            <span>📊</span>
+            <span>Dashboard</span>
+          </button>
           <label style={{ fontSize: '12px', fontWeight: '700', color: '#a7f3d0' }}>Select Date:</label>
           <input
             type="date"

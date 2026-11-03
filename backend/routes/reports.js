@@ -2146,6 +2146,35 @@ router.get('/ledger/:ledgerName', async (req, res) => {
       } catch (e) {}
     }
 
+    // 5b. Look in transport_master
+    let transportIds = new Set()
+    if (!detectedType || detectedType.toLowerCase().includes('transport') || detectedType.toLowerCase().includes('lorry')) {
+      try {
+        const tmQuery = await db.query(
+          `SELECT id, name, print_name FROM transport_master 
+           WHERE id = ? OR name = ? OR TRIM(name) = ? OR LOWER(TRIM(name)) = LOWER(?) 
+              OR print_name = ?`,
+          [parseInt(cleanName) || -1, cleanName, cleanName, cleanName, cleanName]
+        )
+        if (tmQuery.rows && tmQuery.rows.length > 0) {
+          tmQuery.rows.forEach(r => {
+            if (r.id) transportIds.add(Number(r.id))
+            if (r.name) exactLedgerNames.add(r.name.trim().toLowerCase())
+            if (r.print_name) exactLedgerNames.add(r.print_name.trim().toLowerCase())
+          })
+          for (const r of tmQuery.rows) {
+            const matchedLm = await db.query(
+              "SELECT id, name FROM ledgermaster WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1",
+              [r.name]
+            )
+            if (matchedLm.rows && matchedLm.rows.length > 0) {
+              ledgerMasterIds.add(Number(matchedLm.rows[0].id))
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
     // 6. Look in operational_parties (Workers, Loadmen, Drivers, Transporters, etc.)
     let operationalPartyIds = new Set()
     const loadmanLegacyNames = new Set()
@@ -2455,6 +2484,23 @@ router.get('/ledger/:ledgerName', async (req, res) => {
             const amt = parseFloat(row.final_amount || 0);
             const key = `${vNo}_0_${amt}`;
 
+            // Deduplication: if accrual voucher or source purchase is already accounted
+            const isAlreadyAccounted = allTransactions.some(t => {
+              const v = String(t.voucher_no || '').toLowerCase();
+              const p = String(t.particulars || '').toLowerCase();
+              if (row.accrual_voucher_no && (v === row.accrual_voucher_no.toLowerCase() || p.includes(row.accrual_voucher_no.toLowerCase()))) return true;
+              if (row.charge_no && (v === row.charge_no.toLowerCase() || p.includes(row.charge_no.toLowerCase()))) return true;
+              if (row.notes) {
+                const m = row.notes.match(/Purchase #([A-Za-z0-9\-_]+)/i);
+                if (m && m[1]) {
+                  const pNo = m[1].toLowerCase();
+                  if (v.includes(pNo) || p.includes(pNo)) return true;
+                }
+              }
+              return false;
+            });
+            if (isAlreadyAccounted) continue;
+
             if (!seenVoucherNos.has(vNo) && !seenKeys.has(key)) {
               seenKeys.add(key);
               seenVoucherNos.add(vNo);
@@ -2535,8 +2581,23 @@ router.get('/ledger/:ledgerName', async (req, res) => {
           }
 
           for (const purchase of purchases) {
+            const voucherNo = purchase.inv_no || `PUR-${purchase.s_no || purchase.id}`;
             const key = `PURCHASE-ACTIVITY-${purchase.id}`;
             if (seenKeys.has(key)) continue;
+
+            // Strict deduplication: If this purchase is already posted in accounting
+            const alreadyInAccounts = allTransactions.some(t => {
+              const v = String(t.voucher_no || '').toLowerCase();
+              const p = String(t.particulars || '').toLowerCase();
+              const inv = String(purchase.inv_no || '').toLowerCase();
+              const sNo = String(purchase.s_no || '').toLowerCase();
+              const pId = String(purchase.id || '').toLowerCase();
+              return (inv && (v.includes(inv) || p.includes(inv))) ||
+                     (sNo && (v.includes(`pur000${sNo}`) || v.includes(`pur-${sNo}`) || p.includes(`pur-${sNo}`) || p.includes(`#${sNo}`))) ||
+                     (pId && p.includes(`#${pId}`));
+            });
+            if (alreadyInAccounts) continue;
+
             seenKeys.add(key);
 
             const items = itemsByPurchase.get(String(purchase.id)) || [];
@@ -2548,14 +2609,22 @@ router.get('/ledger/:ledgerName', async (req, res) => {
             const qty = Number(purchase.loadman_qty_kg || purchase.total_weight || 0);
             const loadmanName = purchase.loadman_name || officialName;
             const recordedCharges = Number(purchase.loadman_charges || 0);
+
+            let sName = purchase.supplier || '';
+            if (/^\d+$/.test(String(sName))) {
+              try {
+                const sRes = await db.query('SELECT name, print_name FROM supplier_master WHERE id = ?', [sName]);
+                if (sRes.rows && sRes.rows[0]) sName = sRes.rows[0].print_name || sRes.rows[0].name;
+              } catch (_) {}
+            }
+
             const particulars = [
               `Unloading Fee: ${loadmanName}`,
-              purchase.supplier ? `Supplier: ${purchase.supplier}` : '',
+              sName ? `Supplier: ${sName}` : '',
               itemDetails.length > 0 ? itemDetails.join('; ') : `Qty: ${Number(purchase.total_qty || 0)}, Weight: ${Number(purchase.total_weight || 0)} kg`,
               `Loadman quantity: ${qty} kg`,
               recordedCharges > 0 ? `Unloading Charges: ₹${recordedCharges.toFixed(2)}` : ''
             ].filter(Boolean).join(' | ');
-            const voucherNo = purchase.inv_no || `PUR-${purchase.s_no || purchase.id}`;
 
             allTransactions.push({
               id: 900000 + Number(purchase.id || 0),
@@ -2574,8 +2643,7 @@ router.get('/ledger/:ledgerName', async (req, res) => {
           }
         }
 
-        // Older Cold Storage inward records saved the loadman on the CSI voucher,
-        // but not on the related purchases row. Include those linked purchases.
+        // Older Cold Storage inward records
         if (opPartyIdList.length > 0 || allLoadmanNamesToMatch.length > 0) {
           try {
             const conditions = [];
@@ -2622,27 +2690,45 @@ router.get('/ledger/:ledgerName', async (req, res) => {
                 const purchaseKey = row.purchase_id ? `PURCHASE-ACTIVITY-${row.purchase_id}` : '';
                 if (purchaseKey && seenKeys.has(purchaseKey)) continue;
                 if (purchaseKey) seenKeys.add(purchaseKey);
+
+                // Deduplication check
+                const alreadyHandled = allTransactions.some(t => {
+                  const v = String(t.voucher_no || '').toLowerCase();
+                  const p = String(t.particulars || '').toLowerCase();
+                  return (row.voucher_no && (v === row.voucher_no.toLowerCase() || p.includes(row.voucher_no.toLowerCase()))) ||
+                         (row.purchase_inv_no && (v.includes(row.purchase_inv_no.toLowerCase()) || p.includes(row.purchase_inv_no.toLowerCase())));
+                });
+                if (alreadyHandled) continue;
+
                 const items = itemsByPurchase.get(String(row.purchase_id)) || [];
                 const itemDetails = items.map(item =>
                   `${item.item_name || 'Item'}: qty ${Number(item.qty || 0)}${Number(item.total_weight || 0) ? `, ${Number(item.total_weight)} kg` : ''}`
                 );
                 const quantity = Number(row.loadman_qty_kg || row.total_weight || 0);
                 const charge = Number(row.loadman_charges ?? row.handling_amount ?? 0);
+
+                let sName = row.supplier || '';
+                if (/^\d+$/.test(String(sName))) {
+                  try {
+                    const sRes = await db.query('SELECT name, print_name FROM supplier_master WHERE id = ?', [sName]);
+                    if (sRes.rows && sRes.rows[0]) sName = sRes.rows[0].print_name || sRes.rows[0].name;
+                  } catch (_) {}
+                }
+
                 const particulars = [
-                  `Loadman: ${row.loadman_name || officialName}`,
-                  `Cold Storage inward: ${row.voucher_no || '-'}`,
-                  row.purchase_inv_no || row.inv_no ? `Purchase: ${row.inv_no || row.purchase_inv_no}` : '',
-                  row.supplier ? `Supplier: ${row.supplier}` : '',
+                  `Cold Storage Inward Unloading: ${row.loadman_name || officialName}`,
+                  sName ? `Supplier: ${sName}` : '',
+                  row.purchase_inv_no ? `Purchase Invoice: #${row.purchase_inv_no}` : '',
                   itemDetails.length > 0 ? itemDetails.join('; ') : `Qty: ${Number(row.total_qty || 0)}, Weight: ${Number(row.total_weight || 0)} kg`,
-                  `Loadman quantity: ${quantity} kg`,
-                  charge > 0 ? `Recorded loadman charge: ₹${charge.toFixed(2)}` : ''
+                  quantity > 0 ? `Loadman handled: ${quantity} kg` : '',
+                  charge > 0 ? `Unloading Charges: ₹${charge.toFixed(2)}` : ''
                 ].filter(Boolean).join(' | ');
 
                 allTransactions.push({
-                  id: 910000 + Number(row.id || 0),
-                  date: row.purchase_date || row.voucher_date,
-                  voucher_type: 'Purchase Unloading (CSI)',
-                  voucher_no: row.inv_no || row.purchase_inv_no || row.voucher_no || `CSI-${row.id}`,
+                  id: 950000 + Number(row.id || 0),
+                  date: row.voucher_date || row.purchase_date,
+                  voucher_type: 'Purchase Unloading',
+                  voucher_no: row.voucher_no || (row.purchase_inv_no ? `PUR-${row.purchase_inv_no}` : `CSI-${row.id}`),
                   particulars,
                   debit: 0,
                   credit: charge,
@@ -2654,12 +2740,84 @@ router.get('/ledger/:ledgerName', async (req, res) => {
                 });
               }
             }
-          } catch (error) {
-            console.error('Error fetching linked loadman Cold Storage inward activities:', error);
+          } catch (e) {
+            console.warn('Error fetching cold storage loadman activities for statement:', e.message);
           }
         }
-      } catch (error) {
-        console.error('Error fetching loadman purchase activities:', error);
+      } catch (err) {
+        console.warn('Error reading purchase loadman activity in ledger statement:', err.message);
+      }
+    }
+
+    // -------------------------------------------------------------
+    // SOURCE 10: purchase activities assigned to a transporter
+    // -------------------------------------------------------------
+    const isTransporterContext = ['transport', 'transporter', 'lorry'].includes(String(detectedType || '').toLowerCase()) ||
+                                 (typeof transportIds !== 'undefined' && transportIds.size > 0);
+
+    if (isTransporterContext) {
+      try {
+        const transNames = Array.from(exactLedgerNames).filter(Boolean);
+        const transParams = [];
+        const transConds = [];
+        if (typeof transportIds !== 'undefined' && transportIds.size > 0) {
+          const tIdsArr = Array.from(transportIds);
+          transConds.push(`(transporter IN (${tIdsArr.map(() => '?').join(', ')}) OR transport IN (${tIdsArr.map(() => '?').join(', ')}))`);
+          transParams.push(...tIdsArr, ...tIdsArr);
+        }
+        if (transNames.length > 0) {
+          transConds.push(`(LOWER(TRIM(transporter)) IN (${transNames.map(() => '?').join(', ')}) OR LOWER(TRIM(transport)) IN (${transNames.map(() => '?').join(', ')}))`);
+          transParams.push(...transNames, ...transNames);
+        }
+
+        if (transConds.length > 0) {
+          const transPurRes = await db.query(`
+            SELECT id, s_no, inv_no, date, supplier, transporter, transport,
+                   COALESCE(NULLIF(net_transport_amount, 0), NULLIF(transport_charges, 0), freight_amount, 0) as freight_amount,
+                   vehicle_no, lorry_no, total_qty, total_weight
+            FROM purchases
+            WHERE (${transConds.join(' OR ')})
+          `, transParams);
+
+          for (const p of (transPurRes.rows || [])) {
+            const fAmt = parseFloat(p.freight_amount || 0);
+            if (fAmt <= 0) continue;
+            const voucherNo = p.inv_no || `PUR-${p.s_no || p.id}`;
+            const key = `TRANS-PUR-${p.id}_${fAmt}`;
+            if (seenKeys.has(key)) continue;
+
+            const alreadyCovered = allTransactions.some(t => {
+              const v = String(t.voucher_no || '').toLowerCase();
+              const pStr = String(t.particulars || '').toLowerCase();
+              const inv = String(p.inv_no || '').toLowerCase();
+              return (inv && (v.includes(inv) || pStr.includes(inv))) && Math.abs(t.credit - fAmt) < 0.01;
+            });
+            if (alreadyCovered) continue;
+
+            seenKeys.add(key);
+            let sName = p.supplier || '';
+            if (/^\d+$/.test(String(sName))) {
+              try {
+                const sRes = await db.query('SELECT name, print_name FROM supplier_master WHERE id = ?', [sName]);
+                if (sRes.rows && sRes.rows[0]) sName = sRes.rows[0].print_name || sRes.rows[0].name;
+              } catch (_) {}
+            }
+
+            allTransactions.push({
+              id: 980000 + Number(p.id || 0),
+              date: p.date,
+              voucher_type: 'Purchase',
+              voucher_no: voucherNo,
+              particulars: `Freight Charges for Purchase #${voucherNo} | Vehicle: ${p.vehicle_no || p.lorry_no || 'N/A'}${sName ? ' | Supplier: ' + sName : ''} | Weight: ${p.total_weight || 0} kg`,
+              debit: 0,
+              credit: fAmt,
+              ledger_id: null,
+              ledger_name: p.transporter || p.transport || officialName
+            });
+          }
+        }
+      } catch (trErr) {
+        console.warn('Error fetching transport transactions for statement:', trErr.message);
       }
     }
 

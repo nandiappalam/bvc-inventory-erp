@@ -3,6 +3,8 @@ const router = express.Router()
 const db = require('../config/database')
 const recycleBinService = require('../services/RecycleBinService')
 
+const { rebuildStockLedger } = require('../utils/stockRebuilder');
+
 // Helper function to check if table exists
 async function tableExists(tableName) {
   try {
@@ -886,7 +888,11 @@ router.get('/:type', async (req, res, next) => {
     const params = []
     
     if (tableName === 'item_master') {
-      // 1. Fetch base items from item_master with their current calculated stock
+      try {
+        await rebuildStockLedger();
+      } catch (e) {}
+
+      // 1. Fetch base items from item_master with their current calculated stock from stock_lots and stock
       const imQuery = `
         SELECT 
           im.id,
@@ -899,13 +905,19 @@ router.get('/:type', async (req, res, next) => {
           im.hsn_code,
           im.status,
           im.lab_parameters,
-          COALESCE(s.stock_qty, 0) as stock_qty
+          COALESCE(sl.stock_qty, s.stock_qty, 0) as stock_qty
         FROM item_master im
         LEFT JOIN (
-          SELECT item_name, SUM(qty) as stock_qty 
+          SELECT LOWER(TRIM(item_name)) as norm_item_name, SUM(COALESCE(remaining_quantity, quantity, 0)) as stock_qty 
+          FROM stock_lots 
+          WHERE COALESCE(remaining_quantity, quantity, 0) > 0
+          GROUP BY LOWER(TRIM(item_name))
+        ) sl ON sl.norm_item_name = LOWER(TRIM(im.item_name))
+        LEFT JOIN (
+          SELECT LOWER(TRIM(item_name)) as norm_item_name, SUM(qty) as stock_qty 
           FROM stock 
-          GROUP BY item_name
-        ) s ON LOWER(TRIM(s.item_name)) = LOWER(TRIM(im.item_name))
+          GROUP BY LOWER(TRIM(item_name))
+        ) s ON s.norm_item_name = LOWER(TRIM(im.item_name))
         WHERE (im.status = 'Active' OR im.status IS NULL OR im.status = '')
         ORDER BY im.item_group ASC, im.item_name ASC
       `
@@ -913,8 +925,9 @@ router.get('/:type', async (req, res, next) => {
       const itemMap = new Map()
 
       ;(imRes.rows || []).forEach(r => {
-        const itemName = r.item_name || r.name || ''
-        const key = String(itemName).trim().toLowerCase()
+        const rawName = r.item_name || r.name || ''
+        const itemName = String(rawName).trim()
+        const key = itemName.toLowerCase()
         if (key) {
           const isFG = key.includes('fg') || key.includes('finish') || key.includes('papad') || key.includes('pack')
           const isOpening = key.includes('opening') || key.includes('open')
@@ -923,6 +936,7 @@ router.get('/:type', async (req, res, next) => {
           
           const itemType = isWastage ? 'Rejection / Wastage' : isFG ? 'Finished Goods' : isOpening ? 'Opening Stock' : isRM ? 'Raw Material' : (r.type || 'Raw Material')
           const itemGroup = isWastage ? 'Rejection / Wastage' : isFG ? 'Finished Goods' : isOpening ? 'Opening Stock' : (r.item_group || itemType)
+          const qty = parseFloat(r.stock_qty || 0)
 
           if (!itemMap.has(key)) {
             itemMap.set(key, {
@@ -930,14 +944,18 @@ router.get('/:type', async (req, res, next) => {
               id: r.id || r.item_code || key,
               name: itemName,
               item_name: itemName,
-              print_name: r.print_name || itemName,
+              print_name: (r.print_name || itemName).trim(),
               item_group: itemGroup,
               type: itemType,
-              stock_qty: parseFloat(r.stock_qty || 0)
+              stock_qty: qty
             })
           } else {
             const existing = itemMap.get(key)
-            existing.stock_qty = (existing.stock_qty || 0) + parseFloat(r.stock_qty || 0)
+            if (!existing.stock_qty || existing.stock_qty === 0) {
+              existing.stock_qty = qty
+            } else {
+              existing.stock_qty = Math.max(existing.stock_qty || 0, qty)
+            }
             if (existing.type === 'Raw Material' && (isFG || isOpening || isWastage)) {
               existing.type = itemType
               existing.item_group = itemGroup
@@ -951,22 +969,19 @@ router.get('/:type', async (req, res, next) => {
         const slRes = await db.query(`
           SELECT 
             item_name, 
-            category,
-            godown,
-            SUM(remaining_quantity) as total_qty
+            SUM(COALESCE(remaining_quantity, quantity, 0)) as total_qty
           FROM stock_lots 
-          WHERE item_name IS NOT NULL AND TRIM(item_name) != ''
-          GROUP BY item_name, category, godown
+          WHERE item_name IS NOT NULL AND TRIM(item_name) != '' AND COALESCE(remaining_quantity, quantity, 0) > 0
+          GROUP BY LOWER(TRIM(item_name))
         `)
         ;(slRes.rows || []).forEach(sl => {
-          const itemName = sl.item_name
-          const cat = String(sl.category || '').toUpperCase()
-          const godown = String(sl.godown || '').toLowerCase()
-          const keyName = String(itemName).trim().toLowerCase()
+          const itemName = String(sl.item_name || '').trim()
+          const keyName = itemName.toLowerCase()
+          if (!keyName) return
 
-          const isFG = cat === 'FG' || godown.includes('finished') || keyName.includes('fg') || keyName.includes('finish') || keyName.includes('papad')
-          const isOpening = cat === 'OPEN' || cat === 'OS' || godown.includes('pj') || keyName.includes('opening') || keyName.includes('open')
-          const isWastage = cat === 'WASTAGE' || cat === 'REJECT' || godown.includes('wastage') || keyName.includes('wastage') || keyName.includes('reject')
+          const isFG = keyName.includes('fg') || keyName.includes('finish') || keyName.includes('papad')
+          const isOpening = keyName.includes('opening') || keyName.includes('open')
+          const isWastage = keyName.includes('wastage') || keyName.includes('reject')
 
           const itemType = isWastage ? 'Rejection / Wastage' : isFG ? 'Finished Goods' : isOpening ? 'Opening Stock' : 'Raw Material'
           const itemGroup = itemType
@@ -987,7 +1002,9 @@ router.get('/:type', async (req, res, next) => {
             })
           } else {
             const existing = itemMap.get(keyName)
-            existing.stock_qty = (existing.stock_qty || 0) + qty
+            if (!existing.stock_qty || existing.stock_qty === 0) {
+              existing.stock_qty = qty
+            }
             if ((existing.type === 'Raw Material' || !existing.type) && (isFG || isOpening || isWastage)) {
               existing.type = itemType
               existing.item_group = itemGroup
@@ -1077,7 +1094,7 @@ router.get('/:type', async (req, res, next) => {
             SUM(qty) as total_qty
           FROM stock
           WHERE item_name IS NOT NULL AND TRIM(item_name) != ''
-          GROUP BY item_name
+          GROUP BY LOWER(TRIM(item_name))
         `)
         ;(stockRes.rows || []).forEach(st => {
           const key = String(st.item_name).trim().toLowerCase()

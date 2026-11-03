@@ -213,10 +213,11 @@ const ItemDropdownCell = ({
         // Prefer finished goods or opening stock or non-RM type over generic RM if duplicate exists
         const eType = String(existing.type || '').toUpperCase();
         const iType = String(item.type || '').toUpperCase();
+        const maxStock = Math.max(Number(existing.stock_qty || 0), Number(item.stock_qty || 0));
         if ((eType.includes('RAW') || eType === '') && (iType.includes('FINISH') || iType.includes('FG') || iType.includes('OPEN') || iType.includes('PAPAD'))) {
-          map.set(key, { ...item, stock_qty: (existing.stock_qty || 0) + (item.stock_qty || 0) });
+          map.set(key, { ...item, stock_qty: maxStock });
         } else {
-          existing.stock_qty = (existing.stock_qty || 0) + (item.stock_qty || 0);
+          existing.stock_qty = maxStock;
         }
       }
     });

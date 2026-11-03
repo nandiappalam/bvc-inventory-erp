@@ -98,38 +98,48 @@ const TallyLedgerStatementPage = () => {
   };
 
   return (
-    <div style={{ padding: '24px', maxWidth: '1440px', margin: '0 auto', color: '#0f172a', fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: '#f8fafc', minHeight: '100vh' }}>
+    <div style={{ padding: '12px 16px', maxWidth: '100%', margin: '0 auto', color: '#0f172a', fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: '#f8fafc', minHeight: '100vh', display: 'flex', flexDirection: 'column', gap: '10px' }}>
       
-      {/* Top Header Bar */}
-      <div style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)', color: '#ffffff', padding: '20px 28px', borderRadius: '12px', boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1)', marginBottom: '24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-          <div style={{ width: '46px', height: '46px', borderRadius: '10px', backgroundColor: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px' }}>
+      {/* Top Bar with Navigation & Actions */}
+      <div style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)', color: '#ffffff', padding: '10px 16px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.08)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div style={{ width: '32px', height: '32px', borderRadius: '6px', backgroundColor: 'rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px' }}>
             📑
           </div>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <h1 style={{ fontSize: '20px', fontWeight: '800', margin: 0, color: '#ffffff', letterSpacing: '-0.02em' }}>Professional Ledger Statement</h1>
-              <span style={{ fontSize: '11px', padding: '2px 10px', borderRadius: '12px', backgroundColor: 'rgba(59, 130, 246, 0.2)', color: '#93c5fd', fontWeight: '700', border: '1px solid rgba(59, 130, 246, 0.3)' }}>
-                Tally Double-Entry
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <h1 style={{ fontSize: '16px', fontWeight: '800', margin: 0, color: '#ffffff', letterSpacing: '-0.01em' }}>Ledger Statement</h1>
+              <span style={{ fontSize: '10px', padding: '1px 8px', borderRadius: '10px', backgroundColor: 'rgba(59, 130, 246, 0.25)', color: '#93c5fd', fontWeight: '700', border: '1px solid rgba(59, 130, 246, 0.3)' }}>
+                Double-Entry Audit
               </span>
             </div>
-            <p style={{ fontSize: '12px', color: '#94a3b8', margin: '4px 0 0 0', fontWeight: '500' }}>
-              Complete chronological running balances, party liabilities & voucher audit trails
-            </p>
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button
+            onClick={() => {
+              if (window.history.length > 1) {
+                navigate(-1);
+              } else {
+                navigate('/accounting/dashboard');
+              }
+            }}
+            style={{ padding: '6px 12px', backgroundColor: 'rgba(255,255,255,0.15)', color: '#ffffff', fontWeight: '700', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.25)', fontSize: '11px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}
+          >
+            <span>←</span>
+            <span>Back</span>
+          </button>
           <button
             onClick={() => navigate('/accounting/dashboard')}
-            style={{ padding: '8px 16px', backgroundColor: 'rgba(255,255,255,0.1)', color: '#ffffff', fontWeight: '700', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.2)', fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+            style={{ padding: '6px 12px', backgroundColor: 'rgba(255,255,255,0.1)', color: '#ffffff', fontWeight: '700', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.2)', fontSize: '11px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}
           >
             <span>📊</span>
-            <span>Accounts Dashboard</span>
+            <span>Dashboard</span>
           </button>
           <button
             onClick={handlePrint}
-            style={{ padding: '8px 16px', backgroundColor: '#3b82f6', color: '#ffffff', fontWeight: '700', borderRadius: '8px', border: 'none', fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', boxShadow: '0 2px 4px rgba(0,0,0,0.15)' }}
+            style={{ padding: '6px 14px', backgroundColor: '#2563eb', color: '#ffffff', fontWeight: '700', borderRadius: '6px', border: 'none', fontSize: '11px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}
           >
             <span>🖨️</span>
             <span>Print / PDF</span>
@@ -137,14 +147,14 @@ const TallyLedgerStatementPage = () => {
         </div>
       </div>
 
-      {/* Advanced Filter & Selection Card */}
-      <div style={{ backgroundColor: '#ffffff', padding: '20px', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.02)', marginBottom: '24px', display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr', gap: '16px', alignItems: 'end' }}>
+      {/* Advanced Filter Bar - Compact Single Row */}
+      <div style={{ backgroundColor: '#ffffff', padding: '10px 16px', borderRadius: '8px', border: '1px solid #e2e8f0', boxShadow: '0 1px 2px rgba(0,0,0,0.02)', display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr auto', gap: '12px', alignItems: 'center' }}>
         <div>
-          <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#334155', marginBottom: '6px' }}>Select Ledger Account *</label>
+          <label style={{ display: 'block', fontSize: '11px', fontWeight: '700', color: '#475569', marginBottom: '3px' }}>Select Ledger Account</label>
           <select
             value={selectedLedgerId}
             onChange={handleLedgerChange}
-            style={{ width: '100%', height: '40px', padding: '6px 12px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '13px', fontWeight: '700', color: '#0f172a', backgroundColor: '#ffffff', boxSizing: 'border-box' }}
+            style={{ width: '100%', height: '34px', padding: '4px 10px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '12px', fontWeight: '700', color: '#0f172a', backgroundColor: '#ffffff' }}
           >
             <option value="">-- Choose Account Ledger --</option>
             {ledgersList.map(l => (
@@ -156,31 +166,31 @@ const TallyLedgerStatementPage = () => {
         </div>
 
         <div>
-          <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#334155', marginBottom: '6px' }}>From Date</label>
+          <label style={{ display: 'block', fontSize: '11px', fontWeight: '700', color: '#475569', marginBottom: '3px' }}>From Date</label>
           <input
             type="date"
             value={fromDate}
             onChange={(e) => setFromDate(e.target.value)}
-            style={{ width: '100%', height: '40px', padding: '6px 12px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '12px', color: '#0f172a', boxSizing: 'border-box', backgroundColor: '#ffffff' }}
+            style={{ width: '100%', height: '34px', padding: '4px 10px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '12px', color: '#0f172a', backgroundColor: '#ffffff' }}
           />
         </div>
 
         <div>
-          <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#334155', marginBottom: '6px' }}>To Date</label>
+          <label style={{ display: 'block', fontSize: '11px', fontWeight: '700', color: '#475569', marginBottom: '3px' }}>To Date</label>
           <input
             type="date"
             value={toDate}
             onChange={(e) => setToDate(e.target.value)}
-            style={{ width: '100%', height: '40px', padding: '6px 12px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '12px', color: '#0f172a', boxSizing: 'border-box', backgroundColor: '#ffffff' }}
+            style={{ width: '100%', height: '34px', padding: '4px 10px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '12px', color: '#0f172a', backgroundColor: '#ffffff' }}
           />
         </div>
 
         <div>
-          <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#334155', marginBottom: '6px' }}>Voucher Type</label>
+          <label style={{ display: 'block', fontSize: '11px', fontWeight: '700', color: '#475569', marginBottom: '3px' }}>Voucher Type</label>
           <select
             value={voucherType}
             onChange={(e) => setVoucherType(e.target.value)}
-            style={{ width: '100%', height: '40px', padding: '6px 12px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '12px', color: '#0f172a', backgroundColor: '#ffffff', boxSizing: 'border-box' }}
+            style={{ width: '100%', height: '34px', padding: '4px 10px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '12px', color: '#0f172a', backgroundColor: '#ffffff' }}
           >
             <option value="ALL">All Vouchers</option>
             <option value="Purchase">Purchase</option>
@@ -192,195 +202,194 @@ const TallyLedgerStatementPage = () => {
           </select>
         </div>
 
-        <div>
+        <div style={{ marginTop: '16px' }}>
           <button
             onClick={fetchStatement}
-            style={{ width: '100%', height: '40px', backgroundColor: '#1d4ed8', color: '#ffffff', fontWeight: '700', borderRadius: '8px', border: 'none', fontSize: '12px', cursor: 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}
+            style={{ height: '34px', padding: '0 16px', backgroundColor: '#1d4ed8', color: '#ffffff', fontWeight: '700', borderRadius: '6px', border: 'none', fontSize: '11px', cursor: 'pointer' }}
           >
-            🔍 Search & Filter
+            Search
           </button>
         </div>
       </div>
 
       {/* Main Statement Content View */}
       {loading ? (
-        <div style={{ textAlign: 'center', padding: '80px 20px', backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-          <div style={{ display: 'inline-block', width: '36px', height: '36px', border: '3px solid #1d4ed8', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
-          <p style={{ marginTop: '14px', fontSize: '13px', color: '#64748b', fontWeight: '600' }}>Computing account ledger statement & running balances...</p>
+        <div style={{ textAlign: 'center', padding: '60px 20px', backgroundColor: '#ffffff', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+          <div style={{ display: 'inline-block', width: '32px', height: '32px', border: '3px solid #1d4ed8', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
+          <p style={{ marginTop: '12px', fontSize: '12px', color: '#64748b', fontWeight: '600' }}>Computing ledger statement & running balances...</p>
         </div>
       ) : error ? (
-        <div style={{ padding: '16px 20px', backgroundColor: '#fef2f2', border: '1px solid #fca5a5', color: '#991b1b', borderRadius: '10px', fontSize: '13px', fontWeight: '600' }}>
+        <div style={{ padding: '12px 16px', backgroundColor: '#fef2f2', border: '1px solid #fca5a5', color: '#991b1b', borderRadius: '8px', fontSize: '12px', fontWeight: '600' }}>
           ⚠️ {error}
         </div>
       ) : statement ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', flex: 1 }}>
           
-          {/* Account Summary Metrics Top Cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '16px' }}>
-            <div style={{ backgroundColor: '#ffffff', padding: '16px 20px', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: '11px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Opening Balance</span>
-              <div style={{ marginTop: '8px' }}>
-                <span style={{ fontSize: '22px', fontWeight: '800', color: '#0f172a' }}>
-                  ₹{Number(statement.opening_balance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                </span>
-                <span style={{ display: 'inline-block', marginLeft: '6px', fontSize: '12px', fontWeight: '700', color: '#2563eb' }}>
-                  ({statement.opening_balance_type || 'Dr'})
-                </span>
+          {/* Sleek Ultra-Compact Horizontal Summary Bar */}
+          <div style={{ backgroundColor: '#0f172a', color: '#ffffff', padding: '8px 16px', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+              <div>
+                <span style={{ fontSize: '10px', textTransform: 'uppercase', color: '#93c5fd', fontWeight: '700' }}>Account: </span>
+                <span style={{ fontSize: '14px', fontWeight: '800', color: '#ffffff' }}>{statement.ledger?.ledger_name || selectedLedgerName}</span>
+                <span style={{ fontSize: '12px', color: '#94a3b8', marginLeft: '6px' }}>({statement.ledger?.group_name || 'General'})</span>
               </div>
             </div>
 
-            <div style={{ backgroundColor: '#ffffff', padding: '16px 20px', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: '11px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Period Total Debit (Dr)</span>
-              <div style={{ marginTop: '8px' }}>
-                <span style={{ fontSize: '22px', fontWeight: '800', color: '#047857' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{ backgroundColor: 'rgba(255,255,255,0.08)', padding: '4px 10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.12)', fontSize: '12px' }}>
+                <span style={{ fontSize: '10px', color: '#cbd5e1', fontWeight: '700', textTransform: 'uppercase' }}>Opening: </span>
+                <span style={{ fontWeight: '800' }}>
+                  ₹{Number(statement.opening_balance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })} ({statement.opening_balance_type || 'Dr'})
+                </span>
+              </div>
+
+              <div style={{ backgroundColor: 'rgba(255,255,255,0.08)', padding: '4px 10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.12)', fontSize: '12px' }}>
+                <span style={{ fontSize: '10px', color: '#cbd5e1', fontWeight: '700', textTransform: 'uppercase' }}>Total Dr: </span>
+                <span style={{ fontWeight: '800', color: '#34d399' }}>
                   ₹{Number(statement.period_debit_total || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                 </span>
-                <span style={{ display: 'block', fontSize: '11px', color: '#059669', fontWeight: '600', marginTop: '2px' }}>Total Inflows / Expenses</span>
               </div>
-            </div>
 
-            <div style={{ backgroundColor: '#ffffff', padding: '16px 20px', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: '11px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Period Total Credit (Cr)</span>
-              <div style={{ marginTop: '8px' }}>
-                <span style={{ fontSize: '22px', fontWeight: '800', color: '#b45309' }}>
+              <div style={{ backgroundColor: 'rgba(255,255,255,0.08)', padding: '4px 10px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.12)', fontSize: '12px' }}>
+                <span style={{ fontSize: '10px', color: '#cbd5e1', fontWeight: '700', textTransform: 'uppercase' }}>Total Cr: </span>
+                <span style={{ fontWeight: '800', color: '#fcd34d' }}>
                   ₹{Number(statement.period_credit_total || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                 </span>
-                <span style={{ display: 'block', fontSize: '11px', color: '#d97706', fontWeight: '600', marginTop: '2px' }}>Total Outflows / Income</span>
               </div>
-            </div>
 
-            <div style={{ backgroundColor: '#eff6ff', padding: '16px 20px', borderRadius: '12px', border: '1px solid #bfdbfe', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: '11px', fontWeight: '700', color: '#1e40af', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Closing Balance</span>
-              <div style={{ marginTop: '8px' }}>
-                <span style={{ fontSize: '22px', fontWeight: '800', color: '#1e3a8a' }}>
-                  ₹{Number(statement.closing_balance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                </span>
-                <span style={{ display: 'inline-block', marginLeft: '6px', fontSize: '12px', fontWeight: '700', color: '#1d4ed8' }}>
-                  ({statement.closing_balance_type || 'Cr'})
+              <div style={{ backgroundColor: 'rgba(59, 130, 246, 0.3)', padding: '4px 12px', borderRadius: '6px', border: '1px solid rgba(147, 197, 253, 0.4)', fontSize: '12px' }}>
+                <span style={{ fontSize: '10px', color: '#bfdbfe', fontWeight: '700', textTransform: 'uppercase' }}>Closing: </span>
+                <span style={{ fontWeight: '800', color: '#ffffff' }}>
+                  ₹{Number(statement.closing_balance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })} ({statement.closing_balance_type || 'Cr'})
                 </span>
               </div>
             </div>
           </div>
 
-          {/* Ledger Transactions Table Component */}
-          <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #cbd5e1', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.04)', overflow: 'hidden' }}>
-            <div style={{ padding: '16px 24px', backgroundColor: '#f8fafc', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <h3 style={{ fontSize: '15px', fontWeight: '800', color: '#0f172a', margin: 0 }}>
-                  {statement.ledger?.ledger_name} <span style={{ fontSize: '13px', color: '#64748b', fontWeight: '600' }}>({statement.ledger?.group_name || 'General Group'})</span>
-                </h3>
-              </div>
-              <span style={{ fontSize: '11px', fontWeight: '700', padding: '4px 12px', borderRadius: '12px', backgroundColor: '#e2e8f0', color: '#334155' }}>
-                {statement.transactions?.length || 0} Posted Entries
-              </span>
-            </div>
-
-            <div style={{ overflowX: 'auto' }}>
+          {/* Maximized High-Density Statement Table */}
+          <div style={{ backgroundColor: '#ffffff', borderRadius: '8px', border: '1px solid #cbd5e1', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', overflow: 'hidden', display: 'flex', flexDirection: 'column', flex: 1, maxHeight: 'calc(100vh - 180px)', minHeight: '400px' }}>
+            <div style={{ overflowX: 'auto', overflowY: 'auto', flex: 1, scrollbarWidth: 'thin' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '12px' }}>
                 <thead>
-                  <tr style={{ backgroundColor: '#f1f5f9', color: '#334155', borderBottom: '1px solid #cbd5e1', fontWeight: '800', textTransform: 'uppercase', fontSize: '11px' }}>
-                    <th style={{ padding: '12px 16px', width: '50px', textAlign: 'center' }}>S.No</th>
-                    <th style={{ padding: '12px 16px', width: '100px' }}>Date</th>
-                    <th style={{ padding: '12px 16px', width: '130px' }}>Voucher No</th>
-                    <th style={{ padding: '12px 16px', width: '120px' }}>Voucher Type</th>
-                    <th style={{ padding: '12px 16px' }}>Particulars / Transaction Trace</th>
-                    <th style={{ padding: '12px 16px', textAlign: 'right', width: '130px' }}>Debit (Dr)</th>
-                    <th style={{ padding: '12px 16px', textAlign: 'right', width: '130px' }}>Credit (Cr)</th>
-                    <th style={{ padding: '12px 16px', textAlign: 'right', width: '160px' }}>Running Balance</th>
-                    <th style={{ padding: '12px 16px', width: '90px', textAlign: 'center' }}>Action</th>
+                  <tr style={{ backgroundColor: '#f1f5f9', color: '#334155', borderBottom: '2px solid #cbd5e1', fontWeight: '800', textTransform: 'uppercase', fontSize: '11px', position: 'sticky', top: 0, zIndex: 10 }}>
+                    <th style={{ padding: '8px 12px', width: '40px', textAlign: 'center', backgroundColor: '#f1f5f9' }}>#</th>
+                    <th style={{ padding: '8px 12px', width: '90px', backgroundColor: '#f1f5f9' }}>Date</th>
+                    <th style={{ padding: '8px 12px', width: '120px', backgroundColor: '#f1f5f9' }}>Voucher No</th>
+                    <th style={{ padding: '8px 12px', width: '120px', backgroundColor: '#f1f5f9' }}>Voucher Type</th>
+                    <th style={{ padding: '8px 12px', backgroundColor: '#f1f5f9' }}>Particulars & Voucher Audit Details</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'right', width: '130px', backgroundColor: '#f1f5f9' }}>Debit (Dr)</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'right', width: '130px', backgroundColor: '#f1f5f9' }}>Credit (Cr)</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'right', width: '150px', backgroundColor: '#f1f5f9' }}>Running Balance</th>
+                    <th style={{ padding: '8px 12px', width: '90px', textAlign: 'center', backgroundColor: '#f1f5f9' }}>Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {/* Opening Balance Row */}
                   <tr style={{ backgroundColor: '#f8fafc', fontWeight: '700', borderBottom: '1px solid #e2e8f0' }}>
-                    <td style={{ padding: '12px 16px', textAlign: 'center', color: '#94a3b8' }}>-</td>
-                    <td style={{ padding: '12px 16px', color: '#64748b' }}>-</td>
-                    <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: '#475569' }}>OPENING</td>
-                    <td style={{ padding: '12px 16px', color: '#64748b' }}>Opening</td>
-                    <td style={{ padding: '12px 16px', color: '#334155' }}>Opening Balance brought forward</td>
-                    <td style={{ padding: '12px 16px', textAlign: 'right' }}>-</td>
-                    <td style={{ padding: '12px 16px', textAlign: 'right' }}>-</td>
-                    <td style={{ padding: '12px 16px', textAlign: 'right', color: '#0f172a' }}>
+                    <td style={{ padding: '6px 12px', textAlign: 'center', color: '#94a3b8' }}>-</td>
+                    <td style={{ padding: '6px 12px', color: '#64748b' }}>-</td>
+                    <td style={{ padding: '6px 12px' }}>
+                      <span style={{ fontSize: '11px', padding: '2px 6px', borderRadius: '4px', backgroundColor: '#e2e8f0', color: '#475569', fontFamily: 'monospace', fontWeight: '700' }}>OPENING</span>
+                    </td>
+                    <td style={{ padding: '6px 12px', color: '#64748b' }}>Opening Balance</td>
+                    <td style={{ padding: '6px 12px', color: '#334155' }}>Opening Balance brought forward</td>
+                    <td style={{ padding: '6px 12px', textAlign: 'right' }}>-</td>
+                    <td style={{ padding: '6px 12px', textAlign: 'right' }}>-</td>
+                    <td style={{ padding: '6px 12px', textAlign: 'right', color: '#0f172a', fontWeight: '800' }}>
                       ₹{Number(statement.opening_balance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })} ({statement.opening_balance_type})
                     </td>
-                    <td style={{ padding: '12px 16px', textAlign: 'center' }}>-</td>
+                    <td style={{ padding: '6px 12px', textAlign: 'center' }}>-</td>
                   </tr>
 
                   {/* Transactions Rows */}
                   {statement.transactions && statement.transactions.length > 0 ? (
-                    statement.transactions.map((r, idx) => (
-                      <tr 
-                        key={idx}
-                        style={{ borderBottom: '1px solid #f1f5f9', backgroundColor: idx % 2 === 0 ? '#ffffff' : '#f8fafc' }}
-                      >
-                        <td style={{ padding: '12px 16px', textAlign: 'center', color: '#94a3b8', fontWeight: '600' }}>{r.s_no}</td>
-                        <td style={{ padding: '12px 16px', color: '#334155', fontWeight: '600' }}>{r.date}</td>
-                        <td style={{ padding: '12px 16px' }}>
-                          <button
-                            onClick={() => {
-                              setActiveVoucherId(r.voucher_id || r.voucher_no);
-                              setVoucherModalOpen(true);
-                            }}
-                            style={{ background: 'none', border: 'none', color: '#1d4ed8', fontWeight: '700', fontFamily: 'monospace', cursor: 'pointer', padding: 0, textDecoration: 'underline' }}
-                          >
-                            {r.voucher_no}
-                          </button>
-                        </td>
-                        <td style={{ padding: '12px 16px' }}>
-                          <span style={{ fontSize: '11px', padding: '3px 9px', borderRadius: '6px', backgroundColor: '#eff6ff', color: '#1e40af', fontWeight: '700', border: '1px solid #bfdbfe' }}>
-                            {r.voucher_type}
-                          </span>
-                        </td>
-                        <td style={{ padding: '12px 16px', color: '#0f172a', fontWeight: '600' }}>
-                          {r.particulars}
-                          {r.narration && <span style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: 'normal', marginTop: '3px' }}>Note: {r.narration}</span>}
-                        </td>
-                        <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: '700', color: '#047857' }}>
-                          {r.debit > 0 ? `₹${r.debit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}
-                        </td>
-                        <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: '700', color: '#b45309' }}>
-                          {r.credit > 0 ? `₹${r.credit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}
-                        </td>
-                        <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: '800', color: '#0f172a' }}>
-                          ₹{r.running_balance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}{' '}
-                          <span style={{ fontSize: '11px', color: '#2563eb' }}>({r.running_balance_type})</span>
-                        </td>
-                        <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                          <button
-                            onClick={() => {
-                              setActiveVoucherId(r.voucher_id || r.voucher_no);
-                              setVoucherModalOpen(true);
-                            }}
-                            style={{ padding: '6px 12px', backgroundColor: '#e2e8f0', color: '#1e293b', border: 'none', borderRadius: '6px', fontSize: '11px', fontWeight: '700', cursor: 'pointer' }}
-                          >
-                            View Journal
-                          </button>
-                        </td>
-                      </tr>
-                    ))
+                    statement.transactions.map((r, idx) => {
+                      const getBadge = (vt) => {
+                        const t = String(vt || '').toLowerCase();
+                        if (t.includes('purchase') || t.includes('papad in')) return { bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe' };
+                        if (t.includes('sales') || t.includes('papad return')) return { bg: '#ecfdf5', color: '#047857', border: '#a7f3d0' };
+                        if (t.includes('debit note') || t.includes('return')) return { bg: '#fef2f2', color: '#b91c1c', border: '#fca5a5' };
+                        if (t.includes('credit note')) return { bg: '#fffbe3', color: '#b45309', border: '#fde68a' };
+                        if (t.includes('payment') || t.includes('advance')) return { bg: '#f5f3ff', color: '#6d28d9', border: '#ddd6fe' };
+                        if (t.includes('receipt')) return { bg: '#f0fdf4', color: '#15803d', border: '#bbf7d0' };
+                        return { bg: '#f8fafc', color: '#334155', border: '#cbd5e1' };
+                      };
+                      const badge = getBadge(r.voucher_type);
+
+                      return (
+                        <tr 
+                          key={idx}
+                          style={{ borderBottom: '1px solid #f1f5f9', backgroundColor: idx % 2 === 0 ? '#ffffff' : '#f8fafc' }}
+                        >
+                          <td style={{ padding: '6px 12px', textAlign: 'center', color: '#94a3b8', fontWeight: '600', fontSize: '11px' }}>{idx + 1}</td>
+                          <td style={{ padding: '6px 12px', color: '#334155', fontWeight: '600' }}>{r.date}</td>
+                          <td style={{ padding: '6px 12px' }}>
+                            <button
+                              onClick={() => {
+                                setActiveVoucherId(r.voucher_id || r.voucher_no);
+                                setVoucherModalOpen(true);
+                              }}
+                              style={{ background: '#eff6ff', border: '1px solid #bfdbfe', color: '#1d4ed8', fontWeight: '700', fontFamily: 'monospace', cursor: 'pointer', padding: '2px 6px', borderRadius: '4px', fontSize: '11px' }}
+                            >
+                              {r.voucher_no}
+                            </button>
+                          </td>
+                          <td style={{ padding: '6px 12px' }}>
+                            <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px', backgroundColor: badge.bg, color: badge.color, border: `1px solid ${badge.border}`, fontWeight: '700', display: 'inline-block' }}>
+                              {r.voucher_type}
+                            </span>
+                          </td>
+                          <td style={{ padding: '6px 12px', color: '#0f172a', fontWeight: '600' }}>
+                            {r.particulars}
+                            {r.narration && <span style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: 'normal', marginTop: '2px' }}>Note: {r.narration}</span>}
+                          </td>
+                          <td style={{ padding: '6px 12px', textAlign: 'right', fontWeight: '700', color: '#047857' }}>
+                            {r.debit > 0 ? `₹${r.debit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}
+                          </td>
+                          <td style={{ padding: '6px 12px', textAlign: 'right', fontWeight: '700', color: '#b45309' }}>
+                            {r.credit > 0 ? `₹${r.credit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}
+                          </td>
+                          <td style={{ padding: '6px 12px', textAlign: 'right', fontWeight: '800', color: '#0f172a' }}>
+                            ₹{r.running_balance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}{' '}
+                            <span style={{ fontSize: '11px', color: r.running_balance >= 0 ? '#047857' : '#b45309' }}>({r.running_balance_type})</span>
+                          </td>
+                          <td style={{ padding: '6px 12px', textAlign: 'center' }}>
+                            <button
+                              onClick={() => {
+                                setActiveVoucherId(r.voucher_id || r.voucher_no);
+                                setVoucherModalOpen(true);
+                              }}
+                              style={{ padding: '4px 10px', backgroundColor: '#e2e8f0', color: '#1e293b', border: 'none', borderRadius: '4px', fontSize: '11px', fontWeight: '700', cursor: 'pointer' }}
+                            >
+                              View Details
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
                   ) : (
                     <tr>
-                      <td colSpan={9} style={{ padding: '40px', textAlign: 'center', color: '#94a3b8', fontSize: '13px' }}>
+                      <td colSpan={9} style={{ padding: '30px', textAlign: 'center', color: '#94a3b8', fontSize: '12px' }}>
                         No transactions recorded for this ledger account in the selected period.
                       </td>
                     </tr>
                   )}
                 </tbody>
                 <tfoot>
-                  <tr style={{ backgroundColor: '#0f172a', color: '#ffffff', fontWeight: '800' }}>
-                    <td colSpan={5} style={{ padding: '14px 16px', textAlign: 'right', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  <tr style={{ backgroundColor: '#0f172a', color: '#ffffff', fontWeight: '800', sticky: 'bottom' }}>
+                    <td colSpan={5} style={{ padding: '8px 12px', textAlign: 'right', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                       Period Totals & Closing Balance:
                     </td>
-                    <td style={{ padding: '14px 16px', textAlign: 'right', color: '#34d399', fontSize: '13px' }}>
+                    <td style={{ padding: '8px 12px', textAlign: 'right', color: '#34d399', fontSize: '12px' }}>
                       ₹{Number(statement.period_debit_total || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                     </td>
-                    <td style={{ padding: '14px 16px', textAlign: 'right', color: '#fcd34d', fontSize: '13px' }}>
+                    <td style={{ padding: '8px 12px', textAlign: 'right', color: '#fcd34d', fontSize: '12px' }}>
                       ₹{Number(statement.period_credit_total || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                     </td>
-                    <td style={{ padding: '14px 16px', textAlign: 'right', color: '#ffffff', fontSize: '14px' }}>
+                    <td style={{ padding: '8px 12px', textAlign: 'right', color: '#ffffff', fontSize: '13px' }}>
                       ₹{Number(statement.closing_balance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })} ({statement.closing_balance_type})
                     </td>
-                    <td style={{ padding: '14px 16px' }}></td>
+                    <td style={{ padding: '8px 12px' }}></td>
                   </tr>
                 </tfoot>
               </table>

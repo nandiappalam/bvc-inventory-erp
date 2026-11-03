@@ -30,6 +30,7 @@ const SalesCreate = () => {
     date: new Date().toISOString().split('T')[0],
     pay_type: 'Credit',
     tax_type: 'Exclusive',
+    stock_type: 'RM',
     tax_percent: 5,
     tax_percent_display: '5% (2.5% + 2.5%)',
     lorry_no: '',
@@ -315,6 +316,11 @@ const SalesCreate = () => {
       address: sourceRecord.address || prev.address,
       tax_type: sourceRecord.tax_type || prev.tax_type,
       tax_percent: sourceRecord.tax_percent !== undefined ? sourceRecord.tax_percent : prev.tax_percent,
+      stock_type: sourceRecord.stock_type || prev.stock_type || 'RM',
+      loadman_name: sourceRecord.loadman_name || prev.loadman_name,
+      loadman_worker_id: sourceRecord.loadman_worker_id || prev.loadman_worker_id,
+      loadman_rate_per_kg: sourceRecord.loadman_rate_per_kg || prev.loadman_rate_per_kg,
+      loadman_charges: sourceRecord.loadman_charges || prev.loadman_charges,
       remarks: `Ref: ${sourceRecord.bill_no || sourceRecord.s_no || ''}. ${sourceRecord.remarks || ''}`.trim()
     }));
 
@@ -335,18 +341,21 @@ const SalesCreate = () => {
     }
 
     if (itemsToImport.length > 0) {
-      const mappedRows = itemsToImport.map(it => ({
-        item_name: it.item_name || it.description || '',
-        lot_no: it.lot_no || sourceRecord.lot_no || '',
-        qty: String(it.qty !== undefined ? it.qty : ''),
-        weight: String(it.weight || it.per_unit_wt || '1'),
-        per_unit_wt: String(it.weight || it.per_unit_wt || '1'),
-        total_wt: String(it.total_wt || it.total_weight || (Number(it.qty || 0) * Number(it.weight || 1))),
-        rate: String(it.rate !== undefined ? it.rate : ''),
-        disc: String(it.disc ?? it.disc_perc ?? 0),
-        tax_rate: String(it.tax_rate ?? it.tax ?? it.tax_perc ?? sourceRecord.tax_percent ?? 5),
-        amount: String(it.amount || it.total_amt || '')
-      }));
+      const mappedRows = itemsToImport.map(it => {
+        const wtVal = parseFloat(it.weight || it.per_unit_wt || '1');
+        return {
+          item_name: it.item_name || it.description || '',
+          lot_no: it.lot_no || sourceRecord.lot_no || '',
+          qty: String(it.qty !== undefined ? it.qty : ''),
+          weight: String(it.weight || it.per_unit_wt || '1'),
+          per_unit_wt: String(it.weight || it.per_unit_wt || '1'),
+          total_wt: String(it.total_wt || it.total_weight || (Number(it.qty || 0) * wtVal)),
+          rate: String(it.rate !== undefined ? it.rate : ''),
+          disc: String(it.disc ?? it.disc_perc ?? 0),
+          tax_rate: String(it.tax_rate ?? it.tax ?? it.tax_perc ?? sourceRecord.tax_percent ?? 5),
+          amount: String(it.amount || it.total_amt || '')
+        };
+      });
       setRows(mappedRows);
     }
     setSuccess('Record details successfully imported into workflow!');
@@ -652,6 +661,11 @@ const SalesCreate = () => {
       {value: 'Exclusive', label: 'Exclusive'},
       {value: 'Inclusive', label: 'Inclusive'},
       {value: 'Without Tax', label: 'Without Tax'}
+    ], col: 1 },
+    { name: 'stock_type', label: 'Stock Type', type: 'select', options: [
+      { value: 'RM', label: 'RM (Raw Material)' },
+      { value: 'FG', label: 'FG (Finished Goods)' },
+      { value: 'Vacuum', label: 'Vacuum' }
     ], col: 2 },
     { name: 'type', label: 'Type', type: 'select', options: [
       {value: 'Pack', label: 'Pack'},
@@ -660,11 +674,12 @@ const SalesCreate = () => {
     ], col: 2 },
     { name: 'loadman_name', label: 'Loadman', type: 'masterSelect', masterType: 'workers', col: 2 },
     { name: 'loadman_rate_per_kg', label: 'Loadman Rate/KG', type: 'number', step: '0.01', col: 2 },
-    { name: 'loadman_charges', label: 'Loadman Charges', type: 'number', step: '0.01', readOnly: true, col: 2 },
-    { name: 'remarks', label: 'Remarks', type: 'textarea', col: 2 },
+    { name: 'loadman_charges', label: 'Loadman Charges', type: 'number', step: '0.01', readOnly: true, col: 3 },
+    { name: 'remarks', label: 'Remarks', type: 'textarea', col: 3 },
     { name: 'customer_id', label: 'Customer', type: 'masterSelect', masterType: 'customers', col: 3 },
     { name: 'address', label: 'Address', type: 'textarea', readOnly: true, col: 3 }
-  ] : [
+  ]
+ : [
     // Column 1: Basic Options
     { name: 's_no', label: 'Bill No', type: 'text', readOnly: true, col: 1 },
     { name: 'date', label: 'Date', type: 'date', col: 1 },
@@ -684,17 +699,19 @@ const SalesCreate = () => {
     ], col: 1 },
 
     // Column 2: Dispatch / Vehicle Info
-    { name: 'lorry_no', label: 'Lorry No', type: 'text', col: 2 },
+    { name: 'lorry_no', label: 'Lorry No', type: 'text', col: 1 },
+
+    // Column 2: Dispatch / Vehicle Info
     { name: 'p_o_no', label: 'P.O No', type: 'text', col: 2 },
     { name: 'driver', label: 'Driver', type: 'text', col: 2 },
     { name: 'pur_trans', label: 'Pur. Trans', type: 'masterSelect', masterType: 'transports', col: 2 },
     { name: 'loadman_name', label: 'Loadman', type: 'masterSelect', masterType: 'workers', col: 2 },
     { name: 'loadman_rate_per_kg', label: 'Loadman Rate/KG', type: 'number', step: '0.01', col: 2 },
     { name: 'loadman_charges', label: 'Loadman Charges', type: 'number', step: '0.01', readOnly: true, col: 2 },
-    { name: 'sign', label: 'Sign', type: 'masterSelect', masterType: 'sign', col: 2 },
-    { name: 'remarks', label: 'Remarks', type: 'textarea', col: 2 },
 
     // Column 3: Party Details
+    { name: 'sign', label: 'Sign', type: 'masterSelect', masterType: 'sign', col: 3 },
+    { name: 'remarks', label: 'Remarks', type: 'textarea', col: 3 },
     { name: 'customer_id', label: 'Customer', type: 'masterSelect', masterType: 'customers', col: 3 },
     { name: 'address', label: 'Address', type: 'textarea', readOnly: true, col: 3 },
     { name: 'sender_id', label: 'Sender', type: 'masterSelect', masterType: 'senders', col: 3 },

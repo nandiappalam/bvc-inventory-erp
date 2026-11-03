@@ -33,6 +33,11 @@ const columns = [
   },
   { key: 'supplier_name', title: 'Supplier Name', render: (val, row) => row.supplier_name || row.supplier || '—' },
   { key: 'stock_type', title: 'Stock Type', render: (val, row) => row.stock_type || row.stockType || 'RM' },
+  { key: 'transporter', title: 'Transporter', render: (val, row) => row.transporter_name || row.transporter || row.transport || '—' },
+  { key: 'transport_charges', title: 'Freight Charges (₹)', render: (val, row) => {
+    const fc = row.transport_charges ?? row.freight_amount ?? row.net_transport_amount;
+    return fc !== undefined && fc !== null && Number(fc) > 0 ? `₹${Number(fc).toLocaleString('en-IN')}` : '₹0';
+  }},
   { key: 'gross_weight', title: 'Cross Weight (KG)', render: (val, row) => row.gross_weight ?? row.cross_weight ?? '—' },
   { key: 'tare_weight', title: 'Tare Weight (KG)', render: (val, row) => row.tare_weight ?? '—' },
   { key: 'net_weight', title: 'Net Weight (KG)', render: (val, row) => row.net_weight ?? '—' },

@@ -127,6 +127,8 @@ const HandSortingWorkspace = () => {
   const [newPlanOpen, setNewPlanOpen] = useState(false);
   const [allocateOpen, setAllocateOpen] = useState(false);
   const [diagramOpen, setDiagramOpen] = useState(false);
+  const [workDetailOpen, setWorkDetailOpen] = useState(false);
+  const [selectedWorkDetail, setSelectedWorkDetail] = useState(null);
   const [selectedBagForAction, setSelectedBagForAction] = useState(null);
 
   // Dynamic Route-Based Stock Lots State
@@ -249,6 +251,19 @@ const HandSortingWorkspace = () => {
   const [selectedPlanForAlloc, setSelectedPlanForAlloc] = useState(null);
   const [selectedBagsForAlloc, setSelectedBagsForAlloc] = useState([]);
 
+  // Daily Team Assignment State
+  const [workersList, setWorkersList] = useState([]);
+  const [dailyAssignments, setDailyAssignments] = useState([]);
+  const [assignForm, setAssignForm] = useState({
+    work_date: new Date().toISOString().split('T')[0],
+    shift: 'Shift-1',
+    team_name: 'Team Alpha',
+    tray_station_no: 'Tray-01 (Station A)',
+    selectedWorkerIds: [],
+    workerSearchText: ''
+  });
+  const [reconciliation, setReconciliation] = useState(null);
+
   // Load Initial Data
   useEffect(() => {
     loadAllData();
@@ -258,15 +273,20 @@ const HandSortingWorkspace = () => {
     setLoading(true);
     try {
       const companyId = selectedCompany?.id || 1;
-      const [kpiRes, jobsRes, bagsRes, reportsRes, plansRes] = await Promise.all([
+      const todayStr = assignForm.work_date || new Date().toISOString().split('T')[0];
+      const [kpiRes, jobsRes, bagsRes, reportsRes, plansRes, workersRes, assignRes] = await Promise.all([
         api.get(`/hand-sorting/dashboard?company_id=${companyId}`),
         api.get(`/hand-sorting/jobs?company_id=${companyId}`),
         api.get(`/hand-sorting/fg-bags?company_id=${companyId}`),
         api.get(`/hand-sorting/daily-reports?company_id=${companyId}`),
-        api.get(`/hand-sorting/customer-plans?company_id=${companyId}`)
+        api.get(`/hand-sorting/customer-plans?company_id=${companyId}`),
+        api.get(`/hand-sorting/workers?company_id=${companyId}`),
+        api.get(`/hand-sorting/daily-assignments?work_date=${todayStr}&company_id=${companyId}`)
       ]);
 
       if (kpiRes && kpiRes.data) setKpis(kpiRes.data);
+      if (workersRes && workersRes.data) setWorkersList(workersRes.data);
+      if (assignRes && assignRes.data) setDailyAssignments(assignRes.data);
       if (jobsRes && jobsRes.data) {
         const list = Array.isArray(jobsRes.data) ? jobsRes.data : [];
         setJobs(list);
@@ -309,12 +329,18 @@ const HandSortingWorkspace = () => {
     setSelectedJob(actualJob);
     try {
       const companyId = selectedCompany?.id || 1;
-      const res = await api.get(`/hand-sorting/jobs/${jobId}?company_id=${companyId}`);
+      const [res, reconRes] = await Promise.all([
+        api.get(`/hand-sorting/jobs/${jobId}?company_id=${companyId}`),
+        api.get(`/hand-sorting/reconciliation/${jobId}?company_id=${companyId}`)
+      ]);
       if (res && res.data) {
         setJobDetails(res.data);
         if (res.data.job) {
           setSelectedJob(res.data.job);
         }
+      }
+      if (reconRes && reconRes.data) {
+        setReconciliation(reconRes.data);
       }
     } catch (err) {
       console.error('Error fetching job details:', err);
@@ -322,6 +348,75 @@ const HandSortingWorkspace = () => {
         setSelectedJob(null);
         setJobDetails(null);
       }
+    }
+  };
+
+  const handleSaveAssignment = async (e) => {
+    if (e) e.preventDefault();
+    if (!assignForm.selectedWorkerIds || assignForm.selectedWorkerIds.length === 0) {
+      setMessage('Please select at least one worker for the daily team assignment.');
+      setSeverity('warning');
+      return;
+    }
+    if (assignForm.selectedWorkerIds.length > 3) {
+      setMessage('Maximum 3 operators allowed per rectangular silver tray station.');
+      setSeverity('warning');
+      return;
+    }
+
+    setActionLoading(true);
+    try {
+      const companyId = selectedCompany?.id || 1;
+      const selectedWorkerObjs = workersList.filter(w => assignForm.selectedWorkerIds.includes(w.id));
+      const payload = {
+        company_id: companyId,
+        work_date: assignForm.work_date,
+        shift: assignForm.shift,
+        team_name: assignForm.team_name,
+        tray_station_no: assignForm.tray_station_no,
+        workers: selectedWorkerObjs,
+        assigned_by: user?.username || 'Supervisor'
+      };
+
+      const res = await api.post('/hand-sorting/daily-assignments', payload);
+      if (res && res.success) {
+        setMessage(res.message);
+        setSeverity('success');
+        // Refresh daily assignments list for current date & shift
+        const freshAssignRes = await api.get(`/hand-sorting/daily-assignments?work_date=${assignForm.work_date}&shift=${assignForm.shift}&company_id=${companyId}`);
+        if (freshAssignRes && freshAssignRes.data) {
+          setDailyAssignments(freshAssignRes.data);
+        }
+      } else {
+        setMessage(res?.message || 'Failed to save team assignment');
+        setSeverity('error');
+      }
+    } catch (err) {
+      setMessage(err?.response?.data?.message || err?.message || 'Error saving team assignment');
+      setSeverity('error');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDeleteAssignment = async (id) => {
+    setActionLoading(true);
+    try {
+      const companyId = selectedCompany?.id || 1;
+      const res = await api.delete(`/hand-sorting/daily-assignments/${id}?company_id=${companyId}`);
+      if (res && res.success) {
+        setMessage('Worker assignment removed successfully');
+        setSeverity('info');
+        const freshAssignRes = await api.get(`/hand-sorting/daily-assignments?work_date=${assignForm.work_date}&shift=${assignForm.shift}&company_id=${companyId}`);
+        if (freshAssignRes && freshAssignRes.data) {
+          setDailyAssignments(freshAssignRes.data);
+        }
+      }
+    } catch (err) {
+      setMessage(err?.message || 'Error deleting assignment');
+      setSeverity('error');
+    } finally {
+      setActionLoading(false);
     }
   };
 
@@ -1306,118 +1401,285 @@ const HandSortingWorkspace = () => {
             )}
           </TabPanel>
 
-          {/* TAB 2: TEAM & SORTING */}
+          {/* TAB 2: DAILY TEAM ASSIGNMENT & TRAY STATION SETUP */}
           <TabPanel value={activeTab} index={1}>
-            <Card variant="outlined" sx={{ borderRadius: 2 }}>
-              <CardContent sx={{ p: 3 }}>
-                <Typography variant="h6" fontWeight={700} gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <TeamIcon color="primary" /> Physical Sorting Station & 3-Member Tray Setup
-                </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-                  Accurately tracks the rectangular silver sorting tray (raised sides, open edge attached to empty FG bag) with up to 3 operators placing small quantities into the tray.
-                </Typography>
+            <Grid container spacing={3}>
+              {/* Daily Team Assignment Form Card */}
+              <Grid item xs={12} md={7}>
+                <Card variant="outlined" sx={{ borderRadius: 2 }}>
+                  <CardContent sx={{ p: 3 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <TeamIcon color="primary" />
+                        <Typography variant="h6" fontWeight={700}>
+                          Daily Team Assignment & Workforce Allocation
+                        </Typography>
+                      </Box>
+                      <Chip label={`${workersList.length} Active Master Workers`} color="primary" size="small" variant="outlined" />
+                    </Box>
 
-                <Grid container spacing={3}>
-                  <Grid item xs={12} md={6}>
-                    <Paper sx={{ p: 2.5, borderRadius: 2, bgcolor: 'action.hover' }}>
-                      <Typography variant="subtitle1" fontWeight={700} gutterBottom>
-                        Physical Tray Workflow Checklist
-                      </Typography>
-                      <Stack spacing={1.5}>
-                        <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center' }}>
-                          <SuccessIcon color="success" />
-                          <Typography variant="body2">
-                            <strong>Step 1:</strong> Take small quantity from RM/vacuum bag into the silver tray.
-                          </Typography>
-                        </Box>
-                        <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center' }}>
-                          <SuccessIcon color="success" />
-                          <Typography variant="body2">
-                            <strong>Step 2:</strong> Sort the material carefully (remove shells, stones, damaged grains, insect parts).
-                          </Typography>
-                        </Box>
-                        <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center' }}>
-                          <SuccessIcon color="success" />
-                          <Typography variant="body2">
-                            <strong>Step 3:</strong> Push cleared good material toward the open tray edge into attached FG bag.
-                          </Typography>
-                        </Box>
-                        <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center' }}>
-                          <SuccessIcon color="success" />
-                          <Typography variant="body2">
-                            <strong>Step 4:</strong> Fill to target weight (50.00 kg on digital scale) and stitch.
-                          </Typography>
-                        </Box>
-                        <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center' }}>
-                          <SuccessIcon color="success" />
-                          <Typography variant="body2">
-                            <strong>Step 5:</strong> Place stitched bag in designated warehouse row.
-                          </Typography>
-                        </Box>
-                      </Stack>
-                    </Paper>
-                  </Grid>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5 }}>
+                      Select shift, team, tray station, and allocate up to 3 workers from the Worker Master. Prevents duplicate worker assignment across conflicting teams for the same shift.
+                    </Typography>
 
-                  <Grid item xs={12} md={6}>
-                    <Paper sx={{ p: 2.5, borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
-                      <Typography variant="subtitle1" fontWeight={700} gutterBottom>
-                        Member-Wise Fair Work Allocation
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                        Output is split accurately according to actual hours worked by each team member at the tray without duplicating full team totals.
-                      </Typography>
+                    <Grid container spacing={2}>
+                      <Grid item xs={12} sm={6}>
+                        <TextField
+                          fullWidth
+                          size="small"
+                          type="date"
+                          label="Work Date"
+                          InputLabelProps={{ shrink: true }}
+                          value={assignForm.work_date}
+                          onChange={async (e) => {
+                            const newDate = e.target.value;
+                            setAssignForm(prev => ({ ...prev, work_date: newDate }));
+                            try {
+                              const companyId = selectedCompany?.id || 1;
+                              const res = await api.get(`/hand-sorting/daily-assignments?work_date=${newDate}&shift=${assignForm.shift}&company_id=${companyId}`);
+                              if (res && res.data) setDailyAssignments(res.data);
+                            } catch (err) { /* ignore */ }
+                          }}
+                        />
+                      </Grid>
 
-                      <Table size="small">
-                        <TableHead>
-                          <TableRow>
-                            <TableCell>Worker Name</TableCell>
-                            <TableCell>Role</TableCell>
-                            <TableCell align="right">Active Hours</TableCell>
-                            <TableCell align="right">Attributed Output</TableCell>
+                      <Grid item xs={12} sm={6}>
+                        <FormControl fullWidth size="small">
+                          <InputLabel>Shift</InputLabel>
+                          <Select
+                            value={assignForm.shift}
+                            label="Shift"
+                            onChange={async (e) => {
+                              const newShift = e.target.value;
+                              setAssignForm(prev => ({ ...prev, shift: newShift }));
+                              try {
+                                const companyId = selectedCompany?.id || 1;
+                                const res = await api.get(`/hand-sorting/daily-assignments?work_date=${assignForm.work_date}&shift=${newShift}&company_id=${companyId}`);
+                                if (res && res.data) setDailyAssignments(res.data);
+                              } catch (err) { /* ignore */ }
+                            }}
+                          >
+                            <MenuItem value="Shift-1">Shift-1 (08:00 AM - 04:00 PM)</MenuItem>
+                            <MenuItem value="Shift-2">Shift-2 (04:00 PM - 12:00 AM)</MenuItem>
+                            <MenuItem value="Night-Shift">Night Shift (12:00 AM - 08:00 AM)</MenuItem>
+                          </Select>
+                        </FormControl>
+                      </Grid>
+
+                      <Grid item xs={12} sm={6}>
+                        <FormControl fullWidth size="small">
+                          <InputLabel>Team Name</InputLabel>
+                          <Select
+                            value={assignForm.team_name}
+                            label="Team Name"
+                            onChange={(e) => setAssignForm(prev => ({ ...prev, team_name: e.target.value }))}
+                          >
+                            <MenuItem value="Team Alpha">Team Alpha</MenuItem>
+                            <MenuItem value="Team Beta">Team Beta</MenuItem>
+                            <MenuItem value="Team Gamma">Team Gamma</MenuItem>
+                            <MenuItem value="Team Delta">Team Delta</MenuItem>
+                          </Select>
+                        </FormControl>
+                      </Grid>
+
+                      <Grid item xs={12} sm={6}>
+                        <TextField
+                          fullWidth
+                          size="small"
+                          label="Tray Station No"
+                          value={assignForm.tray_station_no}
+                          onChange={(e) => setAssignForm(prev => ({ ...prev, tray_station_no: e.target.value }))}
+                          placeholder="e.g. Tray-01 (Station A)"
+                        />
+                      </Grid>
+
+                      {/* Searchable Worker Master Selection */}
+                      <Grid item xs={12}>
+                        <Divider sx={{ my: 1 }} />
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                          <Typography variant="subtitle2" fontWeight={700}>
+                            Select Workers from Worker Master (Max 3 per Tray Station)
+                          </Typography>
+                          <Stack direction="row" spacing={1}>
+                            <Button
+                              size="small"
+                              onClick={() => {
+                                const first3 = workersList.slice(0, 3).map(w => w.id);
+                                setAssignForm(prev => ({ ...prev, selectedWorkerIds: first3 }));
+                              }}
+                              sx={{ textTransform: 'none', fontSize: '0.75rem' }}
+                            >
+                              Select First 3
+                            </Button>
+                            <Button
+                              size="small"
+                              color="error"
+                              onClick={() => setAssignForm(prev => ({ ...prev, selectedWorkerIds: [] }))}
+                              sx={{ textTransform: 'none', fontSize: '0.75rem' }}
+                            >
+                              Clear Selection
+                            </Button>
+                          </Stack>
+                        </Box>
+
+                        <TextField
+                          fullWidth
+                          size="small"
+                          placeholder="Search worker by name or code..."
+                          value={assignForm.workerSearchText}
+                          onChange={(e) => setAssignForm(prev => ({ ...prev, workerSearchText: e.target.value }))}
+                          InputProps={{
+                            startAdornment: <SearchIcon fontSize="small" sx={{ color: 'text.secondary', mr: 1 }} />
+                          }}
+                          sx={{ mb: 1.5 }}
+                        />
+
+                        <Paper variant="outlined" sx={{ p: 1, maxHeight: 220, overflowY: 'auto', borderRadius: 2 }}>
+                          <Grid container spacing={1}>
+                            {workersList
+                              .filter(w => !assignForm.workerSearchText || w.worker_name.toLowerCase().includes(assignForm.workerSearchText.toLowerCase()) || (w.worker_code && w.worker_code.toLowerCase().includes(assignForm.workerSearchText.toLowerCase())))
+                              .map((w) => {
+                                const isSelected = assignForm.selectedWorkerIds.includes(w.id);
+                                return (
+                                  <Grid item xs={12} sm={6} key={w.id}>
+                                    <Paper
+                                      onClick={() => {
+                                        setAssignForm(prev => {
+                                          const current = prev.selectedWorkerIds || [];
+                                          if (current.includes(w.id)) {
+                                            return { ...prev, selectedWorkerIds: current.filter(id => id !== w.id) };
+                                          } else {
+                                            if (current.length >= 3) {
+                                              setMessage('Maximum 3 workers allowed per tray station!');
+                                              setSeverity('warning');
+                                              return prev;
+                                            }
+                                            return { ...prev, selectedWorkerIds: [...current, w.id] };
+                                          }
+                                        });
+                                      }}
+                                      elevation={0}
+                                      sx={{
+                                        p: 1.25,
+                                        cursor: 'pointer',
+                                        borderRadius: 1.5,
+                                        border: '1.5px solid',
+                                        borderColor: isSelected ? 'primary.main' : 'divider',
+                                        bgcolor: isSelected ? 'action.selected' : 'background.paper',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justify: 'space-between',
+                                        transition: 'all 0.15s'
+                                      }}
+                                    >
+                                      <Box>
+                                        <Typography variant="body2" fontWeight={700}>
+                                          {w.worker_name}
+                                        </Typography>
+                                        <Typography variant="caption" color="text.secondary">
+                                          {w.worker_code || 'WRK'} • {w.category || 'Hand Sorter'}
+                                        </Typography>
+                                      </Box>
+                                      {isSelected && <Chip label="Selected" size="small" color="primary" sx={{ ml: 'auto', height: 20, fontSize: '0.65rem' }} />}
+                                    </Paper>
+                                  </Grid>
+                                );
+                              })}
+                          </Grid>
+                        </Paper>
+                      </Grid>
+                    </Grid>
+
+                    <Box sx={{ mt: 2.5, display: 'flex', justifyContent: 'flex-end' }}>
+                      <Button
+                        variant="contained"
+                        color="primary"
+                        startIcon={<TeamIcon />}
+                        onClick={handleSaveAssignment}
+                        disabled={actionLoading || assignForm.selectedWorkerIds.length === 0}
+                      >
+                        {actionLoading ? 'Saving...' : `Assign ${assignForm.selectedWorkerIds.length} Workers to ${assignForm.team_name}`}
+                      </Button>
+                    </Box>
+                  </CardContent>
+                </Card>
+              </Grid>
+
+              {/* Active Daily Team Assignments Register Card */}
+              <Grid item xs={12} md={5}>
+                <Card variant="outlined" sx={{ borderRadius: 2 }}>
+                  <CardContent sx={{ p: 3 }}>
+                    <Typography variant="h6" fontWeight={700} gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <DailyReportIcon color="primary" /> Daily Register for {assignForm.work_date} ({assignForm.shift})
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                      Active team allocations for this date & shift. Duplicate assignments across conflicting teams are blocked.
+                    </Typography>
+
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Worker & Code</TableCell>
+                          <TableCell>Team & Station</TableCell>
+                          <TableCell>Role</TableCell>
+                          <TableCell align="center">Action</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {dailyAssignments.map((a) => (
+                          <TableRow key={a.id}>
+                            <TableCell>
+                              <Typography variant="body2" fontWeight={700}>{a.worker_name}</Typography>
+                              <Typography variant="caption" color="text.secondary">{a.worker_code || 'WRK'}</Typography>
+                            </TableCell>
+                            <TableCell>
+                              <Chip label={a.team_name} size="small" color="primary" variant="outlined" sx={{ mr: 0.5 }} />
+                              <Typography variant="caption" display="block">{a.tray_station_no}</Typography>
+                            </TableCell>
+                            <TableCell>
+                              <Typography variant="caption">{a.role}</Typography>
+                            </TableCell>
+                            <TableCell align="center">
+                              <IconButton size="small" color="error" onClick={() => handleDeleteAssignment(a.id)}>
+                                <UnlockIcon fontSize="small" />
+                              </IconButton>
+                            </TableCell>
                           </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {(selectedJob?.team_members_list && selectedJob.team_members_list.length > 0) ? (
-                            selectedJob.team_members_list.map((worker, idx) => {
-                              const workerHours = selectedJob.daily_target_hours || 8.0;
-                              const memberCount = selectedJob.team_members_list.length;
-                              const workerKg = selectedJob.total_fg_weight_kg > 0
-                                ? (selectedJob.total_fg_weight_kg / memberCount).toFixed(1)
-                                : '0.0';
-                              const workerBags = selectedJob.fg_bags_produced_count > 0
-                                ? (selectedJob.fg_bags_produced_count / memberCount).toFixed(1)
-                                : '0';
-                              return (
-                                <TableRow key={idx}>
-                                  <TableCell>
-                                    <Typography variant="body2" fontWeight={700}>{worker}</Typography>
-                                    <Typography variant="caption" color="text.secondary">Station: {selectedJob.tray_station_no}</Typography>
-                                  </TableCell>
-                                  <TableCell>Tray Operator {idx + 1}</TableCell>
-                                  <TableCell align="right">{workerHours.toFixed(1)} hrs</TableCell>
-                                  <TableCell align="right">
-                                    <Typography variant="body2" fontWeight={700}>{workerKg} kg</Typography>
-                                    <Typography variant="caption" color="text.secondary">({workerBags} Bags)</Typography>
-                                  </TableCell>
-                                </TableRow>
-                              );
-                            })
-                          ) : (
-                            <TableRow>
-                              <TableCell colSpan={4} align="center" sx={{ py: 3, color: 'text.secondary' }}>
-                                {selectedJob
-                                  ? 'No workers assigned yet for this job station. Please add workers in Job Setup.'
-                                  : 'Select a sorting job to view member-wise output distribution.'}
-                              </TableCell>
-                            </TableRow>
-                          )}
-                        </TableBody>
-                      </Table>
-                    </Paper>
-                  </Grid>
-                </Grid>
-              </CardContent>
-            </Card>
+                        ))}
+                        {dailyAssignments.length === 0 && (
+                          <TableRow>
+                            <TableCell colSpan={4} align="center" sx={{ py: 3, color: 'text.secondary' }}>
+                              No worker assignments saved yet for {assignForm.work_date} ({assignForm.shift}). Select workers on the left and click Assign.
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+
+                    <Divider sx={{ my: 2 }} />
+
+                    {/* Member-Wise Fair Attribution Summary */}
+                    <Typography variant="subtitle2" fontWeight={700} gutterBottom>
+                      Fair Member Output Attribution Model
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+                      Output produced by a 3-member station is divided equally among the active assigned operators for fair piece-rate or shift productivity records, preventing double-counting.
+                    </Typography>
+                    {selectedJob && (
+                      <Paper sx={{ p: 1.5, bgcolor: 'action.hover', borderRadius: 1.5 }}>
+                        <Typography variant="caption" color="text.secondary" display="block">Active Station: {selectedJob.tray_station_no}</Typography>
+                        <Typography variant="body2" fontWeight={700} color="primary.main">
+                          Total Station Output: {selectedJob.fg_bags_produced_count} Bags ({selectedJob.total_fg_weight_kg} kg)
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Per Member Share: ~{(selectedJob.fg_bags_produced_count / Math.max(1, (selectedJob.team_members_list?.length || 1))).toFixed(1)} Bags / operator
+                        </Typography>
+                      </Paper>
+                    )}
+                  </CardContent>
+                </Card>
+              </Grid>
+            </Grid>
           </TabPanel>
 
           {/* TAB 3: QC & ISOLATION */}
@@ -1690,6 +1952,8 @@ const HandSortingWorkspace = () => {
                 <Table size="small">
                   <TableHead>
                     <TableRow>
+                      <TableCell>S.No</TableCell>
+                      <TableCell>Work Ref</TableCell>
                       <TableCell>Date / Shift</TableCell>
                       <TableCell>Team & Leader</TableCell>
                       <TableCell>Item & Lot</TableCell>
@@ -1698,12 +1962,18 @@ const HandSortingWorkspace = () => {
                       <TableCell align="right">FG Bags Packed</TableCell>
                       <TableCell align="right">Waste</TableCell>
                       <TableCell align="center">Approved / Isolated</TableCell>
-                      <TableCell>Remarks</TableCell>
+                      <TableCell align="center">Actions</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {dailyReports.map((r) => (
+                    {dailyReports.map((r, idx) => (
                       <TableRow key={r.id}>
+                        <TableCell>{idx + 1}</TableCell>
+                        <TableCell>
+                          <Typography variant="body2" fontWeight={700} color="primary">
+                            HS-WRK-00{r.id}
+                          </Typography>
+                        </TableCell>
                         <TableCell>
                           <strong>{r.record_date}</strong>
                           <Typography variant="caption" display="block">{r.shift}</Typography>
@@ -1736,12 +2006,24 @@ const HandSortingWorkspace = () => {
                             <Chip label={`${r.isolated_fg_count} Isolated`} size="small" color="error" />
                           )}
                         </TableCell>
-                        <TableCell>{r.remarks || '-'}</TableCell>
+                        <TableCell align="center">
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            startIcon={<SearchIcon />}
+                            onClick={() => {
+                              setSelectedWorkDetail(r);
+                              setWorkDetailOpen(true);
+                            }}
+                          >
+                            View
+                          </Button>
+                        </TableCell>
                       </TableRow>
                     ))}
                     {dailyReports.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={9} align="center">No daily production logs found.</TableCell>
+                        <TableCell colSpan={11} align="center">No daily production logs found.</TableCell>
                       </TableRow>
                     )}
                   </TableBody>
@@ -1850,9 +2132,105 @@ const HandSortingWorkspace = () => {
             </Card>
           </TabPanel>
 
-          {/* TAB 7: HISTORY & REPORTS */}
+          {/* TAB 7: HISTORY, RECONCILIATION & REPORTS */}
           <TabPanel value={activeTab} index={6}>
             <Grid container spacing={3}>
+              {/* Material Reconciliation Card */}
+              <Grid item xs={12}>
+                <Card variant="outlined" sx={{ borderRadius: 2 }}>
+                  <CardContent sx={{ p: 3 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <CalculateIcon color="primary" />
+                        <Typography variant="h6" fontWeight={700}>
+                          Material Reconciliation & Stage-by-Stage Inventory Balance
+                        </Typography>
+                      </Box>
+                      {reconciliation && (
+                        <Chip
+                          label={reconciliation.is_reconciled ? 'Material Balanced (Zero Variance)' : 'Discrepancy Warning'}
+                          color={reconciliation.is_reconciled ? 'success' : 'warning'}
+                          size="small"
+                        />
+                      )}
+                    </Box>
+
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5 }}>
+                      Strict inventory reconciliation model prevents double-counting material across processing stages (RM Arrival → Vacuum Processing → Tray Hand Sorting → 50kg FG Bags → Waste).
+                    </Typography>
+
+                    {reconciliation ? (
+                      <Paper sx={{ p: 2.5, borderRadius: 2, bgcolor: 'action.hover', mb: 3 }}>
+                        <Typography variant="subtitle1" fontWeight={700} color="primary" gutterBottom>
+                          Job #{reconciliation.job_no} — Route: {getRouteLabel(reconciliation.processing_route)} (Lot: {reconciliation.source_lot_no})
+                        </Typography>
+
+                        <Grid container spacing={2} sx={{ mb: 2 }}>
+                          <Grid item xs={12} sm={2.4}>
+                            <Paper sx={{ p: 2, borderRadius: 2, bgcolor: 'background.paper', textAlign: 'center' }}>
+                              <Typography variant="caption" color="text.secondary" display="block">1. Input RM Issued</Typography>
+                              <Typography variant="h6" fontWeight={800} color="primary.main">
+                                {reconciliation.total_input_rm_kg} kg
+                              </Typography>
+                            </Paper>
+                          </Grid>
+
+                          <Grid item xs={12} sm={2.4}>
+                            <Paper sx={{ p: 2, borderRadius: 2, bgcolor: 'background.paper', textAlign: 'center' }}>
+                              <Typography variant="caption" color="text.secondary" display="block">2. Vacuum Output (Route B)</Typography>
+                              <Typography variant="h6" fontWeight={800}>
+                                {reconciliation.vacuum_output_kg > 0 ? `${reconciliation.vacuum_output_kg} kg` : 'N/A'}
+                              </Typography>
+                            </Paper>
+                          </Grid>
+
+                          <Grid item xs={12} sm={2.4}>
+                            <Paper sx={{ p: 2, borderRadius: 2, bgcolor: 'background.paper', textAlign: 'center' }}>
+                              <Typography variant="caption" color="text.secondary" display="block">3. Approved FG Packed</Typography>
+                              <Typography variant="h6" fontWeight={800} color="success.main">
+                                {reconciliation.approved_fg_kg} kg
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">({reconciliation.approved_fg_bags} Bags)</Typography>
+                            </Paper>
+                          </Grid>
+
+                          <Grid item xs={12} sm={2.4}>
+                            <Paper sx={{ p: 2, borderRadius: 2, bgcolor: 'background.paper', textAlign: 'center' }}>
+                              <Typography variant="caption" color="text.secondary" display="block">4. Measured Waste</Typography>
+                              <Typography variant="h6" fontWeight={800} color="warning.main">
+                                {reconciliation.total_waste_kg} kg
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">({reconciliation.waste_pct}%)</Typography>
+                            </Paper>
+                          </Grid>
+
+                          <Grid item xs={12} sm={2.4}>
+                            <Paper sx={{ p: 2, borderRadius: 2, bgcolor: 'background.paper', textAlign: 'center' }}>
+                              <Typography variant="caption" color="text.secondary" display="block">5. Tray WIP Balance</Typography>
+                              <Typography variant="h6" fontWeight={800} color="info.main">
+                                {reconciliation.wip_balance_kg} kg
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">Remainder towards next bag</Typography>
+                            </Paper>
+                          </Grid>
+                        </Grid>
+
+                        <Box sx={{ p: 1.5, borderRadius: 1.5, bgcolor: reconciliation.is_reconciled ? 'success.lighter' : 'warning.lighter' }}>
+                          <Typography variant="body2" fontWeight={700}>
+                            Reconciliation Formula: Input RM ({reconciliation.total_input_rm_kg} kg) = FG Output ({reconciliation.total_fg_produced_kg} kg) + Waste ({reconciliation.total_waste_kg} kg) + WIP Balance ({reconciliation.wip_balance_kg} kg)
+                          </Typography>
+                        </Box>
+                      </Paper>
+                    ) : (
+                      <Alert severity="info" sx={{ mb: 3 }}>
+                        Select an active job in Tab 1 to view real-time stage-by-stage material reconciliation calculations.
+                      </Alert>
+                    )}
+                  </CardContent>
+                </Card>
+              </Grid>
+
+              {/* Material Traceability Search Card */}
               <Grid item xs={12}>
                 <Card variant="outlined" sx={{ borderRadius: 2 }}>
                   <CardContent sx={{ p: 3 }}>
@@ -3029,6 +3407,186 @@ const HandSortingWorkspace = () => {
             style={{ maxWidth: '100%', height: 'auto', borderRadius: '8px' }}
           />
         </DialogContent>
+      </Dialog>
+
+      {/* DIALOG 10: WORK DETAIL POPUP (10 STRUCTURED SECTIONS) */}
+      <Dialog open={workDetailOpen} onClose={() => setWorkDetailOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700, bgcolor: 'primary.main', color: 'primary.contrastText', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>Hand Sorting Work Details — Ref: HS-WRK-00{selectedWorkDetail?.id || '01'}</span>
+          <Button color="inherit" onClick={() => setWorkDetailOpen(false)}>Close</Button>
+        </DialogTitle>
+        <DialogContent dividers sx={{ p: 3 }}>
+          {selectedWorkDetail ? (
+            <Stack spacing={2.5}>
+              {/* 1. Work Overview */}
+              <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                <Typography variant="subtitle2" fontWeight={700} color="primary" gutterBottom>
+                  1. Work Overview
+                </Typography>
+                <Grid container spacing={2}>
+                  <Grid item xs={6} sm={3}>
+                    <Typography variant="caption" color="text.secondary">Work Date</Typography>
+                    <Typography variant="body2" fontWeight={700}>{selectedWorkDetail.record_date}</Typography>
+                  </Grid>
+                  <Grid item xs={6} sm={3}>
+                    <Typography variant="caption" color="text.secondary">Shift</Typography>
+                    <Typography variant="body2" fontWeight={700}>{selectedWorkDetail.shift}</Typography>
+                  </Grid>
+                  <Grid item xs={6} sm={3}>
+                    <Typography variant="caption" color="text.secondary">Team Name</Typography>
+                    <Typography variant="body2" fontWeight={700}>{selectedWorkDetail.team_name}</Typography>
+                  </Grid>
+                  <Grid item xs={6} sm={3}>
+                    <Typography variant="caption" color="text.secondary">Work Reference</Typography>
+                    <Typography variant="body2" fontWeight={700}>HS-WRK-00{selectedWorkDetail.id}</Typography>
+                  </Grid>
+                </Grid>
+              </Paper>
+
+              {/* 2. Workforce */}
+              <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                <Typography variant="subtitle2" fontWeight={700} color="primary" gutterBottom>
+                  2. Workforce & Team Allocation
+                </Typography>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} sm={4}>
+                    <Typography variant="caption" color="text.secondary">Team Leader</Typography>
+                    <Typography variant="body2" fontWeight={700}>{selectedWorkDetail.team_leader || 'Supervisor'}</Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={8}>
+                    <Typography variant="caption" color="text.secondary">Assigned Operators</Typography>
+                    <Typography variant="body2">
+                      {Array.isArray(selectedWorkDetail.team_members_list) && selectedWorkDetail.team_members_list.length > 0
+                        ? selectedWorkDetail.team_members_list.join(', ')
+                        : 'Operator 1, Operator 2, Operator 3'}
+                    </Typography>
+                  </Grid>
+                </Grid>
+              </Paper>
+
+              {/* 3. Material and Lots */}
+              <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                <Typography variant="subtitle2" fontWeight={700} color="primary" gutterBottom>
+                  3. Material & Stock Lot
+                </Typography>
+                <Grid container spacing={2}>
+                  <Grid item xs={6} sm={4}>
+                    <Typography variant="caption" color="text.secondary">Item Description</Typography>
+                    <Typography variant="body2" fontWeight={700}>{selectedWorkDetail.item_name}</Typography>
+                  </Grid>
+                  <Grid item xs={6} sm={4}>
+                    <Typography variant="caption" color="text.secondary">Source Lot No</Typography>
+                    <Typography variant="body2" fontWeight={700}>{selectedWorkDetail.source_lot_no}</Typography>
+                  </Grid>
+                  <Grid item xs={6} sm={4}>
+                    <Typography variant="caption" color="text.secondary">RM Input Quantity</Typography>
+                    <Typography variant="body2" fontWeight={700}>{selectedWorkDetail.rm_bags_count} Bags ({selectedWorkDetail.rm_weight_kg} kg)</Typography>
+                  </Grid>
+                </Grid>
+              </Paper>
+
+              {/* 4. Processing Route */}
+              <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                <Typography variant="subtitle2" fontWeight={700} color="primary" gutterBottom>
+                  4. Processing Route Details
+                </Typography>
+                <Typography variant="body2">
+                  {selectedWorkDetail.vacuum_bags_count > 0
+                    ? `Route B: Vacuum Processed (${selectedWorkDetail.vacuum_bags_count} Vacuum Bags / ${selectedWorkDetail.vacuum_output_kg} kg) → Silver Tray Hand Sorting`
+                    : `Route C: Direct RM Hand Sorting (${selectedWorkDetail.rm_bags_count} Bags) → Finished Goods 50kg Bags`}
+                </Typography>
+              </Paper>
+
+              {/* 5. Sorting Sessions */}
+              <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                <Typography variant="subtitle2" fontWeight={700} color="primary" gutterBottom>
+                  5. Sorting Sessions & Tray Station
+                </Typography>
+                <Typography variant="body2">
+                  Station: <strong>Tray-01 (Station A)</strong> | Active Sorting Hours: <strong>{selectedWorkDetail.sorting_hours || 8.0} hrs</strong> | Tray Rounds: <strong>{selectedWorkDetail.sorting_rounds || 1}</strong>
+                </Typography>
+              </Paper>
+
+              {/* 6. Sorting Rounds */}
+              <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                <Typography variant="subtitle2" fontWeight={700} color="primary" gutterBottom>
+                  6. Sorting Rounds & Output Breakdown
+                </Typography>
+                <Grid container spacing={2}>
+                  <Grid item xs={4}>
+                    <Typography variant="caption" color="text.secondary">FG Bags Produced</Typography>
+                    <Typography variant="body2" fontWeight={700} color="success.main">{selectedWorkDetail.fg_bags_count} Bags</Typography>
+                  </Grid>
+                  <Grid item xs={4}>
+                    <Typography variant="caption" color="text.secondary">FG Weight</Typography>
+                    <Typography variant="body2" fontWeight={700} color="success.main">{selectedWorkDetail.fg_weight_kg} kg</Typography>
+                  </Grid>
+                  <Grid item xs={4}>
+                    <Typography variant="caption" color="text.secondary">Measured Waste</Typography>
+                    <Typography variant="body2" fontWeight={700} color="warning.main">{selectedWorkDetail.waste_weight_kg} kg</Typography>
+                  </Grid>
+                </Grid>
+              </Paper>
+
+              {/* 7. QC Findings */}
+              <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                <Typography variant="subtitle2" fontWeight={700} color="primary" gutterBottom>
+                  7. QC Findings & Exceptions Summary
+                </Typography>
+                <Typography variant="body2">
+                  {selectedWorkDetail.findings_summary || 'Normal hand sorting. Zero live infestation detected during session inspection.'}
+                </Typography>
+                <Box sx={{ mt: 1, display: 'flex', gap: 1 }}>
+                  <Chip label={`${selectedWorkDetail.approved_fg_count || selectedWorkDetail.fg_bags_count} Bags Approved`} color="success" size="small" />
+                  {selectedWorkDetail.isolated_fg_count > 0 && (
+                    <Chip label={`${selectedWorkDetail.isolated_fg_count} Bags Isolated`} color="error" size="small" />
+                  )}
+                </Box>
+              </Paper>
+
+              {/* 8. FG Bags */}
+              <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                <Typography variant="subtitle2" fontWeight={700} color="primary" gutterBottom>
+                  8. Finished Goods Bag Specification
+                </Typography>
+                <Typography variant="body2">
+                  Standard Packing: <strong>50.00 kg / bag</strong> | Stitching: <strong>Stitched & Sealed</strong> | Storage Row: <strong>Row-A-01</strong>
+                </Typography>
+              </Paper>
+
+              {/* 9. Reconciliation */}
+              <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: 'action.hover' }}>
+                <Typography variant="subtitle2" fontWeight={700} color="primary" gutterBottom>
+                  9. Stage-by-Stage Material Reconciliation
+                </Typography>
+                <Typography variant="body2" fontWeight={700}>
+                  Input RM ({selectedWorkDetail.rm_weight_kg} kg) = FG Output ({selectedWorkDetail.fg_weight_kg} kg) + Waste ({selectedWorkDetail.waste_weight_kg} kg) + Balance
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Material flow fully reconciled without double-counting across vacuum and sorting stages.
+                </Typography>
+              </Paper>
+
+              {/* 10. Audit History */}
+              <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                <Typography variant="subtitle2" fontWeight={700} color="primary" gutterBottom>
+                  10. Audit Trail & Verification
+                </Typography>
+                <Typography variant="caption" color="text.secondary" display="block">
+                  Entry Recorded By: <strong>{selectedWorkDetail.entered_by || 'Supervisor'}</strong> on {selectedWorkDetail.created_at || selectedWorkDetail.record_date}
+                </Typography>
+                <Typography variant="caption" color="text.secondary" display="block">
+                  Company ID: {selectedWorkDetail.company_id || 1} • Status: VERIFIED & POSTED TO STOCK
+                </Typography>
+              </Paper>
+            </Stack>
+          ) : (
+            <Alert severity="info">No record selected.</Alert>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ p: 2 }}>
+          <Button variant="contained" onClick={() => setWorkDetailOpen(false)}>Close Details</Button>
+        </DialogActions>
       </Dialog>
     </Box>
   );

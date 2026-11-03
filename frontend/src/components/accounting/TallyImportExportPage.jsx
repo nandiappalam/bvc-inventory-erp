@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 const TallyImportExportPage = () => {
+  const navigate = useNavigate();
   const [importing, setImporting] = useState(false);
   const [message, setMessage] = useState('');
 
@@ -49,6 +51,29 @@ const TallyImportExportPage = () => {
               Exchange Accounting Masters, Ledger Groups & Voucher Transactions with TallyPrime
             </p>
           </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button
+            onClick={() => {
+              if (window.history.length > 1) {
+                navigate(-1);
+              } else {
+                navigate('/accounting/dashboard');
+              }
+            }}
+            style={{ padding: '8px 14px', backgroundColor: 'rgba(255,255,255,0.15)', color: '#ffffff', fontWeight: '700', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.25)', fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            <span>←</span>
+            <span>Back</span>
+          </button>
+          <button
+            onClick={() => navigate('/accounting/dashboard')}
+            style={{ padding: '8px 14px', backgroundColor: 'rgba(255,255,255,0.1)', color: '#ffffff', fontWeight: '700', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.2)', fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            <span>📊</span>
+            <span>Dashboard</span>
+          </button>
         </div>
       </div>
 

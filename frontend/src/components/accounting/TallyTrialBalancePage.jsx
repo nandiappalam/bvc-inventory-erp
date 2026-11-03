@@ -44,12 +44,34 @@ const TallyTrialBalancePage = () => {
           </div>
         </div>
 
-        <button
-          onClick={fetchTrialBalance}
-          style={{ padding: '8px 16px', backgroundColor: '#ffffff', color: '#1e1b4b', fontWeight: '700', borderRadius: '6px', border: 'none', fontSize: '12px', cursor: 'pointer' }}
-        >
-          🔄 Re-calculate
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button
+            onClick={() => {
+              if (window.history.length > 1) {
+                navigate(-1);
+              } else {
+                navigate('/accounting/dashboard');
+              }
+            }}
+            style={{ padding: '8px 14px', backgroundColor: 'rgba(255,255,255,0.15)', color: '#ffffff', fontWeight: '700', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.25)', fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            <span>←</span>
+            <span>Back</span>
+          </button>
+          <button
+            onClick={() => navigate('/accounting/dashboard')}
+            style={{ padding: '8px 14px', backgroundColor: 'rgba(255,255,255,0.1)', color: '#ffffff', fontWeight: '700', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.2)', fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            <span>📊</span>
+            <span>Dashboard</span>
+          </button>
+          <button
+            onClick={fetchTrialBalance}
+            style={{ padding: '8px 16px', backgroundColor: '#ffffff', color: '#1e1b4b', fontWeight: '700', borderRadius: '6px', border: 'none', fontSize: '12px', cursor: 'pointer' }}
+          >
+            🔄 Re-calculate
+          </button>
+        </div>
       </div>
 
       {loading ? (

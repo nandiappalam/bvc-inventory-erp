@@ -203,6 +203,21 @@ async function getPartyName(partyVal, preferredType = null) {
           return res.rows[0].flourmill;
         }
       } catch (e) {}
+    } else if (type === 'transporter' || type === 'transport') {
+      try {
+        const res = await db.query('SELECT name, print_name FROM transport_master WHERE id = ?', [id]);
+        if (res.rows && res.rows.length > 0) {
+          return res.rows[0].print_name || res.rows[0].name;
+        }
+      } catch (e) {}
+    } else if (type === 'worker' || type === 'loadman') {
+      try {
+        // Unloading teams / Loadmen are often in person_master or workers table
+        const res = await db.query('SELECT name FROM person_master WHERE id = ?', [id]);
+        if (res.rows && res.rows.length > 0 && res.rows[0].name) {
+          return res.rows[0].name;
+        }
+      } catch (e) {}
     }
 
     // Fallbacks
@@ -507,11 +522,13 @@ async function createPurchaseVoucherChain(purchaseData) {
 
   // Transport & Loadman parameter handling
   const transportCharges = Number(purchaseData.transportCharges || purchaseData.freightAmount || purchaseData.transport_charges || 0);
-  const transporterName = purchaseData.transporter || purchaseData.transporterName || purchaseData.transport || '';
+  const rawTransporter = purchaseData.transporter || purchaseData.transporterName || purchaseData.transport || '';
+  const transporterName = await getPartyName(rawTransporter, 'transporter');
   const transportPayableType = String(purchaseData.transportPayableType || purchaseData.transport_payable_type || 'SEPARATE').toUpperCase();
 
   const loadmanCharges = Number(purchaseData.loadmanCharges || purchaseData.loadman_charges || 0);
-  const loadmanName = purchaseData.loadmanName || purchaseData.loadman_name || '';
+  const rawLoadman = purchaseData.loadmanName || purchaseData.loadman_name || '';
+  const loadmanName = await getPartyName(rawLoadman, 'worker');
   const loadmanWorkerId = purchaseData.loadmanWorkerId || purchaseData.loadman_worker_id;
   const loadmanPayableType = String(purchaseData.loadmanPayableType || purchaseData.loadman_payable_type || 'SEPARATE').toUpperCase();
 

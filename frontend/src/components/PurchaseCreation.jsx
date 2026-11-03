@@ -139,9 +139,28 @@ const PurchaseCreation = () => {
     loadWorkerRate();
   }, [formData.loadman_name, formData.date]);
 
+  const [suppliersList, setSuppliersList] = useState([]);
+  useEffect(() => {
+    getMasters('suppliers').then(res => {
+      const list = Array.isArray(res) ? res : (res?.data || []);
+      setSuppliersList(list);
+    }).catch(() => {});
+  }, []);
+
+  const effectiveSupplierName = useMemo(() => {
+    const matched = (suppliersList || []).find(s => String(s.id) === String(formData.supplier_id));
+    if (matched) return matched.print_name || matched.name;
+    if (formData.address) {
+      const m = formData.address.match(/Name\s*:\s*([^\n\r]+)/i);
+      if (m && m[1]) return m[1].trim();
+    }
+    return '';
+  }, [suppliersList, formData.supplier_id, formData.address]);
+
   const [poPickerOpen, setPoPickerOpen] = useState(false);
   const [poList, setPoList] = useState([]);
   const [loadingPoList, setLoadingPoList] = useState(false);
+  const [expandedPoId, setExpandedPoId] = useState(null);
 
   const [tableData, setTableData] = useState([{
     sno: 1,
@@ -291,6 +310,8 @@ const PurchaseCreation = () => {
     return {
       date: formData.date,
       supplier: formData.supplier_id,
+      supplier_id: formData.supplier_id,
+      supplier_name: effectiveSupplierName,
       payType: formData.pay_type,
       address: formData.supplier_details || formData.address,
       invNo: formData.inv_no,
@@ -300,6 +321,11 @@ const PurchaseCreation = () => {
       stock_type: formData.stock_type || 'RM',
       transporter: formData.transporter || formData.transport || '',
       transport: formData.transporter || formData.transport || '',
+      transport_charges: parseFloat(formData.net_transport_amount || formData.transport_charges || formData.freight_amount || 0),
+      freight_amount: parseFloat(formData.net_transport_amount || formData.freight_amount || formData.transport_charges || 0),
+      net_transport_amount: parseFloat(formData.net_transport_amount || formData.transport_charges || 0),
+      transport_payable_type: formData.transport_payable_type || 'SEPARATE',
+      loadman_payable_type: formData.loadman_payable_type || 'SEPARATE',
       vehicle_no: formData.vehicle_no || formData.lorry_no || '',
       lorry_no: formData.vehicle_no || formData.lorry_no || '',
       driver_name: formData.driver_name || formData.driver || '',
@@ -335,10 +361,14 @@ const PurchaseCreation = () => {
       loadman_rate_per_kg: formData.loadman_rate_per_kg || '0.50',
       loadman_charges: formData.loadman_charges || String(calculatedLoadmanCharges || 0),
       additional_charges: formData.additional_charges || '0',
-      // Keep fields that may be used by ledger helper
-      supplier_id: formData.supplier_id
+      weighment_ref_no: formData.weighment_ref_no || '',
+      weighbridge_location: formData.weighbridge_location || '',
+      unloading_date: formData.unloading_date || '',
+      unloading_time: formData.unloading_time || '',
+      operator_name: formData.operator_name || '',
+      weight_status: formData.weight_status || 'TARE_PENDING'
     }
-  }, [formData, erpTotals?.totalWeight, calculatedLoadmanCharges])
+  }, [formData, erpTotals?.totalWeight, calculatedLoadmanCharges, effectiveSupplierName])
 
 
 
@@ -421,6 +451,7 @@ const PurchaseCreation = () => {
     setFormData((prev) => ({
       ...prev,
       ...draft.formData,
+      date: prev.date || new Date().toISOString().split('T')[0],
       s_no: nextSNo || prev.s_no,
       supplier_id: suppId || prev.supplier_id,
       supplier: suppId || prev.supplier_id,
@@ -1649,31 +1680,56 @@ const PurchaseCreation = () => {
         <div
           style={{
             marginBottom: '15px',
-            padding: '10px 16px',
-            backgroundColor: '#f0fdf4',
-            border: '1px solid #86efac',
-            borderRadius: '6px',
+            padding: '12px 18px',
+            backgroundColor: '#eff6ff',
+            border: '1px solid #93c5fd',
+            borderRadius: '8px',
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
-            color: '#166534',
-            fontSize: '13px'
+            color: '#1e3a8a',
+            fontSize: '13px',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '18px' }}>📦</span>
-            <span>
-              <strong>Linked with Purchase Order:</strong> {formData.po_no || formData.source_order_no}
-            </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '22px' }}>📜</span>
+            <div>
+              <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#1e40af' }}>
+                Imported Purchase Order Reference: <span style={{ fontFamily: 'monospace', fontSize: '15px', color: '#0369a1' }}>{formData.po_no || formData.source_order_no}</span>
+              </div>
+              <div style={{ fontSize: '12px', color: '#475569', marginTop: '2px', display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+                {effectiveSupplierName && <span><strong>Supplier:</strong> {effectiveSupplierName}</span>}
+                <span><strong>Total Bags:</strong> {totals.totalQty}</span>
+                <span><strong>Total Weight:</strong> {totals.totalWeight.toLocaleString('en-IN')} KG</span>
+                <span><strong>PO Value:</strong> ₹{totals.grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+              </div>
+            </div>
           </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <button
+              type="button"
+              onClick={handleOpenPoPicker}
+              style={{
+                padding: '4px 10px',
+                backgroundColor: '#dbeafe',
+                color: '#1e40af',
+                border: '1px solid #bfdbfe',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '11px',
+                fontWeight: 'bold'
+              }}
+            >
+              🔄 Change PO
+            </button>
             <button
               type="button"
               onClick={() => {
                 setFormData(prev => ({ ...prev, purchase_order_id: '', po_no: '', source_order_id: '', source_order_no: '' }));
               }}
               style={{
-                padding: '3px 8px',
+                padding: '4px 10px',
                 backgroundColor: '#fee2e2',
                 color: '#991b1b',
                 border: '1px solid #fca5a5',
@@ -1683,7 +1739,7 @@ const PurchaseCreation = () => {
                 fontWeight: 'bold'
               }}
             >
-              Unlink PO
+              ✕ Unlink PO
             </button>
           </div>
         </div>
@@ -2222,61 +2278,162 @@ const PurchaseCreation = () => {
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                   <thead>
                     <tr style={{ backgroundColor: '#f1f5f9', borderBottom: '2px solid #cbd5e1' }}>
+                      <th style={{ padding: '8px', textAlign: 'center', width: '36px' }}>Details</th>
                       <th style={{ padding: '8px', textAlign: 'left' }}>PO No</th>
                       <th style={{ padding: '8px', textAlign: 'left' }}>Date</th>
                       <th style={{ padding: '8px', textAlign: 'left' }}>Supplier</th>
-                      <th style={{ padding: '8px', textAlign: 'left' }}>Item / Details</th>
+                      <th style={{ padding: '8px', textAlign: 'left' }}>Items Summary</th>
+                      <th style={{ padding: '8px', textAlign: 'right' }}>Total Bags</th>
+                      <th style={{ padding: '8px', textAlign: 'right' }}>Total Wt (KG)</th>
                       <th style={{ padding: '8px', textAlign: 'right' }}>Total (₹)</th>
                       <th style={{ padding: '8px', textAlign: 'center' }}>Status</th>
                       <th style={{ padding: '8px', textAlign: 'center' }}>Action</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {poList.map((po) => (
-                      <tr key={po.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                        <td style={{ padding: '8px', fontWeight: 'bold', color: '#1f4fb2' }}>
-                          {po.inv_no || po.invNo || po.orderNo || `PO-${po.s_no}`}
-                        </td>
-                        <td style={{ padding: '8px' }}>{po.date}</td>
-                        <td style={{ padding: '8px', fontWeight: '500' }}>{po.supplier_name || po.supplierName || '—'}</td>
-                        <td style={{ padding: '8px' }}>
-                          {po.item_name || (po.items && po.items.map(i => i.item_name || i.itemName).join(', ')) || po.type || '—'}
-                        </td>
-                        <td style={{ padding: '8px', textAlign: 'right', fontWeight: 'bold' }}>
-                          ₹{parseFloat(po.total_amt || po.totAmt || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                        </td>
-                        <td style={{ padding: '8px', textAlign: 'center' }}>
-                          <span style={{
-                            padding: '2px 6px',
-                            borderRadius: '4px',
-                            fontSize: '11px',
-                            fontWeight: 'bold',
-                            backgroundColor: (po.inward_purchase_id || po.status === 'Received') ? '#dcfce7' : '#fef9c3',
-                            color: (po.inward_purchase_id || po.status === 'Received') ? '#15803d' : '#854d0e'
-                          }}>
-                            {po.inward_purchase_id || po.status === 'Received' ? 'Received' : 'Ordered'}
-                          </span>
-                        </td>
-                        <td style={{ padding: '8px', textAlign: 'center' }}>
-                          <button
-                            type="button"
-                            onClick={() => handleSelectPo(po)}
-                            style={{
-                              padding: '5px 12px',
-                              backgroundColor: '#16a34a',
-                              color: '#fff',
-                              border: 'none',
-                              borderRadius: '4px',
-                              fontWeight: 'bold',
-                              fontSize: '12px',
-                              cursor: 'pointer'
-                            }}
-                          >
-                            Inward ➔
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                    {poList.map((po) => {
+                      const isExpanded = expandedPoId === po.id;
+                      const poItems = Array.isArray(po.items) ? po.items : [];
+                      const totalBags = poItems.reduce((acc, i) => acc + (Number(i.qty) || 0), 0) || Number(po.tot_qty || po.totQty || 0);
+                      const totalWeight = poItems.reduce((acc, i) => acc + (Number(i.tot_wt || i.total_wt || i.total_weight || (Number(i.qty || 0) * Number(i.weight || 50))) || 0), 0) || Number(po.tot_wt || po.total_weight || 0);
+                      const grandTotal = Number(po.total_amt || po.totAmt || po.net_amount || po.grand_total || 0);
+
+                      return (
+                        <React.Fragment key={po.id}>
+                          <tr style={{ borderBottom: isExpanded ? 'none' : '1px solid #e2e8f0', backgroundColor: isExpanded ? '#f8fafc' : 'transparent' }}>
+                            <td style={{ padding: '8px', textAlign: 'center' }}>
+                              <button
+                                type="button"
+                                onClick={() => setExpandedPoId(isExpanded ? null : po.id)}
+                                style={{
+                                  background: 'none',
+                                  border: '1px solid #cbd5e1',
+                                  borderRadius: '4px',
+                                  width: '24px',
+                                  height: '24px',
+                                  cursor: 'pointer',
+                                  fontSize: '11px',
+                                  fontWeight: 'bold',
+                                  color: '#3b82f6',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center'
+                                }}
+                                title={isExpanded ? "Hide Line Items" : "View Line Items"}
+                              >
+                                {isExpanded ? '▲' : '▼'}
+                              </button>
+                            </td>
+                            <td style={{ padding: '8px', fontWeight: 'bold', color: '#1f4fb2' }}>
+                              {po.inv_no || po.invNo || po.orderNo || `PO-${po.s_no}`}
+                            </td>
+                            <td style={{ padding: '8px' }}>{po.date}</td>
+                            <td style={{ padding: '8px', fontWeight: '500' }}>{po.supplier_name || po.supplierName || '—'}</td>
+                            <td style={{ padding: '8px' }}>
+                              {po.item_name || (poItems.length > 0 ? poItems.map(i => i.item_name || i.itemName).join(', ') : (po.type || '—'))}
+                            </td>
+                            <td style={{ padding: '8px', textAlign: 'right', fontWeight: '500' }}>
+                              {totalBags ? totalBags.toLocaleString('en-IN') : '—'}
+                            </td>
+                            <td style={{ padding: '8px', textAlign: 'right', fontWeight: '500' }}>
+                              {totalWeight ? totalWeight.toLocaleString('en-IN') : '—'}
+                            </td>
+                            <td style={{ padding: '8px', textAlign: 'right', fontWeight: 'bold', color: '#0f172a' }}>
+                              ₹{grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                            </td>
+                            <td style={{ padding: '8px', textAlign: 'center' }}>
+                              <span style={{
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                fontSize: '11px',
+                                fontWeight: 'bold',
+                                backgroundColor: (po.inward_purchase_id || po.status === 'Received') ? '#dcfce7' : '#fef9c3',
+                                color: (po.inward_purchase_id || po.status === 'Received') ? '#15803d' : '#854d0e'
+                              }}>
+                                {po.inward_purchase_id || po.status === 'Received' ? 'Received' : 'Ordered'}
+                              </span>
+                            </td>
+                            <td style={{ padding: '8px', textAlign: 'center' }}>
+                              <button
+                                type="button"
+                                onClick={() => handleSelectPo(po)}
+                                style={{
+                                  padding: '5px 12px',
+                                  backgroundColor: '#16a34a',
+                                  color: '#fff',
+                                  border: 'none',
+                                  borderRadius: '4px',
+                                  fontWeight: 'bold',
+                                  fontSize: '12px',
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                Inward ➔
+                              </button>
+                            </td>
+                          </tr>
+
+                          {/* Expandable Line Item Details Row */}
+                          {isExpanded && (
+                            <tr style={{ backgroundColor: '#f8fafc', borderBottom: '2px solid #cbd5e1' }}>
+                              <td colSpan={10} style={{ padding: '8px 16px 14px 44px' }}>
+                                <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '10px' }}>
+                                  <div style={{ fontWeight: 'bold', fontSize: '12px', color: '#1e40af', marginBottom: '6px' }}>
+                                    📦 Ordered Line Items Breakdown ({poItems.length} items)
+                                  </div>
+                                  {poItems.length === 0 ? (
+                                    <div style={{ fontSize: '12px', color: '#64748b', fontStyle: 'italic' }}>
+                                      No itemized breakdown rows found for this order.
+                                    </div>
+                                  ) : (
+                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                                      <thead>
+                                        <tr style={{ background: '#f1f5f9', borderBottom: '1px solid #cbd5e1', color: '#475569' }}>
+                                          <th style={{ padding: '6px', textAlign: 'left' }}>#</th>
+                                          <th style={{ padding: '6px', textAlign: 'left' }}>Item Name</th>
+                                          <th style={{ padding: '6px', textAlign: 'right' }}>Qty (Bags)</th>
+                                          <th style={{ padding: '6px', textAlign: 'right' }}>Per Unit Wt (KG)</th>
+                                          <th style={{ padding: '6px', textAlign: 'right' }}>Total Wt (KG)</th>
+                                          <th style={{ padding: '6px', textAlign: 'right' }}>Rate (₹)</th>
+                                          <th style={{ padding: '6px', textAlign: 'right' }}>Disc %</th>
+                                          <th style={{ padding: '6px', textAlign: 'right' }}>Tax %</th>
+                                          <th style={{ padding: '6px', textAlign: 'right' }}>Line Amount (₹)</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {poItems.map((item, idx) => {
+                                          const itemQty = Number(item.qty || 0);
+                                          const itemWt = Number(item.weight || item.per_unit_weight || 50);
+                                          const itemTotWt = Number(item.tot_wt || item.total_wt || (itemQty * itemWt));
+                                          const itemRate = Number(item.rate || item.purc_rate || 0);
+                                          const itemDisc = Number(item.discount_percent || item.disc_percent || item.disc || 0);
+                                          const itemTax = Number(item.tax_percent ?? item.tax_rate ?? 0);
+                                          const lineAmt = Number(item.amount) || ((itemQty * itemRate) * (1 - itemDisc / 100) * (1 + itemTax / 100));
+
+                                          return (
+                                            <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                              <td style={{ padding: '6px', color: '#64748b' }}>{idx + 1}</td>
+                                              <td style={{ padding: '6px', fontWeight: '500', color: '#0f172a' }}>{item.item_name || item.itemName || '—'}</td>
+                                              <td style={{ padding: '6px', textAlign: 'right' }}>{itemQty}</td>
+                                              <td style={{ padding: '6px', textAlign: 'right' }}>{itemWt}</td>
+                                              <td style={{ padding: '6px', textAlign: 'right' }}>{itemTotWt.toLocaleString('en-IN')}</td>
+                                              <td style={{ padding: '6px', textAlign: 'right' }}>₹{itemRate.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                                              <td style={{ padding: '6px', textAlign: 'right' }}>{itemDisc}%</td>
+                                              <td style={{ padding: '6px', textAlign: 'right' }}>{itemTax}%</td>
+                                              <td style={{ padding: '6px', textAlign: 'right', fontWeight: 'bold' }}>₹{lineAmt.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                                            </tr>
+                                          );
+                                        })}
+                                      </tbody>
+                                    </table>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
                   </tbody>
                 </table>
               )}
@@ -2388,7 +2545,14 @@ const PurchaseCreation = () => {
         onClose={() => setLedgerModalOpen(false)}
         purchaseId={id}
         purchaseData={{
-          formData,
+          formData: {
+            ...formData,
+            supplier_name: effectiveSupplierName,
+            supplier: effectiveSupplierName || formData.supplier_id,
+            transporter: formData.transporter || formData.transport || '',
+            transport_charges: parseFloat(formData.net_transport_amount || formData.transport_charges || 0),
+            freight_amount: parseFloat(formData.net_transport_amount || formData.freight_amount || 0)
+          },
           items: validItems,
           totals: erpTotals,
           deductions: selectedDeductions

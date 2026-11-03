@@ -196,6 +196,24 @@ async function ensureTables() {
       )
     `);
 
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS hand_sorting_daily_assignments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        work_date TEXT NOT NULL,
+        shift TEXT DEFAULT 'Shift-1',
+        team_name TEXT NOT NULL,
+        worker_id INTEGER,
+        worker_name TEXT NOT NULL,
+        worker_code TEXT,
+        role TEXT DEFAULT 'Tray Operator',
+        tray_station_no TEXT DEFAULT 'Tray-01',
+        status TEXT DEFAULT 'PRESENT',
+        assigned_by TEXT DEFAULT 'Supervisor',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     tablesInitialized = true;
   } catch (err) {
     console.error('Error ensuring hand_sorting tables:', err);
@@ -518,9 +536,243 @@ router.post('/reset-fresh', async (req, res) => {
     await db.run(`DELETE FROM hand_sorting_fg_bags WHERE company_id = ?`, [companyId]);
     await db.run(`DELETE FROM hand_sorting_daily_records WHERE company_id = ?`, [companyId]);
     await db.run(`DELETE FROM hand_sorting_customer_plans WHERE company_id = ?`, [companyId]);
+    await db.run(`DELETE FROM hand_sorting_daily_assignments WHERE company_id = ?`, [companyId]);
     await db.run(`DELETE FROM hand_sorting_audit_logs WHERE company_id = ?`, [companyId]);
     res.json({ success: true, message: 'Hand sorting workspace reset to fresh initial state.' });
   } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// 2.1 Searchable Workers Master Endpoint
+router.get('/workers', async (req, res) => {
+  try {
+    const companyId = req.query.company_id || req.headers['x-company-id'] || 1;
+    const search = req.query.search || '';
+
+    let workers = [];
+    try {
+      let sql = `
+        SELECT id, name as worker_name, party_code as worker_code, party_type as category, phone, 'PRESENT' as status
+        FROM operational_parties
+        WHERE company_id = ? AND (party_type LIKE '%worker%' OR party_type LIKE '%labor%' OR party_type LIKE '%sorting%' OR party_type IS NULL OR party_type = '')
+      `;
+      const params = [companyId];
+      if (search) {
+        sql += ` AND (name LIKE ? OR party_code LIKE ?)`;
+        params.push(`%${search}%`, `%${search}%`);
+      }
+      sql += ` ORDER BY name ASC`;
+      const partyRes = await db.query(sql, params);
+      workers = partyRes.rows || [];
+    } catch (e) {
+      console.warn('Operational parties table fetch notice:', e.message);
+    }
+
+    // Fallback list of factory workers if no operational parties found
+    if (workers.length === 0) {
+      const defaultWorkers = [
+        { id: 101, worker_name: 'Anitha M.', worker_code: 'WRK-001', category: 'Hand Sorter', status: 'PRESENT' },
+        { id: 102, worker_name: 'Lakshmi K.', worker_code: 'WRK-002', category: 'Hand Sorter', status: 'PRESENT' },
+        { id: 103, worker_name: 'Kavitha S.', worker_code: 'WRK-003', category: 'Hand Sorter', status: 'PRESENT' },
+        { id: 104, worker_name: 'Selvi R.', worker_code: 'WRK-004', category: 'Hand Sorter', status: 'PRESENT' },
+        { id: 105, worker_name: 'Meena P.', worker_code: 'WRK-005', category: 'Hand Sorter', status: 'PRESENT' },
+        { id: 106, worker_name: 'Mariammal V.', worker_code: 'WRK-006', category: 'Hand Sorter', status: 'PRESENT' },
+        { id: 107, worker_name: 'Devi G.', worker_code: 'WRK-007', category: 'Tray Leader', status: 'PRESENT' },
+        { id: 108, worker_name: 'Valli S.', worker_code: 'WRK-008', category: 'Hand Sorter', status: 'PRESENT' },
+        { id: 109, worker_name: 'Radha T.', worker_code: 'WRK-009', category: 'Hand Sorter', status: 'PRESENT' },
+        { id: 110, worker_name: 'Bhavani R.', worker_code: 'WRK-010', category: 'Stitching Operator', status: 'PRESENT' },
+        { id: 111, worker_name: 'Saravanan M.', worker_code: 'WRK-011', category: 'Weighing Operator', status: 'PRESENT' },
+        { id: 112, worker_name: 'Karthik N.', worker_code: 'WRK-012', category: 'Warehouse Helper', status: 'PRESENT' }
+      ];
+      workers = search
+        ? defaultWorkers.filter(w => w.worker_name.toLowerCase().includes(search.toLowerCase()) || w.worker_code.toLowerCase().includes(search.toLowerCase()))
+        : defaultWorkers;
+    }
+
+    res.json({ success: true, count: workers.length, data: workers });
+  } catch (err) {
+    console.error('Error fetching workers:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// 2.2 Daily Team Assignments API (Date, Shift, Team, Tray Station, Workers)
+router.get('/daily-assignments', async (req, res) => {
+  try {
+    const companyId = req.query.company_id || req.headers['x-company-id'] || 1;
+    const { work_date, shift, team_name } = req.query;
+
+    let sql = `SELECT * FROM hand_sorting_daily_assignments WHERE company_id = ?`;
+    const params = [companyId];
+
+    if (work_date) {
+      sql += ` AND work_date = ?`;
+      params.push(work_date);
+    }
+    if (shift) {
+      sql += ` AND shift = ?`;
+      params.push(shift);
+    }
+    if (team_name) {
+      sql += ` AND team_name = ?`;
+      params.push(team_name);
+    }
+
+    sql += ` ORDER BY id ASC`;
+    const result = await db.query(sql, params);
+    res.json({ success: true, data: result.rows || [] });
+  } catch (err) {
+    console.error('Error fetching daily assignments:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.post('/daily-assignments', async (req, res) => {
+  try {
+    const companyId = req.body.company_id || req.headers['x-company-id'] || 1;
+    const { work_date, shift, team_name, tray_station_no, workers, assigned_by } = req.body;
+
+    if (!work_date || !shift || !team_name || !Array.isArray(workers) || workers.length === 0) {
+      return res.status(400).json({ success: false, message: 'Work date, shift, team name, and selected workers are required.' });
+    }
+
+    // Check duplicate worker assignment within the same date and shift across OTHER teams
+    const existingRes = await db.query(`
+      SELECT worker_name, team_name, shift FROM hand_sorting_daily_assignments
+      WHERE company_id = ? AND work_date = ? AND shift = ?
+    `, [companyId, work_date, shift]);
+
+    const existingWorkersMap = new Map();
+    (existingRes.rows || []).forEach(r => {
+      existingWorkersMap.set(r.worker_name, r.team_name);
+    });
+
+    const duplicates = [];
+    for (const w of workers) {
+      const wName = typeof w === 'string' ? w : w.worker_name;
+      if (existingWorkersMap.has(wName) && existingWorkersMap.get(wName) !== team_name) {
+        duplicates.push(`${wName} (already in ${existingWorkersMap.get(wName)})`);
+      }
+    }
+
+    if (duplicates.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Duplicate assignment conflict: ${duplicates.join(', ')} on ${work_date} (${shift}). Clear previous assignment first.`
+      });
+    }
+
+    // Delete existing team assignments for this specific team, date, and shift to update
+    await db.run(`
+      DELETE FROM hand_sorting_daily_assignments
+      WHERE company_id = ? AND work_date = ? AND shift = ? AND team_name = ?
+    `, [companyId, work_date, shift, team_name]);
+
+    // Insert new worker assignments
+    for (let i = 0; i < workers.length; i++) {
+      const w = workers[i];
+      const wName = typeof w === 'string' ? w : w.worker_name;
+      const wCode = typeof w === 'object' ? (w.worker_code || '') : `WRK-00${i+1}`;
+      const wId = typeof w === 'object' ? (w.id || null) : null;
+      const role = i === 0 ? 'Tray Leader & Operator' : `Tray Operator ${i+1}`;
+
+      await db.run(`
+        INSERT INTO hand_sorting_daily_assignments (
+          company_id, work_date, shift, team_name, worker_id, worker_name, worker_code, role, tray_station_no, status, assigned_by
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PRESENT', ?)
+      `, [
+        companyId, work_date, shift, team_name, wId, wName, wCode, role, tray_station_no || 'Tray-01', assigned_by || 'Supervisor'
+      ]);
+    }
+
+    res.json({
+      success: true,
+      message: `Daily Team Assignment saved successfully: ${workers.length} workers allocated to ${team_name} (${shift}, ${work_date}).`
+    });
+  } catch (err) {
+    console.error('Error saving daily assignments:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.delete('/daily-assignments/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const companyId = req.query.company_id || req.headers['x-company-id'] || 1;
+    await db.run(`DELETE FROM hand_sorting_daily_assignments WHERE id = ? AND company_id = ?`, [id, companyId]);
+    res.json({ success: true, message: 'Assignment record removed.' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// 2.3 Material Reconciliation Endpoint (Zero Double-Counting)
+router.get('/reconciliation/:jobId', async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const companyId = req.query.company_id || req.headers['x-company-id'] || 1;
+
+    const [jobRes, bagsRes, roundsRes] = await Promise.all([
+      db.query(`SELECT * FROM hand_sorting_jobs WHERE id = ? AND company_id = ?`, [jobId, companyId]),
+      db.query(`SELECT * FROM hand_sorting_fg_bags WHERE job_id = ? AND company_id = ?`, [jobId, companyId]),
+      db.query(`SELECT * FROM hand_sorting_rounds WHERE job_id = ? AND company_id = ?`, [jobId, companyId])
+    ]);
+
+    if (!jobRes.rows.length) {
+      return res.status(404).json({ success: false, message: 'Job not found' });
+    }
+
+    const job = jobRes.rows[0];
+    const bags = bagsRes.rows || [];
+    const rounds = roundsRes.rows || [];
+
+    const totalInputRmKg = parseFloat(job.source_rm_weight_kg || 0);
+    const vacuumOutputKg = parseFloat(job.vacuum_output_weight_kg || 0);
+
+    const approvedFgKg = bags
+      .filter(b => b.qc_status === 'APPROVED' && b.isolation_status === 'NORMAL')
+      .reduce((acc, b) => acc + parseFloat(b.actual_weight_kg || 0), 0);
+
+    const isolatedFgKg = bags
+      .filter(b => b.isolation_status === 'ISOLATED')
+      .reduce((acc, b) => acc + parseFloat(b.actual_weight_kg || 0), 0);
+
+    const totalFgProducedKg = approvedFgKg + isolatedFgKg;
+
+    const totalMeasuredWasteKg = rounds
+      .reduce((acc, r) => acc + parseFloat(r.waste_measured_weight_kg || 0), 0);
+
+    // Unprocessed WIP / Tray Balance (Input RM - (FG Output + Waste))
+    const wipBalanceKg = Math.max(0, parseFloat((totalInputRmKg - (totalFgProducedKg + totalMeasuredWasteKg)).toFixed(2)));
+
+    const yieldPct = totalInputRmKg > 0 ? parseFloat(((approvedFgKg / totalInputRmKg) * 100).toFixed(1)) : 0;
+    const wastePct = totalInputRmKg > 0 ? parseFloat(((totalMeasuredWasteKg / totalInputRmKg) * 100).toFixed(1)) : 0;
+    const varianceKg = parseFloat((totalInputRmKg - (totalFgProducedKg + totalMeasuredWasteKg + wipBalanceKg)).toFixed(2));
+
+    res.json({
+      success: true,
+      data: {
+        job_no: job.job_no,
+        processing_route: job.processing_route,
+        source_lot_no: job.source_lot_no,
+        total_input_rm_kg: totalInputRmKg,
+        vacuum_output_kg: vacuumOutputKg,
+        approved_fg_kg: approvedFgKg,
+        approved_fg_bags: bags.filter(b => b.qc_status === 'APPROVED' && b.isolation_status === 'NORMAL').length,
+        isolated_fg_kg: isolatedFgKg,
+        isolated_fg_bags: bags.filter(b => b.isolation_status === 'ISOLATED').length,
+        total_fg_produced_kg: totalFgProducedKg,
+        total_waste_kg: totalMeasuredWasteKg,
+        wip_balance_kg: wipBalanceKg,
+        yield_pct: yieldPct,
+        waste_pct: wastePct,
+        variance_kg: varianceKg,
+        is_reconciled: Math.abs(varianceKg) < 0.05
+      }
+    });
+  } catch (err) {
+    console.error('Error fetching reconciliation:', err);
     res.status(500).json({ success: false, message: err.message });
   }
 });

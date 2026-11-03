@@ -13,7 +13,7 @@ export const buildReceiptDraftFromPurchaseOrder = (order = {}) => {
       supplier_id: order.supplierId || order.supplier_id || order.supplier || '',
       supplier_details: order.address || order.supplierAddress || '',
       address: order.address || order.supplierAddress || '',
-      date: order.date || new Date().toISOString().split('T')[0],
+      date: new Date().toISOString().split('T')[0],
       inv_date: order.inv_date || order.invDate || '',
       pay_type: order.pay_type || order.payType || 'Cash',
       tax_type: order.tax_type || order.taxType || 'Exclusive',

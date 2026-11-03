@@ -27,6 +27,17 @@ export function generateVehicleInPassHtml(row = {}, company = {}) {
   const totalWeight = row.total_weight || row.total_wt || '—';
   const godown = row.godown || row.godown_name || 'Main Godown';
 
+  const grossWeight = row.gross_weight ?? row.cross_weight ?? '—';
+  const tareWeight = row.tare_weight ?? '—';
+  const netWeight = row.net_weight ?? row.total_weight ?? row.total_wt ?? '—';
+
+  const formatWt = (val) => {
+    if (val === null || val === undefined || val === '' || val === '—') return '—';
+    const num = Number(val);
+    if (!isNaN(num) && num > 0) return `${num.toLocaleString('en-IN', { minimumFractionDigits: 2 })} KG`;
+    return String(val);
+  };
+
   return `
     <div style="font-family: 'Segoe UI', Arial, sans-serif; color: #1e293b; line-height: 1.4; max-width: 850px; margin: 0 auto; padding: 10px;">
       
@@ -135,12 +146,12 @@ export function generateVehicleInPassHtml(row = {}, company = {}) {
       <!-- WEIGHBRIDGE & SECURITY CHECKPOINTS -->
       <table style="width: 100%; border-collapse: collapse; margin-bottom: 18px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 12px;">
         <tr style="background: #f8fafc; border-bottom: 1px solid #cbd5e1;">
-          <th colspan="4" style="padding: 6px 10px; text-align: left; font-weight: 700; color: #334155;">⚖️ WEIGHBRIDGE & SECURITY CHECKS</th>
+          <th colspan="4" style="padding: 6px 10px; text-align: left; font-weight: 700; color: #334155;">⚖️ WEIGHBRIDGE & WEIGHT VERIFICATION CHECKS</th>
         </tr>
         <tr>
-          <td style="padding: 8px 10px; border-right: 1px solid #cbd5e1; width: 25%;"><strong>Gross Weight:</strong> ________________ KG</td>
-          <td style="padding: 8px 10px; border-right: 1px solid #cbd5e1; width: 25%;"><strong>Tare Weight:</strong> Pending Exit</td>
-          <td style="padding: 8px 10px; border-right: 1px solid #cbd5e1; width: 25%;"><strong>Net Weight:</strong> ________________ KG</td>
+          <td style="padding: 8px 10px; border-right: 1px solid #cbd5e1; width: 25%;"><strong>Cross / Gross Wt:</strong> <span style="font-weight: 800; color: #0f172a;">${formatWt(grossWeight)}</span></td>
+          <td style="padding: 8px 10px; border-right: 1px solid #cbd5e1; width: 25%;"><strong>Tare Wt (Empty):</strong> <span style="font-weight: 800; color: #0f172a;">${formatWt(tareWeight)}</span></td>
+          <td style="padding: 8px 10px; border-right: 1px solid #cbd5e1; width: 25%;"><strong>Net Weight:</strong> <span style="font-weight: 800; color: #0f766e;">${formatWt(netWeight)}</span></td>
           <td style="padding: 8px 10px; width: 25%;"><strong>Security Seal:</strong> Verified [ ✓ ]</td>
         </tr>
         <tr style="border-top: 1px solid #cbd5e1;">

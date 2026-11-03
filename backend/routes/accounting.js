@@ -24,7 +24,7 @@ const INITIAL_LEDGER_GROUPS = [
   { name: 'Suspense Accounts', nature: 'Liability', statement: 'Balance Sheet', balance: 'Cr', parent: null },
 ];
 
-async function initAccountingTables() {
+async function initAccountingTables(companyId = null) {
   try {
     // 1. Ledger Groups table
     await db.run(`
@@ -40,7 +40,7 @@ async function initAccountingTables() {
         status TEXT DEFAULT 'Active',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
-    `);
+    `, [], companyId);
 
     // 2. Ledger Master table
     await db.run(`
@@ -63,52 +63,56 @@ async function initAccountingTables() {
         status TEXT DEFAULT 'Active',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
-    `);
+    `, [], companyId);
 
     // Check and migrate columns if ledgermaster existed with older/different schema
     try {
-      const tableInfo = await db.query('PRAGMA table_info(ledgermaster)');
+      const tableInfo = await db.query('PRAGMA table_info(ledgermaster)', [], companyId);
       const columns = new Set((tableInfo.rows || []).map(r => r.name));
-      if (!columns.has('ledger_name') && columns.has('name')) {
-        try { await db.run('ALTER TABLE ledgermaster ADD COLUMN ledger_name TEXT'); } catch (e) {}
-        try { await db.run('UPDATE ledgermaster SET ledger_name = name WHERE ledger_name IS NULL OR ledger_name = ""'); } catch (e) {}
+      if (!columns.has('ledger_name')) {
+        try { await db.run('ALTER TABLE ledgermaster ADD COLUMN ledger_name TEXT', [], companyId); } catch (e) {}
       }
-      if (!columns.has('group_name') && columns.has('under')) {
-        try { await db.run('ALTER TABLE ledgermaster ADD COLUMN group_name TEXT'); } catch (e) {}
-        try { await db.run('UPDATE ledgermaster SET group_name = under WHERE group_name IS NULL OR group_name = ""'); } catch (e) {}
+      if (columns.has('name')) {
+        try { await db.run('UPDATE ledgermaster SET ledger_name = name WHERE ledger_name IS NULL OR ledger_name = ""', [], companyId); } catch (e) {}
       }
-      if (!columns.has('ledger_code')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN ledger_code TEXT'); } catch (e) {} }
-      if (!columns.has('group_id')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN group_id INTEGER'); } catch (e) {} }
-      if (!columns.has('opening_balance')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN opening_balance REAL DEFAULT 0'); } catch (e) {} }
-      if (!columns.has('opening_balance_type')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN opening_balance_type TEXT DEFAULT "Dr"'); } catch (e) {} }
-      if (!columns.has('opening_date')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN opening_date DATE'); } catch (e) {} }
-      if (!columns.has('linked_party_type')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN linked_party_type TEXT'); } catch (e) {} }
-      if (!columns.has('linked_party_id')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN linked_party_id INTEGER'); } catch (e) {} }
-      if (!columns.has('gst_no')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN gst_no TEXT'); } catch (e) {} }
-      if (!columns.has('contact_person')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN contact_person TEXT'); } catch (e) {} }
-      if (!columns.has('phone')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN phone TEXT'); } catch (e) {} }
-      if (!columns.has('email')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN email TEXT'); } catch (e) {} }
-      if (!columns.has('credit_period')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN credit_period INTEGER DEFAULT 30'); } catch (e) {} }
-      if (!columns.has('status')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN status TEXT DEFAULT "Active"'); } catch (e) {} }
+      if (!columns.has('group_name')) {
+        try { await db.run('ALTER TABLE ledgermaster ADD COLUMN group_name TEXT', [], companyId); } catch (e) {}
+      }
+      if (columns.has('under')) {
+        try { await db.run('UPDATE ledgermaster SET group_name = under WHERE group_name IS NULL OR group_name = ""', [], companyId); } catch (e) {}
+      }
+      if (!columns.has('ledger_code')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN ledger_code TEXT', [], companyId); } catch (e) {} }
+      if (!columns.has('group_id')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN group_id INTEGER', [], companyId); } catch (e) {} }
+      if (!columns.has('opening_balance')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN opening_balance REAL DEFAULT 0', [], companyId); } catch (e) {} }
+      if (!columns.has('opening_balance_type')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN opening_balance_type TEXT DEFAULT "Dr"', [], companyId); } catch (e) {} }
+      if (!columns.has('opening_date')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN opening_date DATE', [], companyId); } catch (e) {} }
+      if (!columns.has('linked_party_type')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN linked_party_type TEXT', [], companyId); } catch (e) {} }
+      if (!columns.has('linked_party_id')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN linked_party_id INTEGER', [], companyId); } catch (e) {} }
+      if (!columns.has('gst_no')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN gst_no TEXT', [], companyId); } catch (e) {} }
+      if (!columns.has('contact_person')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN contact_person TEXT', [], companyId); } catch (e) {} }
+      if (!columns.has('phone')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN phone TEXT', [], companyId); } catch (e) {} }
+      if (!columns.has('email')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN email TEXT', [], companyId); } catch (e) {} }
+      if (!columns.has('credit_period')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN credit_period INTEGER DEFAULT 30', [], companyId); } catch (e) {} }
+      if (!columns.has('status')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN status TEXT DEFAULT "Active"', [], companyId); } catch (e) {} }
     } catch (migErr) {
       console.warn('Migration check warning:', migErr.message);
     }
 
     // Seed Ledger Groups if table is empty
-    const groupCountRes = await db.query("SELECT COUNT(*) as cnt FROM ledger_groups");
+    const groupCountRes = await db.query("SELECT COUNT(*) as cnt FROM ledger_groups", [], companyId);
     const count = groupCountRes?.rows?.[0]?.cnt || 0;
     if (count === 0) {
       console.log('Seeding initial Tally Ledger Groups...');
       for (const g of INITIAL_LEDGER_GROUPS) {
         let parentId = null;
         if (g.parent) {
-          const parentRes = await db.query("SELECT id FROM ledger_groups WHERE group_name = ? LIMIT 1", [g.parent]);
+          const parentRes = await db.query("SELECT id FROM ledger_groups WHERE group_name = ? LIMIT 1", [g.parent], companyId);
           if (parentRes?.rows?.[0]) parentId = parentRes.rows[0].id;
         }
         await db.run(`
           INSERT INTO ledger_groups (group_name, parent_group_id, parent_group_name, account_nature, financial_statement, normal_balance)
           VALUES (?, ?, ?, ?, ?, ?)
-        `, [g.name, parentId, g.parent || null, g.nature, g.statement, g.balance]);
+        `, [g.name, parentId, g.parent || null, g.nature, g.statement, g.balance], companyId);
       }
     }
 
@@ -130,14 +134,14 @@ async function initAccountingTables() {
     ];
 
     for (const dl of defaultLedgers) {
-      const checkRes = await db.query("SELECT id FROM ledgermaster WHERE LOWER(TRIM(ledger_name)) = LOWER(TRIM(?)) LIMIT 1", [dl.name]);
+      const checkRes = await db.query("SELECT id FROM ledgermaster WHERE LOWER(TRIM(COALESCE(ledger_name, name))) = LOWER(TRIM(?)) LIMIT 1", [dl.name], companyId);
       if (!checkRes?.rows?.length) {
-        const groupRes = await db.query("SELECT id FROM ledger_groups WHERE group_name = ? LIMIT 1", [dl.group]);
+        const groupRes = await db.query("SELECT id FROM ledger_groups WHERE group_name = ? LIMIT 1", [dl.group], companyId);
         const groupId = groupRes?.rows?.[0]?.id || null;
         await db.run(`
           INSERT INTO ledgermaster (ledger_name, ledger_code, group_id, group_name, opening_balance, opening_balance_type, status)
           VALUES (?, ?, ?, ?, 0, ?, 'Active')
-        `, [dl.name, dl.name.toUpperCase().replace(/\s+/g, '_'), groupId, dl.group, dl.type]);
+        `, [dl.name, dl.name.toUpperCase().replace(/\s+/g, '_'), groupId, dl.group, dl.type], companyId);
       }
     }
 
@@ -146,7 +150,17 @@ async function initAccountingTables() {
   }
 }
 
-initAccountingTables();
+initAccountingTables(1).catch(err => console.warn('[accounting] Initial startup migration notice:', err.message));
+
+router.use(async (req, res, next) => {
+  try {
+    const cId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    await initAccountingTables(cId);
+  } catch (err) {
+    console.warn('[accounting] Table initialization notice:', err.message);
+  }
+  next();
+});
 
 // -------------------------------------------------------------
 // 1. ACCOUNTING DASHBOARD METRICS
@@ -166,8 +180,8 @@ router.get('/dashboard', async (req, res) => {
       SELECT 
         COALESCE(SUM(le.debit) - SUM(le.credit), 0) as balance
       FROM ledger_entries le
-      JOIN ledgermaster lm ON le.ledger_id = lm.id OR LOWER(TRIM(le.ledger_name)) = LOWER(TRIM(lm.ledger_name))
-      WHERE lm.group_name = 'Cash-in-hand' OR le.ledger_name LIKE '%Cash%'
+      JOIN ledgermaster lm ON le.ledger_id = lm.id OR LOWER(TRIM(le.ledger_name)) = LOWER(TRIM(COALESCE(lm.ledger_name, lm.name, '')))
+      WHERE COALESCE(lm.group_name, lm.under) = 'Cash-in-hand' OR le.ledger_name LIKE '%Cash%'
     `);
 
     // Bank Balance
@@ -175,8 +189,8 @@ router.get('/dashboard', async (req, res) => {
       SELECT 
         COALESCE(SUM(le.debit) - SUM(le.credit), 0) as balance
       FROM ledger_entries le
-      JOIN ledgermaster lm ON le.ledger_id = lm.id OR LOWER(TRIM(le.ledger_name)) = LOWER(TRIM(lm.ledger_name))
-      WHERE lm.group_name = 'Bank Accounts' OR le.ledger_name LIKE '%Bank%'
+      JOIN ledgermaster lm ON le.ledger_id = lm.id OR LOWER(TRIM(le.ledger_name)) = LOWER(TRIM(COALESCE(lm.ledger_name, lm.name, '')))
+      WHERE COALESCE(lm.group_name, lm.under) = 'Bank Accounts' OR le.ledger_name LIKE '%Bank%'
     `);
 
     // Supplier Outstanding (Sundry Creditors)
@@ -184,8 +198,8 @@ router.get('/dashboard', async (req, res) => {
       SELECT 
         COALESCE(SUM(le.credit) - SUM(le.debit), 0) as outstanding
       FROM ledger_entries le
-      JOIN ledgermaster lm ON le.ledger_id = lm.id OR LOWER(TRIM(le.ledger_name)) = LOWER(TRIM(lm.ledger_name))
-      WHERE lm.group_name = 'Sundry Creditors' OR lm.linked_party_type = 'supplier'
+      JOIN ledgermaster lm ON le.ledger_id = lm.id OR LOWER(TRIM(le.ledger_name)) = LOWER(TRIM(COALESCE(lm.ledger_name, lm.name, '')))
+      WHERE COALESCE(lm.group_name, lm.under) = 'Sundry Creditors' OR lm.linked_party_type = 'supplier'
     `);
 
     // Customer Outstanding (Sundry Debtors)
@@ -193,8 +207,8 @@ router.get('/dashboard', async (req, res) => {
       SELECT 
         COALESCE(SUM(le.debit) - SUM(le.credit), 0) as outstanding
       FROM ledger_entries le
-      JOIN ledgermaster lm ON le.ledger_id = lm.id OR LOWER(TRIM(le.ledger_name)) = LOWER(TRIM(lm.ledger_name))
-      WHERE lm.group_name = 'Sundry Debtors' OR lm.linked_party_type = 'customer'
+      JOIN ledgermaster lm ON le.ledger_id = lm.id OR LOWER(TRIM(le.ledger_name)) = LOWER(TRIM(COALESCE(lm.ledger_name, lm.name, '')))
+      WHERE COALESCE(lm.group_name, lm.under) = 'Sundry Debtors' OR lm.linked_party_type = 'customer'
     `);
 
     // Purchases & Sales Totals
@@ -209,7 +223,7 @@ router.get('/dashboard', async (req, res) => {
     const directExpRes = await db.query(`
       SELECT COALESCE(SUM(le.debit - le.credit), 0) as total
       FROM ledger_entries le
-      LEFT JOIN ledgermaster lm ON le.ledger_id = lm.id OR LOWER(TRIM(le.ledger_name)) = LOWER(TRIM(lm.ledger_name))
+      LEFT JOIN ledgermaster lm ON le.ledger_id = lm.id OR LOWER(TRIM(le.ledger_name)) = LOWER(TRIM(COALESCE(lm.ledger_name, lm.name, '')))
       LEFT JOIN ledger_groups lg ON lm.group_id = lg.id
       WHERE lg.group_name = 'Direct Expenses' OR le.ledger_name IN ('Transport Charges', 'Loadman Charges')
     `);
@@ -217,7 +231,7 @@ router.get('/dashboard', async (req, res) => {
     const indirectExpRes = await db.query(`
       SELECT COALESCE(SUM(le.debit - le.credit), 0) as total
       FROM ledger_entries le
-      LEFT JOIN ledgermaster lm ON le.ledger_id = lm.id OR LOWER(TRIM(le.ledger_name)) = LOWER(TRIM(lm.ledger_name))
+      LEFT JOIN ledgermaster lm ON le.ledger_id = lm.id OR LOWER(TRIM(le.ledger_name)) = LOWER(TRIM(COALESCE(lm.ledger_name, lm.name, '')))
       LEFT JOIN ledger_groups lg ON lm.group_id = lg.id
       WHERE lg.group_name = 'Indirect Expenses'
     `);
@@ -265,7 +279,7 @@ router.get('/groups', async (req, res) => {
   try {
     const result = await db.query(`
       SELECT lg.*,
-        (SELECT COUNT(*) FROM ledgermaster lm WHERE lm.group_id = lg.id OR LOWER(TRIM(lm.group_name)) = LOWER(TRIM(lg.group_name))) as ledger_count,
+        (SELECT COUNT(*) FROM ledgermaster lm WHERE lm.group_id = lg.id OR LOWER(TRIM(COALESCE(lm.group_name, lm.under))) = LOWER(TRIM(lg.group_name))) as ledger_count,
         (SELECT COALESCE(SUM(le.debit), 0) FROM ledger_entries le JOIN ledgermaster lm ON le.ledger_id = lm.id WHERE lm.group_id = lg.id) as group_debit,
         (SELECT COALESCE(SUM(le.credit), 0) FROM ledger_entries le JOIN ledgermaster lm ON le.ledger_id = lm.id WHERE lm.group_id = lg.id) as group_credit
       FROM ledger_groups lg
@@ -350,13 +364,15 @@ router.get('/ledgers', async (req, res) => {
   try {
     const result = await db.query(`
       SELECT lm.*,
+        COALESCE(lm.ledger_name, lm.name) AS ledger_name,
+        COALESCE(lm.group_name, lm.under) AS group_name,
         lg.account_nature,
         lg.financial_statement,
-        COALESCE((SELECT SUM(debit) FROM ledger_entries le WHERE le.ledger_id = lm.id OR LOWER(TRIM(le.ledger_name)) = LOWER(TRIM(lm.ledger_name))), 0) as total_debit,
-        COALESCE((SELECT SUM(credit) FROM ledger_entries le WHERE le.ledger_id = lm.id OR LOWER(TRIM(le.ledger_name)) = LOWER(TRIM(lm.ledger_name))), 0) as total_credit
+        COALESCE((SELECT SUM(debit) FROM ledger_entries le WHERE le.ledger_id = lm.id OR LOWER(TRIM(le.ledger_name)) = LOWER(TRIM(COALESCE(lm.ledger_name, lm.name)))), 0) as total_debit,
+        COALESCE((SELECT SUM(credit) FROM ledger_entries le WHERE le.ledger_id = lm.id OR LOWER(TRIM(le.ledger_name)) = LOWER(TRIM(COALESCE(lm.ledger_name, lm.name)))), 0) as total_credit
       FROM ledgermaster lm
-      LEFT JOIN ledger_groups lg ON lm.group_id = lg.id OR LOWER(TRIM(lm.group_name)) = LOWER(TRIM(lg.group_name))
-      ORDER BY lm.ledger_name ASC
+      LEFT JOIN ledger_groups lg ON lm.group_id = lg.id OR LOWER(TRIM(COALESCE(lm.group_name, lm.under))) = LOWER(TRIM(lg.group_name))
+      ORDER BY COALESCE(lm.ledger_name, lm.name) ASC
     `);
 
     const rows = (result.rows || []).map(r => {
@@ -584,22 +600,24 @@ router.get('/group-statement', async (req, res) => {
   try {
     const groupsRes = await db.query(`
       SELECT lg.*,
-        (SELECT COUNT(*) FROM ledgermaster lm WHERE lm.group_id = lg.id OR LOWER(TRIM(lm.group_name)) = LOWER(TRIM(lg.group_name))) as total_ledgers
+        (SELECT COUNT(*) FROM ledgermaster lm WHERE lm.group_id = lg.id OR LOWER(TRIM(COALESCE(lm.group_name, lm.under))) = LOWER(TRIM(lg.group_name))) as total_ledgers
       FROM ledger_groups lg
       ORDER BY lg.account_nature ASC, lg.group_name ASC
     `);
 
     const ledgersRes = await db.query(`
       SELECT lm.*,
-        COALESCE((SELECT SUM(debit) FROM ledger_entries le WHERE le.ledger_id = lm.id OR LOWER(TRIM(le.ledger_name)) = LOWER(TRIM(lm.ledger_name))), 0) as debit_total,
-        COALESCE((SELECT SUM(credit) FROM ledger_entries le WHERE le.ledger_id = lm.id OR LOWER(TRIM(le.ledger_name)) = LOWER(TRIM(lm.ledger_name))), 0) as credit_total
+        COALESCE(lm.ledger_name, lm.name) AS ledger_name,
+        COALESCE(lm.group_name, lm.under) AS group_name,
+        COALESCE((SELECT SUM(debit) FROM ledger_entries le WHERE le.ledger_id = lm.id OR LOWER(TRIM(le.ledger_name)) = LOWER(TRIM(COALESCE(lm.ledger_name, lm.name)))), 0) as debit_total,
+        COALESCE((SELECT SUM(credit) FROM ledger_entries le WHERE le.ledger_id = lm.id OR LOWER(TRIM(le.ledger_name)) = LOWER(TRIM(COALESCE(lm.ledger_name, lm.name)))), 0) as credit_total
       FROM ledgermaster lm
-      ORDER BY lm.ledger_name ASC
+      ORDER BY COALESCE(lm.ledger_name, lm.name) ASC
     `);
 
     const ledgersByGroup = {};
     for (const l of ledgersRes.rows || []) {
-      const gKey = l.group_name || 'General';
+      const gKey = l.group_name || l.under || 'General';
       if (!ledgersByGroup[gKey]) ledgersByGroup[gKey] = [];
 
       const openVal = Number(l.opening_balance || 0);
@@ -680,13 +698,13 @@ router.get('/day-book', async (req, res) => {
 router.get('/trial-balance', async (req, res) => {
   try {
     const ledgersRes = await db.query(`
-      SELECT lm.id, lm.ledger_name, lm.group_name, lm.opening_balance, lm.opening_balance_type,
+      SELECT lm.id, COALESCE(lm.ledger_name, lm.name) AS ledger_name, COALESCE(lm.group_name, lm.under) AS group_name, lm.opening_balance, lm.opening_balance_type,
         lg.account_nature, lg.financial_statement,
-        COALESCE((SELECT SUM(debit) FROM ledger_entries le WHERE le.ledger_id = lm.id OR LOWER(TRIM(le.ledger_name)) = LOWER(TRIM(lm.ledger_name))), 0) as total_debit,
-        COALESCE((SELECT SUM(credit) FROM ledger_entries le WHERE le.ledger_id = lm.id OR LOWER(TRIM(le.ledger_name)) = LOWER(TRIM(lm.ledger_name))), 0) as total_credit
+        COALESCE((SELECT SUM(debit) FROM ledger_entries le WHERE le.ledger_id = lm.id OR LOWER(TRIM(le.ledger_name)) = LOWER(TRIM(COALESCE(lm.ledger_name, lm.name)))), 0) as total_debit,
+        COALESCE((SELECT SUM(credit) FROM ledger_entries le WHERE le.ledger_id = lm.id OR LOWER(TRIM(le.ledger_name)) = LOWER(TRIM(COALESCE(lm.ledger_name, lm.name)))), 0) as total_credit
       FROM ledgermaster lm
-      LEFT JOIN ledger_groups lg ON lm.group_id = lg.id OR LOWER(TRIM(lm.group_name)) = LOWER(TRIM(lg.group_name))
-      ORDER BY lm.group_name ASC, lm.ledger_name ASC
+      LEFT JOIN ledger_groups lg ON lm.group_id = lg.id OR LOWER(TRIM(COALESCE(lm.group_name, lm.under))) = LOWER(TRIM(lg.group_name))
+      ORDER BY COALESCE(lm.group_name, lm.under) ASC, COALESCE(lm.ledger_name, lm.name) ASC
     `);
 
     let grandDr = 0;

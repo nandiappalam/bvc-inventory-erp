@@ -523,6 +523,45 @@ module.exports = async function autoMigrate() {
     console.log('✗ Error ensuring stock alert tables:', err.message);
   }
 
+  // Ensure ledger_groups table & ledgermaster columns exist
+  try {
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS ledger_groups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        group_name TEXT UNIQUE NOT NULL,
+        parent_group_id INTEGER,
+        parent_group_name TEXT,
+        account_nature TEXT NOT NULL DEFAULT 'Expense',
+        financial_statement TEXT NOT NULL DEFAULT 'Profit & Loss',
+        normal_balance TEXT NOT NULL DEFAULT 'Dr',
+        description TEXT,
+        status TEXT DEFAULT 'Active',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('✓ Table ledger_groups is ready');
+  } catch (err) {
+    console.log('✗ Error creating ledger_groups:', err.message);
+  }
+
+  await safeAddColumn('ledgermaster', 'ledger_name', 'TEXT');
+  await safeAddColumn('ledgermaster', 'ledger_code', 'TEXT');
+  await safeAddColumn('ledgermaster', 'group_id', 'INTEGER');
+  await safeAddColumn('ledgermaster', 'group_name', 'TEXT');
+  await safeAddColumn('ledgermaster', 'opening_balance', 'REAL DEFAULT 0');
+  await safeAddColumn('ledgermaster', 'opening_balance_type', "TEXT DEFAULT 'Dr'");
+  await safeAddColumn('ledgermaster', 'linked_party_type', 'TEXT');
+  await safeAddColumn('ledgermaster', 'linked_party_id', 'INTEGER');
+  await safeAddColumn('ledgermaster', 'gst_no', 'TEXT');
+  await safeAddColumn('ledgermaster', 'contact_person', 'TEXT');
+  await safeAddColumn('ledgermaster', 'phone', 'TEXT');
+  await safeAddColumn('ledgermaster', 'email', 'TEXT');
+  await safeAddColumn('ledgermaster', 'credit_period', 'INTEGER DEFAULT 30');
+  try {
+    await db.run('UPDATE ledgermaster SET ledger_name = name WHERE ledger_name IS NULL OR ledger_name = ""');
+    await db.run('UPDATE ledgermaster SET group_name = under WHERE group_name IS NULL OR group_name = ""');
+  } catch (_) {}
+
   await safeAddColumn('item_master', 'minimum_qty', 'REAL DEFAULT 0');
   await safeAddColumn('item_master', 'reorder_level', 'REAL DEFAULT 0');
   await safeAddColumn('item_master', 'critical_level', 'REAL DEFAULT 0');
@@ -741,6 +780,11 @@ module.exports = async function autoMigrate() {
   await safeAddColumn('purchase_returns', 'lot_no', 'TEXT');
   await safeAddColumn('purchase_returns', 'purchase_id', 'TEXT');
 
+  await safeAddColumn('quotations', 'loadman_name', 'TEXT');
+  await safeAddColumn('quotations', 'loadman_worker_id', 'INTEGER');
+  await safeAddColumn('quotations', 'loadman_rate_per_kg', 'REAL DEFAULT 0.50');
+  await safeAddColumn('quotations', 'loadman_charges', 'REAL DEFAULT 0');
+
   // Table for Papad Return
   try {
     await db.run(`
@@ -945,6 +989,25 @@ module.exports = async function autoMigrate() {
   await safeAddColumn('ledgermaster', 'opening_type', "TEXT DEFAULT 'Dr'");
   await safeAddColumn('ledgermaster', 'ledger_type', "TEXT DEFAULT 'General'");
   await safeAddColumn('ledgermaster', 'status', "TEXT DEFAULT 'Active'");
+  await safeAddColumn('ledgermaster', 'ledger_name', 'TEXT');
+  await safeAddColumn('ledgermaster', 'group_name', 'TEXT');
+  await safeAddColumn('ledgermaster', 'ledger_code', 'TEXT');
+  await safeAddColumn('ledgermaster', 'group_id', 'INTEGER');
+  await safeAddColumn('ledgermaster', 'opening_balance', 'REAL DEFAULT 0');
+  await safeAddColumn('ledgermaster', 'opening_balance_type', "TEXT DEFAULT 'Dr'");
+  await safeAddColumn('ledgermaster', 'opening_date', 'DATE');
+  await safeAddColumn('ledgermaster', 'linked_party_type', 'TEXT');
+  await safeAddColumn('ledgermaster', 'linked_party_id', 'INTEGER');
+  await safeAddColumn('ledgermaster', 'gst_no', 'TEXT');
+  await safeAddColumn('ledgermaster', 'contact_person', 'TEXT');
+  await safeAddColumn('ledgermaster', 'phone', 'TEXT');
+  await safeAddColumn('ledgermaster', 'email', 'TEXT');
+  await safeAddColumn('ledgermaster', 'credit_period', 'INTEGER DEFAULT 30');
+
+  try {
+    await db.run('UPDATE ledgermaster SET ledger_name = name WHERE (ledger_name IS NULL OR ledger_name = "") AND name IS NOT NULL');
+    await db.run('UPDATE ledgermaster SET group_name = under WHERE (group_name IS NULL OR group_name = "") AND under IS NOT NULL');
+  } catch (_) {}
 
   // Papad company master new fields
   await safeAddColumn('papad_company_master', 'email', 'TEXT');

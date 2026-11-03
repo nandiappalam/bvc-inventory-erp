@@ -1,25 +1,41 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import ReactDOM from 'react-dom';
 import api from '../../services/api';
+import { printHtml } from '../../utils/printHelper';
 
 /**
  * PurchaseLedgerDetailsModal
  * Displays the complete Purchase-wise Transaction Ledger Statement with double-entry accounting.
  * Covers:
- * 1. Supplier ledger (Sundry Creditors)
- * 2. Transport ledger (Freight Inward / Transporter Payable)
- * 3. Loadman ledger (Loading/Unloading Charges / Loadman Payable)
- * 4. Purchase deduction recovery ledger
- * 5. Purchase ledger
- * 6. Input GST ledgers (CGST + SGST or IGST)
- * 7. Running balances and outstanding summaries
+ * 1. Comprehensive Purchase Details (Supplier, Items, Taxes, Freight, Loadman)
+ * 2. Complete Double-Entry Accounting Trail (Debit Total === Credit Total)
+ * 3. Individual Ledgers (Supplier, Transporter, Loadman, Purchase Account, GST Input)
+ * 4. Party Liabilities & Running Outstanding Balances
  */
 const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData = null }) => {
-  const [activeTab, setActiveTab] = useState('summary'); // 'summary' | 'individual' | 'breakdown'
+  const [activeTab, setActiveTab] = useState('summary'); // 'summary' | 'details' | 'individual' | 'parties'
   const [individualLedgerTab, setIndividualLedgerTab] = useState('supplier');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [statementData, setStatementData] = useState(null);
+  const [rawPurchase, setRawPurchase] = useState(null);
+  const [itemsList, setItemsList] = useState([]);
+  const [suppliersMap, setSuppliersMap] = useState({});
+
+  // Pre-load supplier master to ensure any numeric ID is mapped to actual supplier name
+  useEffect(() => {
+    if (!isOpen) return;
+    api('/masters/suppliers').then(res => {
+      const arr = Array.isArray(res) ? res : (res?.data || []);
+      const map = {};
+      arr.forEach(s => {
+        if (s && s.id) {
+          map[String(s.id)] = s.print_name || s.name;
+        }
+      });
+      setSuppliersMap(map);
+    }).catch(() => {});
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -29,28 +45,37 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
       setError('');
       try {
         if (purchaseId) {
+          // 1. Fetch ledger statement
           const res = await api(`/purchases/${purchaseId}/ledger-statement`);
           const stmtData = res?.data || res;
+          
+          // 2. Fetch raw purchase and items for full audit detail
+          try {
+            const pRes = await api(`/purchases/${purchaseId}`);
+            const pData = pRes?.data || pRes;
+            if (pData) {
+              setRawPurchase(pData);
+              if (Array.isArray(pData.items)) {
+                setItemsList(pData.items);
+              }
+            }
+          } catch (_) {}
+
           if (stmtData && (stmtData.journal_entries || stmtData.totals)) {
             setStatementData(stmtData);
           } else if (purchaseData) {
             setStatementData(generatePreviewStatement(purchaseData));
           } else {
-            // Fallback: fetch purchase directly and generate preview statement
-            try {
-              const pRes = await api(`/purchases/${purchaseId}`);
-              const fetchedP = pRes?.data || pRes;
-              if (fetchedP && (fetchedP.id || fetchedP.s_no)) {
-                setStatementData(generatePreviewStatement({ formData: fetchedP, totals: { baseAmount: fetchedP.base_amount || fetchedP.total_amount, taxAmount: fetchedP.tax_amount, grandTotal: fetchedP.grand_total } }));
-              } else {
-                setError(res?.message || 'Failed to load purchase ledger statement');
-              }
-            } catch (_) {
-              setError('Failed to load purchase ledger statement');
-            }
+            setError(res?.message || 'Failed to load purchase ledger statement');
           }
         } else if (purchaseData) {
           setStatementData(generatePreviewStatement(purchaseData));
+          if (Array.isArray(purchaseData.items)) {
+            setItemsList(purchaseData.items);
+          }
+          if (purchaseData.formData) {
+            setRawPurchase(purchaseData.formData);
+          }
         }
       } catch (err) {
         console.error('Error fetching ledger statement:', err);
@@ -67,8 +92,6 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
     fetchStatement();
   }, [isOpen, purchaseId, purchaseData]);
 
-  if (!isOpen) return null;
-
   // Helper function for preview when creating new purchase
   function generatePreviewStatement(data) {
     const f = data.formData || {};
@@ -81,9 +104,19 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
     const sgstAmount = Number(t.sgstAmount || (isInterstate ? 0 : taxAmount - cgstAmount));
     const igstAmount = Number(t.igstAmount || (isInterstate ? taxAmount : 0));
     const discAmount = Number(t.discAmount || 0);
-    const transportCharges = Number(f.transport_charges || f.freight_amount || 0);
+    const transportCharges = Number(f.transport_charges || f.net_transport_amount || f.freight_amount || 0);
     const loadmanCharges = Number(f.loadman_charges || 0);
-    const supplierName = f.supplier_name || f.supplier || 'Supplier';
+
+    let supplierName = f.supplier_name || f.supplier || 'Supplier';
+    if (/^\d+$/.test(String(supplierName).trim())) {
+      if (suppliersMap[String(supplierName).trim()]) {
+        supplierName = suppliersMap[String(supplierName).trim()];
+      } else if (f.address) {
+        const m = f.address.match(/Name\s*:\s*([^\n\r]+)/i);
+        if (m && m[1]) supplierName = m[1].trim();
+      }
+    }
+
     const transporterName = f.transporter || f.transport || 'Transporter Payable';
     const loadmanName = f.loadman_name || 'Loadman Payable';
     const voucherNo = f.inv_no || f.invNo || 'PUR-PREVIEW';
@@ -118,7 +151,7 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
     const totalOutstanding = Number((supplierOutstanding + transportCharges + loadmanCharges).toFixed(2));
 
     return {
-      purchase: { ...f, voucher_no: voucherNo, gross_supplier_invoice: grossInvoice, supplier_payable: supplierOutstanding },
+      purchase: { ...f, supplier_name: supplierName, supplier: supplierName, voucher_no: voucherNo, gross_supplier_invoice: grossInvoice, supplier_payable: supplierOutstanding },
       voucher: { voucher_no: voucherNo, date: f.date || new Date().toISOString().slice(0, 10), supplier: supplierName },
       journal_entries: entries,
       totals: { debit_total: drTotal, credit_total: crTotal, is_balanced: Math.abs(drTotal - crTotal) < 0.01 },
@@ -139,38 +172,44 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
           ],
           closing_balance: supplierOutstanding,
           closing_balance_type: 'Cr',
-          explanation: `Amount payable to supplier is ₹${supplierOutstanding.toLocaleString('en-IN')}`
+          explanation: `Net supplier payable: ₹${supplierOutstanding.toLocaleString('en-IN')}`
         },
         transporter: {
           title: `Transporter Ledger – ${transporterName}`,
           ledger_name: transporterName,
-          category: 'Transporter Liabilities',
-          rows: [{ date: f.date || '-', particulars: 'Transport charges', voucher: voucherNo, debit: 0, credit: transportCharges }],
+          category: 'Transporter Payable (Current Liabilities)',
+          rows: transportCharges > 0 ? [
+            { date: f.date || '-', particulars: `Freight charges on ${voucherNo}`, voucher: voucherNo, debit: 0, credit: transportCharges }
+          ] : [],
           closing_balance: transportCharges,
           closing_balance_type: 'Cr',
-          explanation: `The company owes ₹${transportCharges.toLocaleString('en-IN')} to the transporter`
+          explanation: `Freight outstanding: ₹${transportCharges.toLocaleString('en-IN')}`
         },
         loadman: {
           title: `Loadman Ledger – ${loadmanName}`,
           ledger_name: loadmanName,
-          category: 'Labour Liabilities',
-          rows: [{ date: f.date || '-', particulars: 'Loading/unloading charges', voucher: voucherNo, debit: 0, credit: loadmanCharges }],
+          category: 'Loadman Payable (Current Liabilities)',
+          rows: loadmanCharges > 0 ? [
+            { date: f.date || '-', particulars: `Loading/unloading charges on ${voucherNo}`, voucher: voucherNo, debit: 0, credit: loadmanCharges }
+          ] : [],
           closing_balance: loadmanCharges,
           closing_balance_type: 'Cr',
-          explanation: `The company owes ₹${loadmanCharges.toLocaleString('en-IN')} to the loadman`
+          explanation: `Unloading charges outstanding: ₹${loadmanCharges.toLocaleString('en-IN')}`
         },
         purchase_account: {
-          title: 'Purchase Ledger',
+          title: 'Purchase Account',
           ledger_name: 'Purchase Account',
-          category: 'Direct Expenses / Inventory',
-          rows: [{ date: f.date || '-', particulars: `${supplierName} purchase`, voucher: voucherNo, debit: baseAmount, credit: 0 }],
+          category: 'Direct Expenses / Cost of Goods Sold',
+          rows: [
+            { date: f.date || '-', particulars: `${supplierName} purchase`, voucher: voucherNo, debit: baseAmount, credit: 0 }
+          ],
           closing_balance: baseAmount,
           closing_balance_type: 'Dr',
-          explanation: `Total purchase value debit: ₹${baseAmount.toLocaleString('en-IN')}`
+          explanation: `Total purchase debit: ₹${baseAmount.toLocaleString('en-IN')}`
         },
         gst_input: {
           title: 'GST Input Ledgers',
-          category: 'Duties & Taxes',
+          category: 'Duties & Taxes (Current Assets)',
           rows: isInterstate ? [
             { date: f.date || '-', particulars: `Purchase ${voucherNo}`, ledger: 'Input IGST', debit: igstAmount, credit: 0 }
           ] : [
@@ -178,51 +217,96 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
             { date: f.date || '-', particulars: `Purchase ${voucherNo}`, ledger: 'Input SGST', debit: sgstAmount, credit: 0 }
           ],
           total_input_credit: taxAmount,
-          explanation: `Eligible input tax credit: ₹${taxAmount.toLocaleString('en-IN')}`
+          explanation: `Input tax credit: ₹${taxAmount.toLocaleString('en-IN')}`
         },
         deduction_recovery: {
-          title: 'Deduction Ledger',
+          title: 'Deduction Recovery Ledger',
           ledger_name: 'Purchase Deduction Recovery',
           category: 'Recovery / Claims Reserve',
-          rows: [{ date: f.date || '-', particulars: 'Supplier quality/shortage recovery', voucher: voucherNo, debit: 0, credit: totalDeds }],
+          rows: totalDeds > 0 ? [
+            { date: f.date || '-', particulars: 'Supplier claim recovery', voucher: voucherNo, debit: 0, credit: totalDeds }
+          ] : [],
           closing_balance: totalDeds,
           closing_balance_type: 'Cr',
-          explanation: `Quality/shortage claim recovery from supplier: ₹${totalDeds.toLocaleString('en-IN')}`
+          explanation: `Recovery from supplier: ₹${totalDeds.toLocaleString('en-IN')}`
         }
       }
     };
   }
 
+  // Resolve official Supplier Name safely
+  const resolvedSupplierName = useMemo(() => {
+    let name = statementData?.party_balances?.supplier?.name ||
+               statementData?.voucher?.supplier ||
+               statementData?.purchase?.supplier_name ||
+               statementData?.purchase?.supplier ||
+               rawPurchase?.supplier_name ||
+               rawPurchase?.supplier || '';
+    
+    const str = String(name).trim();
+    if (/^\d+$/.test(str)) {
+      if (suppliersMap[str]) return suppliersMap[str];
+      const addr = statementData?.purchase?.address || rawPurchase?.address || '';
+      const m = addr.match(/Name\s*:\s*([^\n\r]+)/i);
+      if (m && m[1]) return m[1].trim();
+      return 'Supplier';
+    }
+    return str || 'Supplier';
+  }, [statementData, rawPurchase, suppliersMap]);
+
+  // Clean Journal Entries to eliminate any numeric supplier ledger names
+  const cleanJournalEntries = useMemo(() => {
+    if (!statementData?.journal_entries) return [];
+    return statementData.journal_entries.map(row => {
+      let lName = row.ledger_name;
+      if (/^\d+$/.test(String(lName).trim())) {
+        lName = resolvedSupplierName;
+      }
+      return {
+        ...row,
+        ledger_name: lName
+      };
+    });
+  }, [statementData, resolvedSupplierName]);
+
+  const pData = statementData?.purchase || rawPurchase || {};
+  const transportAmount = Number(pData.net_transport_amount || pData.transport_charges || pData.freight_amount || statementData?.party_balances?.transporter?.transport_credit || 0);
+  const loadmanAmount = Number(pData.loadman_charges || statementData?.party_balances?.loadman?.loadman_credit || 0);
+  const transporterDisplayName = pData.transporter || pData.transport || statementData?.party_balances?.transporter?.name || 'Transporter Payable';
+  const loadmanDisplayName = pData.loadman_name || statementData?.party_balances?.loadman?.name || 'Loadman Team';
+
   const handlePrint = () => {
-    window.print();
+    const printArea = document.getElementById('purchase-ledger-statement-print-area');
+    if (!printArea) return;
+    printHtml(printArea.innerHTML, `Purchase_Ledger_Statement_${statementData?.voucher?.voucher_no || 'PUR'}`);
   };
+
+  if (!isOpen) return null;
 
   const modalContent = (
     <div 
       style={{
         position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
+        inset: 0,
         zIndex: 99999,
         backgroundColor: 'rgba(15, 23, 42, 0.75)',
+        backdropFilter: 'blur(4px)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: '16px',
-        backdropFilter: 'blur(4px)'
+        padding: '16px'
       }}
       onClick={onClose}
     >
       <div 
         style={{
-          width: '980px',
-          maxWidth: '96vw',
+          width: '1100px',
+          maxWidth: '95vw',
+          height: '88vh',
           maxHeight: '88vh',
           backgroundColor: '#ffffff',
           borderRadius: '12px',
-          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.35)',
           border: '1px solid #cbd5e1',
           display: 'flex',
           flexDirection: 'column',
@@ -231,8 +315,8 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white px-6 py-4 flex items-center justify-between shadow-md">
+        {/* Header Bar */}
+        <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white px-6 py-4 flex items-center justify-between shadow-md shrink-0">
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 rounded-lg bg-blue-600/30 border border-blue-400/40 flex items-center justify-center text-xl font-bold">
               📑
@@ -240,19 +324,19 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
             <div>
               <div className="flex items-center space-x-2">
                 <h2 className="text-lg font-bold tracking-tight">Purchase Transaction Ledger Statement</h2>
-                <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-semibold border border-emerald-400/30">
+                <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-semibold border border-emerald-400/30">
                   Double-Entry Accounting
                 </span>
               </div>
               <p className="text-xs text-blue-200 font-medium">
-                Voucher: {statementData?.voucher?.voucher_no || 'PUR-0001'} · Supplier: {statementData?.party_balances?.supplier?.name || 'ABC Traders'} · Date: {statementData?.voucher?.date || '-'}
+                Voucher: {statementData?.voucher?.voucher_no || pData.inv_no || 'PUR-0001'} · Supplier: <strong className="text-white font-bold">{resolvedSupplierName}</strong> · Date: {statementData?.voucher?.date || pData.date || '-'}
               </p>
             </div>
           </div>
           <div className="flex items-center space-x-2">
             <button
               onClick={handlePrint}
-              className="px-3 py-1.5 text-xs font-semibold bg-white/10 hover:bg-white/20 text-white rounded-md border border-white/20 transition-colors flex items-center space-x-1"
+              className="px-3 py-1.5 text-xs font-semibold bg-white/10 hover:bg-white/20 text-white rounded-md border border-white/20 transition-colors flex items-center space-x-1 cursor-pointer"
               title="Print Voucher Statement"
             >
               <span>🖨️</span>
@@ -260,7 +344,7 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
             </button>
             <button
               onClick={onClose}
-              className="text-white/70 hover:text-white hover:bg-white/10 p-1.5 rounded-lg transition-colors text-lg font-bold w-8 h-8 flex items-center justify-center"
+              className="text-white/70 hover:text-white hover:bg-white/10 p-1.5 rounded-lg transition-colors text-lg font-bold w-8 h-8 flex items-center justify-center cursor-pointer"
             >
               ✕
             </button>
@@ -269,79 +353,113 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
 
         {/* Content Body */}
         {loading ? (
-          <div className="flex flex-col items-center justify-center p-16 space-y-3">
+          <div className="flex-1 flex flex-col items-center justify-center p-16 space-y-3">
             <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
             <p className="text-sm font-medium text-slate-500">Generating accounting ledger entries...</p>
           </div>
         ) : error ? (
-          <div className="p-8 text-center text-red-600 font-medium">
-            <p>{error}</p>
+          <div className="flex-1 p-8 text-center text-red-600 font-medium flex flex-col items-center justify-center">
+            <p className="text-sm">{error}</p>
             <button onClick={onClose} className="mt-4 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-md">
               Close
             </button>
           </div>
         ) : statementData ? (
-          <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50/50" style={{ minHeight: 0 }}>
+          <div 
+            id="purchase-ledger-statement-print-area"
+            style={{ 
+              flex: '1 1 0%',
+              minHeight: 0,
+              overflowY: 'auto',
+              padding: '20px',
+              backgroundColor: '#f8fafc',
+              scrollbarWidth: 'thin',
+              scrollbarColor: '#cbd5e1 transparent'
+            }}
+            className="space-y-4"
+          >
             {/* Top Cards: Total Dr, Total Cr & Outstanding Balances */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '16px' }}>
-              <div className="bg-white p-3.5 rounded-lg border border-slate-200 shadow-sm">
-                <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">Total Debit (Dr)</span>
-                <span className="text-xl font-bold text-slate-800">
-                  ₹{Number(statementData.totals.debit_total || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                </span>
-                <span className="text-[11px] font-medium text-emerald-600 block mt-0.5">
-                  ✅ Fully Balanced
-                </span>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
+              <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
+                <div>
+                  <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">Total Debit (Dr)</span>
+                  <div className="text-lg font-black text-slate-800 mt-1 font-mono tabular-nums">
+                    ₹{Number(statementData.totals?.debit_total || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                  </div>
+                </div>
+                <div className="text-[11px] font-medium text-emerald-600 flex items-center gap-1 mt-1.5">
+                  <span>✅</span>
+                  <span>Fully Balanced</span>
+                </div>
               </div>
 
-              <div className="bg-white p-3.5 rounded-lg border border-slate-200 shadow-sm">
-                <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">Total Credit (Cr)</span>
-                <span className="text-xl font-bold text-slate-800">
-                  ₹{Number(statementData.totals.credit_total || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                </span>
-                <span className="text-[11px] font-medium text-emerald-600 block mt-0.5">
-                  Debit = Credit
-                </span>
+              <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
+                <div>
+                  <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">Total Credit (Cr)</span>
+                  <div className="text-lg font-black text-slate-800 mt-1 font-mono tabular-nums">
+                    ₹{Number(statementData.totals?.credit_total || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                  </div>
+                </div>
+                <div className="text-[11px] font-medium text-emerald-600 flex items-center gap-1 mt-1.5">
+                  <span>✅</span>
+                  <span>Debit = Credit</span>
+                </div>
               </div>
 
-              <div className="bg-white p-3.5 rounded-lg border border-amber-200 bg-amber-50/30 shadow-sm">
-                <span className="text-[11px] font-semibold text-amber-800 uppercase tracking-wider block">Supplier Payable</span>
-                <span className="text-xl font-bold text-amber-900">
-                  ₹{Number(statementData.party_balances?.supplier?.outstanding || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                </span>
-                <span className="text-[11px] font-medium text-amber-700 block mt-0.5">
-                  Gross ₹{Number(statementData.party_balances?.supplier?.invoice_credit || 0).toLocaleString('en-IN')} - Ded ₹{Number(statementData.party_balances?.supplier?.deduction_debit || 0).toLocaleString('en-IN')}
-                </span>
+              <div className="bg-amber-50/40 p-3.5 rounded-xl border border-amber-200 shadow-sm flex flex-col justify-between">
+                <div>
+                  <span className="text-[11px] font-semibold text-amber-800 uppercase tracking-wider block">Supplier Payable</span>
+                  <div className="text-lg font-black text-amber-900 mt-1 font-mono tabular-nums">
+                    ₹{Number(statementData.party_balances?.supplier?.outstanding || pData.supplier_payable || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                  </div>
+                </div>
+                <div className="text-[11px] font-medium text-amber-700 truncate mt-1.5" title={`Party: ${resolvedSupplierName}`}>
+                  Party: <strong className="font-bold">{resolvedSupplierName}</strong>
+                </div>
               </div>
 
-              <div className="bg-white p-3.5 rounded-lg border border-indigo-200 bg-indigo-50/30 shadow-sm">
-                <span className="text-[11px] font-semibold text-indigo-800 uppercase tracking-wider block">Combined Outstanding</span>
-                <span className="text-xl font-bold text-indigo-900">
-                  ₹{Number(statementData.party_balances?.total_outstanding || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                </span>
-                <span className="text-[11px] font-medium text-indigo-700 block mt-0.5">
-                  Supplier + Transport + Loadman
-                </span>
+              <div className="bg-indigo-50/40 p-3.5 rounded-xl border border-indigo-200 shadow-sm flex flex-col justify-between">
+                <div>
+                  <span className="text-[11px] font-semibold text-indigo-800 uppercase tracking-wider block">Combined Outstanding</span>
+                  <div className="text-lg font-black text-indigo-900 mt-1 font-mono tabular-nums">
+                    ₹{Number(statementData.party_balances?.total_outstanding || (Number(statementData.party_balances?.supplier?.outstanding || 0) + transportAmount + loadmanAmount)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                  </div>
+                </div>
+                <div className="text-[11px] font-medium text-indigo-700 mt-1.5">
+                  Supplier + Freight + Loadman
+                </div>
               </div>
             </div>
 
             {/* Navigation Tabs */}
-            <div className="flex border-b border-slate-200 space-x-2">
+            <div className="flex border-b border-slate-200 bg-white px-4 pt-2 rounded-t-xl shadow-sm space-x-4 overflow-x-auto">
               <button
                 onClick={() => setActiveTab('summary')}
-                className={`pb-2.5 px-3 text-xs font-bold border-b-2 transition-all flex items-center space-x-1.5 ${
+                className={`pb-3 px-3 text-xs font-bold border-b-2 transition-all flex items-center space-x-1.5 whitespace-nowrap shrink-0 ${
                   activeTab === 'summary'
                     ? 'border-blue-700 text-blue-800'
                     : 'border-transparent text-slate-500 hover:text-slate-700'
                 }`}
               >
                 <span>📊</span>
-                <span>Overall Purchase Transaction Summary</span>
+                <span>Accounting Entries (Dr/Cr)</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('details')}
+                className={`pb-3 px-3 text-xs font-bold border-b-2 transition-all flex items-center space-x-1.5 whitespace-nowrap shrink-0 ${
+                  activeTab === 'details'
+                    ? 'border-blue-700 text-blue-800'
+                    : 'border-transparent text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                <span>📦</span>
+                <span>Purchase & Item Details</span>
               </button>
 
               <button
                 onClick={() => setActiveTab('individual')}
-                className={`pb-2.5 px-3 text-xs font-bold border-b-2 transition-all flex items-center space-x-1.5 ${
+                className={`pb-3 px-3 text-xs font-bold border-b-2 transition-all flex items-center space-x-1.5 whitespace-nowrap shrink-0 ${
                   activeTab === 'individual'
                     ? 'border-blue-700 text-blue-800'
                     : 'border-transparent text-slate-500 hover:text-slate-700'
@@ -353,7 +471,7 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
 
               <button
                 onClick={() => setActiveTab('parties')}
-                className={`pb-2.5 px-3 text-xs font-bold border-b-2 transition-all flex items-center space-x-1.5 ${
+                className={`pb-3 px-3 text-xs font-bold border-b-2 transition-all flex items-center space-x-1.5 whitespace-nowrap shrink-0 ${
                   activeTab === 'parties'
                     ? 'border-blue-700 text-blue-800'
                     : 'border-transparent text-slate-500 hover:text-slate-700'
@@ -364,16 +482,16 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
               </button>
             </div>
 
-            {/* Tab 1: Overall Purchase Transaction Summary (Double-Entry Table) */}
+            {/* TAB 1: Double-Entry Table */}
             {activeTab === 'summary' && (
-              <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
-                <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+                <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex flex-wrap justify-between items-center gap-2 shrink-0">
                   <div>
                     <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                      Automatic Accounting Entries Generated by this Purchase
+                      Automatic Double-Entry Journal Postings Generated by Purchase
                     </h3>
                     <p className="text-[11px] text-slate-500">
-                      Every transaction is traceable to voucher {statementData.voucher?.voucher_no}
+                      Voucher Reference: <span className="font-mono font-bold text-slate-700">{statementData.voucher?.voucher_no || pData.inv_no}</span> · Party: <strong className="text-slate-800">{resolvedSupplierName}</strong>
                     </p>
                   </div>
                   <span className="text-xs font-semibold px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-md border border-emerald-200">
@@ -381,7 +499,7 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
                   </span>
                 </div>
 
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto w-full">
                   <table className="w-full text-left border-collapse text-xs">
                     <thead>
                       <tr className="bg-slate-100 text-slate-700 border-b border-slate-200 font-bold uppercase tracking-wider text-[11px]">
@@ -394,7 +512,7 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {statementData.journal_entries?.map((row, idx) => (
+                      {cleanJournalEntries.map((row, idx) => (
                         <tr 
                           key={idx} 
                           className={`hover:bg-blue-50/40 transition-colors ${
@@ -406,10 +524,10 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
                             {row.ledger_name}
                           </td>
                           <td className="py-2.5 px-3 text-slate-500 text-[11px]">{row.account_head || 'General'}</td>
-                          <td className="py-2.5 px-4 text-right font-bold text-emerald-700">
+                          <td className="py-2.5 px-4 text-right font-bold text-emerald-700 font-mono tabular-nums">
                             {Number(row.debit) > 0 ? `₹${Number(row.debit).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}
                           </td>
-                          <td className="py-2.5 px-4 text-right font-bold text-amber-700">
+                          <td className="py-2.5 px-4 text-right font-bold text-amber-700 font-mono tabular-nums">
                             {Number(row.credit) > 0 ? `₹${Number(row.credit).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}
                           </td>
                           <td className="py-2.5 px-4 text-slate-600 text-[11px]">{row.particulars || '-'}</td>
@@ -421,10 +539,10 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
                         <td colSpan={3} className="py-3 px-4 text-right uppercase tracking-wider text-xs">
                           Grand Total (Balanced):
                         </td>
-                        <td className="py-3 px-4 text-right text-emerald-700 text-sm font-extrabold">
+                        <td className="py-3 px-4 text-right text-emerald-700 text-sm font-extrabold font-mono tabular-nums">
                           ₹{Number(statementData.totals?.debit_total || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                         </td>
-                        <td className="py-3 px-4 text-right text-amber-700 text-sm font-extrabold">
+                        <td className="py-3 px-4 text-right text-amber-700 text-sm font-extrabold font-mono tabular-nums">
                           ₹{Number(statementData.totals?.credit_total || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                         </td>
                         <td className="py-3 px-4 text-xs text-emerald-700 font-bold">
@@ -437,15 +555,114 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
               </div>
             )}
 
-            {/* Tab 2: Individual Ledger Statements */}
+            {/* TAB 2: Purchase & Item Details (User Requested) */}
+            {activeTab === 'details' && (
+              <div className="space-y-4">
+                {/* Information Header Cards */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '12px' }}>
+                  {/* Supplier Card */}
+                  <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                    <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wider block mb-1">Supplier Profile</span>
+                    <h4 className="text-sm font-bold text-slate-900">{resolvedSupplierName}</h4>
+                    <div className="mt-2 text-xs space-y-1 text-slate-600">
+                      <p><span className="text-slate-400">GSTIN:</span> {pData.gst_no || 'Unregistered / Nil'}</p>
+                      <p><span className="text-slate-400">Phone:</span> {pData.phone || 'N/A'}</p>
+                      <p className="line-clamp-2"><span className="text-slate-400">Address:</span> {pData.address ? pData.address.replace(/\n/g, ', ') : 'N/A'}</p>
+                    </div>
+                  </div>
+
+                  {/* Transporter Card */}
+                  <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                    <span className="text-[10px] font-bold text-amber-600 uppercase tracking-wider block mb-1">Transport Freight Details</span>
+                    <h4 className="text-sm font-bold text-slate-900">{transporterDisplayName}</h4>
+                    <div className="mt-2 text-xs space-y-1 text-slate-600">
+                      <p><span className="text-slate-400">Vehicle No:</span> <strong className="text-slate-800">{pData.vehicle_no || pData.lorry_no || 'Not Entered'}</strong></p>
+                      <p><span className="text-slate-400">Driver:</span> {pData.driver_name || pData.driver || 'N/A'}</p>
+                      <p><span className="text-slate-400">Net Freight Amount:</span> <strong className="text-emerald-700 font-bold">₹{transportAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></p>
+                    </div>
+                  </div>
+
+                  {/* Loadman Card */}
+                  <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                    <span className="text-[10px] font-bold text-purple-600 uppercase tracking-wider block mb-1">Loadman & Unloading</span>
+                    <h4 className="text-sm font-bold text-slate-900">{loadmanDisplayName}</h4>
+                    <div className="mt-2 text-xs space-y-1 text-slate-600">
+                      <p><span className="text-slate-400">Weight Handled:</span> {Number(pData.loadman_qty_kg || pData.total_weight || 0)} kg</p>
+                      <p><span className="text-slate-400">Unloading Rate:</span> ₹{Number(pData.loadman_rate_per_kg || 0.50).toFixed(2)} / kg</p>
+                      <p><span className="text-slate-400">Unloading Charges:</span> <strong className="text-purple-700 font-bold">₹{loadmanAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Purchased Items Table */}
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                  <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+                    <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                      Purchased Raw Materials / Stock Items
+                    </h3>
+                    <span className="text-xs text-slate-500 font-medium">
+                      Total Items: {itemsList.length}
+                    </span>
+                  </div>
+
+                  <div className="overflow-x-auto w-full">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-slate-100 text-slate-700 border-b border-slate-200 font-bold uppercase tracking-wider text-[11px]">
+                          <th className="py-2.5 px-3 w-10 text-center">#</th>
+                          <th className="py-2.5 px-4">Item Name</th>
+                          <th className="py-2.5 px-3">Lot No</th>
+                          <th className="py-2.5 px-3 text-right">Qty (Bags)</th>
+                          <th className="py-2.5 px-3 text-right">Weight (KG)</th>
+                          <th className="py-2.5 px-3 text-right">Rate (₹)</th>
+                          <th className="py-2.5 px-3 text-right">GST %</th>
+                          <th className="py-2.5 px-4 text-right">Line Amount (₹)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {itemsList.length === 0 ? (
+                          <tr>
+                            <td colSpan={8} className="py-6 text-center text-slate-400">
+                              No items recorded for this purchase voucher
+                            </td>
+                          </tr>
+                        ) : (
+                          itemsList.map((it, idx) => {
+                            const qty = Number(it.qty || it.quantity || 0);
+                            const wt = Number(it.total_weight || it.total_wt || (qty * (Number(it.per_unit_weight) || 50)));
+                            const rate = Number(it.rate || it.price || 0);
+                            const amt = Number(it.amount || it.totalAmount || (qty * rate));
+                            const gst = Number(it.tax_percent ?? it.tax_rate ?? it.gst_rate ?? 0);
+
+                            return (
+                              <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                                <td className="py-2 px-3 text-center text-slate-400">{idx + 1}</td>
+                                <td className="py-2 px-4 font-bold text-slate-800">{it.item_name || it.name || 'Raw Material'}</td>
+                                <td className="py-2 px-3 font-mono text-[11px] text-blue-700">{it.lot_no || 'LOT-GEN'}</td>
+                                <td className="py-2 px-3 text-right font-medium font-mono tabular-nums">{qty}</td>
+                                <td className="py-2 px-3 text-right font-medium font-mono tabular-nums">{wt.toLocaleString('en-IN')}</td>
+                                <td className="py-2 px-3 text-right font-medium font-mono tabular-nums">₹{rate.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                                <td className="py-2 px-3 text-right text-slate-600 font-mono tabular-nums">{gst}%</td>
+                                <td className="py-2 px-4 text-right font-bold text-slate-900 font-mono tabular-nums">₹{amt.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 3: Individual Ledger Statements */}
             {activeTab === 'individual' && (
               <div className="space-y-4">
-                {/* Sub-tabs */}
                 <div className="flex flex-wrap gap-2">
                   {[
-                    { id: 'supplier', label: 'A. Supplier Ledger', icon: '🏢' },
-                    { id: 'transporter', label: 'B. Transporter Ledger', icon: '🚚' },
-                    { id: 'loadman', label: 'C. Loadman Ledger', icon: '👷' },
+                    { id: 'supplier', label: `A. Supplier (${resolvedSupplierName})`, icon: '🏢' },
+                    { id: 'transporter', label: `B. Transporter (${transporterDisplayName})`, icon: '🚚' },
+                    { id: 'loadman', label: `C. Loadman (${loadmanDisplayName})`, icon: '👷' },
                     { id: 'purchase_account', label: 'D. Purchase Ledger', icon: '📦' },
                     { id: 'gst_input', label: 'E. GST Input Ledgers', icon: '🏛️' },
                     { id: 'deduction_recovery', label: 'F. Deduction Recovery', icon: '⚖️' },
@@ -453,7 +670,7 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
                     <button
                       key={tab.id}
                       onClick={() => setIndividualLedgerTab(tab.id)}
-                      className={`px-3 py-1.5 rounded-md text-xs font-semibold border transition-all flex items-center space-x-1.5 ${
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all flex items-center space-x-1.5 ${
                         individualLedgerTab === tab.id
                           ? 'bg-blue-800 text-white border-blue-900 shadow-sm'
                           : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
@@ -465,103 +682,85 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
                   ))}
                 </div>
 
-                {/* Sub-tab view */}
+                {/* Active Sub-Ledger Statement Table */}
                 {statementData.individual_ledgers && statementData.individual_ledgers[individualLedgerTab] ? (
-                  <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden p-4 space-y-4">
-                    <div className="flex justify-between items-start border-b border-slate-200 pb-3">
+                  <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
                       <div>
-                        <h4 className="text-sm font-bold text-slate-800">
-                          {statementData.individual_ledgers[individualLedgerTab].title}
+                        <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                          {individualLedgerTab === 'supplier' ? `Supplier Ledger – ${resolvedSupplierName}` : statementData.individual_ledgers[individualLedgerTab].title}
                         </h4>
-                        <span className="text-xs text-slate-500 font-medium">
-                          Category: {statementData.individual_ledgers[individualLedgerTab].category || 'Account Ledger'}
-                        </span>
+                        <p className="text-[11px] text-slate-500">
+                          {statementData.individual_ledgers[individualLedgerTab].category}
+                        </p>
                       </div>
-                      {statementData.individual_ledgers[individualLedgerTab].closing_balance !== undefined && (
-                        <div className="text-right">
-                          <span className="text-[11px] font-semibold text-slate-500 uppercase block">Closing Balance</span>
-                          <span className="text-base font-bold text-slate-900">
-                            ₹{Number(statementData.individual_ledgers[individualLedgerTab].closing_balance).toLocaleString('en-IN', { minimumFractionDigits: 2 })}{' '}
-                            <span className="text-xs font-bold text-blue-700">
-                              ({statementData.individual_ledgers[individualLedgerTab].closing_balance_type || 'Cr'})
-                            </span>
-                          </span>
-                        </div>
-                      )}
+                      <span className="text-xs font-bold text-slate-700 bg-slate-200/80 px-2.5 py-1 rounded font-mono tabular-nums">
+                        Closing: ₹{Number(statementData.individual_ledgers[individualLedgerTab].closing_balance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })} {statementData.individual_ledgers[individualLedgerTab].closing_balance_type || 'Cr'}
+                      </span>
                     </div>
 
-                    <table className="w-full text-left border-collapse text-xs">
-                      <thead>
-                        <tr className="bg-slate-100 text-slate-700 border-b border-slate-200 font-bold uppercase text-[11px]">
-                          <th className="py-2.5 px-3">Date</th>
-                          <th className="py-2.5 px-4">Particulars</th>
-                          <th className="py-2.5 px-3">Voucher</th>
-                          <th className="py-2.5 px-4 text-right">Debit (Dr)</th>
-                          <th className="py-2.5 px-4 text-right">Credit (Cr)</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {statementData.individual_ledgers[individualLedgerTab].rows?.map((r, rIdx) => (
-                          <tr key={rIdx} className="hover:bg-slate-50">
-                            <td className="py-2.5 px-3 text-slate-600">{r.date || '-'}</td>
-                            <td className="py-2.5 px-4 font-semibold text-slate-800">{r.particulars}</td>
-                            <td className="py-2.5 px-3 font-mono font-semibold text-blue-700">{r.voucher}</td>
-                            <td className="py-2.5 px-4 text-right font-bold text-emerald-700">
-                              {Number(r.debit) > 0 ? `₹${Number(r.debit).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}
-                            </td>
-                            <td className="py-2.5 px-4 text-right font-bold text-amber-700">
-                              {Number(r.credit) > 0 ? `₹${Number(r.credit).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}
-                            </td>
+                    <div className="overflow-x-auto w-full">
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead>
+                          <tr className="bg-slate-100 text-slate-700 border-b border-slate-200 font-bold uppercase tracking-wider text-[11px] sticky top-0 z-10">
+                            <th className="py-2.5 px-3">Date</th>
+                            <th className="py-2.5 px-4">Particulars</th>
+                            <th className="py-2.5 px-3">Voucher Ref</th>
+                            <th className="py-2.5 px-4 text-right">Debit (₹)</th>
+                            <th className="py-2.5 px-4 text-right">Credit (₹)</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-
-                    <div className="bg-blue-50/60 p-3 rounded border border-blue-100 text-xs text-blue-900 font-medium">
-                      💡 <strong>Accounting Meaning:</strong> {statementData.individual_ledgers[individualLedgerTab].explanation}
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {(statementData.individual_ledgers[individualLedgerTab].rows || []).map((r, rIdx) => (
+                            <tr key={rIdx} className="hover:bg-slate-50 transition-colors">
+                              <td className="py-2 px-3 text-slate-600">{r.date || '-'}</td>
+                              <td className="py-2 px-4 font-semibold text-slate-800">{r.particulars || '-'}</td>
+                              <td className="py-2 px-3 font-mono text-[11px] text-blue-700">{r.voucher || statementData.voucher?.voucher_no}</td>
+                              <td className="py-2 px-4 text-right font-bold text-emerald-700">
+                                {Number(r.debit) > 0 ? `₹${Number(r.debit).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}
+                              </td>
+                              <td className="py-2 px-4 text-right font-bold text-amber-700">
+                                {Number(r.credit) > 0 ? `₹${Number(r.credit).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 ) : (
-                  <div className="p-8 text-center text-slate-400 bg-white rounded-lg border border-slate-200">
-                    No ledger transactions found for this account.
+                  <div className="p-6 text-center text-slate-400 bg-white rounded-xl border border-slate-200">
+                    No transactions recorded under this sub-ledger.
                   </div>
                 )}
               </div>
             )}
 
-            {/* Tab 3: Party Liabilities & Settlements */}
+            {/* TAB 4: Party Liabilities & Settlements */}
             {activeTab === 'parties' && (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '16px' }}>
-                {/* Supplier Liability Card */}
-                <div className="bg-white rounded-lg border border-slate-200 shadow-sm p-4 space-y-3">
-                  <div className="flex items-center space-x-2 border-b border-slate-100 pb-2">
-                    <span className="text-xl">🏢</span>
-                    <div>
-                      <h4 className="text-xs font-bold text-slate-800 uppercase">Supplier Liability</h4>
-                      <p className="text-xs text-blue-700 font-semibold">{statementData.party_balances?.supplier?.name}</p>
-                    </div>
+                {/* 1. Supplier Liability Card */}
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
+                  <div>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Party 1</span>
+                    <h4 className="text-sm font-bold text-slate-900">{resolvedSupplierName}</h4>
+                    <span className="text-xs text-slate-500 font-medium">Sundry Creditor (Goods)</span>
                   </div>
-                  <div className="space-y-1.5 text-xs">
+                  <div className="mt-4 pt-3 border-t border-slate-100 space-y-1.5 text-xs">
                     <div className="flex justify-between">
-                      <span className="text-slate-500">Gross Invoice Value:</span>
+                      <span className="text-slate-500">Gross Invoice:</span>
                       <span className="font-semibold text-slate-800">
                         ₹{Number(statementData.party_balances?.supplier?.invoice_credit || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                       </span>
                     </div>
                     <div className="flex justify-between text-red-600">
-                      <span>Less Deductions / Claims:</span>
+                      <span>Deductions:</span>
                       <span className="font-semibold">
                         -₹{Number(statementData.party_balances?.supplier?.deduction_debit || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                       </span>
                     </div>
-                    <div className="flex justify-between text-emerald-600">
-                      <span>Bank / Cash Paid:</span>
-                      <span className="font-semibold">
-                        -₹{Number(statementData.party_balances?.supplier?.payments_debit || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                      </span>
-                    </div>
                     <div className="pt-2 border-t border-slate-200 flex justify-between font-bold text-slate-900">
-                      <span>Supplier Outstanding:</span>
+                      <span>Net Outstanding:</span>
                       <span className="text-sm text-amber-800">
                         ₹{Number(statementData.party_balances?.supplier?.outstanding || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })} Cr
                       </span>
@@ -569,63 +768,55 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
                   </div>
                 </div>
 
-                {/* Transporter Liability Card */}
-                <div className="bg-white rounded-lg border border-slate-200 shadow-sm p-4 space-y-3">
-                  <div className="flex items-center space-x-2 border-b border-slate-100 pb-2">
-                    <span className="text-xl">🚚</span>
-                    <div>
-                      <h4 className="text-xs font-bold text-slate-800 uppercase">Transporter Liability</h4>
-                      <p className="text-xs text-blue-700 font-semibold">{statementData.party_balances?.transporter?.name}</p>
-                    </div>
+                {/* 2. Transporter Liability Card */}
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
+                  <div>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Party 2</span>
+                    <h4 className="text-sm font-bold text-slate-900">{transporterDisplayName}</h4>
+                    <span className="text-xs text-slate-500 font-medium">Freight & Transport Inward</span>
                   </div>
-                  <div className="space-y-1.5 text-xs">
+                  <div className="mt-4 pt-3 border-t border-slate-100 space-y-1.5 text-xs">
                     <div className="flex justify-between">
-                      <span className="text-slate-500">Freight Amount:</span>
+                      <span className="text-slate-500">Freight Charges:</span>
                       <span className="font-semibold text-slate-800">
-                        ₹{Number(statementData.party_balances?.transporter?.transport_credit || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        ₹{transportAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                       </span>
                     </div>
                     <div className="flex justify-between text-emerald-600">
-                      <span>Paid to Transporter:</span>
-                      <span className="font-semibold">
-                        -₹{Number(statementData.party_balances?.transporter?.payments_debit || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                      </span>
+                      <span>Vehicle:</span>
+                      <span className="font-semibold">{pData.vehicle_no || pData.lorry_no || 'N/A'}</span>
                     </div>
                     <div className="pt-2 border-t border-slate-200 flex justify-between font-bold text-slate-900">
-                      <span>Transport Outstanding:</span>
+                      <span>Transporter Outstanding:</span>
                       <span className="text-sm text-amber-800">
-                        ₹{Number(statementData.party_balances?.transporter?.outstanding || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })} Cr
+                        ₹{transportAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} Cr
                       </span>
                     </div>
                   </div>
                 </div>
 
-                {/* Loadman Liability Card */}
-                <div className="bg-white rounded-lg border border-slate-200 shadow-sm p-4 space-y-3">
-                  <div className="flex items-center space-x-2 border-b border-slate-100 pb-2">
-                    <span className="text-xl">👷</span>
-                    <div>
-                      <h4 className="text-xs font-bold text-slate-800 uppercase">Loadman Liability</h4>
-                      <p className="text-xs text-blue-700 font-semibold">{statementData.party_balances?.loadman?.name}</p>
-                    </div>
+                {/* 3. Loadman Liability Card */}
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
+                  <div>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Party 3</span>
+                    <h4 className="text-sm font-bold text-slate-900">{loadmanDisplayName}</h4>
+                    <span className="text-xs text-slate-500 font-medium">Unloading & Labour Charges</span>
                   </div>
-                  <div className="space-y-1.5 text-xs">
+                  <div className="mt-4 pt-3 border-t border-slate-100 space-y-1.5 text-xs">
                     <div className="flex justify-between">
                       <span className="text-slate-500">Unloading Charges:</span>
                       <span className="font-semibold text-slate-800">
-                        ₹{Number(statementData.party_balances?.loadman?.loadman_credit || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        ₹{loadmanAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                       </span>
                     </div>
-                    <div className="flex justify-between text-emerald-600">
-                      <span>Paid to Loadman:</span>
-                      <span className="font-semibold">
-                        -₹{Number(statementData.party_balances?.loadman?.payments_debit || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                      </span>
+                    <div className="flex justify-between text-slate-500">
+                      <span>Weight Handled:</span>
+                      <span className="font-semibold">{Number(pData.loadman_qty_kg || pData.total_weight || 0)} kg</span>
                     </div>
                     <div className="pt-2 border-t border-slate-200 flex justify-between font-bold text-slate-900">
                       <span>Loadman Outstanding:</span>
                       <span className="text-sm text-amber-800">
-                        ₹{Number(statementData.party_balances?.loadman?.outstanding || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })} Cr
+                        ₹{loadmanAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} Cr
                       </span>
                     </div>
                   </div>
@@ -635,17 +826,67 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
           </div>
         ) : null}
 
-        {/* Footer */}
-        <div className="px-6 py-3 bg-white border-t border-slate-200 flex justify-between items-center text-xs text-slate-500">
-          <div>
-            Traceable Voucher: <strong className="text-slate-800">{statementData?.voucher?.voucher_no || 'PUR-0001'}</strong> · Double-Entry Standard Compliance
+        {/* Clean, Non-overlapping Action Footer */}
+        <div 
+          style={{
+            flexShrink: 0,
+            backgroundColor: '#ffffff',
+            borderTop: '1px solid #e2e8f0',
+            padding: '12px 24px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '12px',
+            boxShadow: '0 -2px 10px rgba(0, 0, 0, 0.03)',
+            zIndex: 10
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '12px', color: '#475569' }}>
+            <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981' }}></span>
+            <span>Traceable Voucher: <strong style={{ color: '#0f172a', fontFamily: 'monospace', fontSize: '13px' }}>{statementData?.voucher?.voucher_no || pData.inv_no || 'PUR-0001'}</strong></span>
+            <span style={{ color: '#cbd5e1' }}>|</span>
+            <span style={{ color: '#059669', fontWeight: 600 }}>Double-Entry Standard Compliance (Dr === Cr) ✅</span>
           </div>
-          <button
-            onClick={onClose}
-            className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-lg shadow-sm transition-colors text-xs"
-          >
-            Close Statement
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <button
+              type="button"
+              onClick={handlePrint}
+              style={{
+                padding: '8px 16px',
+                backgroundColor: '#1e40af',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '8px',
+                fontWeight: 'bold',
+                fontSize: '12px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+              }}
+            >
+              <span>🖨️</span>
+              <span>Print Statement</span>
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              style={{
+                padding: '8px 20px',
+                backgroundColor: '#0f172a',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '8px',
+                fontWeight: 'bold',
+                fontSize: '12px',
+                cursor: 'pointer',
+                boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+              }}
+            >
+              Close Statement
+            </button>
+          </div>
         </div>
       </div>
     </div>

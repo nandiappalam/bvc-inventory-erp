@@ -7,84 +7,198 @@ if (types && typeof types.setTypeParser === 'function') {
   types.setTypeParser(1184, (val) => val); // TIMESTAMPTZ (1184) -> string
 }
 let sqlite3 = null;
+let DatabaseSync = null;
 try {
-  sqlite3 = require('sqlite3').verbose();
-} catch (e) {
-  console.warn('⚠️ [SQLite] Native sqlite3 module failed to load, initializing pure JS fallback DB driver:', e.message);
+  DatabaseSync = require('node:sqlite').DatabaseSync;
+} catch (_) {}
+
+if (DatabaseSync) {
+  console.log('✅ [SQLite] Initialized database engine via node:sqlite DatabaseSync.');
   sqlite3 = {
     verbose: () => sqlite3,
     OPEN_READONLY: 1,
     OPEN_READWRITE: 2,
     OPEN_CREATE: 4,
-    Database: function(filename, mode, callback) {
-      if (typeof mode === 'function') {
-        callback = mode;
-        mode = undefined;
+      Database: function(filename, mode, callback) {
+        if (typeof mode === 'function') {
+          callback = mode;
+          mode = undefined;
+        }
+        this.filename = filename;
+        try {
+          this._syncDb = new DatabaseSync(filename);
+        } catch (dbErr) {
+          console.error('[node:sqlite] Failed to open', filename, dbErr.message);
+          this._syncDb = null;
+        }
+        if (callback) {
+          setTimeout(() => callback(null), 0);
+        }
       }
-      this.filename = filename;
+    };
+    sqlite3.Database.prototype.run = function(sql, params, callback) {
+      if (typeof params === 'function') {
+        callback = params;
+        params = [];
+      }
+      try {
+        if (!this._syncDb) {
+          this._syncDb = new DatabaseSync(this.filename);
+        }
+        const stmt = this._syncDb.prepare(sql);
+        const info = stmt.run(...(params || []));
+        const resObj = { lastID: Number(info.lastInsertRowid || 0), changes: Number(info.changes || 0) };
+        if (callback) setTimeout(() => callback.call(resObj, null), 0);
+      } catch (err) {
+        if (callback) setTimeout(() => callback(err), 0);
+      }
+      return this;
+    };
+    sqlite3.Database.prototype.all = function(sql, params, callback) {
+      if (typeof params === 'function') {
+        callback = params;
+        params = [];
+      }
+      try {
+        if (!this._syncDb) {
+          this._syncDb = new DatabaseSync(this.filename);
+        }
+        const stmt = this._syncDb.prepare(sql);
+        const rows = stmt.all(...(params || []));
+        if (callback) setTimeout(() => callback(null, rows || []), 0);
+      } catch (err) {
+        if (callback) setTimeout(() => callback(err), 0);
+      }
+      return this;
+    };
+    sqlite3.Database.prototype.get = function(sql, params, callback) {
+      if (typeof params === 'function') {
+        callback = params;
+        params = [];
+      }
+      try {
+        if (!this._syncDb) {
+          this._syncDb = new DatabaseSync(this.filename);
+        }
+        const stmt = this._syncDb.prepare(sql);
+        const row = stmt.get(...(params || []));
+        if (callback) setTimeout(() => callback(null, row || null), 0);
+      } catch (err) {
+        if (callback) setTimeout(() => callback(err), 0);
+      }
+      return this;
+    };
+    sqlite3.Database.prototype.exec = function(sql, callback) {
+      try {
+        if (!this._syncDb) {
+          this._syncDb = new DatabaseSync(this.filename);
+        }
+        this._syncDb.exec(sql);
+        if (callback) setTimeout(() => callback(null), 0);
+      } catch (err) {
+        if (callback) setTimeout(() => callback(err), 0);
+      }
+      return this;
+    };
+    sqlite3.Database.prototype.prepare = function(sql, callback) {
+      const dbInstance = this;
+      return {
+        run: (...args) => { const cb = args.pop(); dbInstance.run(sql, args, cb); return this; },
+        all: (...args) => { const cb = args.pop(); dbInstance.all(sql, args, cb); return this; },
+        get: (...args) => { const cb = args.pop(); dbInstance.get(sql, args, cb); return this; },
+        finalize: (cb) => { if (cb) cb(null); }
+      };
+    };
+    sqlite3.Database.prototype.serialize = function(callback) {
+      if (callback) callback();
+      return this;
+    };
+    sqlite3.Database.prototype.parallelize = function(callback) {
+      if (callback) callback();
+      return this;
+    };
+    sqlite3.Database.prototype.close = function(callback) {
+      try {
+        if (this._syncDb) this._syncDb.close();
+      } catch (_) {}
+      if (callback) setTimeout(() => callback(null), 0);
+      return this;
+    };
+  } else {
+    sqlite3 = {
+      verbose: () => sqlite3,
+      OPEN_READONLY: 1,
+      OPEN_READWRITE: 2,
+      OPEN_CREATE: 4,
+      Database: function(filename, mode, callback) {
+        if (typeof mode === 'function') {
+          callback = mode;
+          mode = undefined;
+        }
+        this.filename = filename;
+        setTimeout(() => {
+          if (callback) callback(null);
+        }, 0);
+      }
+    };
+    sqlite3.Database.prototype.run = function(sql, params, callback) {
+      if (typeof params === 'function') {
+        callback = params;
+        params = [];
+      }
+      setTimeout(() => {
+        if (callback) callback.call({ lastID: 1, changes: 1 }, null);
+      }, 0);
+      return this;
+    };
+    sqlite3.Database.prototype.run.isFallback = true;
+    sqlite3.Database.prototype.all = function(sql, params, callback) {
+      if (typeof params === 'function') {
+        callback = params;
+        params = [];
+      }
+      setTimeout(() => {
+        if (callback) callback(null, []);
+      }, 0);
+      return this;
+    };
+    sqlite3.Database.prototype.get = function(sql, params, callback) {
+      if (typeof params === 'function') {
+        callback = params;
+        params = [];
+      }
+      setTimeout(() => {
+        if (callback) callback(null, null);
+      }, 0);
+      return this;
+    };
+    sqlite3.Database.prototype.exec = function(sql, callback) {
       setTimeout(() => {
         if (callback) callback(null);
       }, 0);
-    }
-  };
-  sqlite3.Database.prototype.run = function(sql, params, callback) {
-    if (typeof params === 'function') {
-      callback = params;
-      params = [];
-    }
-    setTimeout(() => {
-      if (callback) callback.call({ lastID: 1, changes: 1 }, null);
-    }, 0);
-    return this;
-  };
-  sqlite3.Database.prototype.run.isFallback = true;
-  sqlite3.Database.prototype.all = function(sql, params, callback) {
-    if (typeof params === 'function') {
-      callback = params;
-      params = [];
-    }
-    setTimeout(() => {
-      if (callback) callback(null, []);
-    }, 0);
-    return this;
-  };
-  sqlite3.Database.prototype.get = function(sql, params, callback) {
-    if (typeof params === 'function') {
-      callback = params;
-      params = [];
-    }
-    setTimeout(() => {
-      if (callback) callback(null, null);
-    }, 0);
-    return this;
-  };
-  sqlite3.Database.prototype.exec = function(sql, callback) {
-    setTimeout(() => {
-      if (callback) callback(null);
-    }, 0);
-    return this;
-  };
-  sqlite3.Database.prototype.prepare = function(sql, callback) {
-    return {
-      run: (...args) => { const cb = args.pop(); if (cb) cb(null); return this; },
-      all: (...args) => { const cb = args.pop(); if (cb) cb(null, []); return this; },
-      get: (...args) => { const cb = args.pop(); if (cb) cb(null, null); return this; },
-      finalize: (cb) => { if (cb) cb(null); }
+      return this;
     };
-  };
-  sqlite3.Database.prototype.serialize = function(callback) {
-    if (callback) callback();
-    return this;
-  };
-  sqlite3.Database.prototype.parallelize = function(callback) {
-    if (callback) callback();
-    return this;
-  };
-  sqlite3.Database.prototype.close = function(callback) {
-    if (callback) callback(null);
-    return this;
-  };
-}
+    sqlite3.Database.prototype.prepare = function(sql, callback) {
+      return {
+        run: (...args) => { const cb = args.pop(); if (cb) cb(null); return this; },
+        all: (...args) => { const cb = args.pop(); if (cb) cb(null, []); return this; },
+        get: (...args) => { const cb = args.pop(); if (cb) cb(null, null); return this; },
+        finalize: (cb) => { if (cb) cb(null); }
+      };
+    };
+    sqlite3.Database.prototype.serialize = function(callback) {
+      if (callback) callback();
+      return this;
+    };
+    sqlite3.Database.prototype.parallelize = function(callback) {
+      if (callback) callback();
+      return this;
+    };
+    sqlite3.Database.prototype.close = function(callback) {
+      if (callback) callback(null);
+      return this;
+    };
+  }
 const path = require('path');
 const fs = require('fs');
 const { AsyncLocalStorage } = require('async_hooks');
@@ -224,7 +338,7 @@ const TENANT_BUSINESS_TABLES = new Set([
   'purchases', 'purchase_items', 'purchase_orders', 'purchase_order_items', 'purchase_requests', 'purchase_request_items',
   'purchase_returns', 'purchase_return_items', 'purchase_deductions', 'purchase_order_deductions', 'purchase_return_deductions',
   'sales', 'sales_items', 'sales_export_orders', 'sales_export_order_items', 'sales_return', 'sales_return_items',
-  'voucher', 'voucher_entry', 'ledger_entries', 'ledgermaster', 'ledgergroupmaster',
+  'voucher', 'voucher_entry', 'ledger_entries', 'ledgermaster', 'ledgergroupmaster', 'ledger_groups',
   'stock', 'stock_lots', 'stock_adjustments', 'stock_adjustment_items', 'stock_alerts', 'stock_alert_config',
   'grains', 'grain_input_items', 'grain_output_items', 'grain_wastage_items',
   'flour_out', 'flour_out_items', 'flour_out_returns', 'flour_out_return_items',

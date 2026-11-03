@@ -24,6 +24,7 @@ const QuotationCreate = () => {
     bill_no: '',
     date: new Date().toISOString().split('T')[0],
     pay_type: 'Cash',
+    stock_type: 'RM',
     tax_type: 'Exclusive',
     type: 'Urad',
     remarks: '',
@@ -54,7 +55,7 @@ const QuotationCreate = () => {
   });
 
   const [items, setItems] = useState([
-    { item_name: '', lot_no: '', qty: '', box: '', rate: '', disc: '', tax: '', amount: '' }
+    { item_name: '', lot_no: '', weight: '50 KG', qty: '', box: '', rate: '', disc: '', tax: '0', tax_type: 'Taxable', amount: '' }
   ]);
 
   const [deductionsList, setDeductionsList] = useState([]);
@@ -118,9 +119,11 @@ const QuotationCreate = () => {
 
             setFormData(prev => ({
               ...prev,
-              bill_no: String(res.bill_no || res.s_no || ''),
+              id: res.id,
+              bill_no: String(res.bill_no || res.s_no || editId || '1'),
               date: res.date ? res.date.substring(0, 10) : new Date().toISOString().split('T')[0],
               pay_type: res.pay_type || 'Cash',
+              stock_type: res.stock_type || 'RM',
               tax_type: res.tax_type || 'Exclusive',
               type: res.type || 'Urad',
               remarks: res.remarks || '',
@@ -143,29 +146,54 @@ const QuotationCreate = () => {
 
             let mappedItems = [];
             if (Array.isArray(res.items) && res.items.length > 0) {
-              mappedItems = res.items.map(it => ({
-                item_name: it.item_name || '',
-                lot_no: it.lot_no || '',
-                qty: String(it.qty !== undefined ? it.qty : ''),
-                box: String(it.box !== undefined ? it.box : ''),
-                rate: String(it.rate !== undefined ? it.rate : ''),
-                disc: String(it.disc !== undefined ? it.disc : ''),
-                tax: String(it.tax !== undefined ? it.tax : ''),
-                amount: String(it.amount !== undefined ? it.amount : '')
-              }));
+              mappedItems = res.items.map(it => {
+                const itemLotNo = it.lot_no || res.lot_no || '';
+                const itemTax = (it.tax !== undefined && it.tax !== null && it.tax !== '' && parseFloat(it.tax) > 0)
+                  ? String(it.tax)
+                  : (res.tax_percent !== undefined && res.tax_percent !== null ? String(res.tax_percent) : '0');
+                const itemTaxType = it.tax_type || (parseFloat(itemTax) > 0 ? 'Taxable' : 'Nil Rated');
+                const itemWeight = (it.weight !== undefined && it.weight !== null && it.weight !== '')
+                  ? String(it.weight)
+                  : (res.weight || '50 KG');
+
+                return {
+                  item_name: it.item_name || '',
+                  lot_no: itemLotNo,
+                  qty: String(it.qty !== undefined ? it.qty : ''),
+                  box: String(it.box !== undefined ? it.box : ''),
+                  rate: String(it.rate !== undefined ? it.rate : ''),
+                  disc: String(it.disc !== undefined ? it.disc : ''),
+                  tax: itemTax,
+                  tax_rate: parseFloat(itemTax) || 0,
+                  tax_percent: parseFloat(itemTax) || 0,
+                  amount: String(it.amount !== undefined ? it.amount : ''),
+                  weight: itemWeight,
+                  per_unit_wt: itemWeight,
+                  tax_type: itemTaxType
+                };
+              });
             } else if (res.item_name) {
+              const itemLotNo = res.lot_no || '';
+              const itemTax = String(res.tax_percent || '0');
+              const itemTaxType = parseFloat(itemTax) > 0 ? 'Taxable' : 'Nil Rated';
+              const itemWeight = res.weight || '50 KG';
               mappedItems = [{
                 item_name: res.item_name || '',
-                lot_no: res.lot_no || '',
+                lot_no: itemLotNo,
                 qty: String(res.qty || ''),
                 box: String(res.box || ''),
                 rate: String(res.rate || ''),
                 disc: String(res.disc || ''),
-                tax: String(res.tax || ''),
-                amount: String(res.amount || '')
+                tax: itemTax,
+                tax_rate: parseFloat(itemTax) || 0,
+                tax_percent: parseFloat(itemTax) || 0,
+                amount: String(res.amount || ''),
+                weight: itemWeight,
+                per_unit_wt: itemWeight,
+                tax_type: itemTaxType
               }];
             } else {
-              mappedItems = [{ item_name: '', lot_no: '', qty: '', box: '', rate: '', disc: '', tax: '', amount: '' }];
+              mappedItems = [{ item_name: '', lot_no: '', weight: '50 KG', qty: '', box: '', rate: '', disc: '', tax: '0', tax_type: 'Taxable', amount: '' }];
             }
             setItems(mappedItems);
 
@@ -189,8 +217,9 @@ const QuotationCreate = () => {
           }
         } else {
           const nextRes = await api('/quotations/next-bill-no');
+          const nextBillVal = nextRes?.next_bill_no ?? nextRes?.next_sno ?? nextRes?.data?.next_bill_no ?? 1;
           if (nextRes && nextRes.success) {
-            setFormData(prev => ({ ...prev, bill_no: String(nextRes.next_bill_no) }));
+            setFormData(prev => ({ ...prev, bill_no: String(nextBillVal) }));
           }
         }
 
@@ -382,7 +411,27 @@ const QuotationCreate = () => {
         if (master) {
           updated[index].name = master.name || master.deduction_name || master.ded_name || '';
           updated[index].type = (master.type || master.deduction_type || 'LESS').toUpperCase();
-          updated[index].percent = master.deduction_value || master.ded_value || '';
+          const pVal = master.deduction_value || master.ded_value || master.percent || '';
+          updated[index].percent = pVal;
+          const numP = parseFloat(pVal) || 0;
+          const gross = parseFloat(formData.gross_amt || formData.amount || 0);
+          if (numP > 100) {
+            updated[index].amount = numP.toFixed(2);
+          } else if (gross > 0 && numP > 0) {
+            updated[index].amount = ((gross * numP) / 100).toFixed(2);
+          }
+        }
+      }
+
+      if (field === 'percent') {
+        const numP = parseFloat(value) || 0;
+        const gross = parseFloat(formData.gross_amt || formData.amount || 0);
+        if (numP > 100) {
+          updated[index].amount = numP.toFixed(2);
+        } else if (gross > 0 && numP > 0) {
+          updated[index].amount = ((gross * numP) / 100).toFixed(2);
+        } else {
+          updated[index].amount = numP > 0 ? numP.toFixed(2) : '0.00';
         }
       }
 
@@ -429,6 +478,9 @@ const QuotationCreate = () => {
       }).map(item => ({
         ...item,
         item_name: typeof item.item_name === 'object' ? (item.item_name?.name || item.item_name?.item_name || '') : (item.item_name || ''),
+        lot_no: item.lot_no || '',
+        weight: item.weight || item.per_unit_wt || '50 KG',
+        tax_type: item.tax_type || (parseFloat(item.tax || 0) > 0 ? 'Taxable' : 'Nil Rated'),
         qty: parseFloat(item.qty) || 0,
         box: parseFloat(item.box) || 0,
         rate: parseFloat(item.rate) || 0,
@@ -450,6 +502,7 @@ const QuotationCreate = () => {
 
       const payload = {
         ...formData,
+        stock_type: formData.stock_type || 'RM',
         customer: customerVal,
         items: validItems,
         deductions: selectedDeductions.filter(d => d.deduction_id || d.name || d.amount)
@@ -475,6 +528,7 @@ const QuotationCreate = () => {
           bill_no: '',
           date: new Date().toISOString().split('T')[0],
           pay_type: 'Cash',
+          stock_type: 'RM',
           tax_type: 'Exclusive',
           type: 'Urad',
           remarks: '',
@@ -495,7 +549,7 @@ const QuotationCreate = () => {
           loadman_charges: '0.00'
         });
         setItems([
-          { item_name: '', lot_no: '', qty: '', box: '', rate: '', disc: '', tax: '', amount: '' }
+          { item_name: '', lot_no: '', weight: '50 KG', qty: '', box: '', rate: '', disc: '', tax: '0', tax_type: 'Taxable', amount: '' }
         ]);
         setSelectedDeductions([
           { deduction_id: '', name: '', type: 'LESS', percent: '', amount: '', remarks: '' }
@@ -529,6 +583,11 @@ const QuotationCreate = () => {
       { value: 'Cash', label: 'Cash' },
       { value: 'Credit', label: 'Credit' }
     ], value: formData.pay_type, col: 1 },
+    { name: 'stock_type', label: 'Stock Type', type: 'select', options: [
+      { value: 'RM', label: 'RM (Raw Material)' },
+      { value: 'FG', label: 'FG (Finished Goods)' },
+      { value: 'Vacuum', label: 'Vacuum' }
+    ], value: formData.stock_type || 'RM', col: 1 },
     { name: 'tax_type', label: 'Tax Type', type: 'select', options: [
       { value: 'Exclusive', label: 'Exclusive' },
       { value: 'Inclusive', label: 'Inclusive' },
@@ -541,8 +600,8 @@ const QuotationCreate = () => {
     ], value: formData.type, col: 2 },
     { name: 'loadman_name', label: 'Loadman', type: 'masterSelect', masterType: 'workers', value: formData.loadman_name, col: 2 },
     { name: 'loadman_rate_per_kg', label: 'Loadman Rate/KG', type: 'number', step: '0.01', value: formData.loadman_rate_per_kg, col: 2 },
-    { name: 'loadman_charges', label: 'Loadman Charges', type: 'number', step: '0.01', readOnly: true, value: formData.loadman_charges, col: 2 },
-    { name: 'remarks', label: 'Remarks', type: 'textarea', value: formData.remarks, col: 2 },
+    { name: 'loadman_charges', label: 'Loadman Charges', type: 'number', step: '0.01', readOnly: true, value: formData.loadman_charges, col: 3 },
+    { name: 'remarks', label: 'Remarks', type: 'textarea', value: formData.remarks, col: 3 },
     { name: 'customer', label: 'Customer', type: 'masterSelect', masterType: 'customers', value: formData.customer, col: 3 },
     { name: 'address', label: 'Address', type: 'textarea', value: formData.address, col: 3 },
   ];
@@ -578,7 +637,7 @@ const QuotationCreate = () => {
   return (
     <div className="window">
       <SalesDistributionWorkflow currentModule="quotation" />
-      <div className="screen-title">Quotation Creation</div>
+      <div className="screen-title">{editId ? "Quotation Updation" : "Quotation Creation"}</div>
 
       {message && <div className={`message ${messageType}`}>{message}</div>}
 
@@ -586,6 +645,7 @@ const QuotationCreate = () => {
         fields={topFrameFields} 
         data={formData} 
         onChange={handleInputChange}
+        nextSnoEndpoint="/quotations/next-bill-no"
       />
 
       <EntryItemsTable 
@@ -700,14 +760,24 @@ const QuotationCreate = () => {
                 if (val) {
                   const master = deductionsList.find(d => String(d.id) === String(val));
                   if (master) {
+                    const pVal = master.deduction_value || master.ded_value || master.percent || '';
+                    const numP = parseFloat(pVal) || 0;
+                    const gross = parseFloat(formData.gross_amt || formData.amount || 0);
+                    let amt = '0.00';
+                    if (numP > 100) {
+                      amt = numP.toFixed(2);
+                    } else if (gross > 0 && numP > 0) {
+                      amt = ((gross * numP) / 100).toFixed(2);
+                    }
+                    
                     setSelectedDeductions(prev => [
                       ...prev.filter(r => r.deduction_id || r.name),
                       {
                         deduction_id: master.id,
                         name: master.name || master.deduction_name || master.ded_name || '',
                         type: (master.type || master.deduction_type || 'LESS').toUpperCase(),
-                        percent: master.deduction_value || master.ded_value || '',
-                        amount: '',
+                        percent: pVal,
+                        amount: amt,
                         remarks: ''
                       }
                     ]);

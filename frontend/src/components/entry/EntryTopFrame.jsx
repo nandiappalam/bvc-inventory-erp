@@ -208,29 +208,41 @@ export const EntryTopFrame = ({ fields = [], data = {}, onChange = () => {}, col
   useEffect(() => {
     if (isEditMode) return;
 
-    // Auto-fetch next purchase/flour-out S.No only for creation mode.
+    // Auto-fetch next purchase/flour-out/quotation S.No/Bill No only for creation mode.
     const fetchNext = async () => {
       try {
         let endpoint = nextSnoEndpoint;
         if (!endpoint) {
           const path = window.location.pathname.toLowerCase();
-          if (path.includes('purchase-order') || path.includes('purchase_order')) {
+          if (path.includes('quotation')) {
+            endpoint = '/quotations/next-bill-no';
+          } else if (path.includes('purchase-order') || path.includes('purchase_order')) {
             endpoint = '/purchase-orders/next-sno';
           } else if (path.includes('flour-out')) {
             endpoint = '/flour-out/next-sno';
+          } else if (path.includes('sales-export-order')) {
+            endpoint = '/sales-export-orders/next-sno';
           } else if (path.includes('sales-export')) {
             endpoint = '/sales-export-orders/next-sno';
+          } else if (path.includes('sales-order') || path.includes('sales_order')) {
+            endpoint = '/sales-orders/next-sno';
+          } else if (path.includes('sales-return') || path.includes('sales_return')) {
+            endpoint = '/sales-returns/next-sno';
           } else if (path.includes('sales')) {
             endpoint = '/sales/next-sno';
-          } else {
+          } else if (path.includes('purchase')) {
             endpoint = '/purchases/next-sno';
           }
         }
+        if (!endpoint) return;
+
         const snoRes = await api(endpoint);
-        const nextSno = snoRes?.next_sno ?? snoRes?.sNo ?? snoRes?.s_no ?? snoRes?.data?.s_no ?? snoRes?.data?.next_sno ?? snoRes?.data?.sNo;
+        const nextSno = snoRes?.next_bill_no ?? snoRes?.next_sno ?? snoRes?.sNo ?? snoRes?.s_no ?? snoRes?.data?.next_bill_no ?? snoRes?.data?.s_no ?? snoRes?.data?.next_sno ?? snoRes?.data?.sNo ?? snoRes?.data?.bill_no;
         if (nextSno !== undefined && nextSno !== null && String(nextSno) !== '') {
           let fieldToSet = 's_no';
-          if (data.sNo !== undefined || fields.some(f => f.name === 'sNo')) {
+          if ((endpoint && endpoint.includes('quotation')) || window.location.pathname.toLowerCase().includes('quotation')) {
+            fieldToSet = 'bill_no';
+          } else if (data.sNo !== undefined || fields.some(f => f.name === 'sNo')) {
             fieldToSet = 'sNo';
           } else if (data.sno !== undefined || fields.some(f => f.name === 'sno')) {
             fieldToSet = 'sno';
@@ -250,7 +262,9 @@ export const EntryTopFrame = ({ fields = [], data = {}, onChange = () => {}, col
     };
 
     let fieldToCheck = 's_no';
-    if (data.sNo !== undefined || fields.some(f => f.name === 'sNo')) {
+    if (window.location.pathname.toLowerCase().includes('quotation')) {
+      fieldToCheck = 'bill_no';
+    } else if (data.sNo !== undefined || fields.some(f => f.name === 'sNo')) {
       fieldToCheck = 'sNo';
     } else if (data.sno !== undefined || fields.some(f => f.name === 'sno')) {
       fieldToCheck = 'sno';

@@ -333,9 +333,56 @@ router.get('/next-sno', async (req, res) => {
   }
 });
  
+const syncAllPurchasesLedgerEntries = async () => {
+  try {
+    const pRes = await db.query(`SELECT id, date, inv_no, supplier, base_amount, gross_amount, tax_amount, disc_amount, grand_total, net_amount, cgst_amount, sgst_amount, igst_amount, transporter, transport, transport_charges, freight_amount, transport_payable_type, loadman_name, loadman_worker_id, loadman_rate_per_kg, loadman_charges FROM purchases`);
+    for (const p of (pRes.rows || [])) {
+      const pId = p.id;
+      const chk = await db.query(`SELECT COUNT(*) as cnt FROM ledger_entries WHERE reference_id = ? AND reference_type = 'purchase'`, [pId]);
+      const count = Number(chk.rows?.[0]?.cnt || 0);
+      const transportAmt = parseFloat(p.transport_charges || p.freight_amount || 0);
+      const chkTrans = transportAmt > 0 ? await db.query(`SELECT COUNT(*) as cnt FROM ledger_entries WHERE reference_id = ? AND reference_type = 'purchase' AND (LOWER(ledger_name) = 'transport charges' OR LOWER(ledger_name) LIKE '%transport%')`, [pId]) : { rows: [{ cnt: 1 }] };
+      const transCount = Number(chkTrans.rows?.[0]?.cnt || 0);
+
+      if (count === 0 || (transportAmt > 0 && transCount === 0)) {
+        let deds = [];
+        try {
+          const dRes = await db.query(`SELECT * FROM purchase_deductions WHERE purchase_id = ?`, [pId]);
+          deds = dRes.rows || [];
+        } catch (_) {}
+
+        await createPurchaseLedgerEntries({
+          supplier: p.supplier,
+          date: p.date,
+          invNo: p.inv_no || '',
+          purchaseId: pId,
+          baseAmount: parseFloat(p.base_amount || p.gross_amount || 0),
+          taxAmount: parseFloat(p.tax_amount || 0),
+          discAmount: parseFloat(p.disc_amount || 0),
+          netAmount: parseFloat(p.grand_total || p.net_amount || 0),
+          cgstAmount: parseFloat(p.cgst_amount || 0),
+          sgstAmount: parseFloat(p.sgst_amount || 0),
+          igstAmount: parseFloat(p.igst_amount || 0),
+          transporter: p.transporter || p.transport || '',
+          transportCharges: transportAmt,
+          transportPayableType: p.transport_payable_type || 'SEPARATE',
+          loadmanName: p.loadman_name || '',
+          loadmanWorkerId: p.loadman_worker_id,
+          loadmanRatePerKg: parseFloat(p.loadman_rate_per_kg || 0),
+          loadmanCharges: parseFloat(p.loadman_charges || 0),
+          deductions: deds
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('[Sync Purchase Ledgers Notice]:', err.message);
+  }
+};
+
 // GET purchase list for UI (ERP-grade join)
 router.get('/purchase-list', async (req, res) => {
   try {
+    syncAllPurchasesLedgerEntries().catch(() => {});
     const sql = `SELECT
       p.id,
       COALESCE(p.s_no, p.id) AS s_no,
@@ -388,6 +435,8 @@ router.get('/purchase-list', async (req, res) => {
       COALESCE(p.loadman_rate_per_kg, 0.50) AS loadman_rate_per_kg,
       COALESCE(p.loadman_charges, 0) AS loadman_charges,
       COALESCE(p.additional_charges, 0) AS additional_charges,
+      COALESCE(p.transport_charges, p.freight_amount, 0) AS transport_charges,
+      COALESCE(p.freight_amount, p.transport_charges, 0) AS freight_amount,
       COALESCE(gm.godown_name, p.godown, 'Main Godown') AS godown_name,
       COALESCE(qi.id, (SELECT id FROM qc_inspections WHERE rm_lot_no = pi.lot_no OR CAST(purchase_id AS TEXT) = CAST(p.id AS TEXT) LIMIT 1)) AS qc_id
     FROM purchases p
@@ -398,7 +447,7 @@ router.get('/purchase-list', async (req, res) => {
     LEFT JOIN transport_master tm ON (CAST(tm.id AS TEXT) = CAST(p.transporter AS TEXT) OR CAST(tm.id AS TEXT) = CAST(p.transport AS TEXT) OR tm.name = CAST(p.transporter AS TEXT) OR tm.name = CAST(p.transport AS TEXT))
     LEFT JOIN qc_inspections qi ON (qi.rm_lot_no = pi.lot_no OR CAST(qi.purchase_id AS TEXT) = CAST(p.id AS TEXT) OR CAST(qi.purchase_id AS TEXT) = ('PUR-' || CAST(p.id AS TEXT)))
     ORDER BY p.id DESC`;
- 
+
     const result = await db.query(sql);
     res.json(result.rows);
   } catch (error) {
@@ -1083,9 +1132,17 @@ router.post('/', async (req, res) => {
         taxAmount: calculatedTotals.taxAmount,
         discAmount: calculatedTotals.discAmount,
         netAmount: calculatedTotals.grandTotal,
+        cgstAmount: calculatedTotals.cgstAmount,
+        sgstAmount: calculatedTotals.sgstAmount,
+        igstAmount: calculatedTotals.igstAmount,
+        isInterstate: calculatedTotals.isInterstate,
+        transporter: formData.transporter || formData.transport || '',
+        transportCharges: parseFloat(formData.transport_charges || formData.transportCharges || formData.freight_charges || formData.freightAmount || 0),
+        transportPayableType: formData.transport_payable_type || formData.transportPayableType || 'SEPARATE',
         loadmanName,
         loadmanRatePerKg: loadmanRateVal,
-        loadmanCharges: loadmanChargesVal
+        loadmanCharges: loadmanChargesVal,
+        deductions: deductions || []
       })
       console.log('Ledger entries created for purchase:', purchaseId)
     } catch (ledgerError) {
@@ -1691,10 +1748,14 @@ router.put('/:id', async (req, res) => {
         sgstAmount: calculatedTotals.sgstAmount,
         igstAmount: calculatedTotals.igstAmount,
         isInterstate: calculatedTotals.isInterstate,
+        transporter: formData.transporter || formData.transport || '',
+        transportCharges: parseFloat(formData.transport_charges || formData.transportCharges || formData.freight_charges || formData.freightAmount || 0),
+        transportPayableType: formData.transport_payable_type || formData.transportPayableType || 'SEPARATE',
         loadmanName,
         loadmanWorkerId,
         loadmanRatePerKg,
-        loadmanCharges
+        loadmanCharges,
+        deductions: deductions || []
       });
     } catch (ledgerError) {
       console.error('Error recreating purchase ledger entries after update:', ledgerError);

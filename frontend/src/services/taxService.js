@@ -468,7 +468,17 @@ export function calculateInvoiceTax(invoiceData = {}) {
   let netDeductionAmount = 0;
   const deductions = Array.isArray(invoiceData.deductions) ? invoiceData.deductions : [];
   deductions.forEach(d => {
-    const amt = parseFloat(d.amount) || 0;
+    let amt = parseFloat(d.amount) || 0;
+    const perc = parseFloat(d.percent) || 0;
+    if ((amt === 0 || isNaN(amt)) && perc > 0) {
+      if (perc > 100) {
+        amt = perc; // flat amount (e.g. 5000)
+      } else {
+        amt = (totalGrossAmount * perc) / 100;
+      }
+    }
+    amt = round2(amt);
+    d.amount = amt;
     const isAdd = String(d.type || '').toUpperCase() === 'ADD' || 
                   String(d.type || '').toUpperCase() === '+' || 
                   String(d.type || '').toUpperCase() === 'ADDITION';
