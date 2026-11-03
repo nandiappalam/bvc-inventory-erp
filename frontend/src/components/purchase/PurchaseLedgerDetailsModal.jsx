@@ -45,14 +45,19 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
       setError('');
       try {
         if (purchaseId) {
-          // 1. Fetch ledger statement
-          const res = await api(`/purchases/${purchaseId}/ledger-statement`);
-          const stmtData = res?.data || res;
-          
-          // 2. Fetch raw purchase and items for full audit detail
+          let stmtData = null;
+          try {
+            const res = await api(`/purchases/${purchaseId}/ledger-statement`);
+            stmtData = res?.data || res;
+          } catch (stErr) {
+            console.warn('Could not fetch server ledger statement:', stErr.message);
+          }
+
+          // Fetch raw purchase for audit detail and client-side statement fallback
+          let pData = null;
           try {
             const pRes = await api(`/purchases/${purchaseId}`);
-            const pData = pRes?.data || pRes;
+            pData = pRes?.data || pRes;
             if (pData) {
               setRawPurchase(pData);
               if (Array.isArray(pData.items)) {
@@ -63,10 +68,15 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
 
           if (stmtData && (stmtData.journal_entries || stmtData.totals)) {
             setStatementData(stmtData);
-          } else if (purchaseData) {
-            setStatementData(generatePreviewStatement(purchaseData));
+          } else if (pData || purchaseData) {
+            const fallbackStmt = generatePreviewStatement(pData || purchaseData);
+            if (fallbackStmt) {
+              setStatementData(fallbackStmt);
+            } else {
+              setError('Failed to generate purchase ledger statement');
+            }
           } else {
-            setError(res?.message || 'Failed to load purchase ledger statement');
+            setError('Failed to load purchase ledger statement');
           }
         } else if (purchaseData) {
           setStatementData(generatePreviewStatement(purchaseData));
@@ -92,20 +102,21 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
     fetchStatement();
   }, [isOpen, purchaseId, purchaseData]);
 
-  // Helper function for preview when creating new purchase
+  // Helper function for preview when creating new purchase or client-side fallback
   function generatePreviewStatement(data) {
-    const f = data.formData || {};
-    const t = data.totals || {};
-    const deds = data.deductions || [];
-    const baseAmount = Number(t.baseAmount || t.taxable || 0);
-    const taxAmount = Number(t.taxAmount || 0);
-    const isInterstate = String(f.tax_type || f.taxType || '').toLowerCase().includes('inter');
-    const cgstAmount = Number(t.cgstAmount || (isInterstate ? 0 : taxAmount / 2));
-    const sgstAmount = Number(t.sgstAmount || (isInterstate ? 0 : taxAmount - cgstAmount));
-    const igstAmount = Number(t.igstAmount || (isInterstate ? taxAmount : 0));
-    const discAmount = Number(t.discAmount || 0);
-    const transportCharges = Number(f.transport_charges || f.net_transport_amount || f.freight_amount || 0);
-    const loadmanCharges = Number(f.loadman_charges || 0);
+    if (!data) return null;
+    const f = data.formData || data || {};
+    const t = data.totals || data || {};
+    const deds = data.deductions || f.deductions || [];
+    const baseAmount = Number(t.baseAmount || t.taxable || f.base_amount || f.taxable_amount || 0);
+    const taxAmount = Number(t.taxAmount || f.tax_amount || 0);
+    const isInterstate = String(f.tax_type || f.taxType || '').toLowerCase().includes('inter') || Number(f.igst_amount || 0) > 0;
+    const cgstAmount = Number(t.cgstAmount || f.cgst_amount || (isInterstate ? 0 : taxAmount / 2));
+    const sgstAmount = Number(t.sgstAmount || f.sgst_amount || (isInterstate ? 0 : taxAmount - cgstAmount));
+    const igstAmount = Number(t.igstAmount || f.igst_amount || (isInterstate ? taxAmount : 0));
+    const discAmount = Number(t.discAmount || f.disc_amount || 0);
+    const transportCharges = Number(f.transport_charges || f.transportCharges || f.net_transport_amount || f.freight_amount || 0);
+    const loadmanCharges = Number(f.loadman_charges || f.loadmanCharges || 0);
 
     let supplierName = f.supplier_name || f.supplier || 'Supplier';
     if (/^\d+$/.test(String(supplierName).trim())) {

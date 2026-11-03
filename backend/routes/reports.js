@@ -2894,7 +2894,7 @@ router.get('/ledger/:ledgerName', async (req, res) => {
     }
 
     // -------------------------------------------------------------
-    // 8. Sort chronologically and calculate running balance
+    // 8. Final deduplication, sort chronologically and calculate running balance
     // -------------------------------------------------------------
     const normalizeDateStr = (d) => {
       if (!d) return ''
@@ -2913,10 +2913,77 @@ router.get('/ledger/:ledgerName', async (req, res) => {
       return (a.id || 0) - (b.id || 0)
     })
 
+    // Final deduplication pass: eliminate duplicate rows originating from the same purchase activity (Loadman / Transporter)
+    const dedupedTransactions = [];
+    const seenPurchaseMap = new Map();
+
+    const extractPurchaseRef = (t) => {
+      const p = String(t.particulars || '');
+      const v = String(t.voucher_no || '');
+      const ref = String(t.reference_id || '');
+
+      // 1. "Auto-recorded from Purchase #111" or "Purchase #111"
+      const pMatch = p.match(/(?:from\s+purchase|purchase)\s*#\s*([A-Za-z0-9\-_]+)/i);
+      if (pMatch && pMatch[1]) {
+        return pMatch[1].toLowerCase().replace(/^pur-?0*/i, '');
+      }
+
+      // 2. "Loading charges payable for #111" or "Freight charges payable for #111"
+      const chargeMatch = p.match(/(?:loading|unloading|freight|transport).*?#([A-Za-z0-9\-_]+)/i);
+      if (chargeMatch && chargeMatch[1] && !/^opc-/i.test(chargeMatch[1])) {
+        return chargeMatch[1].toLowerCase().replace(/^pur-?0*/i, '');
+      }
+
+      // 3. Purchase Unloading or Purchase Freight voucher type
+      if (t.voucher_type === 'Purchase Unloading' || t.voucher_type === 'Purchase Freight') {
+        const raw = (v || ref).toLowerCase().replace(/^pur-?0*/i, '');
+        if (raw) return raw;
+      }
+
+      // 4. Voucher no starting with PUR
+      if (/^pur/i.test(v)) {
+        return v.toLowerCase().replace(/^pur-?0*/i, '');
+      }
+
+      // 5. Reference ID if reference type is purchase
+      if (String(t.reference_type || '').toLowerCase() === 'purchase' && ref) {
+        return ref.toLowerCase().replace(/^pur-?0*/i, '');
+      }
+
+      return null;
+    };
+
+    const getVoucherPriority = (t) => {
+      if (t.voucher_type === 'Purchase') return 3;
+      if (t.voucher_type === 'Journal') return 2;
+      return 1;
+    };
+
+    for (const t of allTransactions) {
+      const pRef = extractPurchaseRef(t);
+      const cr = Number(parseFloat(t.credit || 0).toFixed(2));
+      const dr = Number(parseFloat(t.debit || 0).toFixed(2));
+
+      if (pRef && (cr > 0 || dr > 0)) {
+        const key = `pur_${pRef}_${cr}_${dr}`;
+        if (seenPurchaseMap.has(key)) {
+          const existingIdx = seenPurchaseMap.get(key);
+          const existingT = dedupedTransactions[existingIdx];
+          if (getVoucherPriority(t) > getVoucherPriority(existingT)) {
+            dedupedTransactions[existingIdx] = t;
+          }
+          continue;
+        }
+        seenPurchaseMap.set(key, dedupedTransactions.length);
+      }
+
+      dedupedTransactions.push(t);
+    }
+
     let periodOpeningBalance = openingBalance
     let activeTransactions = []
 
-    for (const t of allTransactions) {
+    for (const t of dedupedTransactions) {
       const tDateStr = normalizeDateStr(t.date)
       const debit = parseFloat(t.debit || 0)
       const credit = parseFloat(t.credit || 0)
@@ -2929,9 +2996,14 @@ router.get('/ledger/:ledgerName', async (req, res) => {
     }
 
     let runningBalance = periodOpeningBalance
+    let periodDebitTotal = 0
+    let periodCreditTotal = 0
+
     const finalTransactions = activeTransactions.map(t => {
       const debit = parseFloat(t.debit || 0)
       const credit = parseFloat(t.credit || 0)
+      periodDebitTotal += debit
+      periodCreditTotal += credit
       runningBalance += debit - credit
       return {
         ...t,
@@ -2941,18 +3013,29 @@ router.get('/ledger/:ledgerName', async (req, res) => {
       }
     })
 
+    const periodDebit = Number(periodDebitTotal.toFixed(2))
+    const periodCredit = Number(periodCreditTotal.toFixed(2))
+
     const payload = {
       success: true,
       ledgerName: officialName,
       openingBalance: Number(periodOpeningBalance.toFixed(2)),
       transactions: finalTransactions,
       closingBalance: Number(runningBalance.toFixed(2)),
+      periodDebitTotal: periodDebit,
+      periodCreditTotal: periodCredit,
+      totalDebit: periodDebit,
+      totalCredit: periodCredit,
       diagnostics: loadmanDiagnostics,
       data: {
         ledgerName: officialName,
         openingBalance: Number(periodOpeningBalance.toFixed(2)),
         transactions: finalTransactions,
         closingBalance: Number(runningBalance.toFixed(2)),
+        periodDebitTotal: periodDebit,
+        periodCreditTotal: periodCredit,
+        totalDebit: periodDebit,
+        totalCredit: periodCredit,
         diagnostics: loadmanDiagnostics
       }
     }

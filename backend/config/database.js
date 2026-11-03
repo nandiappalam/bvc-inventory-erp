@@ -982,8 +982,13 @@ function translateSqlForPostgres(sql, companyId = 1) {
     return `LIKE '${likePattern}'`;
   });
 
-  // 4f. Fix double-quoted default string literals: DEFAULT "value" -> DEFAULT 'value'
+  // 4f. Fix double-quoted default and comparison string literals for PostgreSQL:
+  // DEFAULT "value" -> DEFAULT 'value', = "value" -> = 'value', != "value" -> != 'value', etc.
   transformed = transformed.replace(/DEFAULT\s+"([^"]+)"/gi, "DEFAULT '$1'");
+  transformed = transformed.replace(/(=|!=|<>|<=|>=|<|>|\bLIKE\b|\bILIKE\b)\s*"([^"]+)"/gi, "$1 '$2'");
+  transformed = transformed.replace(/"([^"]+)"\s*(=|!=|<>|<=|>=|<|>|\bLIKE\b|\bILIKE\b)/gi, "'$1' $2");
+  transformed = transformed.replace(/\bIN\s*\(([^)]+)\)/gi, (match, inner) => 'IN (' + inner.replace(/"([^"]+)"/g, "'$1'") + ')');
+  transformed = transformed.replace(/\bVALUES\s*\(([^)]+)\)/gi, (match, inner) => 'VALUES (' + inner.replace(/"([^"]+)"/g, "'$1'") + ')');
 
   // 4g. Handle reserved keyword current_date when used as column definition or assignment
   transformed = transformed.replace(/\bcurrent_date\s+TEXT\b/gi, '"current_date" TEXT');

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../../utils/api.js'
 import { printHtml } from '../../utils/printHelper.js'
@@ -257,6 +257,20 @@ const LedgerStatementReport = () => {
 
   const safeTransactions = reportData?.transactions || []
 
+  const periodDebitCalculated = useMemo(() => {
+    if (reportData?.periodDebitTotal !== undefined && reportData?.periodDebitTotal !== null && !isNaN(reportData.periodDebitTotal) && Number(reportData.periodDebitTotal) > 0) {
+      return Number(reportData.periodDebitTotal);
+    }
+    return safeTransactions.reduce((acc, t) => acc + (parseFloat(t.debit) || 0), 0);
+  }, [reportData, safeTransactions]);
+
+  const periodCreditCalculated = useMemo(() => {
+    if (reportData?.periodCreditTotal !== undefined && reportData?.periodCreditTotal !== null && !isNaN(reportData.periodCreditTotal) && Number(reportData.periodCreditTotal) > 0) {
+      return Number(reportData.periodCreditTotal);
+    }
+    return safeTransactions.reduce((acc, t) => acc + (parseFloat(t.credit) || 0), 0);
+  }, [reportData, safeTransactions]);
+
   return (
     <div className="window ledger-statement-page">
       <div className="screen-header">
@@ -368,13 +382,13 @@ const LedgerStatementReport = () => {
             <div className="stat-box">
               <span className="label">Period Dr:</span>
               <span className="value debit">
-                ₹ {Number(reportData.periodDebitTotal || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                ₹ {Number(periodDebitCalculated).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
               </span>
             </div>
             <div className="stat-box">
               <span className="label">Period Cr:</span>
               <span className="value credit">
-                ₹ {Number(reportData.periodCreditTotal || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                ₹ {Number(periodCreditCalculated).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
               </span>
             </div>
             <div className="stat-box" style={{ backgroundColor: 'rgba(59, 130, 246, 0.25)', borderColor: 'rgba(147, 197, 253, 0.4)' }}>
@@ -500,10 +514,10 @@ const LedgerStatementReport = () => {
               <tr className="closing-balance-row">
                 <td colSpan="5" style={{ textAlign: 'right', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Period Total & Closing Balance:</td>
                 <td style={{ textAlign: 'right', color: '#34d399', fontWeight: '800' }}>
-                  ₹ {Number(reportData.periodDebitTotal || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                  ₹ {Number(periodDebitCalculated).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                 </td>
                 <td style={{ textAlign: 'right', color: '#fcd34d', fontWeight: '800' }}>
-                  ₹ {Number(reportData.periodCreditTotal || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                  ₹ {Number(periodCreditCalculated).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                 </td>
                 <td style={{ textAlign: 'right', color: '#ffffff', fontWeight: '800' }}>
                   ₹ {Math.abs(parseFloat(reportData.closingBalance || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}

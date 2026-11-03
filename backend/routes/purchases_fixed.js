@@ -384,7 +384,7 @@ router.get(['/', '/list', '/purchase-list'], async (req, res) => {
 })
 
 // Helper to resolve purchase record by any identifier (numeric ID, voucher_no, inv_no, s_no, or reference in ledger)
-async function findPurchaseRecord(paramId) {
+async function findPurchaseRecord(paramId, companyId = 1) {
   if (!paramId || paramId === 'undefined' || paramId === 'null') {
     return null;
   }
@@ -392,6 +392,7 @@ async function findPurchaseRecord(paramId) {
   const strVal = String(paramId).trim();
   const numVal = parseInt(strVal, 10);
   const isNum = !isNaN(numVal) && String(numVal) === strVal;
+  const cId = parseInt(companyId, 10) || 1;
 
   // 1. Direct query against purchases table
   try {
@@ -415,7 +416,8 @@ async function findPurchaseRecord(paramId) {
         strVal,
         strVal.toLowerCase(),
         strVal.toLowerCase()
-      ]
+      ],
+      cId
     );
 
     if (pRes.rows && pRes.rows.length > 0) {
@@ -431,11 +433,12 @@ async function findPurchaseRecord(paramId) {
       `SELECT reference_id, reference_type FROM ledger_entries 
        WHERE voucher_no = ? OR reference_id = ? OR CAST(reference_id AS TEXT) = ?
        ORDER BY id DESC LIMIT 1`,
-      [strVal, isNum ? numVal : -1, strVal]
+      [strVal, isNum ? numVal : -1, strVal],
+      cId
     );
     if (leRes.rows && leRes.rows[0] && leRes.rows[0].reference_id) {
       const refId = leRes.rows[0].reference_id;
-      const refP = await db.query('SELECT * FROM purchases WHERE id = ? OR CAST(id AS TEXT) = ? LIMIT 1', [refId, String(refId)]);
+      const refP = await db.query('SELECT * FROM purchases WHERE id = ? OR CAST(id AS TEXT) = ? LIMIT 1', [refId, String(refId)], cId);
       if (refP.rows && refP.rows[0]) {
         return refP.rows[0];
       }
@@ -450,7 +453,8 @@ async function findPurchaseRecord(paramId) {
       `SELECT reference_no FROM voucher 
        WHERE voucher_no = ? OR id = ? OR CAST(id AS TEXT) = ?
        ORDER BY id DESC LIMIT 1`,
-      [strVal, isNum ? numVal : -1, strVal]
+      [strVal, isNum ? numVal : -1, strVal],
+      cId
     );
     if (vRes.rows && vRes.rows[0] && vRes.rows[0].reference_no) {
       const refNo = vRes.rows[0].reference_no;
@@ -458,7 +462,8 @@ async function findPurchaseRecord(paramId) {
         `SELECT * FROM purchases 
          WHERE id = ? OR CAST(id AS TEXT) = ? OR voucher_no = ? OR inv_no = ? OR s_no = ? OR CAST(s_no AS TEXT) = ?
          LIMIT 1`,
-        [parseInt(refNo, 10) || -1, String(refNo), String(refNo), String(refNo), parseInt(refNo, 10) || -1, String(refNo)]
+        [parseInt(refNo, 10) || -1, String(refNo), String(refNo), String(refNo), parseInt(refNo, 10) || -1, String(refNo)],
+        cId
       );
       if (refP.rows && refP.rows[0]) {
         return refP.rows[0];
@@ -474,7 +479,8 @@ async function findPurchaseRecord(paramId) {
 // GET purchase by ID or Voucher No / Inv No
 router.get('/:id', async (req, res) => {
   try {
-    const purchaseData = await findPurchaseRecord(req.params.id);
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    const purchaseData = await findPurchaseRecord(req.params.id, activeCompanyId);
     if (!purchaseData) {
       return res.status(404).json({ success: false, message: 'Purchase not found' });
     }
@@ -571,37 +577,61 @@ router.get('/:id/ledger-statement', async (req, res) => {
     const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
 
     // 1. Fetch purchase record flexibly
-    const purchase = await findPurchaseRecord(req.params.id);
+    const purchase = await findPurchaseRecord(req.params.id, activeCompanyId);
     if (!purchase) {
       return res.status(404).json({ success: false, message: 'Purchase not found' });
     }
     const purchaseId = purchase.id;
 
     // Fetch deductions and items
-    const dedRes = await db.query('SELECT * FROM purchase_deductions WHERE purchase_id = ?', [purchaseId]);
-    const deductions = dedRes.rows || [];
+    let deductions = [];
+    try {
+      const dedRes = await db.query('SELECT * FROM purchase_deductions WHERE purchase_id = ?', [purchaseId], activeCompanyId);
+      deductions = dedRes.rows || [];
+    } catch (_) {}
 
-    const itemsRes = await db.query('SELECT * FROM purchase_items WHERE purchase_id = ?', [purchaseId]);
-    const items = itemsRes.rows || [];
+    let items = [];
+    try {
+      const itemsRes = await db.query('SELECT * FROM purchase_items WHERE purchase_id = ?', [purchaseId], activeCompanyId);
+      items = itemsRes.rows || [];
+    } catch (_) {}
 
     // 2. Fetch linked voucher and voucher entries
     let voucherNo = purchase.voucher_no || `PUR-${String(purchase.s_no || purchase.id).padStart(4, '0')}`;
     let voucherId = null;
-    let vRes = await db.query('SELECT * FROM voucher WHERE reference_no = ? AND (voucher_type = "Purchase" OR voucher_type LIKE "%PUR%") ORDER BY id DESC LIMIT 1', [String(purchaseId)]);
-    if (vRes.rows && vRes.rows.length > 0) {
-      voucherId = vRes.rows[0].id;
-      voucherNo = vRes.rows[0].voucher_no || voucherNo;
-    }
-
     let rawVEntries = [];
-    if (voucherId) {
-      const veRes = await db.query('SELECT * FROM voucher_entry WHERE voucher_id = ? ORDER BY id ASC', [voucherId]);
-      rawVEntries = veRes.rows || [];
+    let ledgerEntries = [];
+
+    try {
+      let vRes = await db.query(
+        "SELECT * FROM voucher WHERE reference_no = ? AND (voucher_type = 'Purchase' OR voucher_type LIKE '%PUR%') ORDER BY id DESC LIMIT 1",
+        [String(purchaseId)],
+        activeCompanyId
+      );
+      if (vRes.rows && vRes.rows.length > 0) {
+        voucherId = vRes.rows[0].id;
+        voucherNo = vRes.rows[0].voucher_no || voucherNo;
+      }
+
+      if (voucherId) {
+        const veRes = await db.query('SELECT * FROM voucher_entry WHERE voucher_id = ? ORDER BY id ASC', [voucherId], activeCompanyId);
+        rawVEntries = veRes.rows || [];
+      }
+    } catch (vErr) {
+      console.warn('Notice checking voucher for purchase ledger-statement:', vErr.message);
     }
 
     // Also check ledger_entries table
-    const leRes = await db.query('SELECT * FROM ledger_entries WHERE reference_id = ? AND (voucher_type = "Purchase" OR voucher_type LIKE "%PUR%") ORDER BY id ASC', [String(purchaseId)]);
-    const ledgerEntries = leRes.rows || [];
+    try {
+      const leRes = await db.query(
+        "SELECT * FROM ledger_entries WHERE reference_id = ? AND (voucher_type = 'Purchase' OR voucher_type LIKE '%PUR%') ORDER BY id ASC",
+        [String(purchaseId)],
+        activeCompanyId
+      );
+      ledgerEntries = leRes.rows || [];
+    } catch (leErr) {
+      console.warn('Notice checking ledger_entries for purchase ledger-statement:', leErr.message);
+    }
 
     // If no voucher entries recorded yet, generate them on the fly
     const baseAmount = Number(purchase.base_amount || purchase.taxable_amount || 0);
@@ -617,19 +647,23 @@ router.get('/:id/ledger-statement', async (req, res) => {
     // Resolve Supplier Name
     let supplierName = purchase.supplier || 'Supplier';
     if (purchase.supplier && /^\d+$/.test(String(purchase.supplier))) {
-      const sRes = await db.query('SELECT name, print_name FROM supplier_master WHERE id = ?', [purchase.supplier]);
-      if (sRes.rows && sRes.rows[0]) {
-        supplierName = sRes.rows[0].print_name || sRes.rows[0].name;
-      }
+      try {
+        const sRes = await db.query('SELECT name, print_name FROM supplier_master WHERE id = ?', [purchase.supplier], activeCompanyId);
+        if (sRes.rows && sRes.rows[0]) {
+          supplierName = sRes.rows[0].print_name || sRes.rows[0].name;
+        }
+      } catch (_) {}
     }
 
     // Resolve Transporter Name
     let transporterName = purchase.transporter || purchase.transport || 'Transporter Payable';
     if (transporterName && /^\d+$/.test(String(transporterName))) {
-      const tRes = await db.query('SELECT name, print_name FROM transport_master WHERE id = ?', [transporterName]);
-      if (tRes.rows && tRes.rows[0]) {
-        transporterName = tRes.rows[0].print_name || tRes.rows[0].name;
-      }
+      try {
+        const tRes = await db.query('SELECT name, print_name FROM transport_master WHERE id = ?', [transporterName], activeCompanyId);
+        if (tRes.rows && tRes.rows[0]) {
+          transporterName = tRes.rows[0].print_name || tRes.rows[0].name;
+        }
+      } catch (_) {}
     }
     
     const loadmanName = purchase.loadman_name || 'Loadman Payable';
@@ -808,7 +842,8 @@ router.get('/:id/ledger-statement', async (req, res) => {
          WHERE (reference_id = ? OR particulars LIKE ?) 
            AND voucher_type IN ('Payment', 'Bank Payment', 'Cash Payment', 'Advance')
            AND LOWER(TRIM(ledger_name)) = LOWER(TRIM(?))`,
-        [String(purchaseId), `%${voucherNo}%`, supplierName]
+        [String(purchaseId), `%${voucherNo}%`, supplierName],
+        activeCompanyId
       );
       supplierPayments = Number(payRes.rows[0]?.total_paid || 0);
     } catch (_) {}
