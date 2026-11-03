@@ -2354,22 +2354,26 @@ const PurchaseCreation = () => {
                               </span>
                             </td>
                             <td style={{ padding: '8px', textAlign: 'center' }}>
-                              <button
-                                type="button"
-                                onClick={() => handleSelectPo(po)}
-                                style={{
-                                  padding: '5px 12px',
-                                  backgroundColor: '#16a34a',
-                                  color: '#fff',
-                                  border: 'none',
-                                  borderRadius: '4px',
-                                  fontWeight: 'bold',
-                                  fontSize: '12px',
-                                  cursor: 'pointer'
-                                }}
-                              >
-                                Inward ➔
-                              </button>
+                              {(!po.status || po.status === 'Ordered' || !po.inward_purchase_id) ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleSelectPo(po)}
+                                  style={{
+                                    padding: '5px 12px',
+                                    backgroundColor: '#16a34a',
+                                    color: '#fff',
+                                    border: 'none',
+                                    borderRadius: '4px',
+                                    fontWeight: 'bold',
+                                    fontSize: '12px',
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  Inward ➔
+                                </button>
+                              ) : (
+                                <span style={{ fontSize: '11px', color: '#15803d', fontWeight: 'bold' }}>Completed</span>
+                              )}
                             </td>
                           </tr>
 

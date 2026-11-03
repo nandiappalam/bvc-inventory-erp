@@ -287,28 +287,30 @@ const PurchaseOrderList = () => {
             >
               Delete
             </button>
-            <button
-              type="button"
-              onClick={() => navigate(`/entry/purchase-create?sourcePurchaseOrderId=${row.id}`, {
-                state: { sourcePurchaseOrder: row }
-              })}
-              title="Convert to Inward Purchase"
-              style={{
-                padding: '4px 8px',
-                backgroundColor: '#16a34a',
-                color: '#ffffff',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontWeight: 'bold',
-                fontSize: '11px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '3px'
-              }}
-            >
-              📦 Inward ➔
-            </button>
+            {(!row.status || row.status === 'Ordered' || !row.inward_purchase_id) && (
+              <button
+                type="button"
+                onClick={() => navigate(`/entry/purchase-create?sourcePurchaseOrderId=${row.id}`, {
+                  state: { sourcePurchaseOrder: row }
+                })}
+                title="Convert to Inward Purchase"
+                style={{
+                  padding: '4px 8px',
+                  backgroundColor: '#16a34a',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold',
+                  fontSize: '11px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '3px'
+                }}
+              >
+                📦 Inward ➔
+              </button>
+            )}
           </div>
         )}
       />
