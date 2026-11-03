@@ -2337,7 +2337,9 @@ router.get('/ledger/:ledgerName', async (req, res) => {
               debit,
               credit,
               ledger_id: row.ledger_id,
-              ledger_name: row.ledger_name
+              ledger_name: row.ledger_name,
+              reference_id: row.reference_id || null,
+              reference_type: row.reference_type || null
             })
           }
         }
@@ -2371,6 +2373,7 @@ router.get('/ledger/:ledgerName', async (req, res) => {
             v.date,
             v.voucher_type,
             v.voucher_no,
+            v.reference_no,
             COALESCE(NULLIF(TRIM(ve.remarks), ''), NULLIF(TRIM(v.reference_no), ''), NULLIF(TRIM(v.narration), ''), v.voucher_type) as particulars,
             ve.debit,
             ve.credit,
@@ -2400,7 +2403,9 @@ router.get('/ledger/:ledgerName', async (req, res) => {
               debit,
               credit,
               ledger_id: row.ledger_id,
-              ledger_name: row.ledger_name
+              ledger_name: row.ledger_name,
+              reference_id: row.reference_no || row.voucher_id || null,
+              reference_type: row.voucher_type || null
             })
           }
         }
@@ -2471,9 +2476,15 @@ router.get('/ledger/:ledgerName', async (req, res) => {
           const chgRes = await db.query(`
             SELECT id, charge_no, 
                    COALESCE(date, charge_date, '') as date, 
+                   party_id,
                    party_name, 
                    COALESCE(final_amount, total_amount, amount, 0) as final_amount, 
                    operation_type, 
+                   source_module,
+                   source_transaction_no,
+                   source_transaction_id,
+                   accrual_voucher_id,
+                   accrual_voucher_no,
                    COALESCE(notes, remarks, '') as notes 
             FROM ${companyPrefix}operational_charges
             WHERE (${opConds.join(' OR ')})
@@ -2485,18 +2496,38 @@ router.get('/ledger/:ledgerName', async (req, res) => {
             const key = `${vNo}_0_${amt}`;
 
             // Deduplication: if accrual voucher or source purchase is already accounted
+            const isPurchaseCharge = String(row.source_module || '').toUpperCase() === 'PURCHASE' ||
+                                     /purchase/i.test(String(row.notes || '')) ||
+                                     /auto-recorded from purchase/i.test(String(row.notes || ''));
+
             const isAlreadyAccounted = allTransactions.some(t => {
               const v = String(t.voucher_no || '').toLowerCase();
               const p = String(t.particulars || '').toLowerCase();
+              const refId = String(t.reference_id || '').toLowerCase();
+              const tDate = String(t.date || '').slice(0, 10);
+              const rDate = String(row.date || '').slice(0, 10);
+
               if (row.accrual_voucher_no && (v === row.accrual_voucher_no.toLowerCase() || p.includes(row.accrual_voucher_no.toLowerCase()))) return true;
               if (row.charge_no && (v === row.charge_no.toLowerCase() || p.includes(row.charge_no.toLowerCase()))) return true;
+
+              if (row.source_transaction_id && (refId === String(row.source_transaction_id).toLowerCase() || p.includes(`#${row.source_transaction_id}`))) return true;
+              if (row.source_transaction_no && (v.includes(String(row.source_transaction_no).toLowerCase()) || p.includes(String(row.source_transaction_no).toLowerCase()) || refId === String(row.source_transaction_no).toLowerCase())) return true;
+
               if (row.notes) {
                 const m = row.notes.match(/Purchase #([A-Za-z0-9\-_]+)/i);
                 if (m && m[1]) {
                   const pNo = m[1].toLowerCase();
-                  if (v.includes(pNo) || p.includes(pNo)) return true;
+                  if (v.includes(pNo) || p.includes(pNo) || refId === pNo || p.includes(`#${pNo}`)) return true;
                 }
               }
+
+              // Purchase-originated operational charge matching an existing purchase voucher with same amount
+              if (isPurchaseCharge && Math.abs((t.credit || 0) - amt) < 0.01 && (!rDate || !tDate || tDate === rDate)) {
+                if (t.voucher_type === 'Purchase' || p.includes('load') || p.includes('unload') || p.includes('charges') || p.includes('freight')) {
+                  return true;
+                }
+              }
+
               return false;
             });
             if (isAlreadyAccounted) continue;
@@ -2513,7 +2544,9 @@ router.get('/ledger/:ledgerName', async (req, res) => {
                 debit: 0,
                 credit: amt,
                 ledger_id: row.party_id,
-                ledger_name: officialName
+                ledger_name: officialName,
+                reference_id: row.source_transaction_id || row.source_transaction_no || null,
+                reference_type: row.source_module || 'Operational'
               });
             }
           }
@@ -2585,6 +2618,8 @@ router.get('/ledger/:ledgerName', async (req, res) => {
             const key = `PURCHASE-ACTIVITY-${purchase.id}`;
             if (seenKeys.has(key)) continue;
 
+            const recordedCharges = Number(purchase.loadman_charges || 0);
+
             // Strict deduplication: If this purchase is already posted in accounting
             const alreadyInAccounts = allTransactions.some(t => {
               const v = String(t.voucher_no || '').toLowerCase();
@@ -2592,9 +2627,21 @@ router.get('/ledger/:ledgerName', async (req, res) => {
               const inv = String(purchase.inv_no || '').toLowerCase();
               const sNo = String(purchase.s_no || '').toLowerCase();
               const pId = String(purchase.id || '').toLowerCase();
-              return (inv && (v.includes(inv) || p.includes(inv))) ||
-                     (sNo && (v.includes(`pur000${sNo}`) || v.includes(`pur-${sNo}`) || p.includes(`pur-${sNo}`) || p.includes(`#${sNo}`))) ||
-                     (pId && p.includes(`#${pId}`));
+              const refId = String(t.reference_id || '').toLowerCase();
+              const tDate = String(t.date || '').slice(0, 10);
+              const pDate = String(purchase.date || '').slice(0, 10);
+
+              if (pId && (refId === pId || p.includes(`#${pId}`) || v.includes(`#${pId}`))) return true;
+              if (sNo && (refId === sNo || v.includes(`pur000${sNo}`) || v.includes(`pur-${sNo}`) || p.includes(`pur-${sNo}`) || p.includes(`#${sNo}`))) return true;
+              if (inv && (v.includes(inv) || p.includes(inv))) return true;
+
+              if (recordedCharges > 0 && Math.abs((t.credit || 0) - recordedCharges) < 0.01 && (!pDate || !tDate || tDate === pDate)) {
+                if (t.voucher_type === 'Purchase' || p.includes('load') || p.includes('unload') || p.includes('unloading')) {
+                  return true;
+                }
+              }
+
+              return false;
             });
             if (alreadyInAccounts) continue;
 
@@ -2608,7 +2655,6 @@ router.get('/ledger/:ledgerName', async (req, res) => {
             });
             const qty = Number(purchase.loadman_qty_kg || purchase.total_weight || 0);
             const loadmanName = purchase.loadman_name || officialName;
-            const recordedCharges = Number(purchase.loadman_charges || 0);
 
             let sName = purchase.supplier || '';
             if (/^\d+$/.test(String(sName))) {
@@ -2691,12 +2737,27 @@ router.get('/ledger/:ledgerName', async (req, res) => {
                 if (purchaseKey && seenKeys.has(purchaseKey)) continue;
                 if (purchaseKey) seenKeys.add(purchaseKey);
 
+                const charge = Number(row.loadman_charges ?? row.handling_amount ?? 0);
+
                 // Deduplication check
                 const alreadyHandled = allTransactions.some(t => {
                   const v = String(t.voucher_no || '').toLowerCase();
                   const p = String(t.particulars || '').toLowerCase();
-                  return (row.voucher_no && (v === row.voucher_no.toLowerCase() || p.includes(row.voucher_no.toLowerCase()))) ||
-                         (row.purchase_inv_no && (v.includes(row.purchase_inv_no.toLowerCase()) || p.includes(row.purchase_inv_no.toLowerCase())));
+                  const refId = String(t.reference_id || '').toLowerCase();
+                  const pId = String(row.purchase_id || '').toLowerCase();
+                  const pInv = String(row.purchase_inv_no || '').toLowerCase();
+                  const vNo = String(row.voucher_no || '').toLowerCase();
+                  const tDate = String(t.date || '').slice(0, 10);
+                  const rDate = String(row.voucher_date || row.purchase_date || '').slice(0, 10);
+
+                  if (vNo && (v === vNo || p.includes(vNo))) return true;
+                  if (pInv && (v.includes(pInv) || p.includes(pInv))) return true;
+                  if (pId && (refId === pId || p.includes(`#${pId}`))) return true;
+
+                  if (charge > 0 && Math.abs((t.credit || 0) - charge) < 0.01 && (!rDate || !tDate || tDate === rDate)) {
+                    if (t.voucher_type === 'Purchase' || p.includes('load') || p.includes('unload') || p.includes('inward')) return true;
+                  }
+                  return false;
                 });
                 if (alreadyHandled) continue;
 
@@ -2705,7 +2766,6 @@ router.get('/ledger/:ledgerName', async (req, res) => {
                   `${item.item_name || 'Item'}: qty ${Number(item.qty || 0)}${Number(item.total_weight || 0) ? `, ${Number(item.total_weight)} kg` : ''}`
                 );
                 const quantity = Number(row.loadman_qty_kg || row.total_weight || 0);
-                const charge = Number(row.loadman_charges ?? row.handling_amount ?? 0);
 
                 let sName = row.supplier || '';
                 if (/^\d+$/.test(String(sName))) {
@@ -2790,7 +2850,19 @@ router.get('/ledger/:ledgerName', async (req, res) => {
               const v = String(t.voucher_no || '').toLowerCase();
               const pStr = String(t.particulars || '').toLowerCase();
               const inv = String(p.inv_no || '').toLowerCase();
-              return (inv && (v.includes(inv) || pStr.includes(inv))) && Math.abs(t.credit - fAmt) < 0.01;
+              const sNo = String(p.s_no || '').toLowerCase();
+              const pId = String(p.id || '').toLowerCase();
+              const refId = String(t.reference_id || '').toLowerCase();
+              const tDate = String(t.date || '').slice(0, 10);
+              const pDate = String(p.date || '').slice(0, 10);
+
+              if (pId && (refId === pId || pStr.includes(`#${pId}`))) return true;
+              if (sNo && (refId === sNo || v.includes(`pur000${sNo}`) || v.includes(`pur-${sNo}`) || pStr.includes(`#${sNo}`))) return true;
+              if (inv && (v.includes(inv) || pStr.includes(inv))) return true;
+              if (Math.abs((t.credit || 0) - fAmt) < 0.01 && (!pDate || !tDate || tDate === pDate)) {
+                if (t.voucher_type === 'Purchase' || pStr.includes('freight') || pStr.includes('transport')) return true;
+              }
+              return false;
             });
             if (alreadyCovered) continue;
 
@@ -2908,37 +2980,108 @@ router.get('/outstanding-summary', async (req, res) => {
       ledgerMap[String(row.id)] = row.name
     })
 
-    // 2. Fetch all purchases (Bills Payable)
+    // 2. Resolve master names for suppliers and transporters
+    const suppMasterRes = await db.query('SELECT id, name, print_name FROM supplier_master').catch(() => ({ rows: [] }))
+    const suppMap = {}
+    ;(suppMasterRes.rows || []).forEach(sm => {
+      suppMap[String(sm.id)] = sm.print_name || sm.name
+    })
+
+    const transMasterRes = await db.query('SELECT id, name, print_name FROM transport_master').catch(() => ({ rows: [] }))
+    const transMap = {}
+    ;(transMasterRes.rows || []).forEach(tm => {
+      transMap[String(tm.id)] = tm.print_name || tm.name
+    })
+
+    // 2. Fetch all purchases (Bills Payable: Supplier, Transporter, Loadman)
     let purchaseQuery = `
       SELECT 
-        supplier as ledger_name,
-        inv_no as invoice_no,
-        date,
-        grand_total as amount
-      FROM purchases
+        p.id,
+        p.s_no,
+        p.inv_no as invoice_no,
+        p.date,
+        p.supplier as ledger_name,
+        p.grand_total as amount,
+        p.transporter,
+        p.transport,
+        COALESCE(NULLIF(p.net_transport_amount, 0), NULLIF(p.transport_charges, 0), p.freight_amount, 0) as freight_amount,
+        p.transport_payable_type,
+        p.loadman_name,
+        COALESCE(p.loadman_charges, 0) as loadman_charges,
+        p.loadman_payable_type
+      FROM purchases p
     `
     const purchaseParams = []
     if (as_on_date) {
-      purchaseQuery += ` WHERE date <= ?`
+      purchaseQuery += ` WHERE p.date <= ?`
       purchaseParams.push(toDate)
     }
     const purchaseRes = await db.query(purchaseQuery, purchaseParams)
-    let purchases = (purchaseRes.rows || []).map(p => {
-      let name = p.ledger_name
-      if (name) {
-        const key = String(name).trim()
-        name = ledgerMap[key] || name
+    let purchases = []
+    for (const p of (purchaseRes.rows || [])) {
+      let supName = p.ledger_name
+      if (supName) {
+        const key = String(supName).trim()
+        supName = suppMap[key] || ledgerMap[key] || supName
       }
-      return {
-        ledger_name: name,
-        invoice_no: p.invoice_no,
-        date: p.date,
-        amount: parseFloat(p.amount || 0),
-        paid: 0,
-        balance: parseFloat(p.amount || 0),
-        type: 'Payable'
+      const pInvNo = p.invoice_no || `PUR-${p.s_no || p.id}`
+      const fAmt = parseFloat(p.freight_amount || 0)
+      const lAmt = parseFloat(p.loadman_charges || 0)
+      const transSep = (p.transport_payable_type || 'SEPARATE') !== 'SUPPLIER_INVOICE' && fAmt > 0
+      const loadSep = (p.loadman_payable_type || 'SEPARATE') !== 'SUPPLIER_INVOICE' && lAmt > 0
+
+      // Supplier payable bill
+      const supplierBillAmt = parseFloat(p.amount || 0)
+      if (supplierBillAmt > 0 && supName) {
+        purchases.push({
+          ledger_name: supName,
+          invoice_no: pInvNo,
+          date: p.date,
+          amount: supplierBillAmt,
+          paid: 0,
+          balance: supplierBillAmt,
+          type: 'Payable'
+        })
       }
-    })
+
+      // Transporter payable bill (if separate)
+      if (transSep) {
+        let tName = p.transporter || p.transport
+        if (tName) {
+          const tKey = String(tName).trim()
+          tName = transMap[tKey] || ledgerMap[tKey] || tName
+        }
+        if (tName) {
+          purchases.push({
+            ledger_name: tName,
+            invoice_no: `FRT-${pInvNo}`,
+            date: p.date,
+            amount: fAmt,
+            paid: 0,
+            balance: fAmt,
+            type: 'Payable'
+          })
+        }
+      }
+
+      // Loadman payable bill (if separate)
+      if (loadSep && p.loadman_name) {
+        let lName = p.loadman_name
+        if (lName) {
+          const lKey = String(lName).trim()
+          lName = ledgerMap[lKey] || lName
+        }
+        purchases.push({
+          ledger_name: lName,
+          invoice_no: `LDM-${pInvNo}`,
+          date: p.date,
+          amount: lAmt,
+          paid: 0,
+          balance: lAmt,
+          type: 'Payable'
+        })
+      }
+    }
 
     // 3. Fetch all sales (Bills Receivable)
     let salesQuery = `
@@ -3050,8 +3193,41 @@ router.get('/outstanding-summary', async (req, res) => {
       }
     })
 
+    // Also include operational payments (for loadmen and transporters)
+    let opPayments = []
+    try {
+      let opPayQuery = `
+        SELECT id, party_name as ledger_name, payment_date as date, payment_no as voucher_no,
+               paid_amount as debit, 0 as credit, reference_no as particulars
+        FROM operational_payments
+      `
+      const opPayParams = []
+      if (as_on_date) {
+        opPayQuery += ` WHERE payment_date <= ?`
+        opPayParams.push(toDate)
+      }
+      const opPayRes = await db.query(opPayQuery, opPayParams)
+      opPayments = (opPayRes.rows || []).map(op => {
+        let name = op.ledger_name
+        if (name) {
+          const key = String(name).trim()
+          name = ledgerMap[key] || transMap[key] || name
+        }
+        return {
+          id: 500000 + op.id,
+          ledger_name: name,
+          date: op.date,
+          voucher_type: 'Payment',
+          voucher_no: op.voucher_no,
+          debit: parseFloat(op.debit || 0),
+          credit: 0,
+          particulars: op.particulars || 'Operational payment'
+        }
+      })
+    } catch (_) {}
+
     // Combine settlements
-    let allSettlements = [...settlements, ...advanceSettlements]
+    let allSettlements = [...settlements, ...advanceSettlements, ...opPayments]
 
     // Sort settlements chronologically
     allSettlements.sort((a, b) => new Date(a.date) - new Date(b.date) || a.id - b.id)

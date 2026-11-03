@@ -27,14 +27,17 @@ export function generateVehicleInPassHtml(row = {}, company = {}) {
   const totalWeight = row.total_weight || row.total_wt || '—';
   const godown = row.godown || row.godown_name || 'Main Godown';
 
-  const grossWeight = row.gross_weight ?? row.cross_weight ?? '—';
-  const tareWeight = row.tare_weight ?? '—';
-  const netWeight = row.net_weight ?? row.total_weight ?? row.total_wt ?? '—';
+  const grossWeight = row.gross_weight ?? row.grossWeight ?? row.gross_wt ?? row.cross_weight ?? '—';
+  const tareWeight = row.tare_weight ?? row.tareWeight ?? row.tare_wt ?? '—';
+  const netWeight = row.net_weight ?? row.netWeight ?? row.net_wt ?? row.total_weight ?? row.total_wt ?? '—';
 
   const formatWt = (val) => {
     if (val === null || val === undefined || val === '' || val === '—') return '—';
     const num = Number(val);
-    if (!isNaN(num) && num > 0) return `${num.toLocaleString('en-IN', { minimumFractionDigits: 2 })} KG`;
+    if (!isNaN(num)) {
+      if (num === 0) return '0.00 KG';
+      return `${num.toLocaleString('en-IN', { minimumFractionDigits: 2 })} KG`;
+    }
     return String(val);
   };
 

@@ -1223,38 +1223,7 @@ router.post('/', async (req, res) => {
     // UNIVERSAL OPERATIONAL CHARGE RECORDING (LOADMAN / UNLOADING)
     // ------------------------------------------------------------------------
     const workerName = formData.loadman_name || formData.worker_name || null;
-    if (workerName) {
-      try {
-        const handledKg = parseFloat(totals.totalWeight) || (parseFloat(totals.totalQty) * 50) || 0;
-        const loadmanRate = parseFloat(formData.loadman_rate_per_kg ?? formData.unloading_rate ?? 0.50);
-        const addlLabourCharges = parseFloat(formData.additional_labour_charges || formData.additional_charges || 0);
-        
-        await OpChargeEngine.recordOperationalCharge({
-          companyId: activeCompanyId,
-          sourceModule: 'PURCHASE',
-          sourceTransactionId: purchaseId,
-          sourceTransactionNo: finalInvNo,
-          date: formData.date || new Date().toISOString().split('T')[0],
-          operationType: 'UNLOADING',
-          chargeCategory: 'LABOUR',
-          partyId: formData.loadman_worker_id || null,
-          partyName: workerName,
-          rateBasis: 'PER_KG',
-          ratePerUnit: loadmanRate,
-          quantity: handledKg,
-          uom: 'KG',
-          adjustmentAmount: addlLabourCharges,
-          vehicleNo: vehicle_no,
-          driverName: driver_name,
-          notes: `Auto-recorded from Purchase #${finalInvNo}`,
-          autoPostToAccounts: false, // Authoritative accounting is posted via createPurchaseLedgerEntries to prevent duplicate liability
-          createdBy: req.user?.username || 'System'
-        });
-        console.log(`✅ [OpCharge] Successfully recorded loadman charges for Purchase #${finalInvNo}`);
-      } catch (opErr) {
-        console.warn('⚠️ [OpCharge] Error recording loadman charges:', opErr.message);
-      }
-    }
+    // Note: OpChargeEngine.recordOperationalCharge removed here to prevent duplicate ledger/voucher entries; createPurchaseVoucherChain handles authoritative accounting.
 
     // Check if the target godown is Cold Storage and automatically create/update linked Cold Storage IN voucher & items
     const isColdStorage = (resolvedGodownName || '').toLowerCase().includes('cold') || String(resolvedGodownId) === '2';
