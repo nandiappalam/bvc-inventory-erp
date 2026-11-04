@@ -270,13 +270,6 @@ router.get('/godown-stock', async (req, res) => {
     const godownsRes = await db.query('SELECT * FROM godown_master ORDER BY id ASC');
     godowns = godownsRes.rows || [];
 
-    if (godowns.length === 0) {
-      godowns = [
-        { id: 1, godown_name: 'PJ', area: 'Factory Storage' },
-        { id: 2, godown_name: 'BTS Cold Storage', area: 'Cold Storage' }
-      ];
-    }
-
     // Include distinct godowns from stock table
     try {
       const extraGRes = await db.query(`SELECT DISTINCT godown_id, godown FROM stock WHERE godown IS NOT NULL AND godown != ''`);

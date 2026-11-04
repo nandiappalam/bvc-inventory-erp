@@ -776,27 +776,6 @@ async function initializeMasterTables() {
     console.error('Error seeding default weightmaster:', err.message);
   }
 
-  // Seed default godowns if empty
-  try {
-    const existingGd = await db.query('SELECT COUNT(*) as cnt FROM godown_master');
-    const gdCount = parseInt(existingGd.rows[0]?.cnt || existingGd.rows[0]?.count || 0, 10);
-    if (gdCount === 0) {
-      const defaultGodowns = [
-        { name: 'Main Godown', type: 'Normal', location: 'Inside Factory' },
-        { name: 'Factory Godown', type: 'Normal', location: 'Inside Factory' },
-        { name: 'BTS Cold Storage', type: 'Cold Storage', location: 'Outside Factory' }
-      ];
-      for (const g of defaultGodowns) {
-        await db.run(
-          'INSERT INTO godown_master (godown_name, print_name, godown_type, storage_location, status) VALUES (?, ?, ?, ?, ?)',
-          [g.name, g.name, g.type, g.location, 'Active']
-        );
-      }
-      console.log('✓ Auto-seeded default godown_master records on startup');
-    }
-  } catch (err) {
-    console.error('Error seeding default godowns:', err.message);
-  }
 }
 
 // Start server after initialization

@@ -13,7 +13,6 @@ import {
   Alert,
   InputAdornment,
   IconButton,
-  Chip
 } from '@mui/material';
 import LockIcon from '@mui/icons-material/Lock';
 import PersonIcon from '@mui/icons-material/Person';
@@ -34,8 +33,8 @@ const LoginPage = () => {
   const navigate = useNavigate();
   const { login: setAuthLogin, selectedCompany } = useAuth();
 
-  const [username, setUsername] = useState('admin');
-  const [password, setPassword] = useState('admin123');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -232,27 +231,9 @@ const LoginPage = () => {
               }}
             />
 
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 1.5, mb: 1 }}>
-              <Typography variant="caption" sx={{ color: '#64748b' }}>
-                Quick Fill:
-              </Typography>
-              <Box sx={{ display: 'flex', gap: 1 }}>
-                <Chip 
-                  size="small" 
-                  label="Admin (admin / admin123)" 
-                  onClick={() => { setUsername('admin'); setPassword('admin123'); }} 
-                  clickable 
-                  sx={{ fontSize: '0.75rem', bgcolor: themeColors.lightBlue, color: themeColors.primary, fontWeight: 600 }}
-                />
-                <Chip 
-                  size="small" 
-                  label="Staff (staff / staff123)" 
-                  onClick={() => { setUsername('staff'); setPassword('staff123'); }} 
-                  clickable 
-                  sx={{ fontSize: '0.75rem', bgcolor: '#f1f5f9', color: '#475569', fontWeight: 600 }}
-                />
-              </Box>
-            </Box>
+            <Typography variant="caption" sx={{ display: 'block', mt: 1.5, mb: 1, color: '#64748b' }}>
+              Use the credentials issued for this company. Default demo passwords are disabled.
+            </Typography>
 
             {/* Login Button */}
             <Button

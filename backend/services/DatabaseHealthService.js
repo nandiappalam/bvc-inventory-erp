@@ -11,7 +11,7 @@ class DatabaseHealthService {
     this.startupTimestamp = new Date();
     this.lastHealthStatus = {
       status: 'INITIALIZING',
-      engine: process.env.DATABASE_URL ? 'PostgreSQL' : 'SQLite',
+      engine: db.isPostgres ? 'PostgreSQL' : 'SQLite',
       ready: false,
       timestamp: new Date().toISOString(),
     };
@@ -25,7 +25,7 @@ class DatabaseHealthService {
 
   async checkDatabaseHealth() {
     const startTime = Date.now();
-    const isPostgres = !!process.env.DATABASE_URL;
+    const isPostgres = db.isPostgres;
     const engine = isPostgres ? 'PostgreSQL' : 'SQLite';
 
     try {

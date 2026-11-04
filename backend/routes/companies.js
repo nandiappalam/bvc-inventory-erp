@@ -1,7 +1,16 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
-const bcrypt = require('bcryptjs');
+
+function requireSuperAdmin(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({ success: false, message: 'Authentication required' });
+  }
+  if (String(req.user.role || '').toLowerCase() !== 'superadmin') {
+    return res.status(403).json({ success: false, message: 'SuperAdmin privileges required' });
+  }
+  return next();
+}
 
 // ============================================================================
 // API ROUTES FOR COMPANIES (Master Database)
@@ -143,16 +152,6 @@ async function ensureDefaultCompanyExists() {
       VALUES (1, ?, ?, ?, 'Active')
     `, [db.isPostgres ? 'postgres' : 'sqlite', db.isPostgres ? 'company_1' : 'company_1.db', db.isPostgres ? 'company_1' : null]);
 
-    // Ensure default admin user exists
-    const adminExists = await db.master.query("SELECT id FROM users WHERE username = 'admin' LIMIT 1");
-    if (!adminExists.rows || adminExists.rows.length === 0) {
-      const hash = await bcrypt.hash('admin123', 10);
-      await db.master.run(`
-        INSERT OR IGNORE INTO users (username, password_hash, role, company_id, status)
-        VALUES ('admin', ?, 'Admin', 1, 'Active')
-      `, [hash]);
-    }
-
     const seeded = await db.master.query("SELECT * FROM companies WHERE status != 'Inactive' OR status IS NULL ORDER BY id ASC");
     return (seeded.rows || []).map(normalizeCompany);
   } catch (err) {
@@ -218,7 +217,7 @@ router.get(['/', '/list'], async (req, res) => {
 });
 
 // POST initialize default company (recovery route)
-router.post('/init-default', async (req, res) => {
+router.post('/init-default', requireSuperAdmin, async (req, res) => {
   try {
     const companies = await ensureDefaultCompanyExists();
     res.json({ success: true, message: 'Default company verified', companies });
@@ -230,6 +229,9 @@ router.post('/init-default', async (req, res) => {
 // GET company by ID
 router.get('/:id', async (req, res) => {
   try {
+    if (Number(req.params.id) !== Number(req.companyId)) {
+      return res.status(403).json({ success: false, message: 'Company access denied' });
+    }
     const result = await db.master.query('SELECT * FROM companies WHERE id = ?', [req.params.id]);
     if (result.rows.length === 0) {
       return res.status(404).json({ message: 'Company not found' });
@@ -242,10 +244,10 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST create new company (creates isolated database + clean schema)
-router.post('/', async (req, res) => {
+router.post('/', requireSuperAdmin, async (req, res) => {
   console.log('POST /api/companies called with body:', req.body);
   try {
-    const { name, address, gst_number, contact, email, admin_username, admin_password } = req.body;
+    const { name, address, gst_number, contact, email } = req.body;
 
     if (!name || !name.trim()) {
       return res.status(400).json({ message: 'Company name is required' });
@@ -274,20 +276,14 @@ router.post('/', async (req, res) => {
     // 2. Initialize isolated database with clean ERP schema (Company B gets empty tables!)
     await db.createCompanyDatabase(companyId, code);
 
-    // 3. Create initial Company Administrator in master users table
-    const adminUser = (admin_username && admin_username.trim()) ? admin_username.trim() : 'admin';
-    const adminPass = (admin_password && admin_password.trim()) ? admin_password.trim() : 'admin123';
-    const passwordHash = await bcrypt.hash(adminPass, 10);
-
-    await db.master.run(`
-      INSERT OR REPLACE INTO users (username, password_hash, role, company_id, status)
-      VALUES (?, ?, 'Admin', ?, 'Active')
-    `, [adminUser, passwordHash, companyId]);
-
-    console.log(`✅ Created default administrator '${adminUser}' for Company ${companyId}`);
+    // Grant the authenticated platform operator explicit access to provision tenant users.
+    await db.master.run(
+      'INSERT INTO user_company_access (user_id, company_id) VALUES (?, ?)',
+      [req.user.id, companyId]
+    );
 
     res.status(201).json({
-      message: 'Company created successfully with isolated database!',
+      message: 'Company created successfully. Provision an administrator through the authorized setup process.',
       id: companyId,
       company_id: companyId,
       name: trimmedName,
@@ -301,7 +297,7 @@ router.post('/', async (req, res) => {
 });
 
 // PUT update company
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireSuperAdmin, async (req, res) => {
   try {
     const { name, address, gst_number, contact, email } = req.body;
     const companyId = parseInt(req.params.id, 10);
@@ -337,7 +333,7 @@ router.put('/:id', async (req, res) => {
 });
 
 // DELETE company
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireSuperAdmin, async (req, res) => {
   try {
     const companyId = parseInt(req.params.id, 10);
     if (!companyId || isNaN(companyId)) {
@@ -351,6 +347,12 @@ router.delete('/:id', async (req, res) => {
       await db.master.run('DELETE FROM users WHERE company_id = ?', [companyId]);
     } catch (e) {
       console.warn(`Notice cleaning up users for company ${companyId}:`, e.message);
+    }
+
+    try {
+      await db.master.run('DELETE FROM user_company_access WHERE company_id = ?', [companyId]);
+    } catch (e) {
+      console.warn(`Notice cleaning up memberships for company ${companyId}:`, e.message);
     }
 
     // 2. Delete database registry entry
@@ -399,7 +401,7 @@ router.delete('/:id', async (req, res) => {
 });
 
 // One-click restore route for KIYA tenant data
-router.all('/restore-kiya-data', async (req, res) => {
+router.all('/restore-kiya-data', requireSuperAdmin, async (req, res) => {
   try {
     const fs = require('fs');
     const path = require('path');

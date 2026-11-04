@@ -8,19 +8,6 @@ const db = require('../config/database');
  */
 async function rebuildStockLedger() {
   try {
-    // Ensure default godowns exist in godown_master if empty
-    try {
-      const gCheck = await db.query(`SELECT COUNT(*) as cnt FROM godown_master`);
-      if (parseInt(gCheck.rows?.[0]?.cnt || 0, 10) === 0) {
-        await db.run(`
-          INSERT INTO godown_master (id, godown_name, print_name, godown_type, storage_location, status)
-          VALUES 
-            (1, 'PJ', 'PJ Main Factory Godown', 'Normal', 'Inside Factory', 'Active'),
-            (2, 'BTS Cold Storage', 'BTS Cold Storage Facility', 'Cold Storage', 'Outside Factory', 'Active')
-        `);
-      }
-    } catch (gSeedErr) {}
-
     // Fetch master godowns for dynamic location mapping
     const gmAll = await db.query(`SELECT id, godown_name, godown_type, storage_location FROM godown_master ORDER BY id ASC`);
     const godownRows = gmAll.rows || [];

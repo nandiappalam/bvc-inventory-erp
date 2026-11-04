@@ -245,15 +245,25 @@ const rawConnectionString = sanitizeConnectionString(
 );
 
 const hasValidPgUrl = Boolean(rawConnectionString && rawConnectionString.trim().length > 0);
+const isRenderRuntime = process.env.RENDER === 'true'
+  || process.env.RENDER === '1'
+  || Boolean(process.env.RENDER_SERVICE_ID);
+const isProductionRuntime = process.env.NODE_ENV === 'production' || isRenderRuntime;
 let isPostgres = false;
+
+if (isProductionRuntime && process.env.DB_ENGINE === 'sqlite') {
+  throw new Error('Production requires PostgreSQL; DB_ENGINE=sqlite is not supported.');
+}
+if (isProductionRuntime && !hasValidPgUrl) {
+  throw new Error('Production requires a PostgreSQL connection URL; refusing to start with SQLite.');
+}
 
 if (process.env.DB_ENGINE === 'sqlite') {
   isPostgres = false;
 } else if (hasValidPgUrl) {
   isPostgres = true;
 } else if (process.env.DB_ENGINE === 'postgres') {
-  console.warn('⚠️ [PostgreSQL Pool] DB_ENGINE is postgres, but no DATABASE_URL or POSTGRES_URL was found. Falling back to local SQLite engine.');
-  isPostgres = false;
+  throw new Error('DB_ENGINE=postgres requires a PostgreSQL connection URL.');
 } else {
   isPostgres = false;
 }
@@ -292,7 +302,7 @@ if (isPostgres) {
 
     pgPool = new Pool({
       connectionString,
-      ssl: isSslNeeded ? { rejectUnauthorized: false } : false,
+      ssl: isSslNeeded ? { rejectUnauthorized: true } : false,
       max: 20,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 10000,
@@ -323,7 +333,7 @@ if (isPostgres) {
     // Keep fallback mock driver
   }
 
-  dbDir = path.join(__dirname, '../../database');
+  dbDir = process.env.BVC_SQLITE_DB_DIR || path.join(__dirname, '../../database');
   if (!fs.existsSync(dbDir)) {
     fs.mkdirSync(dbDir, { recursive: true });
   }
@@ -364,7 +374,8 @@ const TENANT_BUSINESS_TABLES = new Set([
 
 // Master tables MUST NEVER be included in TENANT_BUSINESS_TABLES
 const MASTER_TABLE_NAMES_SET = new Set([
-  'companies', 'database_registry', 'users', 'roles', 'permissions', 'user_permissions', 'login_history', '_master_migrations'
+  'companies', 'database_registry', 'users', 'roles', 'permissions', 'user_permissions',
+  'user_company_access', 'login_history', '_master_migrations'
 ]);
 
 // Dynamically add any additional tables declared in COMPANY_TABLES (strictly excluding master tables)
@@ -1400,16 +1411,20 @@ async function resyncPostgresSequences(clientOrPool, schemaName = null) {
 async function ensurePostgresCompanySequences(companyId = 1) {
   if (!isPostgres || !pgPool) return;
   const client = await pgPool.connect();
+  let discardClient = false;
   try {
     const schemaName = `company_${parseInt(companyId, 10) || 1}`;
     await client.query(`CREATE SCHEMA IF NOT EXISTS ${schemaName}`);
-    await client.query(`SET search_path TO ${schemaName}, public`);
+    await client.query(`SET search_path TO ${schemaName}`);
     await resyncPostgresSequences(client, schemaName);
   } finally {
     try {
       await client.query('RESET search_path;');
-    } catch (_) {}
-    client.release();
+    } catch (resetError) {
+      discardClient = true;
+      console.error('[PostgreSQL] Failed to reset pooled connection search_path:', resetError.message);
+    }
+    client.release(discardClient ? new Error('Discarding PostgreSQL client after search_path reset failure') : undefined);
   }
 }
 
@@ -1426,6 +1441,7 @@ async function executePgQuery(sql, params = [], companyId = 1, isMaster = false)
   }
 
   const client = await pgPool.connect();
+  let discardClient = false;
   try {
     const cId = parseInt(companyId, 10) || 1;
     const schemaName = isMaster ? 'public' : `company_${cId}`;
@@ -1433,7 +1449,7 @@ async function executePgQuery(sql, params = [], companyId = 1, isMaster = false)
     // Ensure schema exists and set search_path for isolation
     if (!isMaster) {
       await client.query(`CREATE SCHEMA IF NOT EXISTS ${schemaName};`);
-      await client.query(`SET search_path TO ${schemaName}, public;`);
+      await client.query(`SET search_path TO ${schemaName};`);
     } else {
       await client.query(`SET search_path TO public;`);
     }
@@ -1462,22 +1478,6 @@ async function executePgQuery(sql, params = [], companyId = 1, isMaster = false)
           return p;
         });
         result = await client.query(transformedSql, sanitizedParams);
-      } else if (queryErr.code === '23503' && /violates foreign key constraint/i.test(queryErr.message)) {
-        const constraintMatch = queryErr.message.match(/violates foreign key constraint "([^"]+)"/i) || [null, queryErr.constraint];
-        const referencingTableMatch = queryErr.message.match(/on table "([^"]+)"/i) || queryErr.message.match(/table "([^"]+)"/i) || [null, queryErr.table];
-        const constraintName = constraintMatch[1];
-        const tableName = referencingTableMatch[1];
-        if (constraintName && tableName) {
-          try {
-            await client.query(`ALTER TABLE IF EXISTS "${schemaName}"."${tableName}" DROP CONSTRAINT IF EXISTS "${constraintName}" CASCADE`);
-            await client.query(`ALTER TABLE IF EXISTS "public"."${tableName}" DROP CONSTRAINT IF EXISTS "${constraintName}" CASCADE`);
-            result = await client.query(transformedSql, params);
-          } catch (retryErr) {
-            throw queryErr;
-          }
-        } else {
-          throw queryErr;
-        }
       } else {
         throw queryErr;
       }
@@ -1497,17 +1497,15 @@ async function executePgQuery(sql, params = [], companyId = 1, isMaster = false)
       lastInsertRowid: lastID,
     };
   } catch (err) {
-    // If table doesn't exist, log cleanly and handle gracefully
-    if (err.code === '42P01') { // undefined_table
-      console.warn(`[PostgreSQL] Table not yet created: ${err.message}. Returning empty result.`);
-      return { rows: [], rowCount: 0, changes: 0, lastID: null, lastInsertRowid: null };
-    }
     throw err;
   } finally {
     try {
       await client.query('RESET search_path;');
-    } catch (_) {}
-    client.release();
+    } catch (resetError) {
+      discardClient = true;
+      console.error('[PostgreSQL] Failed to reset pooled connection search_path:', resetError.message);
+    }
+    client.release(discardClient ? new Error('Discarding PostgreSQL client after search_path reset failure') : undefined);
   }
 }
 
@@ -1561,7 +1559,7 @@ async function createCompanyDatabase(companyId, companyCode) {
       await client.query('BEGIN');
       const schemaName = `company_${cId}`;
       await client.query(`CREATE SCHEMA IF NOT EXISTS ${schemaName}`);
-      await client.query(`SET search_path TO ${schemaName}, public`);
+      await client.query(`SET search_path TO ${schemaName}`);
 
       // 1. Create all ERP tables
       for (const tableSql of orderTablesByDependencies(COMPANY_TABLES)) {
@@ -1788,7 +1786,7 @@ async function restoreDatabase(tempFilePath, companyId = 1) {
       } catch (e) {}
 
       await client.query(`CREATE SCHEMA IF NOT EXISTS ${schemaName};`);
-      await client.query(`SET search_path TO ${schemaName}, public;`);
+      await client.query(`SET search_path TO ${schemaName};`);
 
       // Ensure all standard company tables exist in the target schema first
       try {
@@ -1809,7 +1807,7 @@ async function restoreDatabase(tempFilePath, companyId = 1) {
 
       if (isSql) {
         const sqlContent = fs.readFileSync(tempFilePath, 'utf8');
-        await client.query(`SET search_path TO ${schemaName}, public; ${sqlContent}`);
+        await client.query(`SET search_path TO ${schemaName}; ${sqlContent}`);
         if (replicationRoleChanged) {
           try { await client.query(`SET session_replication_role = 'origin';`); } catch (e) {}
         }
@@ -2249,8 +2247,7 @@ async function ensurePostgresMasterSchema() {
     await migrateNeonPublicDataToTenants(client);
     await discoverAndSyncAllPostgresTenants(client);
     await ensurePostgresDefaultCompany(client);
-    await dropPostgresForeignKeyConstraints(client);
-    console.log('✓ PostgreSQL public master schema, sequences, and multi-tenant constraints verified successfully');
+    console.log('✓ PostgreSQL public master schema and tenant sequences verified successfully');
   } catch (err) {
     console.error('⚠️ [PostgreSQL] Master schema check notice:', err.message);
   } finally {
@@ -2408,7 +2405,7 @@ async function discoverAndSyncAllPostgresTenants(client) {
 
       // Ensure tenant schema has all standard ERP tables
       try {
-        await client.query(`SET search_path TO "${schemaName}", public;`);
+        await client.query(`SET search_path TO "${schemaName}";`);
       } catch (_) {}
       for (const tableSql of COMPANY_TABLES) {
         try {
@@ -2433,7 +2430,7 @@ async function discoverAndSyncAllPostgresTenants(client) {
       `, [compId, sName]);
 
       try {
-        await client.query(`SET search_path TO "${sName}", public;`);
+        await client.query(`SET search_path TO "${sName}";`);
       } catch (_) {}
       for (const tableSql of COMPANY_TABLES) {
         try {
@@ -2555,35 +2552,6 @@ async function ensurePostgresDefaultCompany(client) {
   }
 }
 
-async function dropPostgresForeignKeyConstraints(client) {
-  try {
-    await client.query(`
-      DO $$
-      DECLARE
-        r RECORD;
-      BEGIN
-        FOR r IN (
-          SELECT n.nspname AS schema_name, c.relname AS table_name, con.conname AS constraint_name
-          FROM pg_constraint con
-          JOIN pg_class c ON con.conrelid = c.oid
-          JOIN pg_namespace n ON c.relnamespace = n.oid
-          WHERE con.contype = 'f'
-            AND (n.nspname = 'public' OR n.nspname LIKE 'company_%')
-        ) LOOP
-          BEGIN
-            EXECUTE 'ALTER TABLE "' || r.schema_name || '"."' || r.table_name || '" DROP CONSTRAINT IF EXISTS "' || r.constraint_name || '" CASCADE';
-          EXCEPTION WHEN OTHERS THEN
-            -- Continue smoothly if individual drop is skipped
-          END;
-        END LOOP;
-      END $$;
-    `);
-    console.log('✓ Cleaned up PostgreSQL foreign key constraints across all schemas');
-  } catch (err) {
-    console.warn('⚠️ [PostgreSQL] Foreign key constraint cleanup notice:', err.message);
-  }
-}
-
 // ============================================================================
 // TRANSACTION AWARE CONNECTION WRAPPERS
 // ============================================================================
@@ -2600,7 +2568,7 @@ class PgDbConnection {
     await this.client.query('BEGIN');
     if (!this.isMaster) {
       await this.client.query(`CREATE SCHEMA IF NOT EXISTS "${schemaName}";`);
-      await this.client.query(`SET LOCAL search_path TO "${schemaName}", public;`);
+      await this.client.query(`SET LOCAL search_path TO "${schemaName}";`);
     } else {
       await this.client.query(`SET LOCAL search_path TO public;`);
     }
@@ -2622,7 +2590,7 @@ class PgDbConnection {
     if (!this.inTransaction) {
       if (!this.isMaster) {
         await this.client.query(`CREATE SCHEMA IF NOT EXISTS "${schemaName}";`);
-        await this.client.query(`SET search_path TO "${schemaName}", public;`);
+        await this.client.query(`SET search_path TO "${schemaName}";`);
       } else {
         await this.client.query(`SET search_path TO public;`);
       }
@@ -2637,22 +2605,6 @@ class PgDbConnection {
       } else if (queryErr.code === '23505' && /duplicate key value violates unique constraint/i.test(queryErr.message)) {
         await resyncPostgresSequences(this.client, schemaName);
         result = await this.client.query(transformed, params);
-      } else if (queryErr.code === '23503' && /violates foreign key constraint/i.test(queryErr.message)) {
-        const constraintMatch = queryErr.message.match(/violates foreign key constraint "([^"]+)"/i) || [null, queryErr.constraint];
-        const tableMatch = queryErr.message.match(/table "([^"]+)"/i) || [null, queryErr.table];
-        const constraintName = constraintMatch[1];
-        const tableName = tableMatch[1];
-        if (constraintName && tableName) {
-          try {
-            await this.client.query(`ALTER TABLE IF EXISTS "${schemaName}"."${tableName}" DROP CONSTRAINT IF EXISTS "${constraintName}" CASCADE`);
-            await this.client.query(`ALTER TABLE IF EXISTS "public"."${tableName}" DROP CONSTRAINT IF EXISTS "${constraintName}" CASCADE`);
-            result = await this.client.query(transformed, params);
-          } catch (retryErr) {
-            throw queryErr;
-          }
-        } else {
-          throw queryErr;
-        }
       } else {
         throw queryErr;
       }
@@ -2675,11 +2627,17 @@ class PgDbConnection {
     return this.query(text, params);
   }
 
-  release() {
+  async release() {
     if (this.client) {
-      this.client.query('RESET search_path;').catch(() => {}).finally(() => {
-        this.client.release();
-      });
+      const client = this.client;
+      this.client = null;
+      try {
+        await client.query('RESET search_path;');
+        client.release();
+      } catch (resetError) {
+        console.error('[PostgreSQL] Discarding pooled connection after search_path reset failure:', resetError.message);
+        client.release(resetError);
+      }
     }
   }
 }
@@ -2743,7 +2701,7 @@ async function restoreFromJsonData(jsonData, companyId = 1) {
       } catch (e) {}
 
       await client.query(`CREATE SCHEMA IF NOT EXISTS "${schemaName}";`);
-      await client.query(`SET search_path TO "${schemaName}", public;`);
+      await client.query(`SET search_path TO "${schemaName}";`);
 
       // Ensure all standard company tables exist in the target schema first
       try {
@@ -2946,6 +2904,17 @@ async function restoreFromJsonData(jsonData, companyId = 1) {
 // ============================================================================
 module.exports = {
   isPostgres,
+  closeSqliteConnections: async () => {
+    if (isPostgres) return;
+    for (const connection of companyDbPool.values()) {
+      await new Promise((resolve) => connection.close(() => resolve()));
+    }
+    companyDbPool.clear();
+    if (masterDb) {
+      await new Promise((resolve) => masterDb.close(() => resolve()));
+      masterDb = null;
+    }
+  },
   asyncLocalStorage,
   companyStorage: asyncLocalStorage,
   getDbPath: (companyId = 1) => getCompanyDbPath(companyId),

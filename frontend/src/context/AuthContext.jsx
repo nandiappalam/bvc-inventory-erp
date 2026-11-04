@@ -172,30 +172,43 @@ export const AuthProvider = ({ children }) => {
 
   // Fetch current active financial year whenever selectedCompany is set or changed
   useEffect(() => {
-    let isMounted = true;
+    const companyId = Number(selectedCompany?.id);
+    if (!user?.id || !localStorage.getItem('erp_token') || !Number.isSafeInteger(companyId) || companyId <= 0) {
+      return undefined;
+    }
+
+    const controller = new AbortController();
     const fetchCurrentFY = async () => {
-      const companyId = selectedCompany?.id || 1;
       try {
         const token = localStorage.getItem('erp_token');
         const headers = { 'Content-Type': 'application/json' };
         if (token) headers['Authorization'] = `Bearer ${token}`;
-        if (companyId) headers['X-Company-Id'] = String(companyId);
+        headers['X-Company-Id'] = String(companyId);
 
-        const response = await fetch(`/api/financial-years/current?company_id=${companyId}`, { headers });
+        const response = await fetch(`/api/financial-years/current?company_id=${companyId}`, {
+          headers,
+          signal: controller.signal
+        });
         if (response.ok) {
           const data = await response.json();
-          if (isMounted && data && data.financial_year) {
+          if (data && Number(data.company_id) === companyId && data.financial_year) {
             setFinancialYear(data.financial_year);
             localStorage.setItem('erp_financial_year', data.financial_year);
           }
+        } else if (response.status === 401 || response.status === 403) {
+          console.warn(`Financial year request denied for company ${companyId} (HTTP ${response.status}).`);
+        } else {
+          console.error(`Financial year request failed for company ${companyId} (HTTP ${response.status}).`);
         }
       } catch (err) {
-        // Fallback silently if server is starting or endpoint unavailable
+        if (err.name !== 'AbortError') {
+          console.error(`Financial year request failed for company ${companyId}:`, err);
+        }
       }
     };
     fetchCurrentFY();
-    return () => { isMounted = false; };
-  }, [selectedCompany?.id]);
+    return () => controller.abort();
+  }, [user?.id, selectedCompany?.id]);
 
   // Login function
   const login = async (loginData) => {

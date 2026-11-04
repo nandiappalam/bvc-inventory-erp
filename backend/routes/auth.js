@@ -2,6 +2,29 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
 const bcrypt = require('bcryptjs');
+const { hasCompanyAccess } = require('../middleware/authMiddleware');
+
+function requireCompanyAdmin(req, res, next) {
+  const role = String(req.user && req.user.role || '').trim().toLowerCase();
+  if (!req.user) {
+    return res.status(401).json({ success: false, message: 'Authentication required' });
+  }
+  if (!['admin', 'manager', 'superadmin'].includes(role)) {
+    return res.status(403).json({ success: false, message: 'Administrator privileges required' });
+  }
+  return next();
+}
+
+function requireCurrentCompany(req, res, next) {
+  const requestedCompanyId = Number(req.params.companyId || req.body.company_id);
+  if (!Number.isSafeInteger(requestedCompanyId) || requestedCompanyId <= 0) {
+    return res.status(400).json({ success: false, message: 'Invalid company ID' });
+  }
+  if (requestedCompanyId !== Number(req.companyId)) {
+    return res.status(403).json({ success: false, message: 'Company access denied' });
+  }
+  return next();
+}
 
 // Helper for database operations on the master database
 const masterDb = {
@@ -119,6 +142,14 @@ const createAuthTables = async () => {
       )
     `);
 
+    await masterDb.run(`
+      CREATE TABLE IF NOT EXISTS user_company_access (
+        user_id INTEGER NOT NULL,
+        company_id INTEGER NOT NULL,
+        PRIMARY KEY (user_id, company_id)
+      )
+    `);
+
     console.log('✅ Auth tables and columns initialized successfully');
   } catch (error) {
     console.error('Auth tables init error:', error.message);
@@ -128,45 +159,19 @@ const createAuthTables = async () => {
 createAuthTables();
 
 // ============================================================================
-// SEED DEFAULT DATA & CREDENTIALS
+// ENSURE A DEFAULT COMPANY EXISTS
 // ============================================================================
 const seedDefaultData = async () => {
   try {
     await createAuthTables();
 
-    const saltRounds = 10;
-    const adminPasswordHash = await bcrypt.hash('admin123', saltRounds);
-
-    // Ensure default Company 1 exists
     const companies = await masterDb.query("SELECT * FROM companies ORDER BY id ASC");
-    let firstCompId = 1;
-
     if (!companies.rows || companies.rows.length === 0) {
       console.log('🌱 Seeding default company...');
-      const compRes = await masterDb.run(
+      await masterDb.run(
         'INSERT INTO companies (name, address, gst_number, contact, email, status) VALUES (?, ?, ?, ?, ?, ?)',
         ['BVC Exports Pvt Ltd', '123 Main Industrial Area, City', '33AABCB1234A1Z5', '9876543210', 'info@bvcexports.com', 'Active']
       );
-      firstCompId = compRes.lastID || compRes.lastInsertRowid || 1;
-    } else {
-      firstCompId = companies.rows[0].id;
-    }
-
-    // Ensure default admin user exists for each active company
-    const activeCompanies = companies.rows && companies.rows.length > 0 ? companies.rows : [{ id: firstCompId }];
-    for (const comp of activeCompanies) {
-      const compId = comp.id;
-      const compAdmin = await masterDb.query(
-        "SELECT id FROM users WHERE LOWER(TRIM(username)) = 'admin' AND (company_id = ? OR company_id IS NULL)",
-        [compId]
-      );
-      if (!compAdmin.rows || compAdmin.rows.length === 0) {
-        console.log(`🌱 Seeding default admin for Company ID ${compId}...`);
-        await masterDb.run(
-          'INSERT INTO users (username, password_hash, role, status, company_id, password_expiry_days) VALUES (?, ?, ?, ?, ?, ?)',
-          ['admin', adminPasswordHash, 'Admin', 'Active', compId, 90]
-        ).catch(() => {});
-      }
     }
   } catch (error) {
     console.error('Error seeding default auth data:', error.message);
@@ -180,25 +185,32 @@ setTimeout(seedDefaultData, 1000);
 // ============================================================================
 
 // GET login history
-router.get('/login-history/:userId', async (req, res) => {
+router.get('/login-history/:userId', requireCompanyAdmin, async (req, res) => {
   try {
     const result = await masterDb.query(
-      `SELECT lh.*, u.username FROM login_history lh LEFT JOIN users u ON lh.user_id = u.id WHERE lh.user_id = ? ORDER BY lh.login_time DESC LIMIT 50`,
-      [req.params.userId]
+      `SELECT lh.id, lh.company_id, lh.login_time, lh.logout_time, lh.ip_address, u.username
+         FROM login_history lh
+         JOIN users u ON lh.user_id = u.id
+        WHERE lh.user_id = ? AND u.company_id = ? AND lh.company_id = ?
+        ORDER BY lh.login_time DESC LIMIT 50`,
+      [req.params.userId, req.companyId, req.companyId]
     );
     res.json(result.rows || []);
   } catch (error) {
     console.error('Error fetching login history:', error);
-    res.json([]);
+    res.status(500).json({ success: false, message: 'Error fetching login history' });
   }
 });
 
 // GET user permissions
-router.get('/permissions/:userId', async (req, res) => {
+router.get('/permissions/:userId', requireCompanyAdmin, async (req, res) => {
   try {
     const result = await masterDb.query(
-      `SELECT module_name, page_name, can_view, can_create, can_edit, can_delete, can_print FROM user_permissions WHERE user_id = ?`,
-      [req.params.userId]
+      `SELECT p.module_name, p.page_name, p.can_view, p.can_create, p.can_edit, p.can_delete, p.can_print
+         FROM user_permissions p
+         JOIN users u ON u.id = p.user_id
+        WHERE p.user_id = ? AND u.company_id = ?`,
+      [req.params.userId, req.companyId]
     );
     res.json(result.rows || []);
   } catch (error) {
@@ -216,107 +228,49 @@ router.post('/login', async (req, res) => {
     }
 
     const trimmedUsername = String(username).trim();
-    const companyIdNum = company_id ? parseInt(company_id, 10) : null;
-    const lowerUser = trimmedUsername.toLowerCase();
-    
-    // Standard system fallback credentials
-    const isDefaultAdminCred = (lowerUser === 'admin' && ['admin123', 'admin', 'password', '123456'].includes(password));
-    const isDefaultStaffCred = (lowerUser === 'staff' && ['staff123', 'staff', 'password', '123456'].includes(password));
+    const companyIdNum = company_id ? Number(company_id) : null;
+    if (company_id && (!Number.isSafeInteger(companyIdNum) || companyIdNum <= 0)) {
+      return res.status(400).json({ message: 'Invalid company ID' });
+    }
+    const retiredDefaultPasswords = new Set(['admin123', 'admin', 'password', '123456', 'staff123', 'staff']);
+    if (typeof password !== 'string' || retiredDefaultPasswords.has(password.trim().toLowerCase())) {
+      return res.status(401).json({ message: 'Invalid username or password for this company' });
+    }
 
     let userCandidate = null;
 
-    // 1. Check company-specific user matching username in master database
-    if (companyIdNum) {
-      const companyUsers = await masterDb.query(
-        'SELECT * FROM users WHERE LOWER(TRIM(username)) = LOWER(TRIM(?)) AND (company_id = ? OR company_id IS NULL)',
-        [trimmedUsername, companyIdNum]
-      );
-
-      for (const candidate of (companyUsers.rows || [])) {
-        let matches = false;
-        if (candidate.password_hash && candidate.password_hash.startsWith('$2')) {
-          matches = await bcrypt.compare(password, candidate.password_hash);
-        } else {
-          matches = (password === candidate.password_hash);
-        }
-
-        // Special fallback for default admin or staff
-        if (!matches && (isDefaultAdminCred && candidate.username.toLowerCase() === 'admin')) {
-          matches = true;
-          const newHash = await bcrypt.hash('admin123', 10);
-          await masterDb.run('UPDATE users SET password_hash = ? WHERE id = ?', [newHash, candidate.id]).catch(() => {});
-        } else if (!matches && (isDefaultStaffCred && candidate.username.toLowerCase() === 'staff')) {
-          matches = true;
-          const newHash = await bcrypt.hash('staff123', 10);
-          await masterDb.run('UPDATE users SET password_hash = ? WHERE id = ?', [newHash, candidate.id]).catch(() => {});
-        }
-
-        if (matches) {
-          userCandidate = candidate;
-          break;
-        }
-      }
-    }
-
-    // 2. Fallback: Search all users globally matching username
-    if (!userCandidate) {
-      const globalUsers = await masterDb.query(
-        'SELECT * FROM users WHERE LOWER(TRIM(username)) = LOWER(TRIM(?))',
+    const userQuery = companyIdNum
+      ? await masterDb.query(
+        `SELECT * FROM users
+          WHERE LOWER(TRIM(username)) = LOWER(TRIM(?))
+            AND (company_id = ? OR EXISTS (
+              SELECT 1 FROM user_company_access a
+               WHERE a.user_id = users.id AND a.company_id = ?
+            ))`,
+        [trimmedUsername, companyIdNum, companyIdNum]
+      )
+      : await masterDb.query(
+        'SELECT * FROM users WHERE LOWER(TRIM(username)) = LOWER(TRIM(?)) ORDER BY company_id ASC',
         [trimmedUsername]
       );
 
-      for (const candidate of (globalUsers.rows || [])) {
-        let matches = false;
-        if (candidate.password_hash && candidate.password_hash.startsWith('$2')) {
-          matches = await bcrypt.compare(password, candidate.password_hash);
-        } else {
-          matches = (password === candidate.password_hash);
-        }
-
-        if (!matches && (isDefaultAdminCred && candidate.username.toLowerCase() === 'admin')) {
-          matches = true;
-          const newHash = await bcrypt.hash('admin123', 10);
-          await masterDb.run('UPDATE users SET password_hash = ? WHERE id = ?', [newHash, candidate.id]).catch(() => {});
-        } else if (!matches && (isDefaultStaffCred && candidate.username.toLowerCase() === 'staff')) {
-          matches = true;
-          const newHash = await bcrypt.hash('staff123', 10);
-          await masterDb.run('UPDATE users SET password_hash = ? WHERE id = ?', [newHash, candidate.id]).catch(() => {});
-        }
-
-        if (matches) {
-          userCandidate = candidate;
-          break;
-        }
+    for (const candidate of (userQuery.rows || [])) {
+      const matches = candidate.password_hash && candidate.password_hash.startsWith('$2')
+        ? await bcrypt.compare(password, candidate.password_hash)
+        : password === candidate.password_hash;
+      if (matches) {
+        userCandidate = candidate;
+        break;
       }
-    }
-
-    // 3. Auto-provision default admin/staff if user is logging in with standard creds and no record was found
-    if (!userCandidate && (isDefaultAdminCred || isDefaultStaffCred)) {
-      const targetRole = isDefaultStaffCred ? 'Staff' : 'Admin';
-      const targetUser = isDefaultStaffCred ? 'staff' : 'admin';
-      const targetPass = isDefaultStaffCred ? 'staff123' : 'admin123';
-      const targetCompId = companyIdNum || 1;
-      
-      console.log(`🌱 [Auth] Auto-creating missing ${targetUser} account for Company ID ${targetCompId}...`);
-      const pwdHash = await bcrypt.hash(targetPass, 10);
-      const insertRes = await masterDb.run(
-        'INSERT INTO users (username, password_hash, role, status, company_id, password_expiry_days) VALUES (?, ?, ?, ?, ?, ?)',
-        [targetUser, pwdHash, targetRole, 'Active', targetCompId, 90]
-      );
-      const newUserId = insertRes.lastID || insertRes.lastInsertRowid || 1;
-      userCandidate = {
-        id: newUserId,
-        username: targetUser,
-        password_hash: pwdHash,
-        role: targetRole,
-        status: 'Active',
-        company_id: targetCompId,
-        password_expiry_days: 90
-      };
     }
 
     if (!userCandidate) {
       return res.status(401).json({ message: 'Invalid username or password for this company' });
+    }
+    if (!userCandidate.password_hash.startsWith('$2')) {
+      const passwordHash = await bcrypt.hash(password, 10);
+      await masterDb.run('UPDATE users SET password_hash = ? WHERE id = ?', [passwordHash, userCandidate.id]);
+      userCandidate.password_hash = passwordHash;
     }
 
     if (userCandidate.status === 'Inactive') {
@@ -324,8 +278,14 @@ router.post('/login', async (req, res) => {
     }
 
     const activeCompanyId = companyIdNum || userCandidate.company_id || 1;
+    if (!(await hasCompanyAccess(userCandidate.id, activeCompanyId))) {
+      return res.status(401).json({ message: 'Invalid username or password for this company' });
+    }
     const companyResult = await masterDb.query('SELECT * FROM companies WHERE id = ?', [activeCompanyId]);
-    const company = (companyResult.rows && companyResult.rows[0]) ? companyResult.rows[0] : { id: activeCompanyId, name: `Company ${activeCompanyId}` };
+    const company = companyResult.rows && companyResult.rows[0];
+    if (!company || String(company.status || 'Active').toLowerCase() === 'inactive') {
+      return res.status(401).json({ message: 'Invalid username or password for this company' });
+    }
 
     const permissionsResult = await masterDb.query(
       `SELECT module_name, page_name, can_view, can_create, can_edit, can_delete, can_print FROM user_permissions WHERE user_id = ?`,
@@ -391,7 +351,7 @@ router.post('/logout', async (req, res) => {
 });
 
 // POST create user
-router.post('/users', async (req, res) => {
+router.post('/users', requireCompanyAdmin, requireCurrentCompany, async (req, res) => {
   try {
     let { username, password, role, status, company_id, permissions, password_expiry_days } = req.body;
 
@@ -400,7 +360,17 @@ router.post('/users', async (req, res) => {
     }
 
     username = String(username).trim();
-    const companyIdNum = parseInt(company_id, 10);
+    const companyIdNum = Number(company_id);
+    if (!Number.isSafeInteger(companyIdNum) || companyIdNum !== Number(req.companyId)) {
+      return res.status(403).json({ success: false, message: 'Company access denied' });
+    }
+    if (typeof password !== 'string' || password.length < 12) {
+      return res.status(400).json({ success: false, message: 'Password must be at least 12 characters' });
+    }
+    if (String(role || 'Staff').toLowerCase() === 'superadmin'
+      && String(req.user.role).toLowerCase() !== 'superadmin') {
+      return res.status(403).json({ success: false, message: 'Only a SuperAdmin can grant the SuperAdmin role' });
+    }
     const expiryDays = password_expiry_days !== undefined ? parseInt(password_expiry_days, 10) : 90;
 
     // Check for existing user FOR THIS COMPANY
@@ -423,8 +393,8 @@ router.post('/users', async (req, res) => {
         'INSERT INTO users (username, password_hash, role, status, company_id, password_expiry_days, password_last_changed) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)',
         [username, passwordHash, role || 'Staff', status || 'Active', companyIdNum, expiryDays]
       );
-    } catch (_) {
-      // Fallback if password_last_changed is not yet in column list
+    } catch (insertError) {
+      if (!/password_last_changed|column/i.test(insertError.message)) throw insertError;
       userResult = await masterDb.run(
         'INSERT INTO users (username, password_hash, role, status, company_id, password_expiry_days) VALUES (?, ?, ?, ?, ?, ?)',
         [username, passwordHash, role || 'Staff', status || 'Active', companyIdNum, expiryDays]
@@ -456,13 +426,15 @@ router.post('/users', async (req, res) => {
 });
 
 // GET users by company
-router.get('/users/:companyId', async (req, res) => {
+router.get('/users/:companyId', requireCompanyAdmin, requireCurrentCompany, async (req, res) => {
   try {
     const result = await masterDb.query(`
-      SELECT u.*, c.name as company_name
+      SELECT u.id, u.username, u.role, u.company_id, u.status, u.email, u.phone,
+             u.password_expiry_days, u.password_last_changed, u.created_at, u.updated_at,
+             c.name as company_name
       FROM users u
       LEFT JOIN companies c ON u.company_id = c.id
-      WHERE u.company_id = ? OR u.company_id IS NULL
+      WHERE u.company_id = ?
       ORDER BY u.id ASC
     `, [req.params.companyId]);
     res.json(result.rows || []);
@@ -473,14 +445,17 @@ router.get('/users/:companyId', async (req, res) => {
 });
 
 // GET all users (for admin view across all companies)
-router.get('/users', async (req, res) => {
+router.get('/users', requireCompanyAdmin, async (req, res) => {
   try {
     const result = await masterDb.query(`
-      SELECT u.*, c.name as company_name
+      SELECT u.id, u.username, u.role, u.company_id, u.status, u.email, u.phone,
+             u.password_expiry_days, u.password_last_changed, u.created_at, u.updated_at,
+             c.name as company_name
       FROM users u
       LEFT JOIN companies c ON u.company_id = c.id
+      WHERE u.company_id = ?
       ORDER BY u.id ASC
-    `);
+    `, [req.companyId]);
     res.json(result.rows || []);
   } catch (error) {
     console.error('Error fetching all users:', error);
@@ -489,18 +464,14 @@ router.get('/users', async (req, res) => {
 });
 
 // GET single user with permissions
-router.get('/users/:companyId/:userId', async (req, res) => {
+router.get('/users/:companyId/:userId', requireCompanyAdmin, requireCurrentCompany, async (req, res) => {
   try {
-    let userResult = await masterDb.query(
-      'SELECT * FROM users WHERE id = ? AND (company_id = ? OR company_id IS NULL)',
+    const userResult = await masterDb.query(
+      `SELECT id, username, role, company_id, status, email, phone,
+              password_expiry_days, password_last_changed, created_at, updated_at
+         FROM users WHERE id = ? AND company_id = ?`,
       [req.params.userId, req.params.companyId]
     );
-    if (!userResult.rows || userResult.rows.length === 0) {
-      userResult = await masterDb.query(
-        'SELECT * FROM users WHERE id = ?',
-        [req.params.userId]
-      );
-    }
     if (!userResult.rows || userResult.rows.length === 0) {
       return res.status(404).json({ message: 'User not found' });
     }
@@ -517,60 +488,63 @@ router.get('/users/:companyId/:userId', async (req, res) => {
 });
 
 // PUT update user (allows changing username, password, expiry time period, role, status, permissions)
-router.put('/users/:userId', async (req, res) => {
+router.put('/users/:userId', requireCompanyAdmin, async (req, res) => {
   try {
     const { username, password, role, status, company_id, permissions, password_expiry_days } = req.body;
     const { userId } = req.params;
-    const companyIdNum = company_id ? parseInt(company_id, 10) : null;
+    const companyIdNum = company_id ? Number(company_id) : Number(req.companyId);
     const expiryDays = password_expiry_days !== undefined ? parseInt(password_expiry_days, 10) : 90;
-
-    if (password && password.trim() !== '') {
-      // Hash new password and update password_last_changed timestamp
-      const saltRounds = 10;
-      const passwordHash = await bcrypt.hash(password, saltRounds);
-      try {
-        if (companyIdNum) {
-          await masterDb.run(
-            'UPDATE users SET username = ?, password_hash = ?, role = ?, status = ?, company_id = ?, password_expiry_days = ?, password_last_changed = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-            [username, passwordHash, role, status, companyIdNum, expiryDays, userId]
-          );
-        } else {
-          await masterDb.run(
-            'UPDATE users SET username = ?, password_hash = ?, role = ?, status = ?, password_expiry_days = ?, password_last_changed = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-            [username, passwordHash, role, status, expiryDays, userId]
-          );
-        }
-      } catch (_) {
-        if (companyIdNum) {
-          await masterDb.run(
-            'UPDATE users SET username = ?, password_hash = ?, role = ?, status = ?, company_id = ?, password_expiry_days = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-            [username, passwordHash, role, status, companyIdNum, expiryDays, userId]
-          );
-        } else {
-          await masterDb.run(
-            'UPDATE users SET username = ?, password_hash = ?, role = ?, status = ?, password_expiry_days = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-            [username, passwordHash, role, status, expiryDays, userId]
-          );
-        }
-      }
-    } else {
-      // Update details without overwriting existing password
-      if (companyIdNum) {
-        await masterDb.run(
-          'UPDATE users SET username = ?, role = ?, status = ?, company_id = ?, password_expiry_days = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-          [username, role, status, companyIdNum, expiryDays, userId]
-        );
-      } else {
-        await masterDb.run(
-          'UPDATE users SET username = ?, role = ?, status = ?, password_expiry_days = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-          [username, role, status, expiryDays, userId]
-        );
-      }
+    if (companyIdNum !== Number(req.companyId)) {
+      return res.status(403).json({ success: false, message: 'Company access denied' });
     }
 
-    // Update permissions
+    const currentResult = await masterDb.query(
+      'SELECT id, username, role FROM users WHERE id = ? AND company_id = ?',
+      [userId, req.companyId]
+    );
+    const currentUser = currentResult.rows && currentResult.rows[0];
+    if (!currentUser) return res.status(404).json({ success: false, message: 'User not found' });
+    if (String(role || currentUser.role).toLowerCase() === 'superadmin'
+      && String(req.user.role).toLowerCase() !== 'superadmin') {
+      return res.status(403).json({ success: false, message: 'Only a SuperAdmin can grant the SuperAdmin role' });
+    }
+    if (password && (typeof password !== 'string' || password.length < 12)) {
+      return res.status(400).json({ success: false, message: 'Password must be at least 12 characters' });
+    }
+
+    const fields = [
+      username || currentUser.username,
+      role || currentUser.role,
+      status || 'Active',
+      expiryDays,
+      userId,
+      req.companyId,
+    ];
+    if (password) {
+      const passwordHash = await bcrypt.hash(password, 10);
+      await masterDb.run(
+        `UPDATE users
+            SET username = ?, role = ?, status = ?, password_expiry_days = ?,
+                password_hash = ?, password_last_changed = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND company_id = ?`,
+        [fields[0], fields[1], fields[2], fields[3], passwordHash, fields[4], fields[5]]
+      );
+    } else {
+      await masterDb.run(
+        `UPDATE users
+            SET username = ?, role = ?, status = ?, password_expiry_days = ?,
+                updated_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND company_id = ?`,
+        fields
+      );
+    }
+
     if (permissions && Array.isArray(permissions)) {
-      await masterDb.run('DELETE FROM user_permissions WHERE user_id = ?', [userId]);
+      await masterDb.run(
+        'DELETE FROM user_permissions WHERE user_id = ? AND EXISTS (SELECT 1 FROM users WHERE id = ? AND company_id = ?)',
+        [userId, userId, req.companyId]
+      );
       for (const perm of permissions) {
         if (perm.can_view || perm.can_create || perm.can_edit || perm.can_delete || perm.can_print) {
           await masterDb.run(
@@ -589,10 +563,22 @@ router.put('/users/:userId', async (req, res) => {
 });
 
 // DELETE user
-router.delete('/users/:userId', async (req, res) => {
+router.delete('/users/:userId', requireCompanyAdmin, async (req, res) => {
   try {
-    await masterDb.run('DELETE FROM user_permissions WHERE user_id = ?', [req.params.userId]);
-    await masterDb.run('DELETE FROM users WHERE id = ?', [req.params.userId]);
+    if (Number(req.params.userId) === Number(req.user.id)) {
+      return res.status(400).json({ success: false, message: 'You cannot delete your own account' });
+    }
+    await masterDb.run(
+      'DELETE FROM user_permissions WHERE user_id = ? AND EXISTS (SELECT 1 FROM users WHERE id = ? AND company_id = ?)',
+      [req.params.userId, req.params.userId, req.companyId]
+    );
+    const result = await masterDb.run(
+      'DELETE FROM users WHERE id = ? AND company_id = ?',
+      [req.params.userId, req.companyId]
+    );
+    if (!result.changes && !result.rowCount) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
     res.json({ success: true, message: 'User deleted successfully' });
   } catch (error) {
     console.error('Error deleting user:', error);

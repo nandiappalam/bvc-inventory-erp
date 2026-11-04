@@ -84,15 +84,7 @@ const enrichGodown = (row) => {
 router.get('/', async (req, res) => {
   try {
     const result = await db.query('SELECT * FROM godown_master ORDER BY id ASC');
-    let list = (result.rows || []).map(enrichGodown);
-    if (list.length === 0) {
-      list = [
-        { id: 1, godown_name: 'Main Godown', name: 'Main Godown', area: 'Factory Premises', location: 'Factory Premises', address: 'Factory Premises', address1: 'Factory Premises', godown_type: 'Normal', storage_location: 'Inside Factory', status: 'Active' },
-        { id: 2, godown_name: 'Finished Goods', name: 'Finished Goods', area: 'Unit 1 Storage', location: 'Unit 1 Storage', address: 'Unit 1 Storage', address1: 'Unit 1 Storage', godown_type: 'Normal', storage_location: 'Inside Factory', status: 'Active' },
-        { id: 3, godown_name: 'Raw Materials', name: 'Raw Materials', area: 'RM Warehouse', location: 'RM Warehouse', address: 'RM Warehouse', address1: 'RM Warehouse', godown_type: 'Normal', storage_location: 'Inside Factory', status: 'Active' },
-        { id: 4, godown_name: 'Packing Store', name: 'Packing Store', area: 'Store Room', location: 'Store Room', address: 'Store Room', address1: 'Store Room', godown_type: 'Normal', storage_location: 'Inside Factory', status: 'Active' }
-      ];
-    }
+    const list = (result.rows || []).map(enrichGodown);
     // Return both formats for full compatibility with frontend callers
     if (req.query.format === 'object' || req.headers['x-requested-format'] === 'object') {
       res.json({ success: true, data: list });

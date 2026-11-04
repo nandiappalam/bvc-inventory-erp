@@ -67,8 +67,8 @@ const OutpassCreate = () => {
     party_id: '',
     party_name: '',
     from_location: 'Inside Factory (Main Godown)',
-    from_godown_id: 1,
-    from_godown_name: 'PJ Main Factory Godown',
+    from_godown_id: '',
+    from_godown_name: '',
     destination: '',
     vehicle_no: '',
     driver_name: '',
@@ -89,8 +89,8 @@ const OutpassCreate = () => {
       uom: 'KG',
       rate: '',
       amount: 0,
-      godown_id: 1,
-      godown_name: 'PJ',
+      godown_id: '',
+      godown_name: '',
       reason: 'Outside Processing Grinding'
     }
   ]);
@@ -174,13 +174,43 @@ const OutpassCreate = () => {
       })
       .catch(() => {});
 
-    // 5. Fetch Godowns
-    api('/masters/godowns')
-      .then(res => {
-        if (Array.isArray(res)) setGodownsList(res);
-        else if (res?.data && Array.isArray(res.data)) setGodownsList(res.data);
-      })
-      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    let requestVersion = 0;
+    const fetchGodowns = async (resetSelection = false) => {
+      const version = ++requestVersion;
+      setGodownsList([]);
+      if (resetSelection) {
+        setFormData(prev => ({ ...prev, from_godown_id: '', from_godown_name: '' }));
+        setItems(prev => prev.map(item => ({ ...item, godown_id: '', godown_name: '' })));
+      }
+      try {
+        const result = await api('/masters/godowns');
+        const rows = Array.isArray(result) ? result : (Array.isArray(result?.data) ? result.data : []);
+        if (active && requestVersion === version) setGodownsList(rows);
+      } catch (error) {
+        if (active && requestVersion === version) {
+          console.error('Error fetching Outpass Godowns:', error);
+          setGodownsList([]);
+        }
+      }
+    };
+
+    const refreshForCompany = () => fetchGodowns(true);
+    fetchGodowns();
+    window.addEventListener('erp_company_changed', refreshForCompany);
+    const handleStorage = (event) => {
+      if (event.key === 'erp_selected_company' || event.key === 'erp_company') refreshForCompany();
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      active = false;
+      requestVersion += 1;
+      window.removeEventListener('erp_company_changed', refreshForCompany);
+      window.removeEventListener('storage', handleStorage);
+    };
   }, []);
 
   // Pre-fill from Grind if referenced
@@ -213,8 +243,8 @@ const OutpassCreate = () => {
                 uom: 'KG',
                 rate: String(it.rate || 0),
                 amount: (parseFloat(it.qty || 0) * parseFloat(it.rate || 0)),
-                godown_id: 1,
-                godown_name: 'PJ',
+                godown_id: '',
+                godown_name: '',
                 reason: 'Outside Processing Grinding'
               }));
               setItems(prefilled);
@@ -227,12 +257,7 @@ const OutpassCreate = () => {
   }, [grindIdParam, refIdParam, refTypeParam]);
 
   // Deduplicated Godowns
-  const availableGodowns = godownsList.length > 0
-    ? godownsList
-    : [
-        { id: 1, godown_name: 'PJ Main Factory Godown' },
-        { id: 2, godown_name: 'BTS Cold Storage Facility' }
-      ];
+  const availableGodowns = godownsList;
 
   const handleFormChange = (e) => {
     const { name, value } = e.target;
@@ -283,7 +308,7 @@ const OutpassCreate = () => {
           }
           if (matchedLot.godown_id) {
             row.godown_id = matchedLot.godown_id;
-            row.godown_name = matchedLot.godown || matchedLot.godown_name || 'PJ';
+            row.godown_name = matchedLot.godown || matchedLot.godown_name || '';
           }
         }
       } else {
@@ -326,8 +351,8 @@ const OutpassCreate = () => {
         uom: 'KG',
         rate: '',
         amount: 0,
-        godown_id: formData.from_godown_id || 1,
-        godown_name: formData.from_godown_name || 'PJ',
+        godown_id: formData.from_godown_id || '',
+        godown_name: formData.from_godown_name || '',
         reason: formData.purpose || 'Outside Processing'
       }
     ]);
@@ -346,6 +371,11 @@ const OutpassCreate = () => {
   const estimatedCharges = processingRate * totalWeight;
 
   const handleSave = async (andPrint = false) => {
+    if (!godownsList.some(godown => String(godown.id) === String(formData.from_godown_id))) {
+      alert('Select a dispatch Godown configured for this company.');
+      return;
+    }
+
     if (!formData.party_name) {
       alert('Please select or enter External Mill / Party Name');
       return;
@@ -354,6 +384,13 @@ const OutpassCreate = () => {
     const validItems = items.filter(it => it.item_name && (parseFloat(it.qty) > 0 || parseFloat(it.total_weight) > 0));
     if (validItems.length === 0) {
       alert('Please enter at least one item with valid name and quantity / weight');
+      return;
+    }
+    if (validItems.some(item => {
+      const godownId = item.godown_id || formData.from_godown_id;
+      return !godownsList.some(godown => String(godown.id) === String(godownId));
+    })) {
+      alert('Select a valid Godown for each item.');
       return;
     }
 
@@ -369,7 +406,11 @@ const OutpassCreate = () => {
           total_amount: totalAmount,
           estimated_charges: estimatedCharges
         },
-        items: validItems
+        items: validItems.map(item => ({
+          ...item,
+          godown_id: item.godown_id || formData.from_godown_id,
+          godown_name: item.godown_name || formData.from_godown_name
+        }))
       };
 
       const res = await api('/outpasses', {
@@ -724,18 +765,19 @@ const OutpassCreate = () => {
             <label className="outpass-label">From Dispatch Godown</label>
             <select
               name="from_godown_id"
-              value={String(formData.from_godown_id || '1')}
+              value={String(formData.from_godown_id || '')}
               onChange={(e) => {
                 const gId = e.target.value;
                 const sel = availableGodowns.find(g => String(g.id) === String(gId));
                 setFormData(prev => ({
                   ...prev,
                   from_godown_id: gId,
-                  from_godown_name: sel ? (sel.print_name || sel.godown_name) : prev.from_godown_name
+                  from_godown_name: sel ? (sel.print_name || sel.godown_name) : ''
                 }));
               }}
               className="outpass-select"
             >
+              <option value="">-- Select Godown --</option>
               {availableGodowns.map(g => (
                 <option key={g.id} value={String(g.id)}>
                   {g.print_name || g.godown_name}
@@ -1017,7 +1059,7 @@ const OutpassCreate = () => {
                   </td>
                   <td style={{ border: '1px solid #cbd5e1', padding: '6px' }}>
                     <select
-                      value={String(row.godown_id || '1')}
+                      value={String(row.godown_id || formData.from_godown_id || '')}
                       onChange={(e) => {
                         const gid = e.target.value;
                         const sel = availableGodowns.find(g => String(g.id) === String(gid));
@@ -1034,6 +1076,7 @@ const OutpassCreate = () => {
                         fontSize: '11px'
                       }}
                     >
+                      <option value="">-- Select Godown --</option>
                       {availableGodowns.map(g => (
                         <option key={g.id} value={String(g.id)}>{g.print_name || g.godown_name}</option>
                       ))}

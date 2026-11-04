@@ -10,6 +10,21 @@ const masterCache = new Map();
 const inFlightRequests = new Map();
 const CACHE_TTL_MS = 60 * 1000; // 60 seconds fresh TTL
 
+export const getTenantCacheScope = () => {
+  try {
+    const storedCompany = localStorage.getItem('erp_selected_company') || localStorage.getItem('erp_company');
+    const parsedCompany = storedCompany ? JSON.parse(storedCompany) : null;
+    const companyId = parsedCompany && typeof parsedCompany === 'object'
+      ? parsedCompany.id
+      : parsedCompany;
+    return String(companyId || 'default');
+  } catch (error) {
+    return 'default';
+  }
+};
+
+const getTenantCacheKey = (key) => `${getTenantCacheScope()}::${key}`;
+
 export const normalizeMasterKey = (type) => {
   if (!type) return '';
   let k = String(type).trim().toLowerCase();
@@ -39,64 +54,27 @@ export const normalizeMasterKey = (type) => {
 export const invalidateMasterCache = (type) => {
   if (!type) {
     masterCache.clear();
+    inFlightRequests.clear();
     return;
   }
-  const key = normalizeMasterKey(type);
-  const raw = String(type).toLowerCase().trim();
-  masterCache.delete(key);
-  masterCache.delete(raw);
-  masterCache.delete(`all_${key}`);
-  masterCache.delete(`all_${raw}`);
-
-  if (key === 'workers' || raw === 'worker' || raw === 'loadman' || raw === 'operational_parties' || raw === 'worker_master') {
-    masterCache.delete('workers');
-    masterCache.delete('worker');
-    masterCache.delete('loadman');
-    masterCache.delete('loadmen');
-    masterCache.delete('loadman_team');
-    masterCache.delete('loadman_name');
-    masterCache.delete('operational_parties');
-    masterCache.delete('worker_master');
-    masterCache.delete('all_workers');
-    masterCache.delete('all_loadman');
-    masterCache.delete('all_operational_parties');
+  const keysToDelete = new Set([
+    normalizeMasterKey(type),
+    String(type).toLowerCase().trim(),
+    `all_${normalizeMasterKey(type)}`,
+    `all_${String(type).toLowerCase().trim()}`,
+  ]);
+  const tenantPrefix = `${getTenantCacheKey('')}`;
+  for (const [cacheKey] of masterCache) {
+    if (cacheKey.startsWith(tenantPrefix)
+      && keysToDelete.has(cacheKey.slice(tenantPrefix.length))) {
+      masterCache.delete(cacheKey);
+    }
   }
-
-  if (key === 'weights' || raw === 'weight' || raw === 'weightmaster') {
-    masterCache.delete('weights');
-    masterCache.delete('weightmaster');
-    masterCache.delete('all_weights');
-    masterCache.delete('all_weightmaster');
-  }
-  if (key === 'suppliers' || raw === 'supplier' || raw === 'supplier_master') {
-    masterCache.delete('suppliers');
-    masterCache.delete('supplier_master');
-    masterCache.delete('all_suppliers');
-    masterCache.delete('all_supplier_master');
-  }
-  if (key === 'customers' || raw === 'customer' || raw === 'customer_master') {
-    masterCache.delete('customers');
-    masterCache.delete('customer_master');
-    masterCache.delete('all_customers');
-    masterCache.delete('all_customer_master');
-  }
-  if (key === 'godowns' || raw === 'godown' || raw === 'godown_master') {
-    masterCache.delete('godowns');
-    masterCache.delete('godown_master');
-    masterCache.delete('all_godowns');
-    masterCache.delete('all_godown_master');
-  }
-  if (key === 'transports' || raw === 'transport' || raw === 'transport_master') {
-    masterCache.delete('transports');
-    masterCache.delete('transport_master');
-    masterCache.delete('all_transports');
-    masterCache.delete('all_transport_master');
-  }
-  if (key === 'items' || raw === 'item' || raw === 'item_master') {
-    masterCache.delete('items');
-    masterCache.delete('item_master');
-    masterCache.delete('all_items');
-    masterCache.delete('all_item_master');
+  for (const [requestKey] of inFlightRequests) {
+    if (requestKey.startsWith(tenantPrefix)
+      && keysToDelete.has(requestKey.slice(tenantPrefix.length))) {
+      inFlightRequests.delete(requestKey);
+    }
   }
 };
 
@@ -112,8 +90,9 @@ export const FALLBACK_MASTERS = {};
 export const getCachedMasters = (type) => {
   if (!type) return [];
   const key = normalizeMasterKey(type);
-  if (masterCache.has(key)) {
-    return masterCache.get(key).data || [];
+  const cacheKey = getTenantCacheKey(key);
+  if (masterCache.has(cacheKey)) {
+    return masterCache.get(cacheKey).data || [];
   }
   return [];
 };
@@ -121,21 +100,22 @@ export const getCachedMasters = (type) => {
 export const getMasters = async (type, options = {}) => {
   if (!type) return makeDualArray([]);
   const key = normalizeMasterKey(type);
+  const cacheKey = getTenantCacheKey(key);
   const now = Date.now();
   const forceRefresh = options?.forceRefresh || false;
 
   // 1. Check existing fresh cache
-  if (!forceRefresh && masterCache.has(key)) {
-    const cached = masterCache.get(key);
+  if (!forceRefresh && masterCache.has(cacheKey)) {
+    const cached = masterCache.get(cacheKey);
     if (now - cached.timestamp < CACHE_TTL_MS) {
       return makeDualArray(cached.data);
     }
   }
 
   // 2. Reuse in-flight request to prevent simultaneous duplicate requests
-  if (inFlightRequests.has(key)) {
+  if (inFlightRequests.has(cacheKey)) {
     try {
-      const res = await inFlightRequests.get(key);
+      const res = await inFlightRequests.get(cacheKey);
       if (res && res.length > 0) {
         return makeDualArray(res);
       }
@@ -170,9 +150,9 @@ export const getMasters = async (type, options = {}) => {
             // Only cache if we actually got non-empty data
             // This prevents caching an empty [] during cold starts or transient network failures on Render
             if (list.length > 0) {
-              masterCache.set(key, { data: list, timestamp: Date.now() });
+              masterCache.set(cacheKey, { data: list, timestamp: Date.now() });
             }
-            return list.length > 0 ? list : (masterCache.get(key)?.data || []);
+            return list;
           }
         }
         lastError = new Error(result?.message || result?.error || `Failed to fetch master for ${key}`);
@@ -185,21 +165,16 @@ export const getMasters = async (type, options = {}) => {
       }
     }
 
-    // If all retries failed but cached non-empty data exists, return cached list
-    if (masterCache.has(key) && masterCache.get(key).data?.length > 0) {
-      return masterCache.get(key).data;
-    }
-
-    return [];
+    throw lastError || new Error(`Failed to fetch master for ${key}`);
   })();
 
-  inFlightRequests.set(key, requestPromise);
+  inFlightRequests.set(cacheKey, requestPromise);
 
   try {
     const resultList = await requestPromise;
     return makeDualArray(resultList);
   } finally {
-    inFlightRequests.delete(key);
+    inFlightRequests.delete(cacheKey);
   }
 };
 
@@ -211,7 +186,7 @@ if (api && typeof api === 'function') {
 // Get FULL records (all columns) for display tables
 export const getAllMasters = async (table, options = {}) => {
   if (!table) return makeDualArray([]);
-  const key = `all_${normalizeMasterKey(table)}`;
+  const key = getTenantCacheKey(`all_${normalizeMasterKey(table)}`);
   const now = Date.now();
   const forceRefresh = options?.forceRefresh || false;
 
@@ -242,12 +217,9 @@ export const getAllMasters = async (table, options = {}) => {
         }
         return list;
       }
-    } catch (e) {
-      console.error(`Error in getAllMasters for ${table}:`, e);
-    }
-
-    if (masterCache.has(key) && masterCache.get(key).data?.length > 0) {
-      return masterCache.get(key).data;
+    } catch (error) {
+      console.error(`Error in getAllMasters for ${table}:`, error);
+      throw error;
     }
     return [];
   })();
@@ -295,4 +267,3 @@ export const deleteMaster = async (table, id) => {
   }
   return { success: true, message: result?.message };
 };
-

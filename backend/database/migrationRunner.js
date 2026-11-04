@@ -2,7 +2,6 @@ const db = require('../config/database');
 const { MASTER_TABLES } = require('./masterSchema');
 const { COMPANY_TABLES, DEFAULT_LEDGER_CHART, DEFAULT_TAX_RATES } = require('./companySchema');
 const { orderTablesByDependencies } = require('../utils/schemaOrderer');
-const bcrypt = require('bcryptjs');
 
 async function runAllPendingMigrations() {
   console.log('🔄 [MIGRATIONS] Starting safe database migration check...');
@@ -38,25 +37,12 @@ async function runAllPendingMigrations() {
         );
         defaultCompanyId = compRes.lastInsertRowid || 1;
 
-        // Seed default admin and staff users in Master DB
-        const adminPass = await bcrypt.hash('admin123', 10);
-        const staffPass = await bcrypt.hash('staff123', 10);
-
-        await master.run(
-          `INSERT OR IGNORE INTO users (username, password_hash, role, company_id, status) VALUES (?, ?, ?, ?, ?)`,
-          ['admin', adminPass, 'Admin', defaultCompanyId, 'Active']
-        );
-        await master.run(
-          `INSERT OR IGNORE INTO users (username, password_hash, role, company_id, status) VALUES (?, ?, ?, ?, ?)`,
-          ['staff', staffPass, 'Staff', defaultCompanyId, 'Active']
-        );
-
         // Register Company 1 database
         await master.run(
           `INSERT OR REPLACE INTO database_registry (company_id, db_type, db_name, status) VALUES (?, ?, ?, ?)`,
           [defaultCompanyId, db.isPostgres ? 'postgres' : 'sqlite', db.isPostgres ? 'company_1' : 'company_1.db', 'Active']
         );
-        console.log(`✅ [MIGRATIONS] Initial Company ${defaultCompanyId} and users seeded`);
+        console.log(`✅ [MIGRATIONS] Initial Company ${defaultCompanyId} seeded`);
       } catch (seedErr) {
         console.warn('⚠️ [MIGRATIONS] Notice during initial company seeding:', seedErr.message);
         defaultCompanyId = 1;

@@ -27,7 +27,7 @@ async function executeSafeTransaction(callback, companyId = null) {
     throw err;
   } finally {
     if (typeof conn.release === 'function') {
-      conn.release();
+      await conn.release();
     }
   }
 }

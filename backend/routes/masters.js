@@ -11,7 +11,7 @@ async function tableExists(tableName) {
     const isPg = db.isPostgres;
     if (isPg) {
       const result = await db.query(
-        "SELECT table_name as name FROM information_schema.tables WHERE lower(table_name) = lower($1)",
+        "SELECT table_name as name FROM information_schema.tables WHERE table_schema = current_schema() AND lower(table_name) = lower($1)",
         [tableName]
       );
       return (result && result.rows && result.rows.length > 0);
@@ -23,7 +23,7 @@ async function tableExists(tableName) {
     return (result && result.rows && result.rows.length > 0);
   } catch (error) {
     console.error(`Error checking if table '${tableName}' exists:`, error.message);
-    return true;
+    throw error;
   }
 }
 
@@ -33,7 +33,7 @@ async function getTableColumns(tableName) {
     const isPg = db.isPostgres;
     if (isPg) {
       const res = await db.query(
-        "SELECT column_name as name FROM information_schema.columns WHERE lower(table_name) = lower($1)",
+        "SELECT column_name as name FROM information_schema.columns WHERE table_schema = current_schema() AND lower(table_name) = lower($1)",
         [tableName]
       );
       const rows = res?.rows || (Array.isArray(res) ? res : []);
@@ -45,7 +45,7 @@ async function getTableColumns(tableName) {
     }
   } catch (err) {
     console.error(`Error inspecting columns for table '${tableName}':`, err.message);
-    return new Set();
+    throw err;
   }
 }
 
@@ -62,7 +62,7 @@ async function columnExists(tableName, columnName) {
     return false;
   } catch (error) {
     console.error(`Error checking column '${columnName}' in '${tableName}':`, error.message);
-    return true;
+    throw error;
   }
 }
 
@@ -849,8 +849,12 @@ router.get('/:type', async (req, res, next) => {
     // Check if table exists
     const exists = await tableExists(tableName)
     if (!exists) {
-      console.log(`Table '${tableName}' does not exist`)
-      return res.json({ success: true, data: [] })
+      console.error(`Required tenant master table '${tableName}' does not exist`);
+      return res.status(503).json({
+        success: false,
+        message: `Required master table '${tableName}' is not initialized`,
+        code: 'MASTER_TABLE_NOT_INITIALIZED',
+      });
     }
     
     let displayField = getDisplayField(type)
@@ -1186,7 +1190,7 @@ router.get('/:type', async (req, res, next) => {
     res.json({ success: true, data: simplified })
   } catch (error) {
     console.error(`Error fetching master records for ${req.params?.type}:`, error.message)
-    res.json({ success: true, data: [], error: error.message })
+    res.status(500).json({ success: false, message: 'Error fetching master records', error: error.message })
   }
 })
 
@@ -1199,13 +1203,18 @@ router.get('/all/:table', async (req, res) => {
     const { tableName: resolvedTableName, tableConfig } = resolveTableConfig(tableNameParam)
 
     if (!resolvedTableName) {
-      return res.json({ success: true, data: [] })
+      return res.status(400).json({ success: false, message: 'Invalid master table' })
     }
 
     const tableName = await resolveCompanyMasterTable(resolvedTableName, req.companyId)
     const exists = await tableExists(tableName)
     if (!exists) {
-      return res.json({ success: true, data: [] })
+      console.error(`Required tenant master table '${tableName}' does not exist`);
+      return res.status(503).json({
+        success: false,
+        message: `Required master table '${tableName}' is not initialized`,
+        code: 'MASTER_TABLE_NOT_INITIALIZED',
+      });
     }
 
     const result = await db.query(`SELECT * FROM ${tableName}`)
@@ -1246,7 +1255,7 @@ router.get('/all/:table', async (req, res) => {
     res.json({ success: true, data: rows })
   } catch (error) {
     console.error(`Error fetching master all records for ${req.params?.table}:`, error.message)
-    res.json({ success: true, data: [], error: error.message })
+    res.status(500).json({ success: false, message: 'Error fetching master records', error: error.message })
   }
 })
 

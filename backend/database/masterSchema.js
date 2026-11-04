@@ -93,6 +93,14 @@ const MASTER_TABLES = [
     )`
   },
   {
+    name: 'user_company_access',
+    sql: `CREATE TABLE IF NOT EXISTS user_company_access (
+      user_id INTEGER NOT NULL,
+      company_id INTEGER NOT NULL,
+      PRIMARY KEY(user_id, company_id)
+    )`
+  },
+  {
     name: 'login_history',
     sql: `CREATE TABLE IF NOT EXISTS login_history (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -120,6 +128,7 @@ const MASTER_TABLE_NAMES = new Set([
   'roles',
   'permissions',
   'user_permissions',
+  'user_company_access',
   'login_history',
   '_master_migrations'
 ]);

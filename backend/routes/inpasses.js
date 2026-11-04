@@ -207,6 +207,40 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ success: false, message: 'At least one item is required for Inpass' });
     }
 
+    const toGodownId = Number(formData.to_godown_id);
+    if (!Number.isSafeInteger(toGodownId) || toGodownId <= 0) {
+      return res.status(400).json({ success: false, message: 'A valid company Godown is required' });
+    }
+    const godownsById = new Map();
+    for (const item of activeItems) {
+      const itemGodownId = Number(item.godown_id || item.godownId || toGodownId);
+      if (!Number.isSafeInteger(itemGodownId) || itemGodownId <= 0) {
+        return res.status(400).json({ success: false, message: 'Each Inpass item must use a valid company Godown' });
+      }
+      if (!godownsById.has(itemGodownId)) {
+        const godownResult = await db.query(
+          'SELECT id, godown_name FROM godown_master WHERE id = ?',
+          [itemGodownId],
+          activeCompanyId
+        );
+        if (!godownResult.rows || godownResult.rows.length === 0) {
+          return res.status(400).json({ success: false, message: 'Selected Godown does not exist in this company' });
+        }
+        godownsById.set(itemGodownId, godownResult.rows[0]);
+      }
+    }
+    if (!godownsById.has(toGodownId)) {
+      const godownResult = await db.query(
+        'SELECT id, godown_name FROM godown_master WHERE id = ?',
+        [toGodownId],
+        activeCompanyId
+      );
+      if (!godownResult.rows || godownResult.rows.length === 0) {
+        return res.status(400).json({ success: false, message: 'Selected Godown does not exist in this company' });
+      }
+      godownsById.set(toGodownId, godownResult.rows[0]);
+    }
+
     // Retrieve Outpass if linked
     let linkedOutpass = null;
     let outpassItems = [];
@@ -283,8 +317,8 @@ router.post('/', async (req, res) => {
       formData.vehicle_no || '',
       formData.driver_name || '',
       formData.received_by || 'Admin',
-      formData.to_godown_id || null,
-      formData.to_godown_name || formData.toGodownName || 'PJ Main Factory Godown',
+      toGodownId,
+      godownsById.get(toGodownId).godown_name,
       formData.qc_required !== undefined ? (formData.qc_required ? 1 : 0) : 1,
       formData.qc_status || 'QC_PENDING',
       inputWeight,
@@ -315,8 +349,8 @@ router.post('/', async (req, res) => {
       const uom = it.uom || 'KG';
       const rate = parseFloat(it.rate) || 0;
       const amt = parseFloat(it.amount) || (qty * rate);
-      const godownId = it.godown_id || it.godownId || formData.to_godown_id || 1;
-      const godownName = it.godown_name || it.godownName || formData.to_godown_name || 'PJ';
+      const godownId = Number(it.godown_id || it.godownId || toGodownId);
+      const godownName = godownsById.get(godownId).godown_name;
       const originalItemName = it.original_item_name || (outpassItems[0]?.item_name || '');
       const originalLotNo = it.original_lot_no || (outpassItems[0]?.lot_no || '');
 

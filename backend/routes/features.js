@@ -595,55 +595,45 @@ router.post('/general-setup', async (req, res) => {
 // POST User Change Password
 router.post('/change-password', async (req, res) => {
   try {
-    const { userId, username, oldPassword, newPassword, confirmPassword } = req.body;
+    const { oldPassword, newPassword, confirmPassword } = req.body;
 
-    if (!newPassword || newPassword !== confirmPassword) {
+    if (!req.user || !oldPassword) {
+      return res.status(401).json({ success: false, message: 'Authentication and current password are required' });
+    }
+    if (typeof newPassword !== 'string' || newPassword.length < 12) {
+      return res.status(400).json({ message: 'New password must be at least 12 characters' });
+    }
+    if (newPassword !== confirmPassword) {
       return res.status(400).json({ message: 'New password and repeat password do not match' });
+    }
+    if (['admin123', 'admin', 'password', '123456', 'staff123', 'staff'].includes(newPassword.trim().toLowerCase())) {
+      return res.status(400).json({ message: 'Choose a unique, non-default password' });
     }
 
     const bcrypt = require('bcryptjs');
     const masterQuery = (db.master && db.master.query) ? db.master.query.bind(db.master) : db.query.bind(db);
     const masterRun = (db.master && db.master.run) ? db.master.run.bind(db.master) : db.run.bind(db);
-
-    let user;
-
-    if (userId) {
-      const uRes = await masterQuery('SELECT * FROM users WHERE id = ?', [userId]);
-      user = uRes.rows[0];
-    } else if (username) {
-      const uRes = await masterQuery('SELECT * FROM users WHERE LOWER(TRIM(username)) = LOWER(TRIM(?))', [username]);
-      user = uRes.rows[0];
-    } else {
-      const uRes = await masterQuery('SELECT * FROM users LIMIT 1');
-      user = uRes.rows[0];
-    }
+    const uRes = await masterQuery('SELECT * FROM users WHERE id = ?', [req.user.id]);
+    const user = uRes.rows[0];
 
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    if (oldPassword && user.password_hash) {
-      let isMatch = false;
-      if (user.password_hash.startsWith('$2')) {
-        isMatch = await bcrypt.compare(oldPassword, user.password_hash);
-      } else {
-        isMatch = (oldPassword === user.password_hash);
-      }
-
-      // Allow admin123 fallback for admin user
-      if (!isMatch && oldPassword === 'admin123' && user.username.toLowerCase() === 'admin') {
-        isMatch = true;
-      }
-
-      if (!isMatch) {
-        return res.status(400).json({ message: 'Old password is incorrect' });
-      }
+    const isMatch = user.password_hash && user.password_hash.startsWith('$2')
+      ? await bcrypt.compare(oldPassword, user.password_hash)
+      : oldPassword === user.password_hash;
+    if (!isMatch) {
+      return res.status(400).json({ message: 'Old password is incorrect' });
     }
 
     const saltRounds = 10;
     const newHash = await bcrypt.hash(newPassword, saltRounds);
 
-    await masterRun('UPDATE users SET password_hash = ?, password_last_changed = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [newHash, user.id]);
+    await masterRun(
+      'UPDATE users SET password_hash = ?, password_last_changed = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [newHash, req.user.id]
+    );
 
     res.json({ success: true, message: 'Password changed successfully!' });
   } catch (error) {

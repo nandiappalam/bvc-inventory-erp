@@ -21,6 +21,9 @@ export async function api(endpoint, options = {}) {
     : `/api${endpoint}`;
 
   let url = `${BASE_URL}${cleanEndpoint}`;
+  const method = (options.method || "GET").toUpperCase();
+  const isPublicRequest = (method === "POST" && cleanEndpoint === "/api/auth/login")
+    || (method === "GET" && ["/api/companies", "/api/companies/list", "/api/health"].includes(cleanEndpoint));
 
   // ✅ Handle query parameters if present
   if (options.params && typeof options.params === 'object') {
@@ -41,6 +44,7 @@ export async function api(endpoint, options = {}) {
   // Resolve authentication & company headers from storage
   const authHeaders = {};
   try {
+    if (!isPublicRequest) {
     const token = localStorage.getItem('erp_token');
     if (token) {
       authHeaders['Authorization'] = `Bearer ${token}`;
@@ -65,6 +69,7 @@ export async function api(endpoint, options = {}) {
         authHeaders['X-User-Id'] = String(parsedUser.id);
       }
     }
+    }
   } catch (e) {}
 
   const maxRetries = options.method && options.method !== 'GET' ? 1 : 3;
@@ -78,7 +83,7 @@ export async function api(endpoint, options = {}) {
       }
 
       const res = await fetch(url, {
-        method: options.method || "GET",
+        method,
         headers: {
           "Content-Type": "application/json",
           ...authHeaders,
@@ -202,4 +207,3 @@ api.createFlourOutReturn = (payload) => api('/flour-out-return', { method: 'POST
 
 // Export for backward compatibility
 export default api;
-

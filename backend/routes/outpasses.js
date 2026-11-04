@@ -213,6 +213,40 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ success: false, message: 'At least one item is required for Outpass' });
     }
 
+    const fromGodownId = Number(formData.from_godown_id);
+    if (!Number.isSafeInteger(fromGodownId) || fromGodownId <= 0) {
+      return res.status(400).json({ success: false, message: 'A valid company Godown is required' });
+    }
+    const godownsById = new Map();
+    for (const item of activeItems) {
+      const itemGodownId = Number(item.godown_id || item.godownId || fromGodownId);
+      if (!Number.isSafeInteger(itemGodownId) || itemGodownId <= 0) {
+        return res.status(400).json({ success: false, message: 'Each Outpass item must use a valid company Godown' });
+      }
+      if (!godownsById.has(itemGodownId)) {
+        const godownResult = await db.query(
+          'SELECT id, godown_name FROM godown_master WHERE id = ?',
+          [itemGodownId],
+          activeCompanyId
+        );
+        if (!godownResult.rows || godownResult.rows.length === 0) {
+          return res.status(400).json({ success: false, message: 'Selected Godown does not exist in this company' });
+        }
+        godownsById.set(itemGodownId, godownResult.rows[0]);
+      }
+    }
+    if (!godownsById.has(fromGodownId)) {
+      const godownResult = await db.query(
+        'SELECT id, godown_name FROM godown_master WHERE id = ?',
+        [fromGodownId],
+        activeCompanyId
+      );
+      if (!godownResult.rows || godownResult.rows.length === 0) {
+        return res.status(400).json({ success: false, message: 'Selected Godown does not exist in this company' });
+      }
+      godownsById.set(fromGodownId, godownResult.rows[0]);
+    }
+
     const totalQty = activeItems.reduce((sum, it) => sum + (parseFloat(it.qty) || 0), 0);
     const totalWeight = activeItems.reduce((sum, it) => {
       const wt = parseFloat(it.total_weight || it.totalWeight) || ((parseFloat(it.qty) || 0) * (parseFloat(it.weight) || 50));
@@ -242,8 +276,8 @@ router.post('/', async (req, res) => {
       formData.party_id || null,
       formData.party_name || formData.partyName || formData.flour_mill || '',
       formData.from_location || 'Inside Factory',
-      formData.from_godown_id || null,
-      formData.from_godown_name || formData.fromGodownName || 'PJ Main Factory Godown',
+      fromGodownId,
+      godownsById.get(fromGodownId).godown_name,
       formData.destination || formData.party_name || '',
       formData.vehicle_no || '',
       formData.driver_name || '',
@@ -271,8 +305,8 @@ router.post('/', async (req, res) => {
       const uom = it.uom || 'KG';
       const rate = parseFloat(it.rate) || 0;
       const amt = parseFloat(it.amount) || (qty * rate);
-      const godownId = it.godown_id || it.godownId || formData.from_godown_id || 1;
-      const godownName = it.godown_name || it.godownName || formData.from_godown_name || 'PJ';
+      const godownId = Number(it.godown_id || it.godownId || fromGodownId);
+      const godownName = godownsById.get(godownId).godown_name;
 
       await db.run(`
         INSERT INTO outpass_items (
