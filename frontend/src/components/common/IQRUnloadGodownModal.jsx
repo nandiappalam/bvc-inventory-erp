@@ -42,59 +42,40 @@ export default function IQRUnloadGodownModal({ open, onClose, lotData, onSuccess
 
   const [splits, setSplits] = useState([]);
 
-  // Fetch company Godowns when the modal opens or the active company changes.
+  // Fetch Godowns on mount
   useEffect(() => {
-    if (!open) return undefined;
-
-    let active = true;
-    let requestVersion = 0;
-    const fetchGodowns = async () => {
-      const version = ++requestVersion;
+    if (open) {
       setError('');
-      setGodowns([]);
-      setSplits([]);
       setLoadingGodowns(true);
-      try {
-        const result = await api('/masters/all/godowns');
-        if (result?.success === false) {
-          throw new Error(result.message || 'Failed to load company Godowns.');
-        }
-        const list = Array.isArray(result) ? result : (Array.isArray(result?.data) ? result.data : []);
-        if (!active || requestVersion !== version) return;
-        setGodowns(list);
-        if (list.length === 0) {
-          setError('No Godowns are configured for this company.');
-          return;
-        }
-        const defaultGodown = list[0];
-        setSplits([{
-          godownId: String(defaultGodown.id),
-          godownName: defaultGodown.godown_name || defaultGodown.name,
-          qty: String(totalQty),
-          weight: String(totalWeight)
-        }]);
-      } catch (error) {
-        if (active && requestVersion === version) {
-          console.error('Error fetching godowns:', error);
-          setError(error.message);
-        }
-      } finally {
-        if (active && requestVersion === version) setLoadingGodowns(false);
-      }
-    };
+      api('/masters/all/godowns')
+        .then((res) => {
+          let list = Array.isArray(res) ? res : (Array.isArray(res?.data) ? res.data : []);
+          setGodowns(list || []);
 
-    fetchGodowns();
-    window.addEventListener('erp_company_changed', fetchGodowns);
-    const handleStorage = (event) => {
-      if (event.key === 'erp_selected_company' || event.key === 'erp_company') fetchGodowns();
-    };
-    window.addEventListener('storage', handleStorage);
-    return () => {
-      active = false;
-      requestVersion += 1;
-      window.removeEventListener('erp_company_changed', fetchGodowns);
-      window.removeEventListener('storage', handleStorage);
-    };
+          const defaultGodown = list && list.length > 0 ? list[0] : { id: '', godown_name: '' };
+          setSplits([
+            {
+              godownId: String(defaultGodown.id || ''),
+              godownName: defaultGodown.godown_name || '',
+              qty: String(totalQty),
+              weight: String(totalWeight)
+            }
+          ]);
+        })
+        .catch((err) => {
+          console.error('Error fetching godowns:', err);
+          setGodowns([]);
+          setSplits([
+            {
+              godownId: '',
+              godownName: '',
+              qty: String(totalQty),
+              weight: String(totalWeight)
+            }
+          ]);
+        })
+        .finally(() => setLoadingGodowns(false));
+    }
   }, [open, lotNo, totalQty, totalWeight]);
 
   const allocatedQtySum = splits.reduce((acc, row) => acc + (parseFloat(row.qty) || 0), 0);
@@ -106,7 +87,7 @@ export default function IQRUnloadGodownModal({ open, onClose, lotData, onSuccess
     const selected = godowns.find((g) => String(g.id) === String(godownId));
     const updated = [...splits];
     updated[index].godownId = String(godownId);
-    updated[index].godownName = selected ? (selected.godown_name || selected.name) : '';
+    updated[index].godownName = selected ? (selected.godown_name || selected.name) : 'Godown';
     setSplits(updated);
   };
 
@@ -126,17 +107,15 @@ export default function IQRUnloadGodownModal({ open, onClose, lotData, onSuccess
   };
 
   const handleAddSplitRow = () => {
-    if (godowns.length === 0) return;
     const unallocated = remainingQty > 0 ? remainingQty : 0;
     const calcWt = (unallocated * perUnitWeight).toFixed(2);
     const availableGodown = godowns.find((g) => !splits.some((s) => String(s.godownId) === String(g.id))) || godowns[0];
-    if (!availableGodown) return;
 
     setSplits([
       ...splits,
       {
-        godownId: String(availableGodown?.id || ''),
-        godownName: availableGodown?.godown_name || availableGodown?.name || '',
+        godownId: String(availableGodown?.id || 1),
+        godownName: availableGodown?.godown_name || 'Additional Godown',
         qty: String(unallocated),
         weight: String(calcWt)
       }
@@ -153,10 +132,6 @@ export default function IQRUnloadGodownModal({ open, onClose, lotData, onSuccess
     setError('');
     if (splits.length === 0) {
       setError('Please select at least one godown for unloading.');
-      return;
-    }
-    if (splits.some(split => !godowns.some(godown => String(godown.id) === String(split.godownId)))) {
-      setError('Select a Godown configured for this company in every row.');
       return;
     }
 
@@ -258,7 +233,6 @@ export default function IQRUnloadGodownModal({ open, onClose, lotData, onSuccess
                 variant="outlined"
                 startIcon={<AddCircleOutlineIcon fontSize="small" />}
                 onClick={handleAddSplitRow}
-                disabled={godowns.length === 0}
                 sx={{ fontWeight: 700, textTransform: 'none' }}
               >
                 + Add Godown Split

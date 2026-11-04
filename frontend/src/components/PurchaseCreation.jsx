@@ -2354,7 +2354,7 @@ const PurchaseCreation = () => {
                               </span>
                             </td>
                             <td style={{ padding: '8px', textAlign: 'center' }}>
-                              {(!po.status || po.status === 'Ordered' || !po.inward_purchase_id) ? (
+                              {(po.status !== 'Received' && po.status !== 'INWARDED' && po.status !== 'Completed' && !po.inward_purchase_id) ? (
                                 <button
                                   type="button"
                                   onClick={() => handleSelectPo(po)}

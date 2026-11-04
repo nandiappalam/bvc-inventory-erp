@@ -6,6 +6,7 @@ const { Pool } = require('pg');
 const { MASTER_TABLES } = require('../database/masterSchema');
 const { COMPANY_TABLES, DEFAULT_LEDGER_CHART, DEFAULT_TAX_RATES } = require('../database/companySchema');
 const { orderTablesByDependencies } = require('../utils/schemaOrderer');
+const bcrypt = require('bcryptjs');
 
 async function initPostgresSchema() {
   const connectionString = process.env.DATABASE_URL;
@@ -46,9 +47,21 @@ async function initPostgresSchema() {
       console.log('  ✓ Seeded Company 1');
     }
 
+    const adminPass = await bcrypt.hash('admin123', 10);
+    const staffPass = await bcrypt.hash('staff123', 10);
+
+    await client.query(`
+      INSERT INTO users (username, password_hash, role, company_id, status)
+      VALUES 
+        ('admin', $1, 'Admin', 1, 'Active'),
+        ('staff', $2, 'Staff', 1, 'Active')
+      ON CONFLICT DO NOTHING
+    `, [adminPass, staffPass]);
+    console.log('  ✓ Seeded Default Users (admin / staff)');
+
     console.log('🏭 3. Initializing Company 1 Tenant Schema (company_1)...');
     await client.query('CREATE SCHEMA IF NOT EXISTS company_1;');
-    await client.query('SET search_path TO company_1;');
+    await client.query('SET search_path TO company_1, public;');
 
     for (const tblSql of orderTablesByDependencies(COMPANY_TABLES)) {
       let pgSql = tblSql

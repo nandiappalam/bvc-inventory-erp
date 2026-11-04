@@ -75,8 +75,8 @@ const CompanySelection = () => {
   const [initializing, setInitializing] = useState(false);
 
   // Quick Login State for Selected Company
-  const [loginUsername, setLoginUsername] = useState('');
-  const [loginPassword, setLoginPassword] = useState('');
+  const [loginUsername, setLoginUsername] = useState('admin');
+  const [loginPassword, setLoginPassword] = useState('admin123');
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -842,9 +842,27 @@ const CompanySelection = () => {
                     }}
                   />
 
-                  <Typography variant="caption" sx={{ display: 'block', mt: 1.5, mb: 1, color: '#64748b' }}>
-                    Use the credentials issued for this company. Default demo passwords are disabled.
-                  </Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 1.5, mb: 1 }}>
+                    <Typography variant="caption" sx={{ color: '#64748b' }}>
+                      Quick Fill Credentials:
+                    </Typography>
+                    <Box sx={{ display: 'flex', gap: 1 }}>
+                      <Chip 
+                        size="small" 
+                        label="Admin (admin / admin123)" 
+                        onClick={() => { setLoginUsername('admin'); setLoginPassword('admin123'); }} 
+                        clickable 
+                        sx={{ fontSize: '0.75rem', bgcolor: themeColors.lighterBlue, color: themeColors.primary, fontWeight: 600 }}
+                      />
+                      <Chip 
+                        size="small" 
+                        label="Staff (staff / staff123)" 
+                        onClick={() => { setLoginUsername('staff'); setLoginPassword('staff123'); }} 
+                        clickable 
+                        sx={{ fontSize: '0.75rem', bgcolor: '#f1f5f9', color: '#475569', fontWeight: 600 }}
+                      />
+                    </Box>
+                  </Box>
 
                   <Button
                     type="submit"

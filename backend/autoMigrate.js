@@ -1725,44 +1725,9 @@ module.exports = async function autoMigrate() {
       )
     `);
 
-    // Seed default BOMs and Yield Standards if none exist
-    const bomCheck = await db.query('SELECT COUNT(*) as cnt FROM bom_headers');
-    if ((bomCheck.rows?.[0]?.cnt || 0) === 0) {
-      console.log('Seeding initial manufacturing BOMs and Formulas...');
-      // 1. Urad Flour BOM (From Urad Whole)
-      await db.run(`
-        INSERT INTO bom_headers (bom_code, bom_name, product_name, version, batch_qty, uom, status, standard_yield_pct, yield_tolerance_pct, remarks)
-        VALUES ('BOM-FLOUR-01', 'Standard Urad Flour Milling Recipe', 'Urad Flour', 'V1', 1000, 'KG', 'Active', 72, 2, 'Standard whole urad to flour conversion with 72% yield and 18% bran')
-      `);
-      const bom1Res = await db.query("SELECT id FROM bom_headers WHERE bom_code = 'BOM-FLOUR-01'");
-      const bom1Id = bom1Res.rows?.[0]?.id;
-      if (bom1Id) {
-        await db.run("INSERT INTO bom_items (bom_id, item_name, quantity, uom, scrap_pct, item_type) VALUES (?, 'Urad Whole', 1000, 'KG', 5, 'Raw Material')", [bom1Id]);
-      }
+    // Only create tables, do not inject any example or sample BOMs or formulas
+    // The application only saves and fetches user-created records
 
-      // 2. Papad Product A Multi-level BOM
-      await db.run(`
-        INSERT INTO bom_headers (bom_code, bom_name, product_name, version, batch_qty, uom, status, standard_yield_pct, yield_tolerance_pct, remarks)
-        VALUES ('BOM-PAPAD-01', 'Special Appalam / Papad Recipe A', 'Special Papad 100g', 'V1', 100, 'KG', 'Active', 90, 2, 'Standard papad formulation with spices and salt')
-      `);
-      const bom2Res = await db.query("SELECT id FROM bom_headers WHERE bom_code = 'BOM-PAPAD-01'");
-      const bom2Id = bom2Res.rows?.[0]?.id;
-      if (bom2Id) {
-        await db.run("INSERT INTO bom_items (bom_id, item_name, quantity, uom, scrap_pct, item_type) VALUES (?, 'Urad Flour', 70, 'KG', 1, 'Intermediate')", [bom2Id]);
-        await db.run("INSERT INTO bom_items (bom_id, item_name, quantity, uom, scrap_pct, item_type) VALUES (?, 'Spices Mix', 5, 'KG', 0, 'Additive')", [bom2Id]);
-        await db.run("INSERT INTO bom_items (bom_id, item_name, quantity, uom, scrap_pct, item_type) VALUES (?, 'Edible Salt', 3, 'KG', 0, 'Additive')", [bom2Id]);
-        await db.run("INSERT INTO bom_items (bom_id, item_name, quantity, uom, scrap_pct, item_type) VALUES (?, 'Gingelly Oil', 2, 'KG', 0, 'Additive')", [bom2Id]);
-        await db.run("INSERT INTO bom_items (bom_id, item_name, quantity, uom, scrap_pct, item_type) VALUES (?, 'Packaging Box 100g', 1000, 'Nos', 1, 'Packaging')", [bom2Id]);
-      }
-    }
-
-    // Seed Yield Standards
-    const ysCheck = await db.query('SELECT COUNT(*) as cnt FROM yield_standards');
-    if ((ysCheck.rows?.[0]?.cnt || 0) === 0) {
-      await db.run("INSERT INTO yield_standards (product_name, process_name, standard_yield_pct, tolerance_pct, allowed_wastage_pct, allowed_loss_pct) VALUES ('Urad Flour', 'Flour Milling', 72, 2, 18, 5)");
-      await db.run("INSERT INTO yield_standards (product_name, process_name, standard_yield_pct, tolerance_pct, allowed_wastage_pct, allowed_loss_pct) VALUES ('Special Papad', 'Papad Dough & Pressing', 90, 2, 3, 2)");
-      await db.run("INSERT INTO yield_standards (product_name, process_name, standard_yield_pct, tolerance_pct, allowed_wastage_pct, allowed_loss_pct) VALUES ('Moong Flour', 'Flour Milling', 74, 2, 16, 5)");
-    }
 
     // Seed Contractor Master from existing Papad Companies & Flour Mills
     const contractorsCheck = await db.query('SELECT COUNT(*) as cnt FROM contractor_master');
@@ -1928,33 +1893,11 @@ module.exports = async function autoMigrate() {
       )
     `);
 
-    // Seed default Production Units if empty
-    const unitsCheck = await db.query('SELECT COUNT(*) as cnt FROM production_units');
-    if ((unitsCheck.rows?.[0]?.cnt || 0) === 0) {
-      console.log('Seeding initial Factory Production Units / Work Centers...');
-      const now = new Date();
-      const startTime = new Date(now.getTime() - 45 * 60 * 1000).toISOString();
-      const finishTime = new Date(now.getTime() + 120 * 60 * 1000).toISOString();
+    // Production units table ready; only user-created production units and jobs are recorded
+    await db.run(`
+      DELETE FROM production_queue WHERE source_ref_no IN ('PO-2026-0045', 'PO-2026-0048', 'PO-2026-0051', 'QT-2026-0089', 'PO-2026-0055');
+    `).catch(() => {});
 
-      await db.run(`
-        INSERT INTO production_units (unit_code, unit_name, process_stage, capacity_kg_per_hr, setup_time_mins, cleaning_time_mins, qc_time_mins, status, current_job_id, current_job_code, current_product, current_input_qty, started_at, expected_finish_at, operator, efficiency_pct)
-        VALUES ('CLN-01', 'Grain & Seed Cleaning Pre-Cleaner', 'Cleaning', 350, 15, 20, 10, 'RUNNING', 1, 'PO-2026-0045-CLN', 'Urad Whole Raw', 1000, ?, ?, 'Karthik Raja', 96.5)
-      `, [startTime, finishTime]);
-
-      await db.run(`
-        INSERT INTO production_units (unit_code, unit_name, process_stage, capacity_kg_per_hr, setup_time_mins, cleaning_time_mins, qc_time_mins, status, current_job_id, current_job_code, current_product, current_input_qty, started_at, expected_finish_at, operator, efficiency_pct)
-        VALUES ('GRD-01', 'Heavy-Duty Pulverizer & Grinding Mill 1', 'Grinding', 250, 15, 25, 10, 'READY', NULL, NULL, NULL, 0, NULL, NULL, 'Suresh Kumar', 94.2)
-      `);
-
-      await db.run(`
-        INSERT INTO production_units (unit_code, unit_name, process_stage, capacity_kg_per_hr, setup_time_mins, cleaning_time_mins, qc_time_mins, status, current_job_id, current_job_code, current_product, current_input_qty, started_at, expected_finish_at, operator, efficiency_pct)
-        VALUES ('SIV-01', 'Vibratory Sieving & Grading Line', 'Sieving', 400, 10, 15, 5, 'READY', NULL, NULL, NULL, 0, NULL, NULL, 'Murugan S', 98.0)
-      `);
-
-      await db.run(`
-        INSERT INTO production_units (unit_code, unit_name, process_stage, capacity_kg_per_hr, setup_time_mins, cleaning_time_mins, qc_time_mins, status, current_job_id, current_job_code, current_product, current_input_qty, started_at, expected_finish_at, operator, efficiency_pct)
-        VALUES ('MIX-01', 'Industrial Double-Cone Flour Blender', 'Mixing', 500, 20, 30, 15, 'READY', NULL, NULL, NULL, 0, NULL, NULL, 'Praveen K', 97.4)
-      `);
 
       // Keep production units clean
       await db.run(`

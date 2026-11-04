@@ -316,36 +316,7 @@ const DatabaseUtility = () => {
         </Alert>
       )}
 
-      <Card sx={{ border: '2px solid #2e7d32', borderRadius: 3, boxShadow: '0 4px 16px rgba(46,125,50,0.12)', mb: 3, backgroundColor: '#f1f8e9' }}>
-        <CardContent sx={{ p: 4 }}>
-          <Typography variant="h6" sx={{ fontWeight: 'bold', mb: 1, color: '#1b5e20', display: 'flex', alignItems: 'center', gap: 1 }}>
-            ⚡ 1-Click Restore KIYA Company (Company 7)
-          </Typography>
-          <Typography variant="body2" sx={{ color: '#2e7d32', mb: 3 }}>
-            Directly populate and restore all KIYA company data (Suppliers, Items, Purchases, Vouchers, Stock Lots, and Ledger) with a single click. No file upload or SQL copy-paste needed!
-          </Typography>
-
-          <Button
-            variant="contained"
-            color="success"
-            size="large"
-            onClick={handleInitKiya}
-            disabled={initializingKiya || downloading || uploading}
-            startIcon={initializingKiya ? <CircularProgress size={20} color="inherit" /> : <CheckCircleIcon />}
-            sx={{
-              backgroundColor: '#2e7d32',
-              textTransform: 'none',
-              borderRadius: 2,
-              fontWeight: 'bold',
-              px: 4,
-              py: 1.5,
-              '&:hover': { backgroundColor: '#1b5e20' },
-            }}
-          >
-            {initializingKiya ? 'Restoring KIYA Company Data...' : 'Restore KIYA Company (Company 7) Now'}
-          </Button>
-        </CardContent>
-      </Card>
+      
 
       <Card sx={{ border: '1px solid #dbe7fb', borderRadius: 3, boxShadow: '0 4px 12px rgba(0,0,0,0.05)', mb: 3 }}>
         <CardContent sx={{ p: 4 }}>

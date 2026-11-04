@@ -42,21 +42,8 @@ function getActiveAuthHeaders() {
   return { companyId, token, userId };
 }
 
-function isPublicApiRequest(method, requestUrl) {
-  let pathname;
-  try {
-    pathname = new URL(requestUrl, window.location.origin).pathname.replace(/\/+$/, '') || '/';
-  } catch (e) {
-    return false;
-  }
-  const normalizedMethod = String(method || 'GET').toUpperCase();
-  return (normalizedMethod === 'POST' && pathname === '/api/auth/login')
-    || (normalizedMethod === 'GET' && ['/api/companies', '/api/companies/list', '/api/health'].includes(pathname));
-}
-
 // 1. Configure global Axios interceptor
 axios.interceptors.request.use((config) => {
-  if (isPublicApiRequest(config.method, config.url)) return config;
   const { companyId, token, userId } = getActiveAuthHeaders();
   config.headers = config.headers || {};
   if (!config.headers['x-company-id'] && !config.headers['X-Company-Id'] && companyId) {
@@ -77,12 +64,6 @@ if (typeof window !== 'undefined' && typeof window.fetch === 'function') {
     const originalFetch = window.fetch.bind(window);
     const customFetch = async function (input, init = {}) {
       try {
-        const requestUrl = typeof input === 'string' || input instanceof URL ? input : input.url;
-        const requestMethod = init.method || (typeof Request !== 'undefined' && input instanceof Request ? input.method : 'GET');
-        if (isPublicApiRequest(requestMethod, requestUrl)) {
-          return originalFetch(input, init);
-        }
-
         const { companyId, token, userId } = getActiveAuthHeaders();
         const customInit = { ...init };
         let headers;

@@ -334,6 +334,13 @@ const Navigation = () => {
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date().toLocaleString());
 
+  // Ensure sidebar navbar is closed on initial page load / refresh and on navigation
+  useEffect(() => {
+    if (isSidebarOpen) {
+      toggleSidebar();
+    }
+  }, [location.pathname]);
+
   // Global keyboard shortcut: Ctrl+K / Cmd+K opens Universal ERP Search
   useEffect(() => {
     const handleKeyDown = (e) => {

@@ -6,43 +6,41 @@ const db = require('../config/database');
  * This ensures exact real-time accuracy for Stock Status, Lot Breakdown, Godown Stock Reports,
  * Grind, Sales, Transfers, and Returns.
  */
-async function rebuildStockLedger() {
-  try {
-    // Fetch master godowns for dynamic location mapping
-    const gmAll = await db.query(`SELECT id, godown_name, godown_type, storage_location FROM godown_master ORDER BY id ASC`);
-    const godownRows = gmAll.rows || [];
-    
-    // Determine default primary inside-factory godown from godown_master
-    let defaultGodown = godownRows.find(g => (g.godown_type || '').toLowerCase() === 'normal' || (g.storage_location || '').toLowerCase() === 'inside factory') || godownRows[0] || { id: 1, godown_name: 'PJ' };
+async function rebuildStockLedger(targetCompanyId = null) {
+  const store = db.asyncLocalStorage ? db.asyncLocalStorage.getStore() : null;
+  const activeCompanyId = targetCompanyId || (store ? store.companyId : 1);
 
-    // Determine finished goods godown if exists, else defaultGodown
-    let fgGodown = godownRows.find(g => (g.godown_name || '').toLowerCase().includes('finish') || (g.godown_name || '').toLowerCase().includes('fg')) || defaultGodown;
-
-    // Determine raw materials godown if exists, else defaultGodown
-    let rmGodown = godownRows.find(g => (g.godown_name || '').toLowerCase().includes('raw') || (g.godown_name || '').toLowerCase().includes('rm')) || defaultGodown;
-
-    // Determine cold storage godown if exists
-    let csGodown = godownRows.find(g => (g.godown_type || '').toLowerCase().includes('cold') || (g.godown_name || '').toLowerCase().includes('cold')) || null;
-
-    // Clean up any legacy or erroneous transfers of factory raw material LOT0003 to Cold Storage
+  const runRebuilder = async () => {
     try {
-      await db.run(`DELETE FROM godown_transfers WHERE UPPER(TRIM(lot_no)) LIKE '%LOT0003%' OR (UPPER(TRIM(item_name)) LIKE '%URAD%' AND (to_godown_name LIKE '%BTS%' OR to_godown_id = 2))`);
-      await db.run(`DELETE FROM item_transfers WHERE UPPER(TRIM(lot_no)) LIKE '%LOT0003%' OR (UPPER(TRIM(item_name)) LIKE '%URAD%' AND (to_godown_name LIKE '%BTS%' OR to_godown_id = 2))`);
-      await db.run(`UPDATE cold_storage_items SET cold_storage_lot_no = 'LOT0006' WHERE UPPER(TRIM(cold_storage_lot_no)) LIKE '%LOT0003%' OR (cold_storage_lot_no = purchase_lot_no AND UPPER(TRIM(purchase_lot_no)) LIKE '%LOT0003%')`);
-      await db.run(`UPDATE stock SET godown = 'PJ', godown_id = 1 WHERE (UPPER(TRIM(lot_no)) LIKE '%LOT0003%' OR UPPER(TRIM(lot_no)) = 'LOT003' OR UPPER(TRIM(item_name)) LIKE '%URAD%') AND (godown LIKE '%BTS%' OR godown LIKE '%Cold%' OR godown_id = 2)`);
-    } catch (e) {}
+      // Fetch master godowns for dynamic location mapping
+      const gmAll = await db.query(`SELECT id, godown_name, godown_type, storage_location FROM godown_master ORDER BY id ASC`);
+      const godownRows = gmAll.rows || [];
+      
+      // Determine default primary inside-factory godown from godown_master
+      let defaultGodown = godownRows.find(g => (g.godown_type || '').toLowerCase() === 'normal' || (g.storage_location || '').toLowerCase() === 'inside factory') || godownRows[0] || { id: null, godown_name: '' };
 
-    // 1. Clear stock_lots and non-Opening stock entries
-    await db.run(`DELETE FROM stock_lots`);
-    await db.run(`DELETE FROM stock WHERE type NOT IN ('Opening Stock', 'Open Stock', 'Opening') OR type IS NULL`);
+      // Determine finished goods godown if exists, else defaultGodown
+      let fgGodown = godownRows.find(g => (g.godown_name || '').toLowerCase().includes('finish') || (g.godown_name || '').toLowerCase().includes('fg')) || defaultGodown;
 
-    // Synchronize existing Opening Stock entries to real master godown
-    await db.run(`
-      UPDATE stock 
-      SET godown = ?, godown_id = ?
-      WHERE (type IN ('Opening Stock', 'Open Stock', 'Opening'))
-        AND (godown IS NULL OR godown = '' OR godown = 'Main Godown' OR godown_id IS NULL OR godown_id NOT IN (SELECT id FROM godown_master))
-    `, [defaultGodown.godown_name, defaultGodown.id]);
+      // Determine raw materials godown if exists, else defaultGodown
+      let rmGodown = godownRows.find(g => (g.godown_name || '').toLowerCase().includes('raw') || (g.godown_name || '').toLowerCase().includes('rm')) || defaultGodown;
+
+      // Determine cold storage godown if exists
+      let csGodown = godownRows.find(g => (g.godown_type || '').toLowerCase().includes('cold') || (g.godown_name || '').toLowerCase().includes('cold')) || null;
+
+      // 1. Clear stock_lots and non-Opening stock entries
+      await db.run(`DELETE FROM stock_lots`);
+      await db.run(`DELETE FROM stock WHERE type NOT IN ('Opening Stock', 'Open Stock', 'Opening') OR type IS NULL`);
+
+      // Synchronize existing Opening Stock entries to real master godown if present
+      if (defaultGodown && defaultGodown.id) {
+        await db.run(`
+          UPDATE stock 
+          SET godown = ?, godown_id = ?
+          WHERE (type IN ('Opening Stock', 'Open Stock', 'Opening'))
+            AND (godown IS NULL OR godown = '' OR godown = 'Main Godown' OR godown_id IS NULL OR godown_id NOT IN (SELECT id FROM godown_master))
+        `, [defaultGodown.godown_name, defaultGodown.id]);
+      }
 
     // 2. Fetch all inflow transactions
     // A0. Opening Stock
@@ -896,6 +894,12 @@ async function rebuildStockLedger() {
   } catch (err) {
     console.error('Error in rebuildStockLedger:', err);
   }
+};
+
+  if (db.asyncLocalStorage) {
+    return db.asyncLocalStorage.run({ companyId: activeCompanyId, companySchema: `company_${activeCompanyId}` }, runRebuilder);
+  }
+  return runRebuilder();
 }
 
 module.exports = rebuildStockLedger;

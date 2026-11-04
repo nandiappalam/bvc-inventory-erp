@@ -21,9 +21,6 @@ export async function api(endpoint, options = {}) {
     : `/api${endpoint}`;
 
   let url = `${BASE_URL}${cleanEndpoint}`;
-  const method = (options.method || "GET").toUpperCase();
-  const isPublicRequest = (method === "POST" && cleanEndpoint === "/api/auth/login")
-    || (method === "GET" && ["/api/companies", "/api/companies/list", "/api/health"].includes(cleanEndpoint));
 
   // ✅ Handle query parameters if present
   if (options.params && typeof options.params === 'object') {
@@ -44,7 +41,6 @@ export async function api(endpoint, options = {}) {
   // Resolve authentication & company headers from storage
   const authHeaders = {};
   try {
-    if (!isPublicRequest) {
     const token = localStorage.getItem('erp_token');
     if (token) {
       authHeaders['Authorization'] = `Bearer ${token}`;
@@ -69,7 +65,6 @@ export async function api(endpoint, options = {}) {
         authHeaders['X-User-Id'] = String(parsedUser.id);
       }
     }
-    }
   } catch (e) {}
 
   const maxRetries = options.method && options.method !== 'GET' ? 1 : 3;
@@ -83,7 +78,7 @@ export async function api(endpoint, options = {}) {
       }
 
       const res = await fetch(url, {
-        method,
+        method: options.method || "GET",
         headers: {
           "Content-Type": "application/json",
           ...authHeaders,
@@ -104,11 +99,10 @@ export async function api(endpoint, options = {}) {
 
       // ✅ Null-safe JSON parse
       if (!res.ok) {
-        console.error("❌ API HTTP error:", res.status, res.statusText);
-        console.error("❌ Response body:", text);
         let errorMsg = `HTTP ${res.status}: ${res.statusText}`;
+        let parsed = null;
         try {
-          const parsed = JSON.parse(text);
+          parsed = JSON.parse(text);
           if (parsed) {
             if (typeof parsed.message === 'string') {
               errorMsg = parsed.message;
@@ -123,7 +117,21 @@ export async function api(endpoint, options = {}) {
             }
           }
         } catch (e) {}
-        return { success: false, data: null, message: String(errorMsg) };
+
+        if (res.status === 401) {
+          console.warn(`⚠️ Authentication required or token expired (401) for endpoint: ${endpoint}`);
+          try {
+            const currentToken = localStorage.getItem('erp_token');
+            if (currentToken && !endpoint.includes('/auth/login')) {
+              localStorage.removeItem('erp_token');
+            }
+          } catch (_) {}
+          return { success: false, data: null, message: errorMsg || 'Authentication required', code: 'AUTH_REQUIRED', status: 401 };
+        }
+
+        console.error("❌ API HTTP error:", res.status, res.statusText);
+        console.error("❌ Response body:", text);
+        return { success: false, data: null, message: String(errorMsg), status: res.status };
       }
 
       let json = null;
@@ -207,3 +215,4 @@ api.createFlourOutReturn = (payload) => api('/flour-out-return', { method: 'POST
 
 // Export for backward compatibility
 export default api;
+

@@ -40,8 +40,8 @@ const InpassCreate = () => {
     vehicle_no: '',
     driver_name: '',
     received_by: 'Admin',
-    to_godown_id: '',
-    to_godown_name: '',
+    to_godown_id: 1,
+    to_godown_name: 'PJ Main Factory Godown',
     qc_required: true,
     qc_status: 'QC_PENDING',
     processing_charge_per_kg: '',
@@ -71,8 +71,8 @@ const InpassCreate = () => {
       rate: '',
       amount: 0,
       qc_status: 'PASS',
-      godown_id: '',
-      godown_name: '',
+      godown_id: 1,
+      godown_name: 'PJ',
       remarks: 'External Mill Processed Output'
     }
   ]);
@@ -105,43 +105,13 @@ const InpassCreate = () => {
       })
       .catch(() => {});
 
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-    let requestVersion = 0;
-    const fetchGodowns = async (resetSelection = false) => {
-      const version = ++requestVersion;
-      setGodownsList([]);
-      if (resetSelection) {
-        setFormData(prev => ({ ...prev, to_godown_id: '', to_godown_name: '' }));
-        setItems(prev => prev.map(item => ({ ...item, godown_id: '', godown_name: '' })));
-      }
-      try {
-        const result = await api('/masters/godowns');
-        const rows = Array.isArray(result) ? result : (Array.isArray(result?.data) ? result.data : []);
-        if (active && requestVersion === version) setGodownsList(rows);
-      } catch (error) {
-        if (active && requestVersion === version) {
-          console.error('Error fetching Inpass Godowns:', error);
-          setGodownsList([]);
-        }
-      }
-    };
-
-    const refreshForCompany = () => fetchGodowns(true);
-    fetchGodowns();
-    window.addEventListener('erp_company_changed', refreshForCompany);
-    const handleStorage = (event) => {
-      if (event.key === 'erp_selected_company' || event.key === 'erp_company') refreshForCompany();
-    };
-    window.addEventListener('storage', handleStorage);
-    return () => {
-      active = false;
-      requestVersion += 1;
-      window.removeEventListener('erp_company_changed', refreshForCompany);
-      window.removeEventListener('storage', handleStorage);
-    };
+    // 4. Fetch Godowns
+    api('/masters/godowns')
+      .then(res => {
+        if (Array.isArray(res)) setGodownsList(res);
+        else if (res?.data && Array.isArray(res.data)) setGodownsList(res.data);
+      })
+      .catch(() => {});
   }, []);
 
   // When outpassIdParam is present, auto-select that outpass
@@ -172,7 +142,8 @@ const InpassCreate = () => {
     }
   }, [grindIdParam, outpassIdParam]);
 
-  const availableGodowns = godownsList;
+  // Godowns for active company
+  const availableGodowns = godownsList || [];
 
   // Apply selected Outpass details
   const applyOutpassData = (op) => {
@@ -195,8 +166,8 @@ const InpassCreate = () => {
       vehicle_no: op.vehicle_no || prev.vehicle_no,
       driver_name: op.driver_name || prev.driver_name,
       processing_charge_per_kg: ratePerKg || prev.processing_charge_per_kg,
-      to_godown_id: op.from_godown_id || prev.to_godown_id || '',
-      to_godown_name: op.from_godown_name || prev.to_godown_name || '',
+      to_godown_id: op.from_godown_id || prev.to_godown_id || 1,
+      to_godown_name: op.from_godown_name || prev.to_godown_name || 'PJ Main Factory Godown',
       remarks: `Received against Outpass #${op.outpass_no} (${op.party_name || 'Outside Mill'})`
     }));
 
@@ -225,8 +196,8 @@ const InpassCreate = () => {
         rate: '',
         amount: 0,
         qc_status: 'PASS',
-        godown_id: op.from_godown_id || '',
-        godown_name: op.from_godown_name || '',
+        godown_id: op.from_godown_id || 1,
+        godown_name: op.from_godown_name || 'PJ',
         remarks: 'Main Processed Yield'
       },
       {
@@ -242,8 +213,8 @@ const InpassCreate = () => {
         rate: '',
         amount: 0,
         qc_status: 'PASS',
-        godown_id: op.from_godown_id || '',
-        godown_name: op.from_godown_name || '',
+        godown_id: op.from_godown_id || 1,
+        godown_name: op.from_godown_name || 'PJ',
         remarks: 'Mill By-product Recovery'
       },
       {
@@ -259,8 +230,8 @@ const InpassCreate = () => {
         rate: '0',
         amount: 0,
         qc_status: 'PASS',
-        godown_id: op.from_godown_id || '',
-        godown_name: op.from_godown_name || '',
+        godown_id: op.from_godown_id || 1,
+        godown_name: op.from_godown_name || 'PJ',
         remarks: 'Normal Process Loss'
       }
     ]);
@@ -340,8 +311,8 @@ const InpassCreate = () => {
         rate: '',
         amount: 0,
         qc_status: 'PASS',
-        godown_id: formData.to_godown_id || '',
-        godown_name: formData.to_godown_name || '',
+        godown_id: formData.to_godown_id || 1,
+        godown_name: formData.to_godown_name || 'PJ',
         remarks: ''
       }
     ]);
@@ -381,11 +352,6 @@ const InpassCreate = () => {
   const totalProcessingCharges = chargeRate * outputWeight;
 
   const handleSave = async (andPrint = false) => {
-    if (!godownsList.some(godown => String(godown.id) === String(formData.to_godown_id))) {
-      alert('Select a receiving Godown configured for this company.');
-      return;
-    }
-
     if (!formData.outpass_id && !formData.outpass_no) {
       if (!window.confirm('No linked Outpass selected. Are you sure you want to issue a standalone Inpass?')) {
         return;
@@ -400,13 +366,6 @@ const InpassCreate = () => {
     const validItems = items.filter(it => it.item_name && (parseFloat(it.qty) > 0 || parseFloat(it.total_weight) > 0));
     if (validItems.length === 0) {
       alert('Please enter at least one received item row with quantity / weight.');
-      return;
-    }
-    if (validItems.some(item => {
-      const godownId = item.godown_id || formData.to_godown_id;
-      return !godownsList.some(godown => String(godown.id) === String(godownId));
-    })) {
-      alert('Select a valid Godown for each item.');
       return;
     }
 
@@ -427,11 +386,7 @@ const InpassCreate = () => {
           yield_percent: yieldPercent,
           total_processing_charges: totalProcessingCharges
         },
-        items: validItems.map(item => ({
-          ...item,
-          godown_id: item.godown_id || formData.to_godown_id,
-          godown_name: item.godown_name || formData.to_godown_name
-        }))
+        items: validItems
       };
 
       const res = await api('/inpasses', {
@@ -829,19 +784,18 @@ const InpassCreate = () => {
             <label className="inpass-label">Receiving Godown</label>
             <select
               name="to_godown_id"
-              value={String(formData.to_godown_id || '')}
+              value={String(formData.to_godown_id || '1')}
               onChange={(e) => {
                 const gId = e.target.value;
                 const sel = availableGodowns.find(g => String(g.id) === String(gId));
                 setFormData(prev => ({
                   ...prev,
                   to_godown_id: gId,
-                  to_godown_name: sel ? (sel.print_name || sel.godown_name) : ''
+                  to_godown_name: sel ? (sel.print_name || sel.godown_name) : prev.to_godown_name
                 }));
               }}
               className="inpass-select"
             >
-              <option value="">-- Select Godown --</option>
               {availableGodowns.map(g => (
                 <option key={g.id} value={String(g.id)}>
                   {g.print_name || g.godown_name}
@@ -1133,7 +1087,7 @@ const InpassCreate = () => {
                   </td>
                   <td style={{ border: '1px solid #cbd5e1', padding: '6px' }}>
                     <select
-                      value={String(row.godown_id || formData.to_godown_id || '')}
+                      value={String(row.godown_id || '1')}
                       onChange={(e) => {
                         const gid = e.target.value;
                         const sel = availableGodowns.find(g => String(g.id) === String(gid));
@@ -1142,7 +1096,7 @@ const InpassCreate = () => {
                           copy[idx] = {
                             ...copy[idx],
                             godown_id: gid,
-                            godown_name: sel ? (sel.print_name || sel.godown_name) : ''
+                            godown_name: sel ? (sel.print_name || sel.godown_name) : copy[idx].godown_name
                           };
                           return copy;
                         });
@@ -1157,7 +1111,6 @@ const InpassCreate = () => {
                         fontSize: '11px'
                       }}
                     >
-                      <option value="">-- Select Godown --</option>
                       {availableGodowns.map(g => (
                         <option key={g.id} value={String(g.id)}>
                           {g.print_name || g.godown_name}

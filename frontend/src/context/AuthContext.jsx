@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api';
+import { clearAllMasterCaches } from '../services/masterservice.js';
 
 // Check if running in Tauri environment (Tauri v1 uses window.__TAURI__)
 const isRunningInTauri = () => {
@@ -138,7 +139,7 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [loginHistoryId, setLoginHistoryId] = useState(null);
   const [financialYear, setFinancialYear] = useState(getCurrentFY());
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   const toggleSidebar = () => {
     setIsSidebarOpen(prev => !prev);
@@ -172,43 +173,30 @@ export const AuthProvider = ({ children }) => {
 
   // Fetch current active financial year whenever selectedCompany is set or changed
   useEffect(() => {
-    const companyId = Number(selectedCompany?.id);
-    if (!user?.id || !localStorage.getItem('erp_token') || !Number.isSafeInteger(companyId) || companyId <= 0) {
-      return undefined;
-    }
-
-    const controller = new AbortController();
+    let isMounted = true;
     const fetchCurrentFY = async () => {
+      const companyId = selectedCompany?.id || 1;
       try {
         const token = localStorage.getItem('erp_token');
         const headers = { 'Content-Type': 'application/json' };
         if (token) headers['Authorization'] = `Bearer ${token}`;
-        headers['X-Company-Id'] = String(companyId);
+        if (companyId) headers['X-Company-Id'] = String(companyId);
 
-        const response = await fetch(`/api/financial-years/current?company_id=${companyId}`, {
-          headers,
-          signal: controller.signal
-        });
+        const response = await fetch(`/api/financial-years/current?company_id=${companyId}`, { headers });
         if (response.ok) {
           const data = await response.json();
-          if (data && Number(data.company_id) === companyId && data.financial_year) {
+          if (isMounted && data && data.financial_year) {
             setFinancialYear(data.financial_year);
             localStorage.setItem('erp_financial_year', data.financial_year);
           }
-        } else if (response.status === 401 || response.status === 403) {
-          console.warn(`Financial year request denied for company ${companyId} (HTTP ${response.status}).`);
-        } else {
-          console.error(`Financial year request failed for company ${companyId} (HTTP ${response.status}).`);
         }
       } catch (err) {
-        if (err.name !== 'AbortError') {
-          console.error(`Financial year request failed for company ${companyId}:`, err);
-        }
+        // Fallback silently if server is starting or endpoint unavailable
       }
     };
     fetchCurrentFY();
-    return () => controller.abort();
-  }, [user?.id, selectedCompany?.id]);
+    return () => { isMounted = false; };
+  }, [selectedCompany?.id]);
 
   // Login function
   const login = async (loginData) => {
@@ -252,6 +240,7 @@ export const AuthProvider = ({ children }) => {
 
       // Clear all module-specific cached business state from previous sessions to guarantee tenant data isolation
       try {
+        clearAllMasterCaches();
         const cacheKeys = [
           'items', 'customers', 'suppliers', 'purchases', 'sales', 'stock',
           'vouchers', 'godowns', 'tax_rates', 'dashboard_stats', 'financial_reports',
@@ -278,6 +267,7 @@ export const AuthProvider = ({ children }) => {
   // Logout function
   const logout = async () => {
     try {
+      clearAllMasterCaches();
       const token = localStorage.getItem('erp_token');
       const headers = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -312,9 +302,10 @@ export const AuthProvider = ({ children }) => {
   };
 
   // Select or switch company
-  const selectCompany = (companyData) => {
+  const selectCompany = async (companyData) => {
     // Clear company-dependent cached state
     try {
+      clearAllMasterCaches();
       const keysToClear = [
         'erp_items_cache',
         'erp_suppliers_cache',
@@ -342,9 +333,32 @@ export const AuthProvider = ({ children }) => {
 
     setSelectedCompany(companyData);
     setCompany(companyData);
-    if (companyData) {
+
+    if (companyData && companyData.id) {
       localStorage.setItem('erp_selected_company', JSON.stringify(companyData));
       localStorage.setItem('erp_company', JSON.stringify(companyData));
+
+      // Call backend switch-company API to obtain an updated JWT token for new companyId
+      try {
+        const token = localStorage.getItem('erp_token');
+        const res = await fetch('/api/auth/switch-company', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+            'X-Company-Id': String(companyData.id)
+          },
+          body: JSON.stringify({ company_id: companyData.id })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.token) {
+            localStorage.setItem('erp_token', data.token);
+          }
+        }
+      } catch (e) {
+        console.warn('Switch company token update notice:', e.message);
+      }
     } else {
       localStorage.removeItem('erp_selected_company');
       localStorage.removeItem('erp_company');

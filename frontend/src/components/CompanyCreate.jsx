@@ -89,8 +89,8 @@ const CompanyCreate = () => {
     setError('');
     setSuccess('');
 
-    if (!formData.name) {
-      setError('Company name is required');
+    if (!formData.name || !formData.name.trim()) {
+      setError('Company Name is a mandatory field and must be filled.');
       return;
     }
 
@@ -98,11 +98,11 @@ const CompanyCreate = () => {
       setSaving(true);
       
       const payload = {
-        name: formData.name,
-        address: formData.address,
-        gst_number: formData.gst_number,
-        contact: formData.contact,
-        email: formData.email
+        name: formData.name.trim(),
+        address: (formData.address || '').trim(),
+        gst_number: (formData.gst_number || '').trim(),
+        contact: (formData.contact || '').trim(),
+        email: (formData.email || '').trim()
       };
       
       console.log('Sending payload:', JSON.stringify(payload, null, 2));
@@ -126,7 +126,7 @@ const CompanyCreate = () => {
       navigate('/company-display');
     } catch (error) {
       console.error('Error saving company:', error);
-      setError('Error connecting to server');
+      setError(error?.message || 'Error connecting to server');
     } finally {
       setSaving(false);
     }

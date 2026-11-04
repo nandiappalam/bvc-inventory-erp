@@ -204,6 +204,36 @@ async function runTests() {
   // -------------------------------------------------------------
   console.log('\n--- SECTION 5: HTTP API Endpoints Smoke & Verification ---');
   
+  const loginRes = await new Promise((resolve, reject) => {
+    const postData = JSON.stringify({ username: 'admin', password: 'admin123', company_id: 1 });
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port: 3001,
+      path: '/api/auth/login',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData)
+      }
+    }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          resolve({ statusCode: res.statusCode, body: JSON.parse(data || '{}') });
+        } catch (e) {
+          resolve({ statusCode: res.statusCode, body: {} });
+        }
+      });
+    });
+    req.on('error', reject);
+    req.write(postData);
+    req.end();
+  });
+
+  const authToken = loginRes.body?.token;
+  assert(loginRes.statusCode === 200 && Boolean(authToken), 'Successfully logged in as admin to retrieve auth token');
+
   const endpointsToTest = [
     { path: '/api/companies', method: 'GET' },
     { path: '/api/dashboard/stats', method: 'GET' },
@@ -234,7 +264,8 @@ async function runTests() {
           path: ep.path,
           method: ep.method,
           headers: {
-            'X-Company-Id': '1'
+            'X-Company-Id': '1',
+            'Authorization': `Bearer ${authToken}`
           }
         }, (response) => {
           let data = '';

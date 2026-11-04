@@ -445,21 +445,13 @@ router.get('/lots', async (req, res) => {
         sl.id,
         sl.item_name,
         sl.lot_no,
-        CASE 
-          WHEN UPPER(TRIM(sl.lot_no)) LIKE '%LOT0003%' OR UPPER(TRIM(sl.lot_no)) = 'LOT003' OR UPPER(TRIM(sl.item_name)) LIKE '%URAD%' THEN COALESCE((SELECT godown_name FROM godown_master WHERE id = 1), 'PJ')
-          WHEN UPPER(TRIM(sl.lot_no)) LIKE '%LOT0006%' OR UPPER(TRIM(sl.lot_no)) = 'LOT006' THEN COALESCE((SELECT godown_name FROM godown_master WHERE id = 2 OR LOWER(godown_name) LIKE '%cold%' LIMIT 1), 'BTS Cold Storage')
-          ELSE COALESCE(
-            (SELECT gm.godown_name FROM godown_master gm WHERE gm.id = sl.godown_id OR CAST(gm.id AS TEXT) = CAST(sl.godown_id AS TEXT) LIMIT 1),
-            sl.godown_name,
-            (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1),
-            'PJ'
-          )
-        END as godown_name,
-        CASE 
-          WHEN UPPER(TRIM(sl.lot_no)) LIKE '%LOT0003%' OR UPPER(TRIM(sl.lot_no)) = 'LOT003' OR UPPER(TRIM(sl.item_name)) LIKE '%URAD%' THEN 1
-          WHEN UPPER(TRIM(sl.lot_no)) LIKE '%LOT0006%' OR UPPER(TRIM(sl.lot_no)) = 'LOT006' THEN 2
-          ELSE sl.godown_id
-        END as godown_id,
+        COALESCE(
+          (SELECT gm.godown_name FROM godown_master gm WHERE gm.id = sl.godown_id OR CAST(gm.id AS TEXT) = CAST(sl.godown_id AS TEXT) LIMIT 1),
+          sl.godown_name,
+          (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1),
+          ''
+        ) as godown_name,
+        sl.godown_id as godown_id,
         sl.quantity as purchased_qty,
         sl.remaining_quantity,
         COALESCE(sl.outside_processing_qty, 0) as outside_processing_qty,

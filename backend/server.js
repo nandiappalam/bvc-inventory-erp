@@ -47,12 +47,24 @@ app.use(cors({
 // Explicitly handle OPTIONS preflight for all routes
 app.options('*', cors());
 
+// Disable ETags on Express to prevent cross-tenant 304 cached responses
+app.set('etag', false);
+
 app.use(express.json({ limit: '50mb' }))
 app.use(express.urlencoded({ extended: true, limit: '50mb' }))
 
 // Multi-company database routing & tenant isolation context middleware
 const { companyContextMiddleware } = require('./middleware/authMiddleware')
 app.use(companyContextMiddleware)
+
+// Prevent cross-tenant HTTP caching for all API responses
+app.use('/api', (req, res, next) => {
+  res.setHeader('Cache-Control', 'private, no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.setHeader('Surrogate-Control', 'no-store');
+  next();
+});
 
 const frontendPath = path.join(__dirname, '../frontend/dist')
 app.use('/Entry', express.static(path.join(__dirname, '../Entry')))
@@ -776,6 +788,8 @@ async function initializeMasterTables() {
     console.error('Error seeding default weightmaster:', err.message);
   }
 
+  // Ensure godown_master table exists without forcing default sample records
+  // User created companies must stay clean and empty until populated by the user.
 }
 
 // Start server after initialization
@@ -800,12 +814,10 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
     await runAllPendingMigrations()
     console.log('✓ Full multi-company database migrations verified on startup')
     
-    // Ensure voucher tables (voucher, voucher_entry, ledger_entries) exist and sync
-    const { ensureVoucherTables, syncAllLedgers } = require('./utils/ledgerHelper')
+    // Ensure voucher tables (voucher, voucher_entry, ledger_entries) exist safely without destructive wipes
+    const { ensureVoucherTables } = require('./utils/ledgerHelper')
     await ensureVoucherTables()
-    console.log('✓ Voucher tables initialized successfully on startup')
-    await syncAllLedgers()
-    console.log('✓ Ledger sync and rebuild successfully completed on startup')
+    console.log('✓ Voucher tables verified successfully on startup')
 
     // Rebuild and synchronize stock lots and stock ledger
     const { rebuildStockLedger } = require('./utils/stockRebuilder')

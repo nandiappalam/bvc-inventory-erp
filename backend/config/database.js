@@ -1500,12 +1500,16 @@ async function executePgQuery(sql, params = [], companyId = 1, isMaster = false)
     throw err;
   } finally {
     try {
-      await client.query('RESET search_path;');
-    } catch (resetError) {
-      discardClient = true;
-      console.error('[PostgreSQL] Failed to reset pooled connection search_path:', resetError.message);
+      await client.query('DISCARD ALL;');
+    } catch (_) {
+      try {
+        await client.query('RESET search_path;');
+      } catch (resetError) {
+        discardClient = true;
+        console.error('[PostgreSQL] Failed to reset pooled connection session state:', resetError.message);
+      }
     }
-    client.release(discardClient ? new Error('Discarding PostgreSQL client after search_path reset failure') : undefined);
+    client.release(discardClient ? new Error('Discarding PostgreSQL client after session reset failure') : undefined);
   }
 }
 
@@ -2631,13 +2635,18 @@ class PgDbConnection {
     if (this.client) {
       const client = this.client;
       this.client = null;
+      let discardError = null;
       try {
-        await client.query('RESET search_path;');
-        client.release();
-      } catch (resetError) {
-        console.error('[PostgreSQL] Discarding pooled connection after search_path reset failure:', resetError.message);
-        client.release(resetError);
+        await client.query('DISCARD ALL;');
+      } catch (_) {
+        try {
+          await client.query('RESET search_path;');
+        } catch (resetError) {
+          discardError = resetError;
+          console.error('[PostgreSQL] Discarding pooled connection after session reset failure:', resetError.message);
+        }
       }
+      client.release(discardError || undefined);
     }
   }
 }

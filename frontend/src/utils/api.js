@@ -94,14 +94,6 @@ export async function api(endpoint, options = {}) {
 
       // ✅ Null-safe JSON parse
       if (!res.ok) {
-        console.warn("⚠️ API HTTP error:", res.status, res.statusText, "for endpoint:", endpoint);
-        
-        // Graceful fallback for 404 or missing endpoints (Tauri / offline / disconnected backend)
-        if (res.status === 404) {
-          console.warn(`⚠️ API 404 fallback for ${endpoint}, returning safe default structure.`);
-          return { success: true, data: [], count: 0 };
-        }
-
         let errorMsg = `HTTP ${res.status}: ${res.statusText}`;
         try {
           const parsed = JSON.parse(text);
@@ -109,7 +101,20 @@ export async function api(endpoint, options = {}) {
             errorMsg = parsed.message || parsed.error;
           }
         } catch (e) {}
-        return { success: false, data: null, message: errorMsg };
+
+        if (res.status === 401) {
+          console.warn(`⚠️ Authentication required or token expired (401) for endpoint: ${endpoint}`);
+          try {
+            const currentToken = localStorage.getItem('erp_token');
+            if (currentToken && !endpoint.includes('/auth/login')) {
+              localStorage.removeItem('erp_token');
+            }
+          } catch (_) {}
+          return { success: false, data: null, message: errorMsg || 'Authentication required', code: 'AUTH_REQUIRED', status: 401 };
+        }
+
+        console.warn("⚠️ API HTTP error:", res.status, res.statusText, "for endpoint:", endpoint);
+        return { success: false, data: null, message: errorMsg, status: res.status };
       }
 
       let json = null;
@@ -117,7 +122,7 @@ export async function api(endpoint, options = {}) {
         json = text ? JSON.parse(text) : {};
       } catch (parseErr) {
         console.warn("⚠️ Response body is not valid JSON:", text.substring(0, 100));
-        return { success: true, data: [] };
+        return { success: false, data: null, message: "Invalid JSON response from server" };
       }
 
       const isReportOrAccount = endpoint.startsWith("/reports") || endpoint.startsWith("/accounts") || endpoint.startsWith("/api/reports") || endpoint.startsWith("/api/accounts");
@@ -134,8 +139,8 @@ export async function api(endpoint, options = {}) {
         await new Promise((r) => setTimeout(r, 400 * attempt));
         continue;
       }
-      console.warn("⚠️ Network request failed (offline / Tauri mode):", err.message);
-      return { success: true, data: [], count: 0, message: err.message };
+      console.warn("⚠️ Network request failed:", err.message);
+      return { success: false, data: null, message: `Network request failed: ${err.message}`, isNetworkError: true };
     }
   }
 

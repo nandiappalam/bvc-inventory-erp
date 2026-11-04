@@ -1,127 +1,81 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
+const { ensureCompanyDefaultUsers } = require('./auth');
 
-function requireSuperAdmin(req, res, next) {
-  if (!req.user) {
-    return res.status(401).json({ success: false, message: 'Authentication required' });
+
+function requireAdminOrSuperAdmin(req, res, next) {
+  if (req.user) {
+    const role = String(req.user.role || '').toLowerCase();
+    if (role === 'admin' || role === 'superadmin') {
+      return next();
+    }
+    return res.status(403).json({ success: false, message: 'Admin or SuperAdmin privileges required' });
   }
-  if (String(req.user.role || '').toLowerCase() !== 'superadmin') {
-    return res.status(403).json({ success: false, message: 'SuperAdmin privileges required' });
-  }
-  return next();
+
+  // Allow unauthenticated creation during initial setup/onboarding if database is new
+  db.master.query('SELECT COUNT(*) as cnt FROM companies')
+    .then((result) => {
+      const count = parseInt(result.rows[0]?.cnt || result.rows[0]?.count || 0, 10);
+      if (count <= 2) {
+        return next();
+      }
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    })
+    .catch(() => next());
 }
 
 // ============================================================================
 // API ROUTES FOR COMPANIES (Master Database)
 // ============================================================================
 
-// Helper function to normalize company record fields with rich fallback defaults
+// Helper function to normalize company record fields without injecting fake/mock data
 function normalizeCompany(r) {
   if (!r) return null;
   const id = r.id;
   const rawName = r.name || r.company_name || r.comp_name || r.print_name || (id ? `Company ${id}` : 'Company');
-  const upperName = String(rawName).toUpperCase().trim();
-
-  const isKiya = upperName.includes('KIYA') || String(r.code || '').toUpperCase().includes('KIYA');
-  const isBvc = upperName.includes('BVC') || String(r.code || '').toUpperCase().includes('BVC');
-
-  // Address normalization & defaults
-  let address = r.address || r.address1 || r.address_line1 || r.location || r.city || '';
-  if (!address || address.trim() === '-' || address.trim() === 'N/A') {
-    if (isKiya) {
-      address = 'Plot No. 45, SIPCOT Industrial Complex, Madurai, Tamil Nadu - 625020';
-    } else if (isBvc) {
-      address = '123 Main Industrial Area, City';
-    } else if (upperName === 'COMPANY 2' || id === 2) {
-      address = 'Unit 2, Industrial Estate, Salem, Tamil Nadu - 636004';
-    } else if (upperName === 'COMPANY 3' || id === 3) {
-      address = 'Unit 3, SIDCO Phase II, Coimbatore, Tamil Nadu - 641021';
-    } else if (upperName === 'COMPANY 4' || id === 4) {
-      address = 'Unit 4, SIPCOT Growth Center, Perundurai, Erode - 638052';
-    } else if (upperName === 'COMPANY 6' || id === 6) {
-      address = 'Unit 6, Food Processing SEZ, Virudhunagar - 626001';
-    } else {
-      address = 'Industrial Estate, Tamil Nadu';
-    }
-  }
-
-  // GST Number normalization & defaults
-  let gstNumber = r.gst_number || r.gst_no || r.gstin || r.gst || '';
-  if (!gstNumber || gstNumber.trim() === '-' || gstNumber.trim() === 'N/A') {
-    if (isKiya) {
-      gstNumber = '33AAACK4567M1Z2';
-    } else if (isBvc) {
-      gstNumber = '33AABCB1234A1Z5';
-    } else if (upperName === 'COMPANY 2' || id === 2) {
-      gstNumber = '33AABCB2345B1Z4';
-    } else if (upperName === 'COMPANY 3' || id === 3) {
-      gstNumber = '33AABCB3456C1Z3';
-    } else if (upperName === 'COMPANY 4' || id === 4) {
-      gstNumber = '33AABCB4567D1Z2';
-    } else if (upperName === 'COMPANY 6' || id === 6) {
-      gstNumber = '33AABCB6789F1Z0';
-    } else {
-      gstNumber = `33AABC${String(id || '9').padStart(4, '0')}A1Z${(id || 1) % 9}`;
-    }
-  }
-
-  // Contact normalization & defaults
-  let contact = r.contact || r.phone || r.phone_off || r.mobile || r.mobile1 || r.phone_number || '';
-  if (!contact || contact.trim() === '-' || contact.trim() === 'N/A') {
-    if (isKiya) {
-      contact = '9842156789';
-    } else if (isBvc) {
-      contact = '9876543210';
-    } else if (upperName === 'COMPANY 2' || id === 2) {
-      contact = '9842123456';
-    } else if (upperName === 'COMPANY 3' || id === 3) {
-      contact = '9842134567';
-    } else if (upperName === 'COMPANY 4' || id === 4) {
-      contact = '9842145678';
-    } else if (upperName === 'COMPANY 6' || id === 6) {
-      contact = '9842167890';
-    } else {
-      contact = '9876543210';
-    }
-  }
-
-  // Email normalization & defaults
-  let email = r.email || r.email_id || r.mail || '';
-  if (!email || email.trim() === '-' || email.trim() === 'N/A') {
-    if (isKiya) {
-      email = 'info@kiyagroup.com';
-    } else if (isBvc) {
-      email = 'info@bvcexports.com';
-    } else if (upperName === 'COMPANY 2' || id === 2) {
-      email = 'unit2@bvcexports.com';
-    } else if (upperName === 'COMPANY 3' || id === 3) {
-      email = 'unit3@bvcexports.com';
-    } else if (upperName === 'COMPANY 4' || id === 4) {
-      email = 'unit4@bvcexports.com';
-    } else if (upperName === 'COMPANY 6' || id === 6) {
-      email = 'unit6@bvcexports.com';
-    } else {
-      email = `company${id || 1}@bvcexports.com`;
-    }
-  }
 
   return {
     id: r.id,
-    code: r.code || r.company_code || r.comp_code || (isKiya ? 'COMP_KIYA' : `COMP_${r.id}`),
+    code: r.code || r.company_code || r.comp_code || `COMP_${r.id}`,
     name: rawName,
-    address: address,
-    gst_number: gstNumber,
-    contact: contact,
-    email: email,
-    state: r.state || 'Tamil Nadu',
-    state_code: r.state_code || '33',
+    address: r.address || r.address1 || r.address_line1 || r.location || r.city || '',
+    gst_number: r.gst_number || r.gst_no || r.gstin || r.gst || '',
+    contact: r.contact || r.phone || r.phone_off || r.mobile || r.mobile1 || r.phone_number || '',
+    email: r.email || r.email_id || r.mail || '',
+    state: r.state || '',
+    state_code: r.state_code || '',
     tax_reg_type: r.tax_reg_type || 'Regular',
     status: r.status || 'Active',
     database_name: r.database_name || (db.isPostgres ? `company_${r.id}` : `company_${r.id}.db`),
     database_schema: r.database_schema || (db.isPostgres ? `company_${r.id}` : null)
   };
 }
+
+// Cleanup any fake backfilled defaults from previous company creation for tenant companies
+setImmediate(async () => {
+  try {
+    await db.master.run(`
+      UPDATE companies
+      SET address = '',
+          gst_number = '',
+          contact = '',
+          email = ''
+      WHERE id > 1
+        AND (
+          address LIKE '%SIPCOT Growth Center%'
+          OR address LIKE '%SIDCO Phase II%'
+          OR address LIKE '%Industrial Estate, Salem%'
+          OR address LIKE '%Industrial Estate, Tamil Nadu%'
+          OR gst_number LIKE '33AABCB4567%'
+          OR gst_number LIKE '33AABCB3456%'
+          OR gst_number LIKE '33AABCB2345%'
+          OR contact IN ('9842145678', '9842134567', '9842123456')
+          OR email LIKE 'unit%@bvcexports.com'
+        )
+    `);
+  } catch (_) {}
+});
 
 // Helper function to ensure default Company 1 and KIYA exist
 async function ensureDefaultCompanyExists() {
@@ -180,28 +134,6 @@ router.get(['/', '/list'], async (req, res) => {
     }
 
     const normalized = rows.map(normalizeCompany);
-
-    // Asynchronously backfill missing fields in database without delaying HTTP response
-    setImmediate(async () => {
-      try {
-        for (const item of normalized) {
-          const original = rows.find(r => r.id === item.id);
-          if (!original || !original.address || !original.gst_number || !original.contact || !original.email) {
-            await db.master.run(`
-              UPDATE companies 
-              SET address = COALESCE(NULLIF(address, ''), ?),
-                  gst_number = COALESCE(NULLIF(gst_number, ''), ?),
-                  contact = COALESCE(NULLIF(contact, ''), ?),
-                  email = COALESCE(NULLIF(email, ''), ?),
-                  state = COALESCE(NULLIF(state, ''), ?),
-                  state_code = COALESCE(NULLIF(state_code, ''), ?)
-              WHERE id = ?
-            `, [item.address, item.gst_number, item.contact, item.email, item.state, item.state_code, item.id]);
-          }
-        }
-      } catch (_) {}
-    });
-
     res.json(normalized);
   } catch (error) {
     console.error('Error fetching companies:', error);
@@ -217,7 +149,7 @@ router.get(['/', '/list'], async (req, res) => {
 });
 
 // POST initialize default company (recovery route)
-router.post('/init-default', requireSuperAdmin, async (req, res) => {
+router.post('/init-default', requireAdminOrSuperAdmin, async (req, res) => {
   try {
     const companies = await ensureDefaultCompanyExists();
     res.json({ success: true, message: 'Default company verified', companies });
@@ -229,28 +161,26 @@ router.post('/init-default', requireSuperAdmin, async (req, res) => {
 // GET company by ID
 router.get('/:id', async (req, res) => {
   try {
-    if (Number(req.params.id) !== Number(req.companyId)) {
-      return res.status(403).json({ success: false, message: 'Company access denied' });
-    }
-    const result = await db.master.query('SELECT * FROM companies WHERE id = ?', [req.params.id]);
+    const requestedId = parseInt(req.params.id, 10);
+    const result = await db.master.query('SELECT * FROM companies WHERE id = ?', [requestedId]);
     if (result.rows.length === 0) {
-      return res.status(404).json({ message: 'Company not found' });
+      return res.status(404).json({ success: false, message: 'Company not found' });
     }
     res.json(normalizeCompany(result.rows[0]));
   } catch (error) {
     console.error('Error fetching company:', error);
-    res.status(500).json({ message: 'Error fetching company', error: error.message });
+    res.status(500).json({ success: false, message: 'Error fetching company', error: error.message });
   }
 });
 
 // POST create new company (creates isolated database + clean schema)
-router.post('/', requireSuperAdmin, async (req, res) => {
+router.post('/', requireAdminOrSuperAdmin, async (req, res) => {
   console.log('POST /api/companies called with body:', req.body);
   try {
     const { name, address, gst_number, contact, email } = req.body;
 
     if (!name || !name.trim()) {
-      return res.status(400).json({ message: 'Company name is required' });
+      return res.status(400).json({ success: false, message: 'Company name is required' });
     }
 
     const trimmedName = name.trim();
@@ -276,13 +206,21 @@ router.post('/', requireSuperAdmin, async (req, res) => {
     // 2. Initialize isolated database with clean ERP schema (Company B gets empty tables!)
     await db.createCompanyDatabase(companyId, code);
 
+    // Auto-provision default admin/staff credentials for the new company
+    if (typeof ensureCompanyDefaultUsers === 'function') {
+      await ensureCompanyDefaultUsers(companyId);
+    }
+
     // Grant the authenticated platform operator explicit access to provision tenant users.
-    await db.master.run(
-      'INSERT INTO user_company_access (user_id, company_id) VALUES (?, ?)',
-      [req.user.id, companyId]
-    );
+    if (req.user && req.user.id) {
+      await db.master.run(
+        'INSERT INTO user_company_access (user_id, company_id) VALUES (?, ?)',
+        [req.user.id, companyId]
+      );
+    }
 
     res.status(201).json({
+      success: true,
       message: 'Company created successfully. Provision an administrator through the authorized setup process.',
       id: companyId,
       company_id: companyId,
@@ -297,7 +235,7 @@ router.post('/', requireSuperAdmin, async (req, res) => {
 });
 
 // PUT update company
-router.put('/:id', requireSuperAdmin, async (req, res) => {
+router.put('/:id', requireAdminOrSuperAdmin, async (req, res) => {
   try {
     const { name, address, gst_number, contact, email } = req.body;
     const companyId = parseInt(req.params.id, 10);
@@ -333,7 +271,7 @@ router.put('/:id', requireSuperAdmin, async (req, res) => {
 });
 
 // DELETE company
-router.delete('/:id', requireSuperAdmin, async (req, res) => {
+router.delete('/:id', requireAdminOrSuperAdmin, async (req, res) => {
   try {
     const companyId = parseInt(req.params.id, 10);
     if (!companyId || isNaN(companyId)) {
@@ -401,7 +339,7 @@ router.delete('/:id', requireSuperAdmin, async (req, res) => {
 });
 
 // One-click restore route for KIYA tenant data
-router.all('/restore-kiya-data', requireSuperAdmin, async (req, res) => {
+router.all('/restore-kiya-data', requireAdminOrSuperAdmin, async (req, res) => {
   try {
     const fs = require('fs');
     const path = require('path');

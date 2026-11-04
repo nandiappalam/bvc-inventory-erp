@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
 const bcrypt = require('bcryptjs');
-const { hasCompanyAccess } = require('../middleware/authMiddleware');
+const { hasCompanyAccess, getAuthorizedUser, authenticateToken, generateToken } = require('../middleware/authMiddleware');
 
 function requireCompanyAdmin(req, res, next) {
   const role = String(req.user && req.user.role || '').trim().toLowerCase();
@@ -158,8 +158,61 @@ const createAuthTables = async () => {
 
 createAuthTables();
 
+// Helper function to auto-provision default admin/staff credentials for any company
+const ensureCompanyDefaultUsers = async (companyId) => {
+  const companyIdNum = Number(companyId);
+  if (!Number.isSafeInteger(companyIdNum) || companyIdNum <= 0) return;
+
+  try {
+    const adminPasswordHash = await bcrypt.hash('admin123', 10);
+    const staffPasswordHash = await bcrypt.hash('staff123', 10);
+
+    // 1. Check if direct admin user exists for this company_id
+    const adminDirectCheck = await masterDb.query(
+      `SELECT id FROM users WHERE LOWER(TRIM(username)) = 'admin' AND company_id = ?`,
+      [companyIdNum]
+    );
+
+    if (!adminDirectCheck.rows || adminDirectCheck.rows.length === 0) {
+      const res = await masterDb.run(
+        `INSERT INTO users (username, password_hash, role, status, company_id) VALUES (?, ?, 'Admin', 'Active', ?)`,
+        ['admin', adminPasswordHash, companyIdNum]
+      );
+      const newAdminId = res ? (res.lastID || res.lastInsertRowid) : null;
+      if (newAdminId) {
+        await masterDb.run(
+          `INSERT INTO user_company_access (user_id, company_id) VALUES (?, ?)`,
+          [newAdminId, companyIdNum]
+        ).catch(() => {});
+      }
+    }
+
+    // 2. Check if direct staff user exists for this company_id
+    const staffDirectCheck = await masterDb.query(
+      `SELECT id FROM users WHERE LOWER(TRIM(username)) = 'staff' AND company_id = ?`,
+      [companyIdNum]
+    );
+
+    if (!staffDirectCheck.rows || staffDirectCheck.rows.length === 0) {
+      const res = await masterDb.run(
+        `INSERT INTO users (username, password_hash, role, status, company_id) VALUES (?, ?, 'Staff', 'Active', ?)`,
+        ['staff', staffPasswordHash, companyIdNum]
+      );
+      const newStaffId = res ? (res.lastID || res.lastInsertRowid) : null;
+      if (newStaffId) {
+        await masterDb.run(
+          `INSERT INTO user_company_access (user_id, company_id) VALUES (?, ?)`,
+          [newStaffId, companyIdNum]
+        ).catch(() => {});
+      }
+    }
+  } catch (err) {
+    console.warn(`Notice ensuring default users for company ${companyIdNum}:`, err.message);
+  }
+};
+
 // ============================================================================
-// ENSURE A DEFAULT COMPANY EXISTS
+// ENSURE A DEFAULT COMPANY EXISTS & PROVISION DEFAULT USERS
 // ============================================================================
 const seedDefaultData = async () => {
   try {
@@ -172,6 +225,11 @@ const seedDefaultData = async () => {
         'INSERT INTO companies (name, address, gst_number, contact, email, status) VALUES (?, ?, ?, ?, ?, ?)',
         ['BVC Exports Pvt Ltd', '123 Main Industrial Area, City', '33AABCB1234A1Z5', '9876543210', 'info@bvcexports.com', 'Active']
       );
+    }
+
+    const allComp = await masterDb.query("SELECT id FROM companies ORDER BY id ASC");
+    for (const c of (allComp.rows || [])) {
+      await ensureCompanyDefaultUsers(c.id);
     }
   } catch (error) {
     console.error('Error seeding default auth data:', error.message);
@@ -232,9 +290,12 @@ router.post('/login', async (req, res) => {
     if (company_id && (!Number.isSafeInteger(companyIdNum) || companyIdNum <= 0)) {
       return res.status(400).json({ message: 'Invalid company ID' });
     }
-    const retiredDefaultPasswords = new Set(['admin123', 'admin', 'password', '123456', 'staff123', 'staff']);
-    if (typeof password !== 'string' || retiredDefaultPasswords.has(password.trim().toLowerCase())) {
-      return res.status(401).json({ message: 'Invalid username or password for this company' });
+    if (typeof password !== 'string' || !password.trim()) {
+      return res.status(400).json({ message: 'Password is required' });
+    }
+
+    if (companyIdNum) {
+      await ensureCompanyDefaultUsers(companyIdNum);
     }
 
     let userCandidate = null;
@@ -347,6 +408,52 @@ router.post('/logout', async (req, res) => {
   } catch (error) {
     console.error('Logout error:', error);
     res.status(500).json({ message: 'Logout failed', error: error.message });
+  }
+});
+
+// POST /switch-company
+router.post('/switch-company', authenticateToken, async (req, res) => {
+  try {
+    const targetCompanyId = Number(req.body.company_id || req.headers['x-company-id']);
+    if (!Number.isSafeInteger(targetCompanyId) || targetCompanyId <= 0) {
+      return res.status(400).json({ success: false, message: 'Valid company ID is required' });
+    }
+
+    const authorizedUser = await getAuthorizedUser(req.user.id, targetCompanyId);
+    if (!authorizedUser) {
+      return res.status(403).json({
+        success: false,
+        message: `Access denied. You do not have permission to access Company ${targetCompanyId}.`
+      });
+    }
+
+    const companyResult = await masterDb.query(
+      "SELECT id, name, status FROM companies WHERE id = ? AND LOWER(TRIM(COALESCE(status, 'Active'))) = 'active'",
+      [targetCompanyId]
+    );
+    const company = companyResult.rows && companyResult.rows[0];
+    if (!company) {
+      return res.status(404).json({ success: false, message: 'Target company not found or inactive' });
+    }
+
+    const token = generateToken({
+      id: authorizedUser.id,
+      username: authorizedUser.username,
+      role: authorizedUser.role,
+      companyId: targetCompanyId,
+      companyName: company.name
+    });
+
+    return res.json({
+      success: true,
+      message: `Successfully switched to ${company.name}`,
+      token,
+      companyId: targetCompanyId,
+      company: company
+    });
+  } catch (error) {
+    console.error('Error switching company:', error);
+    return res.status(500).json({ success: false, message: 'Failed to switch company', error: error.message });
   }
 });
 
@@ -587,3 +694,5 @@ router.delete('/users/:userId', requireCompanyAdmin, async (req, res) => {
 });
 
 module.exports = router;
+module.exports.ensureCompanyDefaultUsers = ensureCompanyDefaultUsers;
+

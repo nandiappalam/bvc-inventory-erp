@@ -138,6 +138,7 @@ const PurchaseDisplay = () => {
   const [activeDoc, setActiveDoc] = useState(null);
   const [selectedCsPurchase, setSelectedCsPurchase] = useState(null);
   const [selectedLedgerPurchaseId, setSelectedLedgerPurchaseId] = useState(null);
+  const [selectedLedgerPurchase, setSelectedLedgerPurchase] = useState(null);
   const [ledgerModalOpen, setLedgerModalOpen] = useState(false);
   const [weightModalPurchase, setWeightModalPurchase] = useState(null);
 
@@ -169,6 +170,7 @@ const PurchaseDisplay = () => {
         style={{ backgroundColor: '#4338ca', color: '#ffffff', border: 'none', padding: '5px 11px', borderRadius: '4px', fontWeight: 700, fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
         onClick={() => {
           setSelectedLedgerPurchaseId(row.id || row.s_no);
+          setSelectedLedgerPurchase(row);
           setLedgerModalOpen(true);
         }}
         title="Open Purchase-wise Transaction Ledger & Double-Entry Statement"
@@ -230,15 +232,13 @@ const PurchaseDisplay = () => {
           </button>
         </>
       ) : (
-        row.lot_no && (
-          <button 
-            className="action-btn" 
-            style={{ backgroundColor: '#00838f', color: '#ffffff', border: 'none', padding: '5px 11px', borderRadius: '4px', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }} 
-            onClick={() => navigate(`/entry/quality-control-create?lotNo=${row.lot_no}`)}
-          >
-            Create QC
-          </button>
-        )
+        <button 
+          className="action-btn" 
+          style={{ backgroundColor: '#00838f', color: '#ffffff', border: 'none', padding: '5px 11px', borderRadius: '4px', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }} 
+          onClick={() => navigate(`/entry/quality-control-create?purchase_id=${row.id || row.s_no}&inv_no=${encodeURIComponent(row.inv_no || row.invoice_no || '')}&lotNo=${encodeURIComponent(row.lot_no || '')}`)}
+        >
+          Create QC
+        </button>
       )}
       <button 
         className="action-btn" 
@@ -341,8 +341,10 @@ const PurchaseDisplay = () => {
         onClose={() => {
           setLedgerModalOpen(false);
           setSelectedLedgerPurchaseId(null);
+          setSelectedLedgerPurchase(null);
         }}
         purchaseId={selectedLedgerPurchaseId}
+        purchaseData={selectedLedgerPurchase}
       />
       {weightModalPurchase && (
         <WeightEntryModal

@@ -141,13 +141,21 @@ const determineLotCategory = async (dbInstance, itemName, itemGroup, lotNo) => {
 // Helper function to check if table exists
 async function tableExists(tableName) {
   try {
+    if (db.isPostgres) {
+      const result = await db.query(
+        "SELECT table_name FROM information_schema.tables WHERE LOWER(table_name) = LOWER(?)",
+        [tableName]
+      );
+      return Boolean(result.rows && result.rows.length > 0);
+    }
     const result = await db.query(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
+      "SELECT name FROM sqlite_master WHERE type='table' AND LOWER(name) = LOWER(?)",
       [tableName]
-    )
-    return result.rows.length > 0
+    );
+    return Boolean(result.rows && result.rows.length > 0);
   } catch (error) {
-    return false
+    console.warn(`Notice checking table existence for ${tableName}:`, error.message);
+    return true; // Default to true so real query runs and doesn't silently return empty lists
   }
 }
 
@@ -248,7 +256,7 @@ router.get('/stock-status', async (req, res) => {
     res.json(formattedRows)
   } catch (error) {
     console.error('Error fetching stock status:', error)
-    res.json([])
+    res.status(500).json({ success: false, error: error.message, message: 'Failed to fetch stock status' })
   }
 })
 
@@ -805,7 +813,7 @@ router.get('/lots', async (req, res) => {
     res.json(result.rows || [])
   } catch (error) {
     console.error('Error fetching lots:', error)
-    res.json([])
+    res.status(500).json({ success: false, error: error.message, message: 'Failed to fetch lots' })
   }
 })
 
@@ -866,7 +874,7 @@ router.get('/purchase-register', async (req, res) => {
     res.json(result.rows || [])
   } catch (error) {
     console.error('Error fetching purchase register:', error)
-    res.json([])
+    res.status(500).json({ success: false, error: error.message, message: 'Failed to fetch purchase register' })
   }
 })
 
@@ -923,7 +931,7 @@ router.get('/sales-register', async (req, res) => {
     res.json(result.rows || [])
   } catch (error) {
     console.error('Error fetching sales register:', error)
-    res.json([])
+    res.status(500).json({ success: false, error: error.message, message: 'Failed to fetch sales register' })
   }
 })
 
@@ -1017,7 +1025,7 @@ router.get('/sales-return-register', async (req, res) => {
     res.json(result.rows || [])
   } catch (error) {
     console.error('Error fetching sales return register:', error)
-    res.json([])
+    res.status(500).json({ success: false, error: error.message, message: 'Failed to fetch sales return register' })
   }
 })
 
@@ -1525,7 +1533,7 @@ router.get('/lot-history', async (req, res) => {
     res.json(processedRows)
   } catch (error) {
     console.error('Error fetching lot history:', error)
-    res.json([])
+    res.status(500).json({ success: false, error: error.message, message: 'Failed to fetch lot history' })
   }
 })
 

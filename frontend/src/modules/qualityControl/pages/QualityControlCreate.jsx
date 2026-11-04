@@ -161,11 +161,35 @@ export default function QualityControlCreate() {
           
           // Check if there are query parameters or router state to pre-populate
           const qLotNo = qs.get('lotNo') || location.state?.lotNo || location.state?.lot_no;
+          const qPurchaseId = qs.get('purchase_id') || qs.get('purchaseId') || location.state?.purchase_id || location.state?.purchaseId;
           const stateVehicleNo = location.state?.vehicleNo || location.state?.vehicle_no;
           const stateItemName = location.state?.itemName || location.state?.item_name;
           const stateSupplier = location.state?.supplier || location.state?.party_name;
 
-          if (qLotNo) {
+          if (qPurchaseId) {
+            // Pre-fill directly from purchase ID endpoint
+            api(`/qc/inspection/${qPurchaseId}`)
+              .then(res => {
+                if (res?.success && res?.data) {
+                  const p = res.data;
+                  handleSelectPendingLotWithItems({
+                    stock_lot_id: p.lotNo || p.rm_lot_no || '',
+                    lot_no: p.lotNo || p.rm_lot_no || `LOT-${qPurchaseId}`,
+                    item_name: p.item || p.item_name || 'Raw Material',
+                    supplier_name: p.supplier || p.supplier_name || '',
+                    received_qty: p.quantity || 100,
+                    unit_weight: p.unit_weight || 50,
+                    total_weight: p.total_weight || 5000,
+                    receipt_no: p.invoice_no || p.receipt_no || `PUR-${qPurchaseId}`,
+                    purchase_id: qPurchaseId,
+                    receipt_date: p.receipt_date || p.inspectionDate || new Date().toISOString().split('T')[0],
+                    invoice_date: p.invoice_date || p.receipt_date || new Date().toISOString().split('T')[0],
+                    unloading_status: p.unloading_status || 'PENDING_DECISION'
+                  }, itemsArr);
+                }
+              })
+              .catch(() => {});
+          } else if (qLotNo) {
             const matched = lotsData.find(l => l.lot_no === qLotNo);
             if (matched) {
               handleSelectPendingLotWithItems(matched, itemsArr);

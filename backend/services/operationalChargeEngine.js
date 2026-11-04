@@ -9,7 +9,7 @@ const { emitTransactionEvent } = require('./transactionNotificationEngine');
 
 // Helper to sanitize table names for multi-tenant company prefix
 function getPrefix(companyId) {
-  return (companyId && companyId > 1) ? `c${companyId}_` : '';
+  return '';
 }
 
 /**
