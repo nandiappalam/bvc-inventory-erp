@@ -147,7 +147,7 @@ export const printOutpassDocument = (op, copyTitle = 'ORIGINAL STORE COPY') => {
             <tr>
               <td style="padding: 3px 0; color: #64748b;">Dispatch Godown:</td>
               <td style="padding: 3px 0; font-weight: 600; color: #0f172a;">
-                ${op.from_godown_name || op.from_location || 'PJ Main Factory Godown'}
+                ${op.from_godown_name || op.from_location || '-'}
               </td>
             </tr>
             ${op.expected_return_date ? `
@@ -368,7 +368,7 @@ export const printInpassDocument = (ip, copyTitle = 'ORIGINAL STORE COPY') => {
         ${formatWeight(it.total_weight || 0)} kg
       </td>
       <td style="border: 1px solid #cbd5e1; padding: 8px; color: #334155; font-size: 12px;">
-        ${it.godown_name || ip.to_godown_name || 'PJ Main Factory Godown'}
+        ${it.godown_name || ip.to_godown_name || '-'}
       </td>
       <td style="border: 1px solid #cbd5e1; padding: 8px; text-align: center;">
         <span style="background: #dcfce7; color: #15803d; padding: 2px 8px; border-radius: 4px; font-weight: 800; font-size: 11px;">
@@ -453,7 +453,7 @@ export const printInpassDocument = (ip, copyTitle = 'ORIGINAL STORE COPY') => {
             <tr>
               <td style="padding: 3px 0; color: #64748b;">Receiving Godown:</td>
               <td style="padding: 3px 0; font-weight: 700; color: #0f172a;">
-                ${ip.to_godown_name || ip.godown_name || 'PJ Main Factory Godown'}
+                ${ip.to_godown_name || ip.godown_name || '-'}
               </td>
             </tr>
           </table>

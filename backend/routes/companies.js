@@ -134,6 +134,14 @@ router.get(['/', '/list'], async (req, res) => {
     }
 
     const normalized = rows.map(normalizeCompany);
+
+    // Ensure every existing company has default admin/staff credentials provisioned
+    if (typeof ensureCompanyDefaultUsers === 'function') {
+      for (const comp of rows) {
+        await ensureCompanyDefaultUsers(comp.id);
+      }
+    }
+
     res.json(normalized);
   } catch (error) {
     console.error('Error fetching companies:', error);

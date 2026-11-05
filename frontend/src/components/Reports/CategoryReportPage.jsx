@@ -1396,7 +1396,7 @@ const CategoryReportPage = () => {
   const effectiveSubReports = getSubReports();
 
   const generateSampleRows = () => {
-    const primaryG = godownsList[0]?.godown_name || godownsList[0]?.name || 'PJ';
+    const primaryG = godownsList[0]?.godown_name || godownsList[0]?.name || 'Main Godown';
     if (categoryKey === 'stock') {
       if (currentSubReport === 'godown-wise') {
         return [
@@ -2034,14 +2034,7 @@ const CategoryReportPage = () => {
                           }
 
                           if (col.id === 'godown_name') {
-                            const lotNorm = (row.lot_no || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-                            const itemNorm = (row.item_name || '').toUpperCase();
-                            let gVal = row[col.id] || 'PJ';
-                            if (lotNorm === 'LOT0003' || lotNorm === 'LOT003' || lotNorm === 'LOT3' || itemNorm.includes('URAD')) {
-                              gVal = 'PJ';
-                            } else if (lotNorm === 'LOT0006' || lotNorm === 'LOT006' || lotNorm === 'LOT6') {
-                              gVal = 'BTS Cold Storage';
-                            }
+                            const gVal = row[col.id] || '-';
                             return (
                               <TableCell key={col.id} align={col.align || 'left'} sx={{ fontSize: '13px', fontWeight: 600 }}>
                                 {gVal}

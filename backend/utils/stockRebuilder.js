@@ -833,14 +833,6 @@ async function rebuildStockLedger(targetCompanyId = null) {
       const lotNorm = (lot.lot_no || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
       const itemNorm = (lot.item_name || '').trim().toUpperCase();
 
-      if (lotNorm === 'LOT0003' || lotNorm === 'LOT003' || lotNorm === 'LOT3') {
-        targetGId = 1;
-        targetGName = 'PJ';
-      } else if (lotNorm === 'LOT0006' || lotNorm === 'LOT006' || lotNorm === 'LOT6') {
-        targetGId = csGodown ? csGodown.id : 2;
-        targetGName = csGodown ? csGodown.godown_name : 'BTS Cold Storage';
-      }
-
       const dedupeKey = `${itemNorm}:::${lotNorm || lot.lot_no}:::${targetGId}`;
       if (!consolidatedLots.has(dedupeKey)) {
         consolidatedLots.set(dedupeKey, {

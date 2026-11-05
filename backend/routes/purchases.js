@@ -1261,11 +1261,11 @@ router.post('/', async (req, res) => {
     // Note: OpChargeEngine.recordOperationalCharge removed here to prevent duplicate ledger/voucher entries; createPurchaseVoucherChain handles authoritative accounting.
 
     // Check if the target godown is Cold Storage and automatically create/update linked Cold Storage IN voucher & items
-    const isColdStorage = (resolvedGodownName || '').toLowerCase().includes('cold') || String(resolvedGodownId) === '2';
+    const isColdStorage = (resolvedGodownName || '').toLowerCase().includes('cold');
     if (isColdStorage) {
       try {
-        const csGodownId = resolvedGodownId || 2;
-        const csGodownName = resolvedGodownName || 'BTS Cold Storage';
+        const csGodownId = resolvedGodownId;
+        const csGodownName = resolvedGodownName || 'Cold Storage';
         await ensureColdStorageSchema(activeCompanyId);
         const tariff = await getColdStorageTariff(csGodownId, activeCompanyId);
 

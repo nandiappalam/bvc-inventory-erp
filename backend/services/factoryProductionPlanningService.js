@@ -30,12 +30,168 @@ class FactoryProductionPlanningService {
     };
   }
 
+  async ensureTables() {
+    try {
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS production_units (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          unit_code TEXT UNIQUE NOT NULL,
+          unit_name TEXT NOT NULL,
+          process_stage TEXT NOT NULL,
+          capacity_kg_per_hr REAL DEFAULT 250,
+          setup_time_mins INTEGER DEFAULT 15,
+          cleaning_time_mins INTEGER DEFAULT 20,
+          qc_time_mins INTEGER DEFAULT 10,
+          status TEXT DEFAULT 'READY',
+          current_job_id INTEGER,
+          current_job_code TEXT,
+          current_product TEXT,
+          current_input_qty REAL DEFAULT 0,
+          started_at DATETIME,
+          expected_finish_at DATETIME,
+          operator TEXT,
+          efficiency_pct REAL DEFAULT 95,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS production_queue (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          queue_no INTEGER DEFAULT 1,
+          order_type TEXT DEFAULT 'SALES_PO',
+          source_ref_no TEXT,
+          customer_id INTEGER,
+          customer_name TEXT,
+          product_id INTEGER,
+          product_name TEXT NOT NULL,
+          ordered_qty REAL DEFAULT 0,
+          required_qty REAL DEFAULT 0,
+          due_date DATE,
+          priority TEXT DEFAULT 'NORMAL',
+          priority_score REAL DEFAULT 50,
+          priority_reason TEXT,
+          material_status TEXT DEFAULT 'AVAILABLE',
+          material_shortage_details TEXT,
+          assigned_unit_id INTEGER,
+          assigned_unit_code TEXT,
+          current_stage TEXT DEFAULT 'Cleaning',
+          status TEXT DEFAULT 'QUEUED',
+          estimated_duration_mins INTEGER DEFAULT 60,
+          started_at DATETIME,
+          completed_at DATETIME,
+          bom_id INTEGER,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS cleaning_changeover_orders (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          cleaning_code TEXT UNIQUE,
+          unit_id INTEGER,
+          unit_code TEXT,
+          previous_product TEXT,
+          next_product TEXT,
+          allergen_risk TEXT DEFAULT 'Low',
+          cleaning_type TEXT DEFAULT 'Standard Wet/Dry Cleaning',
+          duration_mins INTEGER DEFAULT 20,
+          started_at DATETIME,
+          completed_at DATETIME,
+          status TEXT DEFAULT 'PENDING',
+          operator_name TEXT,
+          verified_by TEXT,
+          qc_status TEXT DEFAULT 'PASSED',
+          remarks TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS demand_forecast_records (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          customer_id INTEGER,
+          customer_name TEXT,
+          product_id INTEGER,
+          product_name TEXT,
+          historical_avg_qty REAL DEFAULT 0,
+          last_month_qty REAL DEFAULT 0,
+          predicted_qty REAL DEFAULT 0,
+          confidence_pct REAL DEFAULT 85,
+          confidence_score REAL DEFAULT 85,
+          recommendation TEXT,
+          recommendation_status TEXT DEFAULT 'RECOMMENDED',
+          target_due_date DATE,
+          forecast_period TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      try { await db.run(`ALTER TABLE demand_forecast_records ADD COLUMN recommendation_status TEXT DEFAULT 'RECOMMENDED'`); } catch (_) {}
+      try { await db.run(`ALTER TABLE demand_forecast_records ADD COLUMN confidence_score REAL DEFAULT 85`); } catch (_) {}
+      try { await db.run(`ALTER TABLE demand_forecast_records ADD COLUMN target_due_date DATE`); } catch (_) {}
+      await db.run(`
+        CREATE TABLE IF NOT EXISTS production_output_records (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          output_code TEXT UNIQUE,
+          work_order_no TEXT,
+          queue_id INTEGER,
+          product_name TEXT,
+          fg_lot_no TEXT,
+          lot_no TEXT,
+          unit_code TEXT,
+          process_stage TEXT,
+          order_id INTEGER,
+          input_qty REAL DEFAULT 0,
+          output_qty REAL DEFAULT 0,
+          good_output_qty REAL DEFAULT 0,
+          process_loss_qty REAL DEFAULT 0,
+          waste_flour_qty REAL DEFAULT 0,
+          rejection_qty REAL DEFAULT 0,
+          actual_yield_pct REAL DEFAULT 100,
+          expected_yield_pct REAL DEFAULT 95,
+          yield_pct REAL DEFAULT 100,
+          waste_qty REAL DEFAULT 0,
+          qc_status TEXT DEFAULT 'PASSED',
+          qc_verified_by TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      try { await db.run(`ALTER TABLE production_output_records ADD COLUMN output_code TEXT`); } catch (_) {}
+      try { await db.run(`ALTER TABLE production_output_records ADD COLUMN work_order_no TEXT`); } catch (_) {}
+      try { await db.run(`ALTER TABLE production_output_records ADD COLUMN queue_id INTEGER`); } catch (_) {}
+      try { await db.run(`ALTER TABLE production_output_records ADD COLUMN fg_lot_no TEXT`); } catch (_) {}
+      try { await db.run(`ALTER TABLE production_output_records ADD COLUMN unit_code TEXT`); } catch (_) {}
+      try { await db.run(`ALTER TABLE production_output_records ADD COLUMN process_stage TEXT`); } catch (_) {}
+      try { await db.run(`ALTER TABLE production_output_records ADD COLUMN lot_no TEXT`); } catch (_) {}
+      try { await db.run(`ALTER TABLE production_output_records ADD COLUMN good_output_qty REAL DEFAULT 0`); } catch (_) {}
+      try { await db.run(`ALTER TABLE production_output_records ADD COLUMN process_loss_qty REAL DEFAULT 0`); } catch (_) {}
+      try { await db.run(`ALTER TABLE production_output_records ADD COLUMN waste_flour_qty REAL DEFAULT 0`); } catch (_) {}
+      try { await db.run(`ALTER TABLE production_output_records ADD COLUMN rejection_qty REAL DEFAULT 0`); } catch (_) {}
+      try { await db.run(`ALTER TABLE production_output_records ADD COLUMN actual_yield_pct REAL DEFAULT 100`); } catch (_) {}
+      try { await db.run(`ALTER TABLE production_output_records ADD COLUMN expected_yield_pct REAL DEFAULT 95`); } catch (_) {}
+      try { await db.run(`ALTER TABLE production_output_records ADD COLUMN qc_status TEXT DEFAULT 'PASSED'`); } catch (_) {}
+      try { await db.run(`ALTER TABLE production_output_records ADD COLUMN qc_verified_by TEXT`); } catch (_) {}
+
+      const checkUnits = await db.query('SELECT COUNT(*) as cnt FROM production_units');
+      if (parseInt(checkUnits.rows[0]?.cnt || 0, 10) === 0) {
+        await db.run(`
+          INSERT INTO production_units (unit_code, unit_name, process_stage, capacity_kg_per_hr, status)
+          VALUES 
+            ('CLN-01', 'Primary Grain Cleaning & De-stoning Unit 1', 'Cleaning', 500, 'READY'),
+            ('GRD-01', 'High-Speed Pulverizer & Grinding Mill 1', 'Grinding', 250, 'READY'),
+            ('SVE-01', 'Vibratory Sifter & Sieve Station 1', 'Sieving', 350, 'READY'),
+            ('PCK-01', 'Automatic Pouch & Bag Packaging Line 1', 'Packaging', 400, 'READY')
+        `);
+      }
+    } catch (_) {}
+  }
+
   /**
    * 1. PRODUCTION DASHBOARD SUMMARY
    * Answers: "What should the factory work on now?"
    */
   async getProductionDashboardSummary() {
     try {
+      await this.ensureTables();
       // 1. Fetch Units / Work Centers
       const unitsRes = await db.query('SELECT * FROM production_units ORDER BY id ASC');
       const units = unitsRes.rows || [];
@@ -165,6 +321,7 @@ class FactoryProductionPlanningService {
    */
   async getProductionQueue(filters = {}) {
     try {
+      await this.ensureTables();
       const { status, priority, search } = filters;
       let sql = `SELECT * FROM production_queue WHERE 1=1`;
       const params = [];
@@ -271,10 +428,11 @@ class FactoryProductionPlanningService {
    */
   async getCustomerDemandAndForecast() {
     try {
+      await this.ensureTables();
       // 1. Fetch Forecast / MTS records
       const forecastRes = await db.query(`
         SELECT * FROM demand_forecast_records 
-        ORDER BY confidence_score DESC, id DESC
+        ORDER BY id DESC
       `);
       const forecasts = forecastRes.rows || [];
 
@@ -671,6 +829,7 @@ class FactoryProductionPlanningService {
    */
   async getCleaningOrders() {
     try {
+      await this.ensureTables();
       const res = await db.query('SELECT * FROM cleaning_changeover_orders ORDER BY id DESC');
       return { success: true, data: res.rows || [] };
     } catch (err) {
@@ -684,6 +843,7 @@ class FactoryProductionPlanningService {
    */
   async getProductionOutputs() {
     try {
+      await this.ensureTables();
       const res = await db.query('SELECT * FROM production_output_records ORDER BY id DESC');
       return { success: true, data: res.rows || [] };
     } catch (err) {

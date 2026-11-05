@@ -145,14 +145,8 @@ const StockReport = () => {
         for (const row of responseData) {
           const lotNorm = (row.lot_no || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
           const itemNorm = (row.item_name || '').trim().toUpperCase();
-          const key = `${itemNorm}:::${lotNorm || row.lot_no}`;
           if (!lotMap.has(key)) {
-            let rowGodown = row.godown_name || 'PJ';
-            if (lotNorm === 'LOT0003' || lotNorm === 'LOT003' || lotNorm === 'LOT3' || itemNorm.includes('URAD')) {
-              rowGodown = 'PJ';
-            } else if (lotNorm === 'LOT0006' || lotNorm === 'LOT006' || lotNorm === 'LOT6') {
-              rowGodown = 'BTS Cold Storage';
-            }
+            let rowGodown = row.godown_name || '-';
             lotMap.set(key, { ...row, godown_name: rowGodown });
           } else {
             const existing = lotMap.get(key);
@@ -175,10 +169,7 @@ const StockReport = () => {
           const itemNorm = (row.item_name || '').trim().toUpperCase();
           const key = itemNorm;
           if (!itemMap.has(key)) {
-            let rowGodown = row.godown_name || 'PJ';
-            if (itemNorm.includes('URAD')) {
-              rowGodown = 'PJ';
-            }
+            let rowGodown = row.godown_name || '-';
             itemMap.set(key, { ...row, godown_name: rowGodown });
           } else {
             const existing = itemMap.get(key);
@@ -540,11 +531,7 @@ const StockReport = () => {
                               </span>
                             </td>
                             <td style={{...styles.td, fontWeight: '600', color: '#1e293b'}}>
-                              📍 {(() => {
-                                const itemNorm = (row.item_name || '').toUpperCase();
-                                if (itemNorm.includes('URAD') || (row.godown_name || '').toLowerCase().includes('cold') || (row.godown_name || '').toLowerCase().includes('bts')) return 'PJ';
-                                return row.godown_name || 'PJ';
-                              })()}
+                              📍 {row.godown_name || '-'}
                             </td>
                             <td style={{...styles.td, textAlign: 'right'}}>{getBagWeight(row).toFixed(2)}</td>
                             <td style={{...styles.td, textAlign: 'right'}}>{parseFloat(row.opening_qty || 0).toFixed(2)}</td>
@@ -604,13 +591,7 @@ const StockReport = () => {
                             </td>
                             <td style={{...styles.td, fontFamily: 'monospace', fontWeight: 'bold', color: '#1e293b'}}>{row.lot_no}</td>
                             <td style={{...styles.td, fontWeight: '600', color: '#1e293b'}}>
-                              📍 {(() => {
-                                const lotNorm = (row.lot_no || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-                                const itemNorm = (row.item_name || '').toUpperCase();
-                                if (lotNorm === 'LOT0003' || lotNorm === 'LOT003' || lotNorm === 'LOT3' || itemNorm.includes('URAD')) return 'PJ';
-                                if (lotNorm === 'LOT0006' || lotNorm === 'LOT006' || lotNorm === 'LOT6') return 'BTS Cold Storage';
-                                return row.godown_name || 'PJ';
-                              })()}
+                              📍 {row.godown_name || '-'}
                             </td>
                             <td style={styles.td}>{row.created_at ? new Date(row.created_at).toLocaleDateString() : '-'}</td>
                             <td style={{...styles.td, textAlign: 'right'}}>{getBagWeight(row).toFixed(2)}</td>

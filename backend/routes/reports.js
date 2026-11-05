@@ -2287,19 +2287,28 @@ router.get('/ledger/:ledgerName', async (req, res) => {
     const seenVoucherNos = new Set()
 
     // -------------------------------------------------------------
+    // -------------------------------------------------------------
     // SOURCE 1: ledger_entries (The centralized accounting postings)
     // -------------------------------------------------------------
     try {
       let entryConds = []
       let entryParams = []
 
-      if (lmIdList.length > 0) {
-        entryConds.push(`(ledger_id IS NOT NULL AND ledger_id IN (${lmIdList.map(() => '?').join(', ')}))`)
-        entryParams.push(...lmIdList)
-      }
-      if (nameList.length > 0) {
+      if (nameList.length > 0 && lmIdList.length > 0) {
+        entryConds.push(`(
+          LOWER(TRIM(ledger_name)) IN (${nameList.map(() => '?').join(', ')})
+          OR (
+            ledger_id IN (${lmIdList.map(() => '?').join(', ')})
+            AND (ledger_name IS NULL OR ledger_name = '' OR LOWER(TRIM(ledger_name)) IN (${nameList.map(() => '?').join(', ')}))
+          )
+        )`)
+        entryParams.push(...nameList, ...lmIdList, ...nameList)
+      } else if (nameList.length > 0) {
         entryConds.push(`LOWER(TRIM(ledger_name)) IN (${nameList.map(() => '?').join(', ')})`)
         entryParams.push(...nameList)
+      } else if (lmIdList.length > 0) {
+        entryConds.push(`ledger_id IN (${lmIdList.map(() => '?').join(', ')})`)
+        entryParams.push(...lmIdList)
       }
 
       if (entryConds.length > 0) {
@@ -2325,6 +2334,24 @@ router.get('/ledger/:ledgerName', async (req, res) => {
           const credit = parseFloat(row.credit || 0)
           const vNo = row.voucher_no || `LE-${row.id}`
           const key = `${vNo}_${debit}_${credit}`
+          const rowLedgerLower = String(row.ledger_name || '').trim().toLowerCase()
+          const rowPartLower = String(row.particulars || '').trim().toLowerCase()
+
+          // Strict accounting validation: do not allow cross-head leakage
+          if (/sgst/i.test(cleanName) && !rowPartLower.includes('sgst') && (rowLedgerLower.includes('purchase') || (rowPartLower.includes('purchase #') && !rowPartLower.includes('sgst')))) {
+            continue
+          }
+          if (/cgst/i.test(cleanName) && !rowPartLower.includes('cgst') && (rowLedgerLower.includes('purchase') || (rowPartLower.includes('purchase #') && !rowPartLower.includes('cgst')))) {
+            continue
+          }
+          if (/igst/i.test(cleanName) && !rowPartLower.includes('igst') && (rowLedgerLower.includes('purchase') || (rowPartLower.includes('purchase #') && !rowPartLower.includes('igst')))) {
+            continue
+          }
+          if (detectedType === 'Supplier' || suppIdList.length > 0) {
+            if (/^(cgst|sgst|igst)\s+on\s+purchase/i.test(rowPartLower) || rowLedgerLower.includes('input cgst') || rowLedgerLower.includes('input sgst') || rowLedgerLower.includes('purchase account')) {
+              continue
+            }
+          }
           
           if (!seenKeys.has(key)) {
             seenKeys.add(key)
@@ -2357,13 +2384,21 @@ router.get('/ledger/:ledgerName', async (req, res) => {
       let vConds = []
       let vParams = []
 
-      if (lmIdList.length > 0) {
+      if (nameList.length > 0 && lmIdList.length > 0) {
+        vConds.push(`(
+          LOWER(TRIM(COALESCE(ve.ledger_name, lm.name, ''))) IN (${nameList.map(() => '?').join(', ')})
+          OR (
+            ve.ledger_id IN (${lmIdList.map(() => '?').join(', ')})
+            AND (ve.ledger_name IS NULL OR ve.ledger_name = '' OR LOWER(TRIM(ve.ledger_name)) IN (${nameList.map(() => '?').join(', ')}))
+          )
+        )`)
+        vParams.push(...nameList, ...lmIdList, ...nameList)
+      } else if (nameList.length > 0) {
+        vConds.push(`LOWER(TRIM(COALESCE(ve.ledger_name, lm.name, ''))) IN (${nameList.map(() => '?').join(', ')})`)
+        vParams.push(...nameList)
+      } else if (lmIdList.length > 0) {
         vConds.push(`ve.ledger_id IN (${lmIdList.map(() => '?').join(', ')})`)
         vParams.push(...lmIdList)
-      }
-      if (nameList.length > 0) {
-        vConds.push(`LOWER(TRIM(COALESCE(lm.name, ve.ledger_name, ''))) IN (${nameList.map(() => '?').join(', ')})`)
-        vParams.push(...nameList)
       }
 
       if (vConds.length > 0) {
@@ -2391,6 +2426,24 @@ router.get('/ledger/:ledgerName', async (req, res) => {
           const credit = parseFloat(row.credit || 0)
           const vNo = row.voucher_no || `V-${row.id}`
           const key = `${vNo}_${debit}_${credit}`
+          const rowLedgerLower = String(row.ledger_name || '').trim().toLowerCase()
+          const rowPartLower = String(row.particulars || '').trim().toLowerCase()
+
+          // Strict accounting validation: do not allow cross-head leakage
+          if (/sgst/i.test(cleanName) && !rowPartLower.includes('sgst') && (rowLedgerLower.includes('purchase') || (rowPartLower.includes('purchase #') && !rowPartLower.includes('sgst')))) {
+            continue
+          }
+          if (/cgst/i.test(cleanName) && !rowPartLower.includes('cgst') && (rowLedgerLower.includes('purchase') || (rowPartLower.includes('purchase #') && !rowPartLower.includes('cgst')))) {
+            continue
+          }
+          if (/igst/i.test(cleanName) && !rowPartLower.includes('igst') && (rowLedgerLower.includes('purchase') || (rowPartLower.includes('purchase #') && !rowPartLower.includes('igst')))) {
+            continue
+          }
+          if (detectedType === 'Supplier' || suppIdList.length > 0) {
+            if (/^(cgst|sgst|igst)\s+on\s+purchase/i.test(rowPartLower) || rowLedgerLower.includes('input cgst') || rowLedgerLower.includes('input sgst') || rowLedgerLower.includes('purchase account')) {
+              continue
+            }
+          }
           
           if (!seenKeys.has(key)) {
             seenKeys.add(key)

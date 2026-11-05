@@ -61,8 +61,8 @@ const syncColdStorageStock = async (dbInstance = db, companyId = 1) => {
       `, [lotNo, lotNo, `CS-${lotNo}`], cId);
 
       if (!existingCs.rows || existingCs.rows.length === 0) {
-        let gId = lot.godown_id || lot.g_id || 2;
-        let gName = lot.godown_name || lot.g_name || 'BTS Cold Storage';
+        let gId = lot.godown_id || lot.g_id || null;
+        let gName = lot.godown_name || lot.g_name || 'Cold Storage';
 
         let nextVoucherNo = 'CSI-000001';
         try {

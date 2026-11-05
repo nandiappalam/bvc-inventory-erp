@@ -224,9 +224,9 @@ async function getColdStorageTariff(coldStorageId, companyId = 1) {
 
     return {
       coldStorageId,
-      godownName: godown.godown_name || 'BTS Cold Storage',
+      godownName: godown.godown_name || 'Cold Storage',
       operatorId: godown.operator_id || null,
-      operatorName: godown.operator_name || 'AgroCold Services',
+      operatorName: godown.operator_name || 'Storage Operator',
       calculationType,
       freeDays: parseInt(godown.free_storage_days || 0, 10),
       minDays: parseInt(godown.min_billable_days || 1, 10),

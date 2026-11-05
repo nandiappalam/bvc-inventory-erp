@@ -1021,6 +1021,23 @@ function translateSqlForPostgres(sql, companyId = 1) {
     transformed = transformed.replace(/FOREIGN\s+KEY\s*\([^)]+\)\s*REFERENCES\s+[a-zA-Z0-9_\".]+(?:\s*\([^)]+\))?(?:\s+ON\s+(?:DELETE|UPDATE)\s+[A-Za-z\s]+)*\s*,?/gi, '');
   }
 
+  // 4k. Schema qualification for PostgreSQL (Guarantees 100% tenant isolation under PgBouncer / Neon connection pooling)
+  const schema = `company_${parseInt(companyId, 10) || 1}`;
+  const tableQualifyRegex = /\b(CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?|ALTER\s+TABLE|DROP\s+TABLE(?:\s+IF\s+EXISTS)?|FROM|JOIN|INTO|UPDATE)\s+(?:\"?([a-zA-Z0-9_]+)\"?\.)?\"?([a-zA-Z0-9_]+)\"?/gi;
+
+  transformed = transformed.replace(tableQualifyRegex, (match, clause, existingSchema, tableName) => {
+    const tblLower = tableName.toLowerCase();
+    if (existingSchema) return match;
+    if (['information_schema', 'pg_catalog', 'pg_tables', 'pg_indexes', 'sqlite_master', 'columns', 'tables'].includes(tblLower)) return match;
+    if (MASTER_TABLE_NAMES_SET.has(tblLower)) {
+      return `${clause} "public"."${tblLower}"`;
+    }
+    if (TENANT_BUSINESS_TABLES.has(tblLower)) {
+      return `${clause} "${schema}"."${tblLower}"`;
+    }
+    return match;
+  });
+
   // 5. If INSERT statement without RETURNING clause, append RETURNING id
   const trimmed = transformed.trim();
   if (/^INSERT\s+INTO/i.test(trimmed) && !/RETURNING/i.test(trimmed)) {

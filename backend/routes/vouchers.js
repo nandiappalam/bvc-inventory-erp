@@ -115,28 +115,23 @@ async function initTables() {
     console.error('voucher_entry table error:', err);
   }
 
-  // Heal ledger names that were saved as numeric IDs
-  await healDatabaseVouchers();
-  
-  // Heal all transactions (purchases, sales, advances) to ensure they have corresponding double-entry vouchers & ledger_entries
-  await healAllTransactions();
+  // Ensure tables exist safely without startup data mutations
 }
 
 async function healAllTransactions() {
-  console.log('Running healAllTransactions to sync purchases, sales, and advances to ledger...');
+  console.log('Running safe transaction sync...');
   const { createPurchaseVoucherChain, createSalesLedgerEntries, createAdvanceLedgerEntries } = require('../utils/ledgerHelper');
   
   try {
-    // 1. Heal Purchases
+    // 1. Heal Purchases (Only if no voucher already exists with this reference)
     const purchases = await db.query('SELECT * FROM purchases', []);
     for (const p of purchases.rows || []) {
-      // Check if purchase is already in voucher
       const vResult = await db.query(
-        "SELECT id FROM voucher WHERE reference_no = ? AND voucher_type = 'Purchase' LIMIT 1",
+        "SELECT id FROM voucher WHERE reference_no = ? LIMIT 1",
         [String(p.id)]
       );
-      if (vResult.rows.length === 0) {
-        console.log(`Healing Purchase ID ${p.id} to ledger...`);
+      if (!vResult.rows || vResult.rows.length === 0) {
+        console.log(`Syncing missing Purchase ID ${p.id} to voucher/ledger...`);
         await createPurchaseVoucherChain({
           supplier: p.supplier,
           date: p.date,
@@ -151,15 +146,15 @@ async function healAllTransactions() {
       }
     }
 
-    // 2. Heal Sales
+    // 2. Heal Sales (Only if no voucher already exists with this reference)
     const sales = await db.query('SELECT * FROM sales', []);
     for (const s of sales.rows || []) {
       const vResult = await db.query(
-        "SELECT id FROM voucher WHERE reference_no = ? AND voucher_type = 'Sales' LIMIT 1",
+        "SELECT id FROM voucher WHERE reference_no = ? LIMIT 1",
         [String(s.id)]
       );
-      if (vResult.rows.length === 0) {
-        console.log(`Healing Sales ID ${s.id} to ledger...`);
+      if (!vResult.rows || vResult.rows.length === 0) {
+        console.log(`Syncing missing Sales ID ${s.id} to voucher/ledger...`);
         await createSalesLedgerEntries({
           customer: s.customer,
           date: s.date,
@@ -176,13 +171,12 @@ async function healAllTransactions() {
     // 3. Heal Advances
     const advances = await db.query('SELECT * FROM advances', []);
     for (const a of advances.rows || []) {
-      // For advances, check ledger_entries by reference_id and reference_type
       const leResult = await db.query(
         "SELECT id FROM ledger_entries WHERE reference_id = ? AND reference_type = 'advance' LIMIT 1",
         [a.id]
       );
-      if (leResult.rows.length === 0) {
-        console.log(`Healing Advance ID ${a.id} to ledger...`);
+      if (!leResult.rows || leResult.rows.length === 0) {
+        console.log(`Syncing missing Advance ID ${a.id} to ledger...`);
         await createAdvanceLedgerEntries({
           papadCompany: a.papad_company,
           date: a.date,
@@ -193,7 +187,7 @@ async function healAllTransactions() {
       }
     }
 
-    // 4. Auto-correct any existing misallocated Customer/Supplier ledger entries
+    // 4. Auto-correct any existing misallocated Customer/Supplier ledger entries (surgical line update only)
     const { resolveLedgerId } = require('../utils/ledgerHelper');
     const incorrectSalesEntries = await db.query(`
       SELECT le.id, le.ledger_name, le.voucher_id
@@ -206,7 +200,7 @@ async function healAllTransactions() {
       if (correctId) {
         await db.run("UPDATE ledger_entries SET ledger_id = ? WHERE id = ?", [correctId, entry.id]);
         if (entry.voucher_id) {
-          await db.run("UPDATE voucher_entry SET ledger_id = ? WHERE voucher_id = ? AND ledger_id != ?", [correctId, entry.voucher_id, correctId]);
+          await db.run("UPDATE voucher_entry SET ledger_id = ?, ledger_name = ? WHERE voucher_id = ? AND (LOWER(TRIM(ledger_name)) = LOWER(TRIM(?)) OR ledger_id = ?)", [correctId, entry.ledger_name, entry.voucher_id, entry.ledger_name, entry.ledger_id]);
         }
         console.log(`✓ Corrected Sales entry id ${entry.id} "${entry.ledger_name}" to customer ledger id ${correctId}`);
       }
@@ -223,7 +217,7 @@ async function healAllTransactions() {
       if (correctId) {
         await db.run("UPDATE ledger_entries SET ledger_id = ? WHERE id = ?", [correctId, entry.id]);
         if (entry.voucher_id) {
-          await db.run("UPDATE voucher_entry SET ledger_id = ? WHERE voucher_id = ? AND ledger_id != ?", [correctId, entry.voucher_id, correctId]);
+          await db.run("UPDATE voucher_entry SET ledger_id = ?, ledger_name = ? WHERE voucher_id = ? AND (LOWER(TRIM(ledger_name)) = LOWER(TRIM(?)) OR ledger_id = ?)", [correctId, entry.ledger_name, entry.voucher_id, entry.ledger_name, entry.ledger_id]);
         }
         console.log(`✓ Corrected Purchase entry id ${entry.id} "${entry.ledger_name}" to supplier ledger id ${correctId}`);
       }

@@ -454,7 +454,7 @@ router.get('/ledger-statement', async (req, res) => {
       targetLedger = lRes.rows[0];
     }
     if (!targetLedger && ledger_name) {
-      const lRes = await db.query("SELECT * FROM ledgermaster WHERE LOWER(TRIM(ledger_name)) = LOWER(TRIM(?)) LIMIT 1", [ledger_name]);
+      const lRes = await db.query("SELECT * FROM ledgermaster WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) OR LOWER(TRIM(printname)) = LOWER(TRIM(?)) LIMIT 1", [ledger_name, ledger_name]);
       targetLedger = lRes.rows[0];
     }
 
@@ -463,6 +463,7 @@ router.get('/ledger-statement', async (req, res) => {
       const name = ledger_name || `Ledger #${ledger_id}`;
       targetLedger = {
         id: ledger_id || 0,
+        name: name,
         ledger_name: name,
         group_name: name.toLowerCase().includes('supplier') || name.toLowerCase().includes('traders') ? 'Sundry Creditors' : 'General',
         opening_balance: 0,
@@ -470,7 +471,7 @@ router.get('/ledger-statement', async (req, res) => {
       };
     }
 
-    const lName = targetLedger.ledger_name;
+    const lName = targetLedger.name || targetLedger.ledger_name;
     const lId = targetLedger.id;
 
     // Opening Balance calculation before from_date

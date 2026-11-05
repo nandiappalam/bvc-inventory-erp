@@ -40,8 +40,8 @@ const InpassCreate = () => {
     vehicle_no: '',
     driver_name: '',
     received_by: 'Admin',
-    to_godown_id: 1,
-    to_godown_name: 'PJ Main Factory Godown',
+    to_godown_id: '',
+    to_godown_name: '',
     qc_required: true,
     qc_status: 'QC_PENDING',
     processing_charge_per_kg: '',
@@ -166,8 +166,8 @@ const InpassCreate = () => {
       vehicle_no: op.vehicle_no || prev.vehicle_no,
       driver_name: op.driver_name || prev.driver_name,
       processing_charge_per_kg: ratePerKg || prev.processing_charge_per_kg,
-      to_godown_id: op.from_godown_id || prev.to_godown_id || 1,
-      to_godown_name: op.from_godown_name || prev.to_godown_name || 'PJ Main Factory Godown',
+      to_godown_id: op.from_godown_id || prev.to_godown_id || '',
+      to_godown_name: op.from_godown_name || prev.to_godown_name || '',
       remarks: `Received against Outpass #${op.outpass_no} (${op.party_name || 'Outside Mill'})`
     }));
 

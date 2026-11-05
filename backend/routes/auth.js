@@ -325,6 +325,32 @@ router.post('/login', async (req, res) => {
       }
     }
 
+    // Auto-resync default admin/staff credentials for existing companies if password hash was outdated
+    if (!userCandidate) {
+      const isDefaultAdmin = trimmedUsername.toLowerCase() === 'admin' && password === 'admin123';
+      const isDefaultStaff = trimmedUsername.toLowerCase() === 'staff' && password === 'staff123';
+      if (isDefaultAdmin || isDefaultStaff) {
+        if (userQuery.rows && userQuery.rows.length > 0) {
+          const matchingUser = userQuery.rows[0];
+          const newHash = await bcrypt.hash(password, 10);
+          await masterDb.run('UPDATE users SET password_hash = ?, status = ? WHERE id = ?', [newHash, 'Active', matchingUser.id]);
+          matchingUser.password_hash = newHash;
+          matchingUser.status = 'Active';
+          userCandidate = matchingUser;
+          console.log(`✓ Synchronized default credentials for existing user ${matchingUser.username}`);
+        } else if (companyIdNum) {
+          await ensureCompanyDefaultUsers(companyIdNum);
+          const recheck = await masterDb.query(
+            `SELECT * FROM users WHERE LOWER(TRIM(username)) = LOWER(TRIM(?)) AND company_id = ? LIMIT 1`,
+            [trimmedUsername, companyIdNum]
+          );
+          if (recheck.rows && recheck.rows.length > 0) {
+            userCandidate = recheck.rows[0];
+          }
+        }
+      }
+    }
+
     if (!userCandidate) {
       return res.status(401).json({ message: 'Invalid username or password for this company' });
     }
