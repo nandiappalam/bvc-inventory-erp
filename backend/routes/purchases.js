@@ -278,29 +278,67 @@ router.get('/next-sno', async (req, res) => {
 
 // GET purchase list for UI (ERP-grade join)
 router.get(['/', '/list', '/purchase-list'], async (req, res) => {
-  console.log('[debug] USING purchases_fixed.js /purchase-list')
+  console.log('[debug] USING purchases.js /purchase-list')
   console.log('[/api/purchases/purchase-list] query running')
 
   try {
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
     const sql = `SELECT
       p.id,
       p.s_no AS s_no,
       p.inv_no AS inv_no,
       p.inv_no AS invoice_no,
-      COALESCE(NULLIF(p.po_no, ''), NULLIF(p.source_order_no, ''), NULLIF(po.inv_no, ''), NULLIF(CAST(po.s_no AS TEXT), ''), CASE WHEN p.purchase_order_id IS NOT NULL THEN 'PO-' || CAST(p.purchase_order_id AS TEXT) ELSE '' END, '') AS po_no,
-      COALESCE(NULLIF(CAST(p.purchase_order_id AS TEXT), ''), NULLIF(CAST(p.source_order_id AS TEXT), ''), CAST(po.id AS TEXT)) AS purchase_order_id,
+      COALESCE(
+        NULLIF(p.po_no, ''), 
+        NULLIF(p.source_order_no, ''), 
+        (SELECT po.inv_no FROM purchase_orders po WHERE po.id = p.purchase_order_id OR po.id = p.source_order_id LIMIT 1),
+        CASE WHEN p.purchase_order_id IS NOT NULL THEN 'PO-' || CAST(p.purchase_order_id AS TEXT) ELSE '' END, 
+        ''
+      ) AS po_no,
+      COALESCE(NULLIF(CAST(p.purchase_order_id AS TEXT), ''), NULLIF(CAST(p.source_order_id AS TEXT), ''), '') AS purchase_order_id,
       p.date AS purchase_date,
       p.date,
       p.date AS invoice_date,
       COALESCE(p.created_at, p.date) AS date_time,
       COALESCE(p.type, 'Standard') AS type,
       COALESCE(NULLIF(p.po_no, ''), NULLIF(p.source_order_no, ''), NULLIF(p.inv_no, ''), '') AS reference,
-      COALESCE(s.print_name, s.name, p.supplier, '') AS party,
-      COALESCE(s.print_name, s.name, p.supplier, '') AS supplier_name,
-      COALESCE(s.address1, p.address, '') AS address,
-      COALESCE(NULLIF(tm.print_name, ''), NULLIF(tm.name, ''), NULLIF(p.transporter, ''), NULLIF(p.transport, ''), '') AS transporter,
-      COALESCE(NULLIF(tm.print_name, ''), NULLIF(tm.name, ''), NULLIF(p.transporter, ''), NULLIF(p.transport, ''), '') AS transporter_name,
-      COALESCE(NULLIF(p.transport, ''), NULLIF(p.transporter, ''), NULLIF(tm.print_name, ''), NULLIF(tm.name, ''), '') AS transport,
+      COALESCE(
+        (SELECT COALESCE(NULLIF(sm.print_name, ''), sm.name) FROM supplier_master sm WHERE TRIM(CAST(sm.id AS TEXT)) = TRIM(CAST(p.supplier AS TEXT)) LIMIT 1),
+        (SELECT COALESCE(NULLIF(sm.print_name, ''), sm.name) FROM supplier_master sm WHERE LOWER(TRIM(sm.name)) = LOWER(TRIM(CAST(p.supplier AS TEXT))) LIMIT 1),
+        p.supplier,
+        ''
+      ) AS party,
+      COALESCE(
+        (SELECT COALESCE(NULLIF(sm.print_name, ''), sm.name) FROM supplier_master sm WHERE TRIM(CAST(sm.id AS TEXT)) = TRIM(CAST(p.supplier AS TEXT)) LIMIT 1),
+        (SELECT COALESCE(NULLIF(sm.print_name, ''), sm.name) FROM supplier_master sm WHERE LOWER(TRIM(sm.name)) = LOWER(TRIM(CAST(p.supplier AS TEXT))) LIMIT 1),
+        p.supplier,
+        ''
+      ) AS supplier_name,
+      COALESCE(
+        (SELECT sm.address1 FROM supplier_master sm WHERE TRIM(CAST(sm.id AS TEXT)) = TRIM(CAST(p.supplier AS TEXT)) OR LOWER(TRIM(sm.name)) = LOWER(TRIM(CAST(p.supplier AS TEXT))) LIMIT 1),
+        p.address,
+        ''
+      ) AS address,
+      COALESCE(
+        (SELECT COALESCE(NULLIF(tm.print_name, ''), tm.name) FROM transport_master tm WHERE TRIM(CAST(tm.id AS TEXT)) = TRIM(CAST(p.transporter AS TEXT)) OR TRIM(CAST(tm.id AS TEXT)) = TRIM(CAST(p.transport AS TEXT)) LIMIT 1),
+        (SELECT COALESCE(NULLIF(tm.print_name, ''), tm.name) FROM transport_master tm WHERE LOWER(TRIM(tm.name)) = LOWER(TRIM(CAST(p.transporter AS TEXT))) OR LOWER(TRIM(tm.name)) = LOWER(TRIM(CAST(p.transport AS TEXT))) LIMIT 1),
+        NULLIF(p.transporter, ''),
+        NULLIF(p.transport, ''),
+        ''
+      ) AS transporter,
+      COALESCE(
+        (SELECT COALESCE(NULLIF(tm.print_name, ''), tm.name) FROM transport_master tm WHERE TRIM(CAST(tm.id AS TEXT)) = TRIM(CAST(p.transporter AS TEXT)) OR TRIM(CAST(tm.id AS TEXT)) = TRIM(CAST(p.transport AS TEXT)) LIMIT 1),
+        (SELECT COALESCE(NULLIF(tm.print_name, ''), tm.name) FROM transport_master tm WHERE LOWER(TRIM(tm.name)) = LOWER(TRIM(CAST(p.transporter AS TEXT))) OR LOWER(TRIM(tm.name)) = LOWER(TRIM(CAST(p.transport AS TEXT))) LIMIT 1),
+        NULLIF(p.transporter, ''),
+        NULLIF(p.transport, ''),
+        ''
+      ) AS transporter_name,
+      COALESCE(
+        NULLIF(p.transport, ''),
+        NULLIF(p.transporter, ''),
+        (SELECT COALESCE(NULLIF(tm.print_name, ''), tm.name) FROM transport_master tm WHERE TRIM(CAST(tm.id AS TEXT)) = TRIM(CAST(p.transporter AS TEXT)) OR TRIM(CAST(tm.id AS TEXT)) = TRIM(CAST(p.transport AS TEXT)) LIMIT 1),
+        ''
+      ) AS transport,
       COALESCE(p.vehicle_no, p.lorry_no, vm.vehicle_no, '') AS vehicle_no,
       COALESCE(p.lorry_no, p.vehicle_no, vm.vehicle_no, '') AS lorry_no,
       COALESCE(p.driver_name, p.driver, vm.driver_name, '') AS driver,
@@ -342,25 +380,33 @@ router.get(['/', '/list', '/purchase-list'], async (req, res) => {
       -- Canonical amounts
       pi.amount AS net_amount,
       p.grand_total AS grand_total,
-      qci.id AS qc_id
+      (
+        SELECT MAX(qci.id) 
+        FROM qc_inspections qci 
+        WHERE (CAST(qci.purchase_id AS TEXT) = CAST(p.id AS TEXT) OR CAST(qci.purchase_id AS TEXT) = ('PUR-' || CAST(p.id AS TEXT)) OR CAST(qci.purchase_id AS TEXT) = ('PUR-' || CAST(p.s_no AS TEXT)))
+          AND (qci.rm_lot_no IS NULL OR qci.rm_lot_no = '' OR CAST(qci.rm_lot_no AS TEXT) = CAST(pi.lot_no AS TEXT))
+      ) AS qc_id
     FROM purchases p
-    LEFT JOIN purchase_orders po ON (CAST(po.id AS TEXT) = CAST(p.purchase_order_id AS TEXT) OR CAST(po.id AS TEXT) = CAST(p.source_order_id AS TEXT) OR (p.po_no IS NOT NULL AND CAST(p.po_no AS TEXT) != '' AND (po.inv_no = p.po_no OR CAST(po.s_no AS TEXT) = CAST(p.po_no AS TEXT))))
-    LEFT JOIN supplier_master s ON (
-      TRIM(CAST(s.id AS TEXT)) = TRIM(CAST(p.supplier AS TEXT)) 
-      OR LOWER(TRIM(s.name)) = LOWER(TRIM(CAST(p.supplier AS TEXT))) 
-      OR LOWER(TRIM(COALESCE(s.print_name, ''))) = LOWER(TRIM(CAST(p.supplier AS TEXT)))
-    )
-    LEFT JOIN transport_master tm ON (
-      TRIM(CAST(tm.id AS TEXT)) = TRIM(CAST(p.transporter AS TEXT)) 
-      OR TRIM(CAST(tm.id AS TEXT)) = TRIM(CAST(p.transport AS TEXT)) 
-      OR LOWER(TRIM(tm.name)) = LOWER(TRIM(CAST(p.transporter AS TEXT))) 
-      OR LOWER(TRIM(COALESCE(tm.print_name, ''))) = LOWER(TRIM(CAST(p.transporter AS TEXT)))
-      OR LOWER(TRIM(tm.name)) = LOWER(TRIM(CAST(p.transport AS TEXT)))
-      OR LOWER(TRIM(COALESCE(tm.print_name, ''))) = LOWER(TRIM(CAST(p.transport AS TEXT)))
-    )
     LEFT JOIN purchase_items pi ON CAST(pi.purchase_id AS TEXT) = CAST(p.id AS TEXT)
-    LEFT JOIN item_master im ON (CAST(im.id AS TEXT) = CAST(pi.item_id AS TEXT) OR im.item_name = CAST(pi.item_name AS TEXT))
-    LEFT JOIN vehicle_movements vm ON (CAST(vm.reference_id AS TEXT) = CAST(p.id AS TEXT) OR CAST(vm.reference_id AS TEXT) = CAST(p.inv_no AS TEXT) OR (vm.lot_no IS NOT NULL AND CAST(vm.lot_no AS TEXT) != '' AND CAST(vm.lot_no AS TEXT) = CAST(pi.lot_no AS TEXT)))
+    LEFT JOIN (
+      SELECT id, MAX(item_name) AS item_name
+      FROM item_master
+      GROUP BY id
+    ) im ON CAST(im.id AS TEXT) = CAST(pi.item_id AS TEXT)
+    LEFT JOIN (
+      SELECT 
+        CAST(reference_id AS TEXT) AS reference_id,
+        MAX(vehicle_no) AS vehicle_no,
+        MAX(driver_name) AS driver_name,
+        MAX(gate_in_time) AS gate_in_time,
+        MAX(created_at) AS created_at,
+        MAX(gross_weight) AS gross_weight,
+        MAX(tare_weight) AS tare_weight,
+        MAX(net_weight) AS net_weight
+      FROM vehicle_movements
+      WHERE reference_type = 'Purchase' OR reference_type IS NULL OR reference_type = ''
+      GROUP BY CAST(reference_id AS TEXT)
+    ) vm ON vm.reference_id = CAST(p.id AS TEXT)
     LEFT JOIN (
       SELECT 
         purchase_id,
@@ -369,11 +415,36 @@ router.get(['/', '/list', '/purchase-list'], async (req, res) => {
       FROM purchase_deductions
       GROUP BY purchase_id
     ) pad ON CAST(pad.purchase_id AS TEXT) = CAST(p.id AS TEXT)
-    LEFT JOIN qc_inspections qci ON (CAST(qci.purchase_id AS TEXT) = CAST(p.id AS TEXT) OR ('PUR-' || CAST(p.id AS TEXT)) = CAST(qci.purchase_id AS TEXT) OR ('PUR-' || CAST(p.s_no AS TEXT)) = CAST(qci.purchase_id AS TEXT)) AND CAST(qci.rm_lot_no AS TEXT) = CAST(pi.lot_no AS TEXT)
     ORDER BY p.date DESC, p.id DESC`
 
-    const rows = await db.query(sql)
-    res.json(rows.rows)
+    const rows = await db.query(sql, [], activeCompanyId);
+    
+    // Deduplicate any rows that share the same purchase ID and item/lot, preserving recorded weighment
+    const sortedRows = (rows.rows || []).slice().sort((a, b) => {
+      const aWeight = Number(a.gross_weight || 0) + Number(a.net_weight || 0);
+      const bWeight = Number(b.gross_weight || 0) + Number(b.net_weight || 0);
+      return bWeight - aWeight;
+    });
+
+    const seenRowKeys = new Set();
+    const uniqueRows = [];
+    for (const r of sortedRows) {
+      const rowKey = `${r.id}_${r.lot_no || ''}_${r.item_name || ''}_${r.qty || ''}_${r.amount || ''}`;
+      if (seenRowKeys.has(rowKey)) {
+        continue;
+      }
+      seenRowKeys.add(rowKey);
+      uniqueRows.push(r);
+    }
+
+    uniqueRows.sort((a, b) => {
+      const dateA = new Date(a.date || a.purchase_date || 0).getTime();
+      const dateB = new Date(b.date || b.purchase_date || 0).getTime();
+      if (dateB !== dateA) return dateB - dateA;
+      return Number(b.id || 0) - Number(a.id || 0);
+    });
+
+    res.json(uniqueRows);
   } catch (error) {
     console.error('Error fetching purchase list:', error.message)
     res.status(500).json({ message: 'Error fetching purchase list', error: error.message })
