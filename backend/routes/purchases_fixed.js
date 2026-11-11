@@ -704,6 +704,53 @@ router.get('/:id/ledger-statement', async (req, res) => {
       totalDeductions = Number(purchase.deduction_amount);
     }
 
+    // Build or refine Journal Entries list (Double Entry: Total Debit === Total Credit)
+    let journalEntries = [];
+    let entryIdx = 1;
+
+    // 1. Purchase Account (Dr)
+    journalEntries.push({
+      no: entryIdx++,
+      ledger_name: 'Purchase Account',
+      account_head: 'Direct Expenses / Inventory',
+      debit: baseAmount,
+      credit: 0,
+      particulars: `${supplierName} taxable purchase`
+    });
+
+    // 2. GST Input (Dr)
+    if (isInterstate && igstAmount > 0) {
+      journalEntries.push({
+        no: entryIdx++,
+        ledger_name: 'Input IGST',
+        account_head: 'Duties & Taxes',
+        debit: igstAmount,
+        credit: 0,
+        particulars: `IGST on ${voucherNo}`
+      });
+    } else {
+      if (cgstAmount > 0) {
+        journalEntries.push({
+          no: entryIdx++,
+          ledger_name: 'Input CGST',
+          account_head: 'Duties & Taxes',
+          debit: cgstAmount,
+          credit: 0,
+          particulars: `CGST on ${voucherNo}`
+        });
+      }
+      if (sgstAmount > 0) {
+        journalEntries.push({
+          no: entryIdx++,
+          ledger_name: 'Input SGST',
+          account_head: 'Duties & Taxes',
+          debit: sgstAmount,
+          credit: 0,
+          particulars: `SGST on ${voucherNo}`
+        });
+      }
+    }
+
     // 3. Gross Invoice to Supplier (Cr)
     const grossSupplierInvoice = Number(
       (purchase.grand_total && Number(purchase.grand_total) > 0)

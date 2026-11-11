@@ -5,7 +5,8 @@ const recycleBinService = require('../services/RecycleBinService');
 // Get all deleted items in Recycle Bin
 router.get('/', async (req, res) => {
   try {
-    const items = await recycleBinService.getRecycleBinItems();
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    const items = await recycleBinService.getRecycleBinItems(activeCompanyId);
     res.json({ success: true, items });
   } catch (error) {
     console.error('Error fetching recycle bin:', error);
@@ -16,7 +17,8 @@ router.get('/', async (req, res) => {
 // Restore a deleted item
 router.post('/restore/:id', async (req, res) => {
   try {
-    const result = await recycleBinService.restoreFromRecycleBin(req.params.id);
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    const result = await recycleBinService.restoreFromRecycleBin(req.params.id, activeCompanyId);
     res.json(result);
   } catch (error) {
     console.error('Error restoring item:', error);

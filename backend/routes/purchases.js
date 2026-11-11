@@ -718,7 +718,11 @@ router.get('/:id/ledger-statement', async (req, res) => {
     }
 
     // 3. Gross Invoice to Supplier (Cr)
-    const grossSupplierInvoice = Number((baseAmount + taxAmount - discAmount).toFixed(2));
+    const grossSupplierInvoice = Number(
+      (purchase.grand_total && Number(purchase.grand_total) > 0)
+        ? Number(purchase.grand_total)
+        : (baseAmount + taxAmount - discAmount).toFixed(2)
+    );
     journalEntries.push({
       no: entryIdx++,
       ledger_name: supplierName,
