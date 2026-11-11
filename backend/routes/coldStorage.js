@@ -267,10 +267,13 @@ router.get('/available-lots', async (req, res) => {
     const items = (result.rows || []).map(r => {
       const key = `${r.item_name}_${r.purchase_lot_no}`;
       const movedToCS = csInMap[key] || 0;
-      const rawWt = parseFloat(r.weight || r.per_weight || (r.total_weight && total ? (r.total_weight / total) : 50)) || 50;
+      const totalQty = parseFloat(r.purchased_qty || 0);
+      const availInMain = Math.max(0, totalQty - movedToCS);
+      const rawWt = parseFloat(r.weight || r.per_weight || (r.total_weight && totalQty ? (r.total_weight / totalQty) : 50)) || 50;
       const perWt = rawWt <= 1 ? 50 : rawWt;
       return {
         ...r,
+        purchased_qty: totalQty,
         weight: perWt,
         per_weight: perWt,
         moved_to_cs_qty: movedToCS,

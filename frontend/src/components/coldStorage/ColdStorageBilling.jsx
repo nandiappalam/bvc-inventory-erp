@@ -114,15 +114,6 @@ const ColdStorageBilling = () => {
 
       if (csRes?.data?.length > 0) {
         setColdStorages(csRes.data);
-        const first = csRes.data[0];
-        setColdStorageId(first.id);
-        setColdStorageName(first.godown_name);
-        if (first.operator_id) {
-          setOperatorId(first.operator_id);
-          setOperatorName(first.operator_name || first.external_company || 'Operator');
-        } else if (first.external_company) {
-          setOperatorName(first.external_company);
-        }
       }
       if (supRes?.data) {
         setSuppliers(supRes.data);

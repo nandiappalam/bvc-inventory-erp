@@ -163,55 +163,72 @@ export default function QualityControlCreate() {
           const qLotNo = qs.get('lotNo') || location.state?.lotNo || location.state?.lot_no;
           const qPurchaseId = qs.get('purchase_id') || qs.get('purchaseId') || location.state?.purchase_id || location.state?.purchaseId;
           const stateVehicleNo = location.state?.vehicleNo || location.state?.vehicle_no;
-          const stateItemName = location.state?.itemName || location.state?.item_name;
-          const stateSupplier = location.state?.supplier || location.state?.party_name;
+          const stateItemName = qs.get('itemName') || qs.get('item_name') || location.state?.itemName || location.state?.item_name;
+          const stateSupplier = qs.get('supplier') || qs.get('supplier_name') || location.state?.supplier || location.state?.party_name;
 
-          if (qPurchaseId) {
-            // Pre-fill directly from purchase ID endpoint
-            api(`/qc/inspection/${qPurchaseId}`)
+          // Priority 1: Exact Lot match in loaded lotsData
+          let matchedLot = null;
+          if (qLotNo) {
+            matchedLot = lotsData.find(l => 
+              String(l.lot_no || '').trim().toLowerCase() === String(qLotNo).trim().toLowerCase() ||
+              String(l.stock_lot_id || '').trim().toLowerCase() === String(qLotNo).trim().toLowerCase()
+            );
+          }
+
+          // Priority 2: Match by purchase ID and lot or item if available in lotsData
+          if (!matchedLot && qPurchaseId) {
+            matchedLot = lotsData.find(l => 
+              (String(l.purchase_id) === String(qPurchaseId) || String(l.receipt_no) === String(qPurchaseId) || String(l.receipt_no) === `PUR-${qPurchaseId}`) &&
+              (!qLotNo || String(l.lot_no || '').trim().toLowerCase() === String(qLotNo).trim().toLowerCase())
+            );
+          }
+
+          // Priority 3: Match by Item Name or Supplier in lotsData
+          if (!matchedLot && (stateItemName || stateSupplier)) {
+            matchedLot = lotsData.find(l => 
+              (stateItemName && String(l.item_name || '').toLowerCase() === String(stateItemName).toLowerCase()) ||
+              (stateSupplier && String(l.supplier_name || '').toLowerCase() === String(stateSupplier).toLowerCase())
+            );
+          }
+
+          if (matchedLot) {
+            handleSelectPendingLotWithItems(matchedLot, itemsArr);
+          } else if (qPurchaseId) {
+            // Priority 4: Fetch directly from /purchases/:id to get the authentic purchase and its item details
+            api(`/purchases/${qPurchaseId}`)
               .then(res => {
-                if (res?.success && res?.data) {
-                  const p = res.data;
+                const p = res?.data || res;
+                if (p && (p.id || p.inv_no || p.s_no)) {
+                  const pItems = Array.isArray(p.items) ? p.items : [];
+                  const targetItem = (qLotNo && pItems.find(it => String(it.lot_no || '').trim().toLowerCase() === String(qLotNo).trim().toLowerCase())) ||
+                                     pItems[0] || {};
+
                   handleSelectPendingLotWithItems({
-                    stock_lot_id: p.lotNo || p.rm_lot_no || '',
-                    lot_no: p.lotNo || p.rm_lot_no || `LOT-${qPurchaseId}`,
-                    item_name: p.item || p.item_name || 'Raw Material',
-                    supplier_name: p.supplier || p.supplier_name || '',
-                    received_qty: p.quantity || 100,
-                    unit_weight: p.unit_weight || 50,
-                    total_weight: p.total_weight || 5000,
-                    receipt_no: p.invoice_no || p.receipt_no || `PUR-${qPurchaseId}`,
+                    stock_lot_id: targetItem.lot_no || qLotNo || `LOT-${qPurchaseId}`,
+                    lot_no: targetItem.lot_no || qLotNo || `LOT-${qPurchaseId}`,
+                    item_name: targetItem.item_name || targetItem.item || stateItemName || p.type || 'Raw Material',
+                    supplier_name: p.supplier_name || p.supplier || stateSupplier || '',
+                    received_qty: Number(targetItem.qty || targetItem.quantity || 100),
+                    unit_weight: Number(targetItem.per_unit_weight || 50),
+                    total_weight: Number(targetItem.total_weight || ((Number(targetItem.qty || 100)) * (Number(targetItem.per_unit_weight || 50)))),
+                    receipt_no: p.inv_no || p.invoice_no || `PUR-${qPurchaseId}`,
                     purchase_id: qPurchaseId,
-                    receipt_date: p.receipt_date || p.inspectionDate || new Date().toISOString().split('T')[0],
-                    invoice_date: p.invoice_date || p.receipt_date || new Date().toISOString().split('T')[0],
-                    unloading_status: p.unloading_status || 'PENDING_DECISION'
+                    receipt_date: p.date || new Date().toISOString().split('T')[0],
+                    invoice_date: p.inv_date || p.date || new Date().toISOString().split('T')[0],
+                    unloading_status: 'PENDING_DECISION'
                   }, itemsArr);
+                } else if (lotsData.length > 0) {
+                  handleSelectPendingLotWithItems(lotsData[0], itemsArr);
                 }
               })
-              .catch(() => {});
-          } else if (qLotNo) {
-            const matched = lotsData.find(l => l.lot_no === qLotNo);
-            if (matched) {
-              handleSelectPendingLotWithItems(matched, itemsArr);
-            }
-          } else if (stateItemName || stateSupplier) {
-            const matched = lotsData.find(l => 
-              (stateItemName && (l.item_name?.toLowerCase() === stateItemName.toLowerCase())) ||
-              (stateSupplier && (l.supplier_name?.toLowerCase() === stateSupplier.toLowerCase()))
-            );
-            if (matched) {
-              handleSelectPendingLotWithItems(matched, itemsArr);
-            } else if (lotsData.length > 0) {
-              handleSelectPendingLotWithItems(lotsData[0], itemsArr);
-            }
+              .catch(() => {
+                if (lotsData.length > 0) {
+                  handleSelectPendingLotWithItems(lotsData[0], itemsArr);
+                }
+              });
           } else if (lotsData.length > 0) {
-            // Try to find first pending lot
             const firstPending = lotsData.find(l => !l.qc_status || l.qc_status === 'QC_PENDING');
-            if (firstPending) {
-              handleSelectPendingLotWithItems(firstPending, itemsArr);
-            } else {
-              handleSelectPendingLotWithItems(lotsData[0], itemsArr);
-            }
+            handleSelectPendingLotWithItems(firstPending || lotsData[0], itemsArr);
           }
         }
       })

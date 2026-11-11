@@ -72,7 +72,7 @@ const ColdStorageIn = () => {
 
   // Source
   const [sourceGodownId, setSourceGodownId] = useState('');
-  const [sourceGodownName, setSourceGodownName] = useState('Main Godown');
+  const [sourceGodownName, setSourceGodownName] = useState('');
   const [sourceSupplierId, setSourceSupplierId] = useState(null);
   const [sourceSupplierName, setSourceSupplierName] = useState('');
 
@@ -123,11 +123,6 @@ const ColdStorageIn = () => {
       if (vRes?.voucher_no) setVoucherNo(vRes.voucher_no);
       if (csRes?.data?.length > 0) {
         setColdStorages(csRes.data);
-        const first = csRes.data[0];
-        setColdStorageId(first.id);
-        setColdStorageName(first.godown_name);
-        setSelectedCsObj(first);
-        if (first.default_chamber) setChamberNo(first.default_chamber);
       }
       if (lotsRes?.data) setAvailableLots(lotsRes.data);
       if (gRes?.data) setGodowns(Array.isArray(gRes.data) ? gRes.data : (Array.isArray(gRes) ? gRes : []));
@@ -547,6 +542,7 @@ const ColdStorageIn = () => {
                     onChange={handleColdStorageChange}
                     required
                   >
+                    <MenuItem value="">-- Select Cold Storage Facility --</MenuItem>
                     {coldStorages.map((cs) => (
                       <MenuItem key={cs.id} value={cs.id}>
                         {cs.godown_name} ({cs.operator_name || cs.resolved_operator_name || 'External Operator'})

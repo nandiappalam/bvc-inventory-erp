@@ -1017,26 +1017,27 @@ router.get('/:type', async (req, res, next) => {
         })
       } catch (e) {}
 
-      // 3. Scan open / open_items (Opening Stocks)
+      // 3. Scan open_items (Opening Stocks)
       try {
         const openRes = await db.query(`
           SELECT 
-            COALESCE(oi.item_name, o.item_name, 'Opening Stock Item') as item_name,
-            SUM(COALESCE(oi.qty, o.qty, 0)) as total_qty
-          FROM open o
-          LEFT JOIN open_items oi ON CAST(oi.open_id AS TEXT) = CAST(o.id AS TEXT)
-          WHERE COALESCE(oi.item_name, o.item_name) IS NOT NULL
-          GROUP BY COALESCE(oi.item_name, o.item_name)
+            TRIM(oi.item_name) as item_name,
+            SUM(COALESCE(oi.qty, 0)) as total_qty
+          FROM open_items oi
+          WHERE oi.item_name IS NOT NULL AND TRIM(oi.item_name) != ''
+          GROUP BY LOWER(TRIM(oi.item_name)), TRIM(oi.item_name)
         `)
         ;(openRes.rows || []).forEach(op => {
-          const key = String(op.item_name).trim().toLowerCase()
+          const rawName = op.item_name ? String(op.item_name).trim() : ''
+          const key = rawName.toLowerCase()
+          if (!key) return
           if (!itemMap.has(key)) {
             itemMap.set(key, {
-              id: `open_${key.replace(/\s+/g, '_')}`,
+              id: `open_${key.replace(/[^a-z0-9]/g, '_')}`,
               item_code: `OPEN-${key.substring(0, 4).toUpperCase()}`,
-              name: op.item_name,
-              item_name: op.item_name,
-              print_name: op.item_name,
+              name: rawName,
+              item_name: rawName,
+              print_name: rawName,
               item_group: 'Opening Stock',
               type: 'Opening Stock',
               tax: 5,
@@ -1058,21 +1059,23 @@ router.get('/:type', async (req, res, next) => {
       try {
         const papadRes = await db.query(`
           SELECT 
-            COALESCE(pcm.name, pi.item_name, 'Finished Papad') as item_name,
+            TRIM(pi.item_name) as item_name,
             SUM(COALESCE(pi.qty, 0)) as total_qty
           FROM papad_in pi
-          LEFT JOIN papad_company_master pcm ON (CAST(pcm.id AS TEXT) = CAST(pi.papad_company_id AS TEXT) OR pcm.name = pi.papad_company_id)
-          GROUP BY COALESCE(pcm.name, pi.item_name, 'Finished Papad')
+          WHERE pi.item_name IS NOT NULL AND TRIM(pi.item_name) != ''
+          GROUP BY LOWER(TRIM(pi.item_name)), TRIM(pi.item_name)
         `)
         ;(papadRes.rows || []).forEach(p => {
-          const key = String(p.item_name).trim().toLowerCase()
+          const rawName = p.item_name ? String(p.item_name).trim() : ''
+          const key = rawName.toLowerCase()
+          if (!key) return
           if (!itemMap.has(key)) {
             itemMap.set(key, {
-              id: `fg_${key.replace(/\s+/g, '_')}`,
+              id: `fg_${key.replace(/[^a-z0-9]/g, '_')}`,
               item_code: `FG-${key.substring(0, 4).toUpperCase()}`,
-              name: p.item_name,
-              item_name: p.item_name,
-              print_name: p.item_name,
+              name: rawName,
+              item_name: rawName,
+              print_name: rawName,
               item_group: 'Finished Goods',
               type: 'Finished Goods',
               tax: 5,

@@ -12,6 +12,9 @@ import PurchaseLedgerDetailsModal from './purchase/PurchaseLedgerDetailsModal';
 import WeightEntryModal from './purchase/WeightEntryModal';
 import './PurchaseDisplay.css';
 
+let cachedTransportsMap = {};
+let cachedSuppliersMap = {};
+
 // Classic ERP Column definitions for Purchase Display
 const columns = [
   { key: 's_no', title: 'S.No', render: (val, row, idx) => (idx !== undefined ? idx + 1 : (row.s_no || row.id || '')) },
@@ -31,9 +34,33 @@ const columns = [
       return String(d);
     }
   },
-  { key: 'supplier_name', title: 'Supplier Name', render: (val, row) => row.supplier_name || row.supplier || '—' },
+  { 
+    key: 'supplier_name', 
+    title: 'Supplier Name', 
+    render: (val, row) => {
+      const raw = row.supplier_name || row.supplier;
+      if (!raw) return '—';
+      const clean = String(raw).trim();
+      if (/^\d+$/.test(clean) && cachedSuppliersMap[clean]) {
+        return cachedSuppliersMap[clean];
+      }
+      return clean;
+    }
+  },
   { key: 'stock_type', title: 'Stock Type', render: (val, row) => row.stock_type || row.stockType || 'RM' },
-  { key: 'transporter', title: 'Transporter', render: (val, row) => row.transporter_name || row.transporter || row.transport || '—' },
+  { 
+    key: 'transporter', 
+    title: 'Transporter', 
+    render: (val, row) => {
+      const raw = row.transporter_name || row.transporter || row.transport;
+      if (!raw) return '—';
+      const clean = String(raw).trim();
+      if (/^\d+$/.test(clean) && cachedTransportsMap[clean]) {
+        return cachedTransportsMap[clean];
+      }
+      return clean;
+    }
+  },
   { key: 'transport_charges', title: 'Freight Charges (₹)', render: (val, row) => {
     const fc = row.transport_charges ?? row.freight_amount ?? row.net_transport_amount;
     return fc !== undefined && fc !== null && Number(fc) > 0 ? `₹${Number(fc).toLocaleString('en-IN')}` : '₹0';
@@ -141,6 +168,27 @@ const PurchaseDisplay = () => {
   const [selectedLedgerPurchase, setSelectedLedgerPurchase] = useState(null);
   const [ledgerModalOpen, setLedgerModalOpen] = useState(false);
   const [weightModalPurchase, setWeightModalPurchase] = useState(null);
+  const [, setMasterVersion] = useState(0);
+
+  React.useEffect(() => {
+    let mounted = true;
+    Promise.all([
+      api('/masters/transports').catch(() => []),
+      api('/masters/suppliers').catch(() => [])
+    ]).then(([transRes, suppRes]) => {
+      if (!mounted) return;
+      const tList = Array.isArray(transRes?.data || transRes) ? (transRes?.data || transRes) : [];
+      tList.forEach(t => {
+        if (t && t.id) cachedTransportsMap[String(t.id)] = t.print_name || t.name;
+      });
+      const sList = Array.isArray(suppRes?.data || suppRes) ? (suppRes?.data || suppRes) : [];
+      sList.forEach(s => {
+        if (s && s.id) cachedSuppliersMap[String(s.id)] = s.print_name || s.name;
+      });
+      setMasterVersion(v => v + 1);
+    });
+    return () => { mounted = false; };
+  }, []);
 
   const canEdit = isAdmin || hasPermission('Purchase', 'Display', 'can_edit') || hasPermission('Purchase', 'can_edit');
   const canDelete = isAdmin || hasPermission('Purchase', 'Display', 'can_delete') || hasPermission('Purchase', 'can_delete');
@@ -235,7 +283,14 @@ const PurchaseDisplay = () => {
         <button 
           className="action-btn" 
           style={{ backgroundColor: '#00838f', color: '#ffffff', border: 'none', padding: '5px 11px', borderRadius: '4px', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }} 
-          onClick={() => navigate(`/entry/quality-control-create?purchase_id=${row.id || row.s_no}&inv_no=${encodeURIComponent(row.inv_no || row.invoice_no || '')}&lotNo=${encodeURIComponent(row.lot_no || '')}`)}
+          onClick={() => {
+            const pId = row.id || row.s_no || '';
+            const inv = row.inv_no || row.invoice_no || '';
+            const lot = row.lot_no || '';
+            const item = row.item_name || row.item || '';
+            const supp = row.supplier_name || row.supplier || '';
+            navigate(`/entry/quality-control-create?purchase_id=${encodeURIComponent(pId)}&inv_no=${encodeURIComponent(inv)}&lotNo=${encodeURIComponent(lot)}&itemName=${encodeURIComponent(item)}&supplier=${encodeURIComponent(supp)}`);
+          }}
         >
           Create QC
         </button>

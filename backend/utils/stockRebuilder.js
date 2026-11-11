@@ -1,5 +1,24 @@
 const db = require('../config/database');
 
+async function resolveGodownInDb(idVal, nameVal, fallbackName = 'Main Godown') {
+  const numId = parseInt(idVal, 10);
+  const validId = !isNaN(numId) && numId > 0 ? numId : -1;
+  const strName = String(nameVal || idVal || '').trim();
+
+  if (validId > 0 || strName) {
+    try {
+      const gRes = await db.query(
+        `SELECT id, godown_name FROM godown_master WHERE id = ? OR LOWER(godown_name) = LOWER(?) LIMIT 1`,
+        [validId, strName]
+      );
+      if (gRes.rows && gRes.rows.length > 0) {
+        return { id: gRes.rows[0].id, name: gRes.rows[0].godown_name };
+      }
+    } catch (_) {}
+  }
+  return { id: validId > 0 ? validId : null, name: strName || fallbackName };
+}
+
 /**
  * rebuildStockLedger
  * Synchronizes the `stock` ledger table and `stock_lots` table with source transactions across all modules.
@@ -329,18 +348,10 @@ async function rebuildStockLedger(targetCompanyId = null) {
         }
       } else {
         // Standard single godown allocation
-        let godownId = rmGodown.id;
-        let godownName = rmGodown.godown_name;
         const gLookup = row.godown_id || row.godown_name;
-        if (gLookup) {
-          const gRes = await db.query(`SELECT id, godown_name FROM godown_master WHERE id = ? OR CAST(id AS TEXT) = ? OR LOWER(godown_name) = LOWER(?) LIMIT 1`, [gLookup, String(gLookup), String(gLookup)]);
-          if (gRes.rows && gRes.rows.length > 0) {
-            godownId = gRes.rows[0].id;
-            godownName = gRes.rows[0].godown_name;
-          } else if (typeof gLookup === 'string' && isNaN(parseInt(gLookup, 10))) {
-            godownName = gLookup;
-          }
-        }
+        const resolvedG = await resolveGodownInDb(gLookup, rmGodown.godown_name);
+        let godownId = resolvedG.id || rmGodown.id;
+        let godownName = resolvedG.name || rmGodown.godown_name;
 
         getOrCreateLot(row.item_name, row.lot_no, qty, row.rate, row.date, 'Purchase', row.purchase_id, godownId, godownName);
         await db.run(`
@@ -439,15 +450,9 @@ async function rebuildStockLedger(targetCompanyId = null) {
       if (!row.item_name) continue;
       const qty = parseFloat(row.quantity) || 0;
       const wt = parseFloat(row.total_wt) || (qty * (parseFloat(row.weight) || 1));
-      let godownId = row.cold_storage_id || (csGodown ? csGodown.id : null);
-      let godownName = row.cold_storage_name || (csGodown ? csGodown.godown_name : 'Cold Storage');
-      if (godownId) {
-        const gRes = await db.query(`SELECT id, godown_name FROM godown_master WHERE id = ? OR CAST(id AS TEXT) = ? OR LOWER(godown_name) = LOWER(?) LIMIT 1`, [godownId, String(godownId), String(godownName)]);
-        if (gRes.rows && gRes.rows.length > 0) {
-          godownId = gRes.rows[0].id;
-          godownName = gRes.rows[0].godown_name;
-        }
-      }
+      const resolvedCS = await resolveGodownInDb(row.cold_storage_id, row.cold_storage_name, csGodown ? csGodown.godown_name : 'Cold Storage');
+      let godownId = resolvedCS.id || (csGodown ? csGodown.id : null);
+      let godownName = resolvedCS.name || (csGodown ? csGodown.godown_name : 'Cold Storage');
 
       // Check if this CSI voucher is from direct purchase inward
       const isDirectPurchase = (row.source_godown_name || '').toLowerCase().includes('purchase') ||
@@ -487,12 +492,10 @@ async function rebuildStockLedger(targetCompanyId = null) {
           srcGodownId = srcGodownId || resolved.godownId;
           srcGodownName = srcGodownName && srcGodownName !== 'Main Godown' ? srcGodownName : resolved.godownName;
         }
-        if (srcGodownId) {
-          const gRes = await db.query(`SELECT id, godown_name FROM godown_master WHERE id = ? OR CAST(id AS TEXT) = ? OR LOWER(godown_name) = LOWER(?) LIMIT 1`, [srcGodownId, String(srcGodownId), String(srcGodownName)]);
-          if (gRes.rows && gRes.rows.length > 0) {
-            srcGodownId = gRes.rows[0].id;
-            srcGodownName = gRes.rows[0].godown_name;
-          }
+        if (srcGodownId || srcGodownName) {
+          const resolvedSrc = await resolveGodownInDb(srcGodownId, srcGodownName, defaultGodown.godown_name);
+          srcGodownId = resolvedSrc.id || srcGodownId;
+          srcGodownName = resolvedSrc.name || srcGodownName;
         }
         deductFromLot(row.item_name, srcLotNo, qty, srcGodownId, 'consumed_qty');
 
@@ -508,16 +511,9 @@ async function rebuildStockLedger(targetCompanyId = null) {
       if (!row.item_name) continue;
       const qty = parseFloat(row.quantity) || 0;
       const wt = parseFloat(row.total_wt) || (qty * (parseFloat(row.weight) || 1));
-      let destGodownId = row.destination_godown_id || defaultGodown.id;
-      let destGodownName = row.destination_godown_name || defaultGodown.godown_name;
-      const gDestRes = await db.query(`SELECT id, godown_name FROM godown_master WHERE id = ? OR CAST(id AS TEXT) = ? OR LOWER(godown_name) = LOWER(?) LIMIT 1`, [destGodownId, String(destGodownId), String(destGodownName)]);
-      if (gDestRes.rows && gDestRes.rows.length > 0) {
-        destGodownId = gDestRes.rows[0].id;
-        destGodownName = gDestRes.rows[0].godown_name;
-      } else {
-        destGodownId = defaultGodown.id;
-        destGodownName = defaultGodown.godown_name;
-      }
+      const resolvedDest = await resolveGodownInDb(row.destination_godown_id, row.destination_godown_name, defaultGodown.godown_name);
+      let destGodownId = resolvedDest.id || defaultGodown.id;
+      let destGodownName = resolvedDest.name || defaultGodown.godown_name;
 
       // Lot received back at destination godown (purchase_lot_no or CS lot)
       let destLotNo = row.purchase_lot_no;
@@ -533,21 +529,9 @@ async function rebuildStockLedger(targetCompanyId = null) {
       `, [row.date, row.item_name, destLotNo, qty, wt, row.voucher_id, destGodownName, destGodownId, `Received from Cold Storage: ${row.cold_storage_name || 'Cold Storage'}`]);
 
       // Deduct from Cold Storage lot (which is cold_storage_lot_no!)
-      let csGodownId = row.cold_storage_id || (csGodown ? csGodown.id : null);
-      let csGodownName = row.cold_storage_name || (csGodown ? csGodown.godown_name : 'Cold Storage');
-      if (csGodownId) {
-        const gRes = await db.query(`SELECT id, godown_name FROM godown_master WHERE id = ? OR CAST(id AS TEXT) = ? OR LOWER(godown_name) = LOWER(?) LIMIT 1`, [csGodownId, String(csGodownId), String(csGodownName)]);
-        if (gRes.rows && gRes.rows.length > 0) {
-          csGodownId = gRes.rows[0].id;
-          csGodownName = gRes.rows[0].godown_name;
-        }
-      } else if (csGodownName) {
-        const gRes = await db.query(`SELECT id, godown_name FROM godown_master WHERE LOWER(godown_name) = LOWER(?) OR LOWER(godown_name) LIKE ? LIMIT 1`, [csGodownName.toLowerCase(), `%${csGodownName.toLowerCase()}%`]);
-        if (gRes.rows && gRes.rows.length > 0) {
-          csGodownId = gRes.rows[0].id;
-          csGodownName = gRes.rows[0].godown_name;
-        }
-      }
+      const resolvedCSOut = await resolveGodownInDb(row.cold_storage_id, row.cold_storage_name, csGodown ? csGodown.godown_name : 'Cold Storage');
+      let csGodownId = resolvedCSOut.id || (csGodown ? csGodown.id : null);
+      let csGodownName = resolvedCSOut.name || (csGodown ? csGodown.godown_name : 'Cold Storage');
       deductFromLot(row.item_name, csLotToDeduct, qty, csGodownId, 'consumed_qty');
       await db.run(`
         INSERT INTO stock (date, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, godown_id, remarks)
@@ -588,13 +572,10 @@ async function rebuildStockLedger(targetCompanyId = null) {
         }
       }
 
-      if (gId) {
-        try {
-          const gRes = await db.query(`SELECT id, godown_name FROM godown_master WHERE id = ? OR CAST(id AS TEXT) = ? LIMIT 1`, [gId, String(gId)]);
-          if (gRes.rows && gRes.rows.length > 0) {
-            gName = gRes.rows[0].godown_name;
-          }
-        } catch (e) {}
+      if (gId || gName) {
+        const resolvedOut = await resolveGodownInDb(gId, gName, defaultGodownName);
+        gId = resolvedOut.id || gId;
+        gName = resolvedOut.name || gName;
       }
 
       return { godownId: gId, godownName: gName };
@@ -780,18 +761,9 @@ async function rebuildStockLedger(targetCompanyId = null) {
         }
 
         // Source Godown Outward
-        let fromGodownId = row.from_godown_id;
-        let fromGodownName = row.from_godown_name;
-        if (fromGodownId) {
-          const gFromRes = await db.query(`SELECT id, godown_name FROM godown_master WHERE id = ? OR CAST(id AS TEXT) = ? OR LOWER(godown_name) = LOWER(?) LIMIT 1`, [fromGodownId, String(fromGodownId), String(fromGodownName)]);
-          if (gFromRes.rows && gFromRes.rows.length > 0) {
-            fromGodownId = gFromRes.rows[0].id;
-            fromGodownName = gFromRes.rows[0].godown_name;
-          }
-        } else {
-          fromGodownId = defaultGodown.id;
-          fromGodownName = defaultGodown.godown_name;
-        }
+        const resolvedFrom = await resolveGodownInDb(row.from_godown_id, row.from_godown_name, defaultGodown.godown_name);
+        let fromGodownId = resolvedFrom.id || defaultGodown.id;
+        let fromGodownName = resolvedFrom.name || defaultGodown.godown_name;
 
         deductFromLot(row.item_name, row.lot_no, qty, fromGodownId, 'consumed_qty');
 
@@ -801,18 +773,9 @@ async function rebuildStockLedger(targetCompanyId = null) {
         `, [row.date, row.item_name, row.lot_no || '', -qty, -wt, row.rate || 0, -(row.amount || 0), row.id, fromGodownName, fromGodownId, `Transferred to ${row.to_godown_name || 'Destination Godown'}`]);
 
         // Destination Godown Inward
-        let toGodownId = row.to_godown_id;
-        let toGodownName = row.to_godown_name;
-        if (toGodownId) {
-          const gToRes = await db.query(`SELECT id, godown_name FROM godown_master WHERE id = ? OR CAST(id AS TEXT) = ? OR LOWER(godown_name) = LOWER(?) LIMIT 1`, [toGodownId, String(toGodownId), String(toGodownName)]);
-          if (gToRes.rows && gToRes.rows.length > 0) {
-            toGodownId = gToRes.rows[0].id;
-            toGodownName = gToRes.rows[0].godown_name;
-          }
-        } else {
-          toGodownId = defaultGodown.id;
-          toGodownName = defaultGodown.godown_name;
-        }
+        const resolvedTo = await resolveGodownInDb(row.to_godown_id, row.to_godown_name, defaultGodown.godown_name);
+        let toGodownId = resolvedTo.id || defaultGodown.id;
+        let toGodownName = resolvedTo.name || defaultGodown.godown_name;
 
         const destinationLotNo = destIsColdStorage && !/^CS-/i.test(row.lot_no || '')
           ? `CS-${row.lot_no || 'TRF-LOT'}`

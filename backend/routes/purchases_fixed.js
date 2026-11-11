@@ -263,22 +263,6 @@ router.use(async (req, res, next) => {
   }
 });
 
-// GET all purchases
-router.get('/', async (req, res) => {
-  try {
-    console.log('Fetching purchases...')
-    const result = await db.query(`
-      SELECT * FROM purchases ORDER BY created_at DESC
-    `)
-    console.log('Purchases fetched:', result.rows.length)
-    res.json(result.rows)
-  } catch (error) {
-    console.error('Error fetching purchases:', error.message)
-    console.error('Error stack:', error.stack)
-    res.status(500).json({ message: 'Error fetching purchases', error: error.message })
-  }
-})
-
   // GET next s_no for purchase creation
 router.get('/next-sno', async (req, res) => {
   try {
@@ -314,8 +298,9 @@ router.get(['/', '/list', '/purchase-list'], async (req, res) => {
       COALESCE(s.print_name, s.name, p.supplier, '') AS party,
       COALESCE(s.print_name, s.name, p.supplier, '') AS supplier_name,
       COALESCE(s.address1, p.address, '') AS address,
-      COALESCE(p.transporter, p.transport, '') AS transporter,
-      COALESCE(p.transport, p.transporter, '') AS transport,
+      COALESCE(NULLIF(tm.print_name, ''), NULLIF(tm.name, ''), NULLIF(p.transporter, ''), NULLIF(p.transport, ''), '') AS transporter,
+      COALESCE(NULLIF(tm.print_name, ''), NULLIF(tm.name, ''), NULLIF(p.transporter, ''), NULLIF(p.transport, ''), '') AS transporter_name,
+      COALESCE(NULLIF(p.transport, ''), NULLIF(p.transporter, ''), NULLIF(tm.print_name, ''), NULLIF(tm.name, ''), '') AS transport,
       COALESCE(p.vehicle_no, p.lorry_no, vm.vehicle_no, '') AS vehicle_no,
       COALESCE(p.lorry_no, p.vehicle_no, vm.vehicle_no, '') AS lorry_no,
       COALESCE(p.driver_name, p.driver, vm.driver_name, '') AS driver,
@@ -360,7 +345,19 @@ router.get(['/', '/list', '/purchase-list'], async (req, res) => {
       qci.id AS qc_id
     FROM purchases p
     LEFT JOIN purchase_orders po ON (CAST(po.id AS TEXT) = CAST(p.purchase_order_id AS TEXT) OR CAST(po.id AS TEXT) = CAST(p.source_order_id AS TEXT) OR (p.po_no IS NOT NULL AND CAST(p.po_no AS TEXT) != '' AND (po.inv_no = p.po_no OR CAST(po.s_no AS TEXT) = CAST(p.po_no AS TEXT))))
-    LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(p.supplier AS TEXT) OR s.name = CAST(p.supplier AS TEXT) OR s.print_name = CAST(p.supplier AS TEXT))
+    LEFT JOIN supplier_master s ON (
+      TRIM(CAST(s.id AS TEXT)) = TRIM(CAST(p.supplier AS TEXT)) 
+      OR LOWER(TRIM(s.name)) = LOWER(TRIM(CAST(p.supplier AS TEXT))) 
+      OR LOWER(TRIM(COALESCE(s.print_name, ''))) = LOWER(TRIM(CAST(p.supplier AS TEXT)))
+    )
+    LEFT JOIN transport_master tm ON (
+      TRIM(CAST(tm.id AS TEXT)) = TRIM(CAST(p.transporter AS TEXT)) 
+      OR TRIM(CAST(tm.id AS TEXT)) = TRIM(CAST(p.transport AS TEXT)) 
+      OR LOWER(TRIM(tm.name)) = LOWER(TRIM(CAST(p.transporter AS TEXT))) 
+      OR LOWER(TRIM(COALESCE(tm.print_name, ''))) = LOWER(TRIM(CAST(p.transporter AS TEXT)))
+      OR LOWER(TRIM(tm.name)) = LOWER(TRIM(CAST(p.transport AS TEXT)))
+      OR LOWER(TRIM(COALESCE(tm.print_name, ''))) = LOWER(TRIM(CAST(p.transport AS TEXT)))
+    )
     LEFT JOIN purchase_items pi ON CAST(pi.purchase_id AS TEXT) = CAST(p.id AS TEXT)
     LEFT JOIN item_master im ON (CAST(im.id AS TEXT) = CAST(pi.item_id AS TEXT) OR im.item_name = CAST(pi.item_name AS TEXT))
     LEFT JOIN vehicle_movements vm ON (CAST(vm.reference_id AS TEXT) = CAST(p.id AS TEXT) OR CAST(vm.reference_id AS TEXT) = CAST(p.inv_no AS TEXT) OR (vm.lot_no IS NOT NULL AND CAST(vm.lot_no AS TEXT) != '' AND CAST(vm.lot_no AS TEXT) = CAST(pi.lot_no AS TEXT)))
@@ -521,9 +518,9 @@ router.get('/:id', async (req, res) => {
     if (rawTransporter) {
       transporterRow = (await db.query(
         `SELECT name, print_name FROM transport_master
-         WHERE CAST(id AS TEXT) = ? OR name = ? OR print_name = ?
+         WHERE TRIM(CAST(id AS TEXT)) = ? OR LOWER(TRIM(name)) = LOWER(?) OR LOWER(TRIM(COALESCE(print_name, ''))) = LOWER(?)
          LIMIT 1`,
-        [String(rawTransporter), rawTransporter, rawTransporter]
+        [String(rawTransporter).trim(), String(rawTransporter).trim(), String(rawTransporter).trim()]
       )).rows[0] || null;
     }
 
@@ -634,21 +631,36 @@ router.get('/:id/ledger-statement', async (req, res) => {
     }
 
     // If no voucher entries recorded yet, generate them on the fly
-    const baseAmount = Number(purchase.base_amount || purchase.taxable_amount || 0);
-    const taxAmount = Number(purchase.tax_amount || 0);
+    let computedBaseFromItems = 0;
+    let computedTaxFromItems = 0;
+    let computedDisFromItems = 0;
+    if (Array.isArray(items) && items.length > 0) {
+      computedBaseFromItems = items.reduce((s, it) => s + (Number(it.qty || 0) * Number(it.rate || it.purc_rate || 0)), 0);
+      computedTaxFromItems = items.reduce((s, it) => s + Number(it.tax_amount || 0), 0);
+      computedDisFromItems = items.reduce((s, it) => s + Number(it.disc_amount || 0), 0);
+    }
+
+    const baseAmount = Number(purchase.base_amount || purchase.taxable_amount || computedBaseFromItems || 0);
+    const taxAmount = Number(purchase.tax_amount || computedTaxFromItems || 0);
     const isInterstate = String(purchase.tax_type || '').toLowerCase().includes('inter') || Number(purchase.igst_amount || 0) > 0;
     const cgstAmount = Number(purchase.cgst_amount || (isInterstate ? 0 : taxAmount / 2));
     const sgstAmount = Number(purchase.sgst_amount || (isInterstate ? 0 : taxAmount - cgstAmount));
     const igstAmount = Number(purchase.igst_amount || (isInterstate ? taxAmount : 0));
-    const discAmount = Number(purchase.disc_amount || 0);
+    const discAmount = Number(purchase.disc_amount || computedDisFromItems || 0);
     const transportCharges = Number(purchase.transport_charges || purchase.freight_amount || 0);
     const loadmanCharges = Number(purchase.loadman_charges || 0);
     
     // Resolve Supplier Name
-    let supplierName = purchase.supplier || 'Supplier';
-    if (purchase.supplier && /^\d+$/.test(String(purchase.supplier))) {
+    let supplierName = purchase.supplier_name || purchase.supplier || 'Supplier';
+    if (purchase.supplier) {
       try {
-        const sRes = await db.query('SELECT name, print_name FROM supplier_master WHERE id = ?', [purchase.supplier], activeCompanyId);
+        const sRes = await db.query(
+          `SELECT name, print_name FROM supplier_master 
+           WHERE TRIM(CAST(id AS TEXT)) = ? OR LOWER(TRIM(name)) = LOWER(?) OR LOWER(TRIM(COALESCE(print_name, ''))) = LOWER(?) 
+           LIMIT 1`,
+          [String(purchase.supplier).trim(), String(purchase.supplier).trim(), String(purchase.supplier).trim()],
+          activeCompanyId
+        );
         if (sRes.rows && sRes.rows[0]) {
           supplierName = sRes.rows[0].print_name || sRes.rows[0].name;
         }
@@ -656,72 +668,48 @@ router.get('/:id/ledger-statement', async (req, res) => {
     }
 
     // Resolve Transporter Name
-    let transporterName = purchase.transporter || purchase.transport || 'Transporter Payable';
-    if (transporterName && /^\d+$/.test(String(transporterName))) {
+    let transporterName = purchase.transporter_name || purchase.transporter || purchase.transport || 'Transporter Payable';
+    if (purchase.transporter || purchase.transport) {
+      const rawTrans = String(purchase.transporter || purchase.transport).trim();
       try {
-        const tRes = await db.query('SELECT name, print_name FROM transport_master WHERE id = ?', [transporterName], activeCompanyId);
+        const tRes = await db.query(
+          `SELECT name, print_name FROM transport_master 
+           WHERE TRIM(CAST(id AS TEXT)) = ? OR LOWER(TRIM(name)) = LOWER(?) OR LOWER(TRIM(COALESCE(print_name, ''))) = LOWER(?) 
+           LIMIT 1`,
+          [rawTrans, rawTrans, rawTrans],
+          activeCompanyId
+        );
         if (tRes.rows && tRes.rows[0]) {
           transporterName = tRes.rows[0].print_name || tRes.rows[0].name;
         }
       } catch (_) {}
     }
     
-    const loadmanName = purchase.loadman_name || 'Loadman Payable';
+    let loadmanName = purchase.loadman_name || 'Loadman Payable';
+    if (purchase.loadman_worker_id) {
+      try {
+        const lmRes = await db.query(
+          `SELECT name, worker_name FROM operational_parties WHERE TRIM(CAST(id AS TEXT)) = ? LIMIT 1`,
+          [String(purchase.loadman_worker_id).trim()],
+          activeCompanyId
+        );
+        if (lmRes.rows && lmRes.rows[0]) {
+          loadmanName = lmRes.rows[0].name || lmRes.rows[0].worker_name || loadmanName;
+        }
+      } catch (_) {}
+    }
 
     let totalDeductions = deductions.reduce((sum, d) => sum + Number(d.amount || 0), 0);
     if (totalDeductions === 0 && Number(purchase.deduction_amount || 0) > 0) {
       totalDeductions = Number(purchase.deduction_amount);
     }
 
-    // Build or refine Journal Entries list (Double Entry: Total Debit === Total Credit)
-    let journalEntries = [];
-    let entryIdx = 1;
-
-    // 1. Purchase Account (Dr)
-    journalEntries.push({
-      no: entryIdx++,
-      ledger_name: 'Purchase Account',
-      account_head: 'Direct Expenses / Inventory',
-      debit: baseAmount,
-      credit: 0,
-      particulars: `${supplierName} taxable purchase`
-    });
-
-    // 2. GST Input (Dr)
-    if (isInterstate && igstAmount > 0) {
-      journalEntries.push({
-        no: entryIdx++,
-        ledger_name: 'Input IGST',
-        account_head: 'Duties & Taxes',
-        debit: igstAmount,
-        credit: 0,
-        particulars: `IGST on ${voucherNo}`
-      });
-    } else {
-      if (cgstAmount > 0) {
-        journalEntries.push({
-          no: entryIdx++,
-          ledger_name: 'Input CGST',
-          account_head: 'Duties & Taxes',
-          debit: cgstAmount,
-          credit: 0,
-          particulars: `CGST on ${voucherNo}`
-        });
-      }
-      if (sgstAmount > 0) {
-        journalEntries.push({
-          no: entryIdx++,
-          ledger_name: 'Input SGST',
-          account_head: 'Duties & Taxes',
-          debit: sgstAmount,
-          credit: 0,
-          particulars: `SGST on ${voucherNo}`
-        });
-      }
-    }
-
     // 3. Gross Invoice to Supplier (Cr)
-    const grossSupplierInvoice = Number((baseAmount + taxAmount - discAmount).toFixed(2));
+    const grossSupplierInvoice = Number(
+      (purchase.grand_total && Number(purchase.grand_total) > 0)
+        ? Number(purchase.grand_total)
+        : (baseAmount + taxAmount - discAmount).toFixed(2)
+    );
     journalEntries.push({
       no: entryIdx++,
       ledger_name: supplierName,

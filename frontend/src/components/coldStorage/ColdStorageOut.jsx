@@ -101,7 +101,7 @@ const ColdStorageOut = () => {
 
   // Destination Internal Godown
   const [destinationGodownId, setDestinationGodownId] = useState('');
-  const [destinationGodownName, setDestinationGodownName] = useState('Main Godown');
+  const [destinationGodownName, setDestinationGodownName] = useState('');
 
   // Customer Dispatch Details
   const [customerId, setCustomerId] = useState(null);
@@ -387,25 +387,11 @@ const ColdStorageOut = () => {
 
       if (csRes?.data?.length > 0) {
         setColdStorages(csRes.data);
-        const first = csRes.data[0];
-        setColdStorageId(first.id);
-        setColdStorageName(first.godown_name);
-        setSelectedCsObj(first);
-        setHandlingRate(parseFloat(first.outward_handling_rate || 0));
-        loadCsLots(first.id);
       }
 
       const gList = gRes?.data || [];
       if (gList.length > 0) {
         setGodowns(gList);
-        const mainG = gList.find(g =>
-          (g.godown_name || '').toLowerCase().includes('main') ||
-          (g.godown_name || '').toLowerCase().includes('production')
-        );
-        if (mainG) {
-          setDestinationGodownId(mainG.id);
-          setDestinationGodownName(mainG.godown_name);
-        }
       }
 
       if (custRes?.data) {

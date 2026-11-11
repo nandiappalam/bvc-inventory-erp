@@ -342,9 +342,8 @@ async function ensureSqliteColdStorageSchema(companyId) {
     }
   }
 
-  // Ensure BTS Cold Storage (Godown 2) is configured and has default day slabs
   try {
-    const gCheck = await compDb.query(`SELECT id, godown_name, is_cold_storage FROM godown_master WHERE id = 2 OR godown_name LIKE '%Cold Storage%' LIMIT 1`);
+    const gCheck = await compDb.query(`SELECT id, godown_name, is_cold_storage FROM godown_master WHERE is_cold_storage = 1 OR godown_type = 'Cold Storage' LIMIT 1`);
     if (gCheck.rows && gCheck.rows.length > 0) {
       await compDb.run(`
         UPDATE godown_master SET
@@ -353,8 +352,7 @@ async function ensureSqliteColdStorageSchema(companyId) {
           slab_calculation_type = COALESCE(slab_calculation_type, 'Progressive'),
           inward_unloading_rate = COALESCE(inward_unloading_rate, 0.50),
           outward_loading_rate = COALESCE(outward_loading_rate, 0.50),
-          storage_rate_per_kg_day = COALESCE(storage_rate_per_kg_day, 0.20),
-          operator_name = COALESCE(operator_name, 'BTS Logistics & Cold Chain')
+          storage_rate_per_kg_day = COALESCE(storage_rate_per_kg_day, 0.20)
         WHERE id = ?
       `, [gCheck.rows[0].id]);
     }

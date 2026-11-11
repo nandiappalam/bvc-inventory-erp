@@ -263,22 +263,6 @@ router.use(async (req, res, next) => {
   }
 });
 
-// GET all purchases
-router.get('/', async (req, res) => {
-  try {
-    console.log('Fetching purchases...')
-    const result = await db.query(`
-      SELECT * FROM purchases ORDER BY created_at DESC
-    `)
-    console.log('Purchases fetched:', result.rows.length)
-    res.json(result.rows)
-  } catch (error) {
-    console.error('Error fetching purchases:', error.message)
-    console.error('Error stack:', error.stack)
-    res.status(500).json({ message: 'Error fetching purchases', error: error.message })
-  }
-})
-
   // GET next s_no for purchase creation
 router.get('/next-sno', async (req, res) => {
   try {
@@ -314,8 +298,9 @@ router.get(['/', '/list', '/purchase-list'], async (req, res) => {
       COALESCE(s.print_name, s.name, p.supplier, '') AS party,
       COALESCE(s.print_name, s.name, p.supplier, '') AS supplier_name,
       COALESCE(s.address1, p.address, '') AS address,
-      COALESCE(p.transporter, p.transport, '') AS transporter,
-      COALESCE(p.transport, p.transporter, '') AS transport,
+      COALESCE(NULLIF(tm.print_name, ''), NULLIF(tm.name, ''), NULLIF(p.transporter, ''), NULLIF(p.transport, ''), '') AS transporter,
+      COALESCE(NULLIF(tm.print_name, ''), NULLIF(tm.name, ''), NULLIF(p.transporter, ''), NULLIF(p.transport, ''), '') AS transporter_name,
+      COALESCE(NULLIF(p.transport, ''), NULLIF(p.transporter, ''), NULLIF(tm.print_name, ''), NULLIF(tm.name, ''), '') AS transport,
       COALESCE(p.vehicle_no, p.lorry_no, vm.vehicle_no, '') AS vehicle_no,
       COALESCE(p.lorry_no, p.vehicle_no, vm.vehicle_no, '') AS lorry_no,
       COALESCE(p.driver_name, p.driver, vm.driver_name, '') AS driver,
@@ -360,7 +345,19 @@ router.get(['/', '/list', '/purchase-list'], async (req, res) => {
       qci.id AS qc_id
     FROM purchases p
     LEFT JOIN purchase_orders po ON (CAST(po.id AS TEXT) = CAST(p.purchase_order_id AS TEXT) OR CAST(po.id AS TEXT) = CAST(p.source_order_id AS TEXT) OR (p.po_no IS NOT NULL AND CAST(p.po_no AS TEXT) != '' AND (po.inv_no = p.po_no OR CAST(po.s_no AS TEXT) = CAST(p.po_no AS TEXT))))
-    LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(p.supplier AS TEXT) OR s.name = CAST(p.supplier AS TEXT) OR s.print_name = CAST(p.supplier AS TEXT))
+    LEFT JOIN supplier_master s ON (
+      TRIM(CAST(s.id AS TEXT)) = TRIM(CAST(p.supplier AS TEXT)) 
+      OR LOWER(TRIM(s.name)) = LOWER(TRIM(CAST(p.supplier AS TEXT))) 
+      OR LOWER(TRIM(COALESCE(s.print_name, ''))) = LOWER(TRIM(CAST(p.supplier AS TEXT)))
+    )
+    LEFT JOIN transport_master tm ON (
+      TRIM(CAST(tm.id AS TEXT)) = TRIM(CAST(p.transporter AS TEXT)) 
+      OR TRIM(CAST(tm.id AS TEXT)) = TRIM(CAST(p.transport AS TEXT)) 
+      OR LOWER(TRIM(tm.name)) = LOWER(TRIM(CAST(p.transporter AS TEXT))) 
+      OR LOWER(TRIM(COALESCE(tm.print_name, ''))) = LOWER(TRIM(CAST(p.transporter AS TEXT)))
+      OR LOWER(TRIM(tm.name)) = LOWER(TRIM(CAST(p.transport AS TEXT)))
+      OR LOWER(TRIM(COALESCE(tm.print_name, ''))) = LOWER(TRIM(CAST(p.transport AS TEXT)))
+    )
     LEFT JOIN purchase_items pi ON CAST(pi.purchase_id AS TEXT) = CAST(p.id AS TEXT)
     LEFT JOIN item_master im ON (CAST(im.id AS TEXT) = CAST(pi.item_id AS TEXT) OR im.item_name = CAST(pi.item_name AS TEXT))
     LEFT JOIN vehicle_movements vm ON (CAST(vm.reference_id AS TEXT) = CAST(p.id AS TEXT) OR CAST(vm.reference_id AS TEXT) = CAST(p.inv_no AS TEXT) OR (vm.lot_no IS NOT NULL AND CAST(vm.lot_no AS TEXT) != '' AND CAST(vm.lot_no AS TEXT) = CAST(pi.lot_no AS TEXT)))

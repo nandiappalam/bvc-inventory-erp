@@ -42,14 +42,27 @@ const TransportFreightDetailsModal = ({
         const res = await getMasters('transports');
         const list = Array.isArray(res?.data || res) ? (res?.data || res) : [];
         setTransportersList(list);
+
+        const rawT = initialData.transporter_name || initialData.transporter || initialData.transport || '';
+        if (/^\d+$/.test(String(rawT).trim()) && list.length > 0) {
+          const match = list.find(t => String(t.id) === String(rawT).trim());
+          if (match) {
+            setData(prev => ({
+              ...prev,
+              transporter: match.print_name || match.name || prev.transporter
+            }));
+          }
+        }
       } catch (err) {
         console.warn('Notice loading transporters list:', err.message);
       }
     };
     loadTransporters();
 
+    const rawT = initialData.transporter_name || initialData.transporter || initialData.transport || '';
+
     setData({
-      transporter: initialData.transporter || initialData.transport || '',
+      transporter: rawT,
       vehicle_no: initialData.vehicle_no || initialData.lorry_no || '',
       driver_name: initialData.driver_name || initialData.driver || '',
       driver_mobile: initialData.driver_mobile || '',
@@ -90,8 +103,17 @@ const TransportFreightDetailsModal = ({
 
   const handleSave = (e) => {
     e.preventDefault();
+    const matched = transportersList.find(t => 
+      String(t.name).trim().toLowerCase() === String(data.transporter).trim().toLowerCase() ||
+      String(t.print_name).trim().toLowerCase() === String(data.transporter).trim().toLowerCase() ||
+      String(t.id) === String(data.transporter).trim()
+    );
+    const finalName = matched ? (matched.print_name || matched.name) : data.transporter;
+
     onSave({
       ...data,
+      transporter: finalName,
+      transporter_name: finalName,
       total_deduction: totalDeduction,
       total_additional: totalAdditional,
       net_transport_amount: netTransportAmount,

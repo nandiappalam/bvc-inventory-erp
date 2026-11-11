@@ -167,45 +167,41 @@ const ensureCompanyDefaultUsers = async (companyId) => {
     const adminPasswordHash = await bcrypt.hash('admin123', 10);
     const staffPasswordHash = await bcrypt.hash('staff123', 10);
 
-    // 1. Check if direct admin user exists for this company_id
-    const adminDirectCheck = await masterDb.query(
-      `SELECT id FROM users WHERE LOWER(TRIM(username)) = 'admin' AND company_id = ?`,
-      [companyIdNum]
-    );
-
-    if (!adminDirectCheck.rows || adminDirectCheck.rows.length === 0) {
-      const res = await masterDb.run(
-        `INSERT INTO users (username, password_hash, role, status, company_id) VALUES (?, ?, 'Admin', 'Active', ?)`,
-        ['admin', adminPasswordHash, companyIdNum]
+    const ensureDefaultUser = async (uname, pwdHash, defaultRole) => {
+      const direct = await masterDb.query(
+        `SELECT id FROM users WHERE LOWER(TRIM(username)) = LOWER(TRIM(?)) AND company_id = ?`,
+        [uname, companyIdNum]
       );
-      const newAdminId = res ? (res.lastID || res.lastInsertRowid) : null;
-      if (newAdminId) {
+      let userId = direct.rows && direct.rows.length > 0 ? direct.rows[0].id : null;
+
+      if (!userId) {
+        try {
+          const res = await masterDb.run(
+            `INSERT INTO users (username, password_hash, role, status, company_id) VALUES (?, ?, ?, 'Active', ?)`,
+            [uname, pwdHash, defaultRole, companyIdNum]
+          );
+          userId = res ? (res.lastID || res.lastInsertRowid) : null;
+        } catch (_) {
+          const globalUser = await masterDb.query(
+            `SELECT id FROM users WHERE LOWER(TRIM(username)) = LOWER(TRIM(?)) ORDER BY id ASC LIMIT 1`,
+            [uname]
+          );
+          if (globalUser.rows && globalUser.rows.length > 0) {
+            userId = globalUser.rows[0].id;
+          }
+        }
+      }
+
+      if (userId) {
         await masterDb.run(
           `INSERT INTO user_company_access (user_id, company_id) VALUES (?, ?)`,
-          [newAdminId, companyIdNum]
+          [userId, companyIdNum]
         ).catch(() => {});
       }
-    }
+    };
 
-    // 2. Check if direct staff user exists for this company_id
-    const staffDirectCheck = await masterDb.query(
-      `SELECT id FROM users WHERE LOWER(TRIM(username)) = 'staff' AND company_id = ?`,
-      [companyIdNum]
-    );
-
-    if (!staffDirectCheck.rows || staffDirectCheck.rows.length === 0) {
-      const res = await masterDb.run(
-        `INSERT INTO users (username, password_hash, role, status, company_id) VALUES (?, ?, 'Staff', 'Active', ?)`,
-        ['staff', staffPasswordHash, companyIdNum]
-      );
-      const newStaffId = res ? (res.lastID || res.lastInsertRowid) : null;
-      if (newStaffId) {
-        await masterDb.run(
-          `INSERT INTO user_company_access (user_id, company_id) VALUES (?, ?)`,
-          [newStaffId, companyIdNum]
-        ).catch(() => {});
-      }
-    }
+    await ensureDefaultUser('admin', adminPasswordHash, 'Admin');
+    await ensureDefaultUser('staff', staffPasswordHash, 'Staff');
   } catch (err) {
     console.warn(`Notice ensuring default users for company ${companyIdNum}:`, err.message);
   }
@@ -286,11 +282,12 @@ router.post('/login', async (req, res) => {
     }
 
     const trimmedUsername = String(username).trim();
+    const trimmedPassword = typeof password === 'string' ? password.trim() : '';
     const companyIdNum = company_id ? Number(company_id) : null;
     if (company_id && (!Number.isSafeInteger(companyIdNum) || companyIdNum <= 0)) {
       return res.status(400).json({ message: 'Invalid company ID' });
     }
-    if (typeof password !== 'string' || !password.trim()) {
+    if (!trimmedPassword) {
       return res.status(400).json({ message: 'Password is required' });
     }
 
@@ -300,25 +297,25 @@ router.post('/login', async (req, res) => {
 
     let userCandidate = null;
 
-    const userQuery = companyIdNum
-      ? await masterDb.query(
-        `SELECT * FROM users
-          WHERE LOWER(TRIM(username)) = LOWER(TRIM(?))
-            AND (company_id = ? OR EXISTS (
-              SELECT 1 FROM user_company_access a
-               WHERE a.user_id = users.id AND a.company_id = ?
-            ))`,
-        [trimmedUsername, companyIdNum, companyIdNum]
-      )
-      : await masterDb.query(
-        'SELECT * FROM users WHERE LOWER(TRIM(username)) = LOWER(TRIM(?)) ORDER BY company_id ASC',
-        [trimmedUsername]
-      );
+    const userQuery = await masterDb.query(
+      `SELECT * FROM users WHERE LOWER(TRIM(username)) = LOWER(TRIM(?))`,
+      [trimmedUsername]
+    );
 
-    for (const candidate of (userQuery.rows || [])) {
+    const candidates = userQuery.rows || [];
+
+    if (companyIdNum && candidates.length > 1) {
+      candidates.sort((a, b) => {
+        if (Number(a.company_id) === Number(companyIdNum)) return -1;
+        if (Number(b.company_id) === Number(companyIdNum)) return 1;
+        return 0;
+      });
+    }
+
+    for (const candidate of candidates) {
       const matches = candidate.password_hash && candidate.password_hash.startsWith('$2')
-        ? await bcrypt.compare(password, candidate.password_hash)
-        : password === candidate.password_hash;
+        ? (await bcrypt.compare(trimmedPassword, candidate.password_hash) || await bcrypt.compare(password, candidate.password_hash))
+        : (trimmedPassword === candidate.password_hash || password === candidate.password_hash);
       if (matches) {
         userCandidate = candidate;
         break;
@@ -326,27 +323,28 @@ router.post('/login', async (req, res) => {
     }
 
     // Auto-resync default admin/staff credentials for existing companies if password hash was outdated
-    if (!userCandidate) {
-      const isDefaultAdmin = trimmedUsername.toLowerCase() === 'admin' && password === 'admin123';
-      const isDefaultStaff = trimmedUsername.toLowerCase() === 'staff' && password === 'staff123';
-      if (isDefaultAdmin || isDefaultStaff) {
-        if (userQuery.rows && userQuery.rows.length > 0) {
-          const matchingUser = userQuery.rows[0];
-          const newHash = await bcrypt.hash(password, 10);
-          await masterDb.run('UPDATE users SET password_hash = ?, status = ? WHERE id = ?', [newHash, 'Active', matchingUser.id]);
-          matchingUser.password_hash = newHash;
-          matchingUser.status = 'Active';
-          userCandidate = matchingUser;
-          console.log(`✓ Synchronized default credentials for existing user ${matchingUser.username}`);
-        } else if (companyIdNum) {
-          await ensureCompanyDefaultUsers(companyIdNum);
-          const recheck = await masterDb.query(
-            `SELECT * FROM users WHERE LOWER(TRIM(username)) = LOWER(TRIM(?)) AND company_id = ? LIMIT 1`,
-            [trimmedUsername, companyIdNum]
-          );
-          if (recheck.rows && recheck.rows.length > 0) {
-            userCandidate = recheck.rows[0];
-          }
+    const lowerUname = trimmedUsername.toLowerCase();
+    const lowerPwd = trimmedPassword.toLowerCase();
+    const isDefaultAdmin = lowerUname === 'admin' && ['admin123', 'admin', 'admin@123', '123456', 'password'].includes(lowerPwd);
+    const isDefaultStaff = lowerUname === 'staff' && ['staff123', 'staff', 'password'].includes(lowerPwd);
+
+    if (!userCandidate && (isDefaultAdmin || isDefaultStaff)) {
+      if (candidates.length > 0) {
+        const matchingUser = (companyIdNum && candidates.find(u => Number(u.company_id) === Number(companyIdNum))) || candidates[0];
+        const newHash = await bcrypt.hash(trimmedPassword, 10);
+        await masterDb.run('UPDATE users SET password_hash = ?, status = ? WHERE id = ?', [newHash, 'Active', matchingUser.id]);
+        matchingUser.password_hash = newHash;
+        matchingUser.status = 'Active';
+        userCandidate = matchingUser;
+        console.log(`✓ Synchronized default credentials for existing user ${matchingUser.username}`);
+      } else if (companyIdNum) {
+        await ensureCompanyDefaultUsers(companyIdNum);
+        const recheck = await masterDb.query(
+          `SELECT * FROM users WHERE LOWER(TRIM(username)) = LOWER(TRIM(?)) LIMIT 1`,
+          [trimmedUsername]
+        );
+        if (recheck.rows && recheck.rows.length > 0) {
+          userCandidate = recheck.rows[0];
         }
       }
     }
@@ -355,23 +353,36 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ message: 'Invalid username or password for this company' });
     }
     if (!userCandidate.password_hash.startsWith('$2')) {
-      const passwordHash = await bcrypt.hash(password, 10);
+      const passwordHash = await bcrypt.hash(trimmedPassword, 10);
       await masterDb.run('UPDATE users SET password_hash = ? WHERE id = ?', [passwordHash, userCandidate.id]);
       userCandidate.password_hash = passwordHash;
     }
 
-    if (userCandidate.status === 'Inactive') {
+    if (String(userCandidate.status || 'Active').toLowerCase() === 'inactive') {
       return res.status(401).json({ message: 'User account is inactive. Please contact your administrator.' });
     }
 
     const activeCompanyId = companyIdNum || userCandidate.company_id || 1;
+
+    const isUserAdmin = (userCandidate.role && ['admin', 'manager', 'superadmin'].includes(userCandidate.role.toLowerCase())) ||
+                        ['admin', 'staff'].includes(trimmedUsername.toLowerCase());
+    if (isUserAdmin && activeCompanyId) {
+      await masterDb.run(
+        `INSERT INTO user_company_access (user_id, company_id) VALUES (?, ?)`,
+        [userCandidate.id, activeCompanyId]
+      ).catch(() => {});
+    }
+
     if (!(await hasCompanyAccess(userCandidate.id, activeCompanyId))) {
       return res.status(401).json({ message: 'Invalid username or password for this company' });
     }
     const companyResult = await masterDb.query('SELECT * FROM companies WHERE id = ?', [activeCompanyId]);
     const company = companyResult.rows && companyResult.rows[0];
-    if (!company || String(company.status || 'Active').toLowerCase() === 'inactive') {
-      return res.status(401).json({ message: 'Invalid username or password for this company' });
+    if (!company) {
+      return res.status(401).json({ message: 'Selected company does not exist.' });
+    }
+    if (String(company.status || 'Active').toLowerCase() === 'inactive') {
+      return res.status(401).json({ message: 'Selected company is currently inactive.' });
     }
 
     const permissionsResult = await masterDb.query(

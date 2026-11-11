@@ -735,6 +735,7 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
     let selectValue = rawVal;
     
     if (rawVal && effectiveOptions.length > 0) {
+      const isLoadmanField = ['loadman_name', 'loadman', 'loadman_team'].includes(field.name);
       const match = effectiveOptions.find(opt => {
         const optVal = getOptionValue(opt);
         const optLabel = getOptionLabel(opt);
@@ -742,7 +743,7 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
         return String(optVal).trim().toLowerCase() === cleanRaw ||
                String(optLabel).trim().toLowerCase() === cleanRaw ||
                String(opt.id) === String(rawVal) ||
-               (data.loadman_worker_id && String(opt.id) === String(data.loadman_worker_id));
+               (isLoadmanField && data.loadman_worker_id && String(opt.id) === String(data.loadman_worker_id));
       });
       if (match) {
         const optVal = getOptionValue(match);
@@ -756,10 +757,10 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
         
         selectValue = isNameBased ? optLabel : optVal;
 
-        if (rawVal !== selectValue && (isNameBased || field.masterType === 'workers')) {
+        if (rawVal !== selectValue && isLoadmanField) {
           setTimeout(() => {
             onChange(field.name, selectValue);
-            if (['loadman_name', 'loadman', 'loadman_team'].includes(field.name) && match.id) {
+            if (match.id) {
               onChange('loadman_worker_id', String(match.id));
             }
           }, 0);
@@ -774,45 +775,61 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
     });
 
     if (['loadman_name', 'loadman', 'loadman_team'].includes(field.name)) {
-      const matchedOption = effectiveOptions.find(opt => String(getOptionValue(opt)) === String(data[field.name]));
-      const displayVal = matchedOption ? getOptionLabel(matchedOption) : (data[field.name] || '');
+      const currentRawVal = data[field.name] || '';
+      const matchedOption = effectiveOptions.find(opt =>
+        String(getOptionValue(opt)).trim().toLowerCase() === String(currentRawVal).trim().toLowerCase() ||
+        String(getOptionLabel(opt)).trim().toLowerCase() === String(currentRawVal).trim().toLowerCase() ||
+        (data.loadman_worker_id && String(opt.id) === String(data.loadman_worker_id))
+      );
+      const displayVal = matchedOption ? getOptionLabel(matchedOption) : currentRawVal;
+
       return (
         <div className="entry-top-field-group" style={{ ...styles.fieldGroup, ...(addon ? { position: 'relative' } : {}) }}>
           <label style={styles.label}>{field.label}</label>
           <span style={styles.colon}>:</span>
           <div style={{ display: 'flex', gap: '4px', width: '100%', alignItems: 'center' }}>
-            <input
-              type="text"
-              list={`datalist-${field.name}`}
+            <select
               name={field.name}
               value={displayVal}
-              placeholder={field.placeholder || 'Select or enter loadman'}
               onChange={(e) => {
                 const val = e.target.value;
+                if (val === '__CREATE_NEW__') {
+                  setInlineModalOpen(true);
+                  return;
+                }
                 onChange(field.name, val);
                 const matched = effectiveOptions.find(o =>
+                  String(getOptionLabel(o)).trim().toLowerCase() === val.trim().toLowerCase() ||
                   String(getOptionValue(o)).trim().toLowerCase() === val.trim().toLowerCase() ||
-                  String(getOptionLabel(o)).trim().toLowerCase() === val.trim().toLowerCase()
+                  String(o.id) === val
                 );
                 onChange('loadman_worker_id', matched?.id ? String(matched.id) : '');
               }}
               onFocus={handleDropdownFocus}
               style={{
                 ...styles.input,
-                cursor: (field.disabled || field.readOnly) ? 'not-allowed' : 'text',
+                cursor: (field.disabled || field.readOnly) ? 'not-allowed' : 'pointer',
                 backgroundColor: (field.disabled || field.readOnly) ? '#f4f6fa' : '#ffffff'
               }}
               disabled={field.disabled || field.readOnly}
-              className="form-control"
-              autoComplete="off"
-            />
-            <datalist id={`datalist-${field.name}`}>
-              {effectiveOptions.map((opt, idx) => (
-                <option key={`${getOptionValue(opt) || 'opt'}-${idx}`} value={getOptionLabel(opt)}>
-                  {getOptionLabel(opt)}
-                </option>
-              ))}
-            </datalist>
+              className="form-control form-select"
+            >
+              <option value="">Select Loadman...</option>
+              {displayVal && !effectiveOptions.some(opt => getOptionLabel(opt) === displayVal || String(getOptionValue(opt)) === displayVal) && (
+                <option value={displayVal}>{displayVal}</option>
+              )}
+              {effectiveOptions.map((opt, idx) => {
+                const label = getOptionLabel(opt);
+                return (
+                  <option key={`${opt.id || label || 'lm'}-${idx}`} value={label}>
+                    {label}
+                  </option>
+                );
+              })}
+              <option value="__CREATE_NEW__" style={{ fontWeight: 'bold', color: '#1e3a8a' }}>
+                + Add New Loadman Worker
+              </option>
+            </select>
             <button
               type="button"
               onClick={() => setInlineModalOpen(true)}

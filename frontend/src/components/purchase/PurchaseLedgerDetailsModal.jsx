@@ -21,19 +21,28 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
   const [rawPurchase, setRawPurchase] = useState(null);
   const [itemsList, setItemsList] = useState([]);
   const [suppliersMap, setSuppliersMap] = useState({});
+  const [transportersMap, setTransportersMap] = useState({});
 
-  // Pre-load supplier master to ensure any numeric ID is mapped to actual supplier name
+  // Pre-load supplier and transport masters to ensure any numeric ID is mapped to actual names
   useEffect(() => {
     if (!isOpen) return;
-    api('/masters/suppliers').then(res => {
-      const arr = Array.isArray(res) ? res : (res?.data || []);
-      const map = {};
-      arr.forEach(s => {
-        if (s && s.id) {
-          map[String(s.id)] = s.print_name || s.name;
-        }
+    Promise.all([
+      api('/masters/suppliers').catch(() => []),
+      api('/masters/transports').catch(() => [])
+    ]).then(([sRes, tRes]) => {
+      const sArr = Array.isArray(sRes) ? sRes : (sRes?.data || []);
+      const sMap = {};
+      sArr.forEach(s => {
+        if (s && s.id) sMap[String(s.id)] = s.print_name || s.name;
       });
-      setSuppliersMap(map);
+      setSuppliersMap(sMap);
+
+      const tArr = Array.isArray(tRes) ? tRes : (tRes?.data || []);
+      const tMap = {};
+      tArr.forEach(t => {
+        if (t && t.id) tMap[String(t.id)] = t.print_name || t.name;
+      });
+      setTransportersMap(tMap);
     }).catch(() => {});
   }, [isOpen]);
 
@@ -128,12 +137,19 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
       }
     }
 
-    const transporterName = f.transporter || f.transport || 'Transporter Payable';
+    let transporterName = f.transporter_name || f.transporter || f.transport || 'Transporter Payable';
+    if (/^\d+$/.test(String(transporterName).trim()) && transportersMap[String(transporterName).trim()]) {
+      transporterName = transportersMap[String(transporterName).trim()];
+    }
     const loadmanName = f.loadman_name || 'Loadman Payable';
     const voucherNo = f.inv_no || f.invNo || 'PUR-PREVIEW';
 
     const totalDeds = deds.reduce((sum, d) => sum + Number(d.amount || 0), 0);
-    const grossInvoice = Number((baseAmount + taxAmount - discAmount).toFixed(2));
+    const grossInvoice = Number(
+      (f.grand_total && Number(f.grand_total) > 0)
+        ? Number(f.grand_total)
+        : (baseAmount + taxAmount - discAmount).toFixed(2)
+    );
 
     const entries = [
       { no: 1, ledger_name: 'Purchase Account', account_head: 'Direct Expenses / Inventory', debit: baseAmount, credit: 0, particulars: `${supplierName} taxable purchase` },

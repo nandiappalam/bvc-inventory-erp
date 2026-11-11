@@ -481,6 +481,80 @@ router.get(['/registers', '/all-registers', '/register-list'], asyncHandler(asyn
   });
 }));
 
+// GET /api/qc/purchase/:purchaseId - Dedicated endpoint for fetching purchase details for QC creation
+router.get('/purchase/:purchaseId', asyncHandler(async (req, res) => {
+  const { purchaseId } = req.params;
+  const pIdStr = String(purchaseId).trim();
+  const pIdClean = pIdStr.replace(/^PUR-?/i, '').trim();
+  const reqLotNo = (req.query.lot_no || req.query.lotNo || '').trim();
+
+  let sql = `
+    SELECT 
+      COALESCE(pi.lot_no, sl.lot_no, '') as lot_no,
+      COALESCE(pi.item_name, sl.item_name, 'Raw Material') as item_name,
+      COALESCE(pi.qty, sl.quantity, 100) as qty,
+      COALESCE(pi.per_unit_weight, 50) as unit_weight,
+      COALESCE(pi.total_weight, (COALESCE(pi.qty, sl.quantity, 100) * COALESCE(pi.per_unit_weight, 50))) as total_weight,
+      p.id as purchase_id,
+      p.date as receipt_date,
+      p.inv_date as invoice_date,
+      COALESCE(p.inv_no, CAST(p.s_no AS TEXT), CAST(p.id AS TEXT)) as invoice_no,
+      COALESCE(CAST(sm.print_name AS TEXT), CAST(sm.name AS TEXT), CAST(p.supplier AS TEXT), 'Standard Supplier') as supplier,
+      COALESCE(g.godown_name, 'Main Godown') as godown_name
+    FROM purchases p
+    LEFT JOIN purchase_items pi ON CAST(pi.purchase_id AS TEXT) = CAST(p.id AS TEXT)
+    LEFT JOIN stock_lots sl ON (sl.lot_no = pi.lot_no OR CAST(sl.purchase_id AS TEXT) = CAST(p.id AS TEXT))
+    LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = CAST(p.supplier AS TEXT) OR sm.print_name = CAST(p.supplier AS TEXT))
+    LEFT JOIN godown_master g ON (CAST(sl.godown_id AS TEXT) = CAST(g.id AS TEXT) OR g.godown_name = CAST(sl.godown_id AS TEXT))
+    WHERE (CAST(p.id AS TEXT) = ? 
+       OR CAST(p.s_no AS TEXT) = ?
+       OR p.inv_no = ?
+       OR ('PUR-' || CAST(p.id AS TEXT)) = ? 
+       OR ('PUR-' || CAST(p.s_no AS TEXT)) = ?
+       OR CAST(p.id AS TEXT) = ?
+       OR CAST(p.s_no AS TEXT) = ?)
+  `;
+  const params = [pIdStr, pIdStr, pIdStr, pIdStr, pIdStr, pIdClean, pIdClean];
+
+  if (reqLotNo) {
+    sql += ` AND (LOWER(TRIM(pi.lot_no)) = LOWER(TRIM(?)) OR LOWER(TRIM(sl.lot_no)) = LOWER(TRIM(?)))`;
+    params.push(reqLotNo, reqLotNo);
+  }
+  sql += ` ORDER BY CASE WHEN (pi.lot_no IS NOT NULL AND pi.lot_no != '') THEN 0 ELSE 1 END, p.id DESC LIMIT 1`;
+
+  const purCheck = await db.query(sql, params);
+  if (purCheck.rows && purCheck.rows.length > 0) {
+    const pRow = purCheck.rows[0];
+    const assignedLot = pRow.lot_no || (reqLotNo || `LOT-${pIdClean}`);
+    const insDate = pRow.receipt_date || pRow.invoice_date || new Date().toISOString().split('T')[0];
+
+    return res.json({
+      success: true,
+      data: {
+        id: pIdStr,
+        purchaseId: pRow.purchase_id || pIdStr,
+        lotNo: assignedLot,
+        rm_lot_no: assignedLot,
+        inspectionDate: insDate,
+        item: pRow.item_name || 'Raw Material',
+        item_name: pRow.item_name || 'Raw Material',
+        quantity: pRow.qty || 100,
+        supplier: pRow.supplier || 'Standard Supplier',
+        supplier_name: pRow.supplier || 'Standard Supplier',
+        unit_weight: pRow.unit_weight || 50,
+        total_weight: pRow.total_weight || 5000,
+        receipt_date: insDate,
+        invoice_date: pRow.invoice_date || insDate,
+        receipt_no: pRow.invoice_no,
+        invoice_no: pRow.invoice_no,
+        godown_name: pRow.godown_name
+      }
+    });
+  }
+
+  res.status(404).json({ success: false, message: 'Purchase not found for QC pre-fill' });
+}));
+
 // GET /api/qc/inspection/:id or /api/quality/purchase-lab-testing/:id or /coa/:id or /iqr/:id
 router.get(['/inspection/:id', '/purchase-lab-testing/:id', '/coa/:id', '/iqr/:id', '/report/:id'], asyncHandler(async (req, res) => {
   const { id } = req.params;
@@ -558,6 +632,14 @@ router.get(['/inspection/:id', '/purchase-lab-testing/:id', '/coa/:id', '/iqr/:i
   if (inspectionResult.rows.length === 0) {
     // If not in qc_inspections, search purchases or stock_lots
     let purCheck = { rows: [] };
+    const reqLotNo = (req.query.lot_no || req.query.lotNo || '').trim();
+    let purParams = [idStr, idStr, idStr, idStr, idStr, idStr, idStr, idClean, idClean];
+    let lotFilter = '';
+    if (reqLotNo) {
+      lotFilter = ` AND (LOWER(TRIM(pi.lot_no)) = LOWER(TRIM(?)) OR LOWER(TRIM(sl.lot_no)) = LOWER(TRIM(?)))`;
+      purParams.push(reqLotNo, reqLotNo);
+    }
+
     try {
       purCheck = await db.query(`
         SELECT 
@@ -571,13 +653,13 @@ router.get(['/inspection/:id', '/purchase-lab-testing/:id', '/coa/:id', '/iqr/:i
           p.inv_date as invoice_date,
           COALESCE(p.inv_no, CAST(p.s_no AS TEXT), CAST(p.id AS TEXT)) as invoice_no,
           COALESCE(CAST(sm.print_name AS TEXT), CAST(sm.name AS TEXT), CAST(p.supplier AS TEXT), 'Standard Supplier') as supplier,
-          COALESCE(g.godown_name, 'KNJ Godown') as godown_name
+          COALESCE(g.godown_name, 'Main Godown') as godown_name
         FROM purchases p
         LEFT JOIN purchase_items pi ON CAST(pi.purchase_id AS TEXT) = CAST(p.id AS TEXT)
         LEFT JOIN stock_lots sl ON (sl.lot_no = pi.lot_no OR CAST(sl.purchase_id AS TEXT) = CAST(p.id AS TEXT))
         LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = CAST(p.supplier AS TEXT) OR sm.print_name = CAST(p.supplier AS TEXT))
         LEFT JOIN godown_master g ON (CAST(sl.godown_id AS TEXT) = CAST(g.id AS TEXT) OR g.godown_name = CAST(sl.godown_id AS TEXT))
-        WHERE pi.lot_no = ? 
+        WHERE (pi.lot_no = ? 
            OR sl.lot_no = ? 
            OR CAST(p.id AS TEXT) = ? 
            OR CAST(p.s_no AS TEXT) = ?
@@ -585,9 +667,10 @@ router.get(['/inspection/:id', '/purchase-lab-testing/:id', '/coa/:id', '/iqr/:i
            OR ('PUR-' || CAST(p.id AS TEXT)) = ? 
            OR ('PUR-' || CAST(p.s_no AS TEXT)) = ?
            OR CAST(p.id AS TEXT) = ?
-           OR CAST(p.s_no AS TEXT) = ?
+           OR CAST(p.s_no AS TEXT) = ?)${lotFilter}
+        ORDER BY CASE WHEN (pi.lot_no IS NOT NULL AND pi.lot_no != '') THEN 0 ELSE 1 END, p.id DESC
         LIMIT 1
-      `, [idStr, idStr, idStr, idStr, idStr, idStr, idStr, idClean, idClean]);
+      `, purParams);
     } catch (e) {
       console.warn('Error querying purchases fallback for QC:', e.message);
     }
@@ -891,30 +974,88 @@ router.post(['/submit', '/purchase-lab-testing'], asyncHandler(async (req, res) 
   try {
     await connection.beginTransaction();
 
-    // The UI may submit a business reference such as PUR-7. QC relations use purchases.id.
+    // The UI may submit a business reference such as PUR-5361, PUR-7, INV-123, or 5361.
     let resolvedPurchaseId = null;
     if (purchaseId !== undefined && purchaseId !== null && String(purchaseId).trim() !== '') {
       const purchaseReference = String(purchaseId).trim();
-      if (/^\d+$/.test(purchaseReference)) {
-        const purchaseResult = await connection.query(
-          'SELECT id FROM purchases WHERE id = ? LIMIT 1',
-          [Number(purchaseReference)]
-        );
-        resolvedPurchaseId = purchaseResult.rows[0]?.id || null;
-      } else {
+      const cleanRef = purchaseReference.replace(/^PUR-?/i, '').replace(/^INV-?/i, '').replace(/^BILL-?/i, '').trim();
+      const numVal = parseInt(cleanRef, 10);
+      const isNum = !isNaN(numVal) && String(numVal) === cleanRef;
+
+      // 1. Check purchases table by id, s_no, inv_no, voucher_no, or prefixed 'PUR-'
+      try {
         const purchaseResult = await connection.query(
           `SELECT id FROM purchases
-           WHERE inv_no = ?
-              OR ('PUR-' || CAST(s_no AS TEXT)) = ?
+           WHERE id = ?
+              OR CAST(id AS TEXT) = ?
+              OR ('PUR-' || CAST(id AS TEXT)) = ?
+              OR s_no = ?
               OR CAST(s_no AS TEXT) = ?
-           LIMIT 1`,
-          [purchaseReference, purchaseReference, purchaseReference]
+              OR ('PUR-' || CAST(s_no AS TEXT)) = ?
+              OR inv_no = ?
+              OR inv_no = ?
+              OR ('PUR-' || CAST(inv_no AS TEXT)) = ?
+              OR voucher_no = ?
+              OR voucher_no = ?
+           ORDER BY id DESC LIMIT 1`,
+          [
+            isNum ? numVal : -1,
+            cleanRef,
+            purchaseReference,
+            isNum ? numVal : -1,
+            cleanRef,
+            purchaseReference,
+            purchaseReference,
+            cleanRef,
+            purchaseReference,
+            purchaseReference,
+            cleanRef
+          ]
         );
         resolvedPurchaseId = purchaseResult.rows[0]?.id || null;
+      } catch (err) {
+        console.warn('Notice querying purchases by reference:', err.message);
       }
+
+      // 2. If not found by reference, check if the lotNo links to a purchase in purchase_items or stock_lots
+      if (!resolvedPurchaseId && lotNo) {
+        try {
+          const piRes = await connection.query(
+            `SELECT purchase_id FROM purchase_items 
+             WHERE LOWER(TRIM(lot_no)) = LOWER(TRIM(?)) AND purchase_id IS NOT NULL 
+             ORDER BY id DESC LIMIT 1`,
+            [lotNo]
+          );
+          if (piRes.rows?.[0]?.purchase_id) {
+            resolvedPurchaseId = piRes.rows[0].purchase_id;
+          } else {
+            const slRes = await connection.query(
+              `SELECT purchase_id FROM stock_lots 
+               WHERE LOWER(TRIM(lot_no)) = LOWER(TRIM(?)) AND purchase_id IS NOT NULL 
+               ORDER BY id DESC LIMIT 1`,
+              [lotNo]
+            );
+            if (slRes.rows?.[0]?.purchase_id) {
+              resolvedPurchaseId = slRes.rows[0].purchase_id;
+            }
+          }
+        } catch (_) {}
+      }
+
+      // 3. Fallback: If cleanRef is a positive number, verify if that ID exists in purchases table
+      if (!resolvedPurchaseId && isNum && numVal > 0) {
+        try {
+          const directCheck = await connection.query('SELECT id FROM purchases WHERE id = ? LIMIT 1', [numVal]);
+          if (directCheck.rows?.[0]?.id) {
+            resolvedPurchaseId = directCheck.rows[0].id;
+          }
+        } catch (_) {}
+      }
+
+      // 4. If still not matched to an existing purchases row, do NOT fail or rollback the transaction!
+      // In an ERP, manual QC, sample tests, or external batch tests may reference unlinked vouchers.
       if (resolvedPurchaseId === null) {
-        await connection.rollback();
-        return res.status(400).json({ success: false, message: `Purchase not found for reference ${purchaseReference}.` });
+        console.info(`[QC Submit] Purchase reference '${purchaseReference}' not linked to an existing purchase record; proceeding with unlinked inspection.`);
       }
     }
 

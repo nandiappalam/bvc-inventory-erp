@@ -388,6 +388,13 @@ const PurchaseCreation = () => {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [transportsMasterList, setTransportsMasterList] = useState([])
+
+  useEffect(() => {
+    getMasters('transports').then(res => {
+      setTransportsMasterList(Array.isArray(res?.data || res) ? (res?.data || res) : []);
+    }).catch(() => {});
+  }, [])
 
   const applyPurchaseOrder = useCallback(async (order) => {
     if (!order) return;
@@ -651,8 +658,9 @@ const PurchaseCreation = () => {
             address: data.address || data.supplier_details || '',
             supplier_state: data.supplier_state || data.party_state || data.state || 'Tamil Nadu',
             supplier_state_code: data.supplier_state_code || data.party_state_code || data.state_code || '33',
-            transporter: data.transporter || data.transport || '',
-            transport: data.transporter || data.transport || '',
+            transporter: data.transporter_name || data.transporter || data.transport || '',
+            transport: data.transporter_name || data.transporter || data.transport || '',
+            transporter_name: data.transporter_name || data.transporter || data.transport || '',
             transport_charges: parseFloat(data.transport_charges || data.freight_amount || 0),
             freight_amount: parseFloat(data.freight_amount || data.transport_charges || 0),
             advance_amount: parseFloat(data.advance_amount || 0),
@@ -1820,7 +1828,19 @@ const PurchaseCreation = () => {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', fontSize: '12px' }}>
               <div>
                 <span style={{ color: '#64748b', fontSize: '11px', display: 'block' }}>Transporter:</span>
-                <strong style={{ color: '#0f172a' }}>{formData.transporter || formData.transport || 'Not Selected'}</strong>
+                <strong style={{ color: '#0f172a' }}>
+                  {(() => {
+                    const name = formData.transporter_name;
+                    if (name && !/^\d+$/.test(String(name).trim())) return name;
+                    const raw = String(formData.transporter || formData.transport || '').trim();
+                    if (!raw) return 'Not Selected';
+                    if (/^\d+$/.test(raw) && transportsMasterList.length > 0) {
+                      const match = transportsMasterList.find(t => String(t.id) === raw);
+                      if (match) return match.print_name || match.name || raw;
+                    }
+                    return raw;
+                  })()}
+                </strong>
               </div>
               <div>
                 <span style={{ color: '#64748b', fontSize: '11px', display: 'block' }}>Vehicle No:</span>
@@ -2491,8 +2511,9 @@ const PurchaseCreation = () => {
           setFormData(prev => ({
             ...prev,
             ...tData,
-            transporter: tData.transporter || prev.transporter,
-            transport: tData.transporter || prev.transporter,
+            transporter: tData.transporter_name || tData.transporter || prev.transporter,
+            transporter_name: tData.transporter_name || tData.transporter || prev.transporter_name,
+            transport: tData.transporter_name || tData.transporter || prev.transporter,
             vehicle_no: tData.vehicle_no || prev.vehicle_no,
             lorry_no: tData.vehicle_no || prev.vehicle_no,
             driver_name: tData.driver_name || prev.driver_name,

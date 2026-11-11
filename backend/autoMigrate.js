@@ -2003,7 +2003,6 @@ module.exports = async function autoMigrate() {
           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
       `).catch(() => {});
-    }
   } catch (schemaErr) {
     console.log('Notice creating manufacturing & traceability tables in autoMigrate:', schemaErr.message);
   }
