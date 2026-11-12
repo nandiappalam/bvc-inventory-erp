@@ -50,11 +50,9 @@ const GodownStockPopover = ({ godownId, godownName, godownType }) => {
   const [error, setError] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
 
+  // Auto-open disabled so godown popup only opens when user clicks the godown icon/button.
   useEffect(() => {
     const selectedId = godownId ? String(godownId) : '';
-    if (selectedId && selectedId !== '__CREATE_NEW__' && selectedId !== previousGodownIdRef.current) {
-      setOpen(true);
-    }
     previousGodownIdRef.current = selectedId;
   }, [godownId]);
 

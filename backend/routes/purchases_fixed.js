@@ -627,6 +627,21 @@ router.get('/:id', async (req, res) => {
     purchaseData.lorry_no = purchaseData.lorry_no || purchaseData.vehicle_no || '';
     purchaseData.driver_name = purchaseData.driver_name || purchaseData.driver || '';
     purchaseData.driver = purchaseData.driver || purchaseData.driver_name || '';
+    purchaseData.driver_mobile = purchaseData.driver_mobile || purchaseData.driver_phone || '';
+    purchaseData.transport_date = purchaseData.transport_date || purchaseData.date || '';
+
+    const rawFreight = purchaseData.freight_amount !== undefined && purchaseData.freight_amount !== null && purchaseData.freight_amount !== '' && parseFloat(purchaseData.freight_amount) > 0 ? parseFloat(purchaseData.freight_amount) : 0;
+    const rawNetTrans = purchaseData.net_transport_amount !== undefined && purchaseData.net_transport_amount !== null && purchaseData.net_transport_amount !== '' ? parseFloat(purchaseData.net_transport_amount) : 0;
+    const rawCharges = purchaseData.transport_charges !== undefined && purchaseData.transport_charges !== null && purchaseData.transport_charges !== '' ? parseFloat(purchaseData.transport_charges) : 0;
+
+    purchaseData.freight_amount = rawFreight > 0 ? rawFreight : (rawCharges > 0 ? rawCharges : (rawNetTrans > 0 ? rawNetTrans : 0));
+    purchaseData.advance_amount = parseFloat(purchaseData.advance_amount !== undefined && purchaseData.advance_amount !== null ? purchaseData.advance_amount : (purchaseData.transport_advance || 0));
+    purchaseData.mamool_amount = parseFloat(purchaseData.mamool_amount !== undefined && purchaseData.mamool_amount !== null ? purchaseData.mamool_amount : 0);
+    purchaseData.weight_cash = parseFloat(purchaseData.weight_cash !== undefined && purchaseData.weight_cash !== null ? purchaseData.weight_cash : (purchaseData.weight_cash_amount || 0));
+    purchaseData.weight_cash_amount = purchaseData.weight_cash;
+    purchaseData.other_additional_charges = parseFloat(purchaseData.other_additional_charges !== undefined && purchaseData.other_additional_charges !== null ? purchaseData.other_additional_charges : 0);
+    purchaseData.other_deductions = parseFloat(purchaseData.other_deductions !== undefined && purchaseData.other_deductions !== null ? purchaseData.other_deductions : 0);
+    purchaseData.net_transport_amount = rawNetTrans > 0 ? rawNetTrans : (rawCharges > 0 ? rawCharges : purchaseData.freight_amount);
 
     res.json({
       ...purchaseData,
@@ -1261,11 +1276,49 @@ router.post('/', async (req, res) => {
     const purchaseId = purchaseResult.lastID
 
     try {
-      const netTransAmt = parseFloat(formData.net_transport_amount || formData.transport_charges || formData.freight_amount || 0);
-      if (netTransAmt > 0) {
-        await db.run('UPDATE purchases SET net_transport_amount = ? WHERE id = ?', [netTransAmt, purchaseId]);
-      }
-    } catch (_) {}
+      const freightAmt = parseFloat(formData.freight_amount || formData.transport_charges || 0);
+      const advAmt = parseFloat(formData.advance_amount || 0);
+      const mamoolAmt = parseFloat(formData.mamool_amount || 0);
+      const wtCashAmt = parseFloat(formData.weight_cash || formData.weight_cash_amount || 0);
+      const otherAddlAmt = parseFloat(formData.other_additional_charges || 0);
+      const otherDedAmt = parseFloat(formData.other_deductions || 0);
+      const totalDed = advAmt + mamoolAmt + otherDedAmt;
+      const totalAddl = wtCashAmt + otherAddlAmt;
+      const calcNetTransAmt = Math.max(0, parseFloat((freightAmt - totalDed + totalAddl).toFixed(2)));
+      const netTransAmt = parseFloat(formData.net_transport_amount) > 0 ? parseFloat(formData.net_transport_amount) : (calcNetTransAmt > 0 ? calcNetTransAmt : freightAmt);
+      const transportChargesVal = netTransAmt > 0 ? netTransAmt : freightAmt;
+
+      await db.run(`
+        UPDATE purchases SET
+          transport_charges = ?,
+          freight_amount = ?,
+          advance_amount = ?,
+          mamool_amount = ?,
+          weight_cash = ?,
+          weight_cash_amount = ?,
+          other_additional_charges = ?,
+          other_deductions = ?,
+          net_transport_amount = ?,
+          driver_mobile = ?,
+          transport_date = ?
+        WHERE id = ?
+      `, [
+        transportChargesVal,
+        freightAmt,
+        advAmt,
+        mamoolAmt,
+        wtCashAmt,
+        wtCashAmt,
+        otherAddlAmt,
+        otherDedAmt,
+        netTransAmt,
+        formData.driver_mobile || '',
+        formData.transport_date || '',
+        purchaseId
+      ]);
+    } catch (e) {
+      console.warn('Notice updating transport details on purchase insert:', e.message);
+    }
 
     // If linked to a Purchase Order, update the PO status to 'Received'
     if (purchase_order_id) {
@@ -1888,6 +1941,51 @@ router.put('/:id', async (req, res) => {
     ])
     if (updateResult?.changes === 0) {
       return res.status(404).json({ success: false, message: 'Purchase not found; no details were updated.' });
+    }
+
+    try {
+      const freightAmt = parseFloat(formData.freight_amount || formData.transport_charges || 0);
+      const advAmt = parseFloat(formData.advance_amount || 0);
+      const mamoolAmt = parseFloat(formData.mamool_amount || 0);
+      const wtCashAmt = parseFloat(formData.weight_cash || formData.weight_cash_amount || 0);
+      const otherAddlAmt = parseFloat(formData.other_additional_charges || 0);
+      const otherDedAmt = parseFloat(formData.other_deductions || 0);
+      const totalDed = advAmt + mamoolAmt + otherDedAmt;
+      const totalAddl = wtCashAmt + otherAddlAmt;
+      const calcNetTransAmt = Math.max(0, parseFloat((freightAmt - totalDed + totalAddl).toFixed(2)));
+      const netTransAmt = parseFloat(formData.net_transport_amount) > 0 ? parseFloat(formData.net_transport_amount) : (calcNetTransAmt > 0 ? calcNetTransAmt : freightAmt);
+      const transportChargesVal = netTransAmt > 0 ? netTransAmt : freightAmt;
+
+      await db.run(`
+        UPDATE purchases SET
+          transport_charges = ?,
+          freight_amount = ?,
+          advance_amount = ?,
+          mamool_amount = ?,
+          weight_cash = ?,
+          weight_cash_amount = ?,
+          other_additional_charges = ?,
+          other_deductions = ?,
+          net_transport_amount = ?,
+          driver_mobile = ?,
+          transport_date = ?
+        WHERE id = ?
+      `, [
+        transportChargesVal,
+        freightAmt,
+        advAmt,
+        mamoolAmt,
+        wtCashAmt,
+        wtCashAmt,
+        otherAddlAmt,
+        otherDedAmt,
+        netTransAmt,
+        formData.driver_mobile || '',
+        formData.transport_date || '',
+        purchaseId
+      ]);
+    } catch (e) {
+      console.warn('Notice updating transport details on purchase update:', e.message);
     }
 
     // Preserve existing stock lot statuses before deletion

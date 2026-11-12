@@ -65,14 +65,20 @@ const TransportFreightDetailsModal = ({
       transporter: rawT,
       vehicle_no: initialData.vehicle_no || initialData.lorry_no || '',
       driver_name: initialData.driver_name || initialData.driver || '',
-      driver_mobile: initialData.driver_mobile || '',
+      driver_mobile: initialData.driver_mobile || initialData.driverMobile || '',
       transport_date: initialData.transport_date || initialData.date || new Date().toISOString().slice(0, 10),
-      freight_amount: parseFloat(initialData.freight_amount || initialData.transport_charges || 0),
-      advance_amount: parseFloat(initialData.advance_amount || initialData.transport_advance || 0),
-      mamool_amount: parseFloat(initialData.mamool_amount || 0),
-      weight_cash: parseFloat(initialData.weight_cash || 0),
-      other_additional_charges: parseFloat(initialData.other_additional_charges || 0),
-      other_deductions: parseFloat(initialData.other_deductions || 0),
+      freight_amount: parseFloat(
+        initialData.freight_amount !== undefined && initialData.freight_amount !== null && initialData.freight_amount !== '' && parseFloat(initialData.freight_amount) > 0
+          ? initialData.freight_amount
+          : (initialData.freight !== undefined && initialData.freight !== null && initialData.freight !== '' && parseFloat(initialData.freight) > 0
+            ? initialData.freight
+            : (initialData.transport_charges || 0))
+      ) || 0,
+      advance_amount: parseFloat(initialData.advance_amount !== undefined && initialData.advance_amount !== null && initialData.advance_amount !== '' ? initialData.advance_amount : (initialData.transport_advance || 0)) || 0,
+      mamool_amount: parseFloat(initialData.mamool_amount !== undefined && initialData.mamool_amount !== null && initialData.mamool_amount !== '' ? initialData.mamool_amount : 0) || 0,
+      weight_cash: parseFloat(initialData.weight_cash !== undefined && initialData.weight_cash !== null && initialData.weight_cash !== '' ? initialData.weight_cash : (initialData.weight_cash_amount || 0)) || 0,
+      other_additional_charges: parseFloat(initialData.other_additional_charges !== undefined && initialData.other_additional_charges !== null && initialData.other_additional_charges !== '' ? initialData.other_additional_charges : 0) || 0,
+      other_deductions: parseFloat(initialData.other_deductions !== undefined && initialData.other_deductions !== null && initialData.other_deductions !== '' ? initialData.other_deductions : 0) || 0,
       transport_payable_type: initialData.transport_payable_type || 'SEPARATE',
       remarks: initialData.transport_remarks || initialData.remarks || ''
     });
