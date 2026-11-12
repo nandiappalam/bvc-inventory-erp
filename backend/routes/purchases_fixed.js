@@ -345,6 +345,16 @@ router.get(['/', '/list', '/purchase-list'], async (req, res) => {
       COALESCE(p.driver_name, p.driver, vm.driver_name, '') AS driver_name,
       COALESCE(CAST(vm.gate_in_time AS TEXT), CAST(vm.created_at AS TEXT), 'Done') AS gate_in,
       COALESCE(p.godown, '') AS godown,
+      p.transport_charges,
+      p.freight_amount,
+      p.net_transport_amount,
+      p.advance_amount,
+      p.mamool_amount,
+      p.weight_cash,
+      p.weight_cash_amount,
+      p.other_additional_charges,
+      p.other_deductions,
+
 
       COALESCE(im.item_name, pi.item_name, '') AS item,
       COALESCE(im.item_name, pi.item_name, '') AS item_name,
@@ -1985,7 +1995,7 @@ router.put('/:id', async (req, res) => {
         purchaseId
       ]);
     } catch (e) {
-      console.warn('Notice updating transport details on purchase update:', e.message);
+      console.error('ERROR updating transport details on purchase update:', e);
     }
 
     // Preserve existing stock lot statuses before deletion
@@ -2257,6 +2267,113 @@ router.delete('/:id', async (req, res) => {
     res.status(500).json({ success: false, message: 'Error deleting purchase', error: error.message })
   }
 })
+
+// PUT /api/purchases/:id/transport-details - Dedicated endpoint to persist transport freight details directly
+router.put('/:id/transport-details', async (req, res) => {
+  try {
+    const purchaseId = req.params.id;
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    await ensurePurchasesTableSchema(activeCompanyId);
+
+    const {
+      transporter,
+      transporter_name,
+      vehicle_no,
+      lorry_no,
+      driver_name,
+      driver,
+      driver_mobile,
+      driverMobile,
+      transport_date,
+      freight_amount,
+      freight,
+      advance_amount,
+      mamool_amount,
+      weight_cash,
+      weight_cash_amount,
+      other_additional_charges,
+      other_deductions,
+      net_transport_amount,
+      transport_payable_type,
+      remarks,
+      transport_remarks
+    } = req.body;
+
+    const finalTransporter = transporter_name || transporter || '';
+    const finalVehicleNo = vehicle_no || lorry_no || '';
+    const finalDriverName = driver_name || driver || '';
+    const finalDriverMobile = driver_mobile || driverMobile || '';
+    const finalTransportDate = sanitizeDate(transport_date) || new Date().toISOString().slice(0, 10);
+
+    const freightAmt = parseFloat(freight_amount !== undefined && freight_amount !== null ? freight_amount : (freight || 0)) || 0;
+    const advAmt = parseFloat(advance_amount || 0) || 0;
+    const mamoolAmt = parseFloat(mamool_amount || 0) || 0;
+    const wtCashAmt = parseFloat(weight_cash !== undefined && weight_cash !== null ? weight_cash : (weight_cash_amount || 0)) || 0;
+    const otherAddlAmt = parseFloat(other_additional_charges || 0) || 0;
+    const otherDedAmt = parseFloat(other_deductions || 0) || 0;
+
+    const totalDed = advAmt + mamoolAmt + otherDedAmt;
+    const totalAddl = wtCashAmt + otherAddlAmt;
+    const calcNetTransAmt = Math.max(0, parseFloat((freightAmt - totalDed + totalAddl).toFixed(2)));
+    const netTransAmt = (net_transport_amount !== undefined && net_transport_amount !== null && !isNaN(parseFloat(net_transport_amount)))
+      ? parseFloat(net_transport_amount)
+      : calcNetTransAmt;
+
+    const result = await db.run(`
+      UPDATE purchases SET
+        transporter = ?,
+        transport = ?,
+        vehicle_no = ?,
+        lorry_no = ?,
+        driver_name = ?,
+        driver = ?,
+        driver_mobile = ?,
+        transport_date = ?,
+        freight_amount = ?,
+        advance_amount = ?,
+        mamool_amount = ?,
+        weight_cash = ?,
+        weight_cash_amount = ?,
+        other_additional_charges = ?,
+        other_deductions = ?,
+        net_transport_amount = ?,
+        transport_charges = ?,
+        transport_payable_type = ?,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `, [
+      finalTransporter,
+      finalTransporter,
+      finalVehicleNo,
+      finalVehicleNo,
+      finalDriverName,
+      finalDriverName,
+      finalDriverMobile,
+      finalTransportDate,
+      freightAmt,
+      advAmt,
+      mamoolAmt,
+      wtCashAmt,
+      wtCashAmt,
+      otherAddlAmt,
+      otherDedAmt,
+      netTransAmt,
+      netTransAmt,
+      transport_payable_type || 'SEPARATE',
+      purchaseId
+    ], activeCompanyId);
+
+    const updated = await findPurchaseRecord(purchaseId, activeCompanyId);
+    return res.json({
+      success: true,
+      message: 'Transport freight details updated successfully!',
+      data: updated
+    });
+  } catch (err) {
+    console.error('Error updating transport details:', err);
+    return res.status(500).json({ success: false, message: 'Failed to update transport freight details', error: err.message });
+  }
+});
 
 // PUT /api/purchases/:id/weight-update - Controlled post-unloading Tare Weight recording
 router.put('/:id/weight-update', async (req, res) => {

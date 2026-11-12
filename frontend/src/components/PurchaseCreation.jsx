@@ -673,14 +673,18 @@ const PurchaseCreation = () => {
             transporter: data.transporter_name || data.transporter || data.transport || '',
             transport: data.transporter_name || data.transporter || data.transport || '',
             transporter_name: data.transporter_name || data.transporter || data.transport || '',
-            freight_amount: parseFloat(data.freight_amount !== undefined && data.freight_amount !== null && data.freight_amount !== '' && parseFloat(data.freight_amount) > 0 ? data.freight_amount : (data.transport_charges || 0)),
+            freight_amount: parseFloat(
+              (data.freight_amount !== undefined && data.freight_amount !== null && data.freight_amount !== '')
+                ? data.freight_amount
+                : (data.transport_charges !== undefined && data.transport_charges !== null && data.transport_charges !== '' ? data.transport_charges : 0)
+            ),
             transport_charges: parseFloat(data.net_transport_amount || data.transport_charges || data.freight_amount || 0),
-            advance_amount: parseFloat(data.advance_amount || data.transport_advance || 0),
-            mamool_amount: parseFloat(data.mamool_amount || 0),
-            weight_cash: parseFloat(data.weight_cash || data.weight_cash_amount || 0),
-            other_additional_charges: parseFloat(data.other_additional_charges || 0),
-            other_deductions: parseFloat(data.other_deductions || 0),
-            net_transport_amount: parseFloat(data.net_transport_amount || 0),
+            advance_amount: parseFloat(data.advance_amount !== undefined && data.advance_amount !== null ? data.advance_amount : (data.transport_advance || 0)),
+            mamool_amount: parseFloat(data.mamool_amount !== undefined && data.mamool_amount !== null ? data.mamool_amount : 0),
+            weight_cash: parseFloat(data.weight_cash !== undefined && data.weight_cash !== null ? data.weight_cash : (data.weight_cash_amount || 0)),
+            other_additional_charges: parseFloat(data.other_additional_charges !== undefined && data.other_additional_charges !== null ? data.other_additional_charges : 0),
+            other_deductions: parseFloat(data.other_deductions !== undefined && data.other_deductions !== null ? data.other_deductions : 0),
+            net_transport_amount: parseFloat(data.net_transport_amount !== undefined && data.net_transport_amount !== null ? data.net_transport_amount : 0),
             transport_payable_type: data.transport_payable_type || 'SEPARATE',
             vehicle_no: data.vehicle_no || data.lorry_no || '',
             lorry_no: data.vehicle_no || data.lorry_no || '',
@@ -1449,12 +1453,28 @@ const PurchaseCreation = () => {
             address: data.address || data.supplier_details || '',
             supplier_state: data.supplier_state || data.party_state || data.state || 'Tamil Nadu',
             supplier_state_code: data.supplier_state_code || data.party_state_code || data.state_code || '33',
-            transporter: data.transporter || data.transport || '',
-            transport: data.transporter || data.transport || '',
+            transporter: data.transporter_name || data.transporter || data.transport || '',
+            transport: data.transporter_name || data.transporter || data.transport || '',
+            transporter_name: data.transporter_name || data.transporter || data.transport || '',
             vehicle_no: data.vehicle_no || data.lorry_no || '',
             lorry_no: data.vehicle_no || data.lorry_no || '',
             driver_name: data.driver_name || data.driver || '',
             driver: data.driver_name || data.driver || '',
+            driver_mobile: data.driver_mobile || '',
+            transport_date: data.transport_date || '',
+            freight_amount: parseFloat(
+              (data.freight_amount !== undefined && data.freight_amount !== null && data.freight_amount !== '')
+                ? data.freight_amount
+                : (data.transport_charges !== undefined && data.transport_charges !== null && data.transport_charges !== '' ? data.transport_charges : 0)
+            ),
+            transport_charges: parseFloat(data.net_transport_amount || data.transport_charges || data.freight_amount || 0),
+            advance_amount: parseFloat(data.advance_amount !== undefined && data.advance_amount !== null ? data.advance_amount : (data.transport_advance || 0)),
+            mamool_amount: parseFloat(data.mamool_amount !== undefined && data.mamool_amount !== null ? data.mamool_amount : 0),
+            weight_cash: parseFloat(data.weight_cash !== undefined && data.weight_cash !== null ? data.weight_cash : (data.weight_cash_amount || 0)),
+            other_additional_charges: parseFloat(data.other_additional_charges !== undefined && data.other_additional_charges !== null ? data.other_additional_charges : 0),
+            other_deductions: parseFloat(data.other_deductions !== undefined && data.other_deductions !== null ? data.other_deductions : 0),
+            net_transport_amount: parseFloat(data.net_transport_amount !== undefined && data.net_transport_amount !== null ? data.net_transport_amount : 0),
+            transport_payable_type: data.transport_payable_type || 'SEPARATE',
             contact_person: data.supplier_contact_person || data.contact_person || '',
             area: data.area || '',
             phone: data.supplier_phone || data.phone || '',
@@ -1837,7 +1857,7 @@ const PurchaseCreation = () => {
               </button>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', fontSize: '12px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: '8px', fontSize: '12px', marginBottom: '8px' }}>
               <div>
                 <span style={{ color: '#64748b', fontSize: '11px', display: 'block' }}>Transporter:</span>
                 <strong style={{ color: '#0f172a' }}>
@@ -1863,6 +1883,27 @@ const PurchaseCreation = () => {
                 <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#15803d' }}>
                   ₹{Number(formData.net_transport_amount || formData.transport_charges || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                 </span>
+              </div>
+            </div>
+
+            {/* Breakdown row: Freight, Advance, Mamool, Driver */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: '8px', fontSize: '11px', background: '#f8fafc', padding: '6px 8px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+              <div>
+                <span style={{ color: '#64748b' }}>Agreed Freight: </span>
+                <strong style={{ color: '#1e293b' }}>₹{Number(formData.freight_amount || formData.transport_charges || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+              </div>
+              <div>
+                <span style={{ color: '#64748b' }}>Adv: </span>
+                <strong style={{ color: '#dc2626' }}>₹{Number(formData.advance_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+                <span style={{ color: '#94a3b8', margin: '0 4px' }}>|</span>
+                <span style={{ color: '#64748b' }}>Mamool: </span>
+                <strong style={{ color: '#d97706' }}>₹{Number(formData.mamool_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+              </div>
+              <div>
+                <span style={{ color: '#64748b' }}>Driver: </span>
+                <strong style={{ color: '#334155' }}>
+                  {formData.driver_name || 'N/A'} {formData.driver_mobile ? `(${formData.driver_mobile})` : ''}
+                </strong>
               </div>
             </div>
           </div>
@@ -2518,6 +2559,7 @@ const PurchaseCreation = () => {
         isOpen={transportModalOpen}
         onClose={() => setTransportModalOpen(false)}
         voucherNo={formData.inv_no || formData.s_no ? `PUR-${formData.inv_no || formData.s_no}` : 'PUR-NEW'}
+        purchaseId={id}
         initialData={formData}
         onSave={(tData) => {
           setFormData(prev => ({

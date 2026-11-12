@@ -16,9 +16,11 @@ const TransportFreightDetailsModal = ({
   onClose,
   onSave,
   voucherNo = 'PUR-NEW',
+  purchaseId = null,
   initialData = {}
 }) => {
   const [transportersList, setTransportersList] = useState([]);
+  const [saving, setSaving] = useState(false);
   const [data, setData] = useState({
     transporter: '',
     vehicle_no: '',
@@ -68,17 +70,17 @@ const TransportFreightDetailsModal = ({
       driver_mobile: initialData.driver_mobile || initialData.driverMobile || '',
       transport_date: initialData.transport_date || initialData.date || new Date().toISOString().slice(0, 10),
       freight_amount: parseFloat(
-        initialData.freight_amount !== undefined && initialData.freight_amount !== null && initialData.freight_amount !== '' && parseFloat(initialData.freight_amount) > 0
+        (initialData.freight_amount !== undefined && initialData.freight_amount !== null && initialData.freight_amount !== '')
           ? initialData.freight_amount
-          : (initialData.freight !== undefined && initialData.freight !== null && initialData.freight !== '' && parseFloat(initialData.freight) > 0
+          : (initialData.freight !== undefined && initialData.freight !== null && initialData.freight !== ''
             ? initialData.freight
             : (initialData.transport_charges || 0))
       ) || 0,
-      advance_amount: parseFloat(initialData.advance_amount !== undefined && initialData.advance_amount !== null && initialData.advance_amount !== '' ? initialData.advance_amount : (initialData.transport_advance || 0)) || 0,
-      mamool_amount: parseFloat(initialData.mamool_amount !== undefined && initialData.mamool_amount !== null && initialData.mamool_amount !== '' ? initialData.mamool_amount : 0) || 0,
-      weight_cash: parseFloat(initialData.weight_cash !== undefined && initialData.weight_cash !== null && initialData.weight_cash !== '' ? initialData.weight_cash : (initialData.weight_cash_amount || 0)) || 0,
-      other_additional_charges: parseFloat(initialData.other_additional_charges !== undefined && initialData.other_additional_charges !== null && initialData.other_additional_charges !== '' ? initialData.other_additional_charges : 0) || 0,
-      other_deductions: parseFloat(initialData.other_deductions !== undefined && initialData.other_deductions !== null && initialData.other_deductions !== '' ? initialData.other_deductions : 0) || 0,
+      advance_amount: initialData.advance_amount !== undefined && initialData.advance_amount !== null && initialData.advance_amount !== '' ? parseFloat(initialData.advance_amount) : '',
+      mamool_amount: initialData.mamool_amount !== undefined && initialData.mamool_amount !== null && initialData.mamool_amount !== '' ? parseFloat(initialData.mamool_amount) : '',
+      weight_cash: initialData.weight_cash !== undefined && initialData.weight_cash !== null && initialData.weight_cash !== '' ? parseFloat(initialData.weight_cash) : '',
+      other_additional_charges: initialData.other_additional_charges !== undefined && initialData.other_additional_charges !== null && initialData.other_additional_charges !== '' ? parseFloat(initialData.other_additional_charges) : '',
+      other_deductions: initialData.other_deductions !== undefined && initialData.other_deductions !== null && initialData.other_deductions !== '' ? parseFloat(initialData.other_deductions) : '',
       transport_payable_type: initialData.transport_payable_type || 'SEPARATE',
       remarks: initialData.transport_remarks || initialData.remarks || ''
     });
@@ -104,10 +106,10 @@ const TransportFreightDetailsModal = ({
 
   const handleNumberChange = (e) => {
     const { name, value } = e.target;
-    setData(prev => ({ ...prev, [name]: value === '' ? '' : parseFloat(value) || 0 }));
+    setData(prev => ({ ...prev, [name]: value === '' ? '' : (isNaN(parseFloat(value)) ? 0 : parseFloat(value)) }));
   };
 
-  const handleSave = (e) => {
+  const handleSave = async (e) => {
     e.preventDefault();
     const matched = transportersList.find(t => 
       String(t.name).trim().toLowerCase() === String(data.transporter).trim().toLowerCase() ||
@@ -116,16 +118,36 @@ const TransportFreightDetailsModal = ({
     );
     const finalName = matched ? (matched.print_name || matched.name) : data.transporter;
 
-    onSave({
+    const payload = {
       ...data,
       transporter: finalName,
       transporter_name: finalName,
       total_deduction: totalDeduction,
       total_additional: totalAdditional,
       net_transport_amount: netTransportAmount,
-      transport_charges: freight,
+      transport_charges: netTransportAmount,
       freight_amount: freight
-    });
+    };
+
+    if (purchaseId) {
+      setSaving(true);
+      try {
+        const { api } = await import('../../utils/api');
+        const res = await api(`/purchases/${purchaseId}/transport-details`, {
+          method: 'PUT',
+          body: payload
+        });
+        if (res && res.success === false) {
+          alert('Failed to save transport details: ' + (res.message || 'Unknown error'));
+        }
+      } catch (err) {
+        console.error('Error saving transport details directly:', err);
+      } finally {
+        setSaving(false);
+      }
+    }
+
+    onSave(payload);
     onClose();
   };
 
@@ -449,10 +471,11 @@ const TransportFreightDetailsModal = ({
             </button>
             <button
               type="submit"
-              style={{ padding: '8px 20px', backgroundColor: '#1d4ed8', color: '#ffffff', fontWeight: 'bold', borderRadius: '6px', border: 'none', fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}
+              disabled={saving}
+              style={{ padding: '8px 20px', backgroundColor: saving ? '#64748b' : '#1d4ed8', color: '#ffffff', fontWeight: 'bold', borderRadius: '6px', border: 'none', fontSize: '12px', cursor: saving ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}
             >
               <span>💾</span>
-              <span>Save Transport Details</span>
+              <span>{saving ? 'Saving to Database...' : 'Save Transport Details'}</span>
             </button>
           </div>
         </form>
