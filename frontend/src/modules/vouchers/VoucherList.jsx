@@ -31,10 +31,25 @@ const VoucherList = () => {
   const [vouchers, setVouchers] = useState([]);
   const [ledgers, setLedgers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [reconciling, setReconciling] = useState(false);
 
   // In-app Snackbar notifications
   const [toast, setToast] = useState({ open: false, message: '', severity: 'success' });
   const notify = (message, severity = 'success') => setToast({ open: true, message, severity });
+
+  const handleReconcile = async () => {
+    setReconciling(true);
+    try {
+      const res = await voucherAPI.reconcile();
+      notify(res?.message || 'Accounting registers balanced successfully!', 'success');
+      loadVouchers();
+    } catch (err) {
+      notify('Reconciliation error: ' + err.message, 'error');
+    } finally {
+      setReconciling(false);
+    }
+  };
+
   const [filters, setFilters] = useState({
     from_date: '',
     to_date: '',
@@ -73,10 +88,18 @@ const VoucherList = () => {
   const [displayLoading, setDisplayLoading] = useState(false);
 
   useEffect(() => {
-    // Load ledgers for the filter dropdown
-    voucherAPI.getLedgers()
-      .then(res => setLedgers(safeArray(res)))
-      .catch(err => console.error('Error loading ledgers:', err));
+    const fetchLedgersList = () => {
+      voucherAPI.getLedgers()
+        .then(res => setLedgers(safeArray(res)))
+        .catch(err => console.error('Error loading ledgers:', err));
+    };
+    fetchLedgersList();
+    const handleCompanyChange = () => {
+      fetchLedgersList();
+      loadVouchers();
+    };
+    window.addEventListener('erp_company_changed', handleCompanyChange);
+    return () => window.removeEventListener('erp_company_changed', handleCompanyChange);
   }, []);
 
   useEffect(() => {
@@ -299,23 +322,42 @@ const VoucherList = () => {
         <Typography variant="h6" sx={{ fontWeight: 'bold', color: '#fff', fontSize: '20px', textAlign: 'center', flex: 1, textTransform: 'uppercase' }}>
           VOUCHER DISPLAY
         </Typography>
-        <Button
-          component={Link}
-          to="/entry/voucher-create"
-          sx={{
-            background: '#ffffff',
-            color: '#1f4fb2',
-            fontWeight: 'bold',
-            fontSize: '13px',
-            px: 2,
-            py: '6px',
-            borderRadius: '4px',
-            textTransform: 'none',
-            '&:hover': { background: '#f8fafc' }
-          }}
-        >
-          + New Voucher
-        </Button>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button
+            onClick={handleReconcile}
+            disabled={reconciling}
+            sx={{
+              background: '#ffffff',
+              color: '#15803d',
+              fontWeight: 'bold',
+              fontSize: '13px',
+              px: 2,
+              py: '6px',
+              borderRadius: '4px',
+              textTransform: 'none',
+              '&:hover': { background: '#f0fdf4' }
+            }}
+          >
+            {reconciling ? 'Reconciling...' : '⚡ Reconcile Registers'}
+          </Button>
+          <Button
+            component={Link}
+            to="/entry/voucher-create"
+            sx={{
+              background: '#ffffff',
+              color: '#1f4fb2',
+              fontWeight: 'bold',
+              fontSize: '13px',
+              px: 2,
+              py: '6px',
+              borderRadius: '4px',
+              textTransform: 'none',
+              '&:hover': { background: '#f8fafc' }
+            }}
+          >
+            + New Voucher
+          </Button>
+        </Box>
       </Box>
 
       {/* Filters Panel */}
@@ -471,11 +513,39 @@ const VoucherList = () => {
                           }}
                         />
                       </TableCell>
-                      <TableCell>
-                        <Tooltip title={voucher.ledger_names || 'N/A'}>
-                          <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.primary', noWrap: true, textOverflow: 'ellipsis', overflow: 'hidden', maxWidth: 350 }}>
-                            {voucher.ledger_names || 'N/A'}
-                          </Typography>
+                      <TableCell sx={{ maxWidth: 360 }}>
+                        <Tooltip title={voucher.particulars_display || voucher.ledger_names || 'N/A'}>
+                          <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                            <Typography
+                              variant="body2"
+                              sx={{
+                                fontWeight: 700,
+                                color: '#1e293b',
+                                lineHeight: 1.3,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap'
+                              }}
+                            >
+                              {voucher.primary_particular || voucher.ledger_names || 'General Ledger'}
+                            </Typography>
+                            {(voucher.secondary_particular || voucher.narration) && (
+                              <Typography
+                                variant="caption"
+                                sx={{
+                                  color: '#64748b',
+                                  fontSize: '0.75rem',
+                                  lineHeight: 1.2,
+                                  mt: 0.2,
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap'
+                                }}
+                              >
+                                {voucher.secondary_particular || voucher.narration}
+                              </Typography>
+                            )}
+                          </Box>
                         </Tooltip>
                       </TableCell>
                       <TableCell align="right" sx={{ fontWeight: 'bold' }}>
@@ -602,6 +672,27 @@ const VoucherList = () => {
                   ₹{difference.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                   {Math.abs(difference) < 0.01 ? ' (Balanced ✔)' : ' (Unbalanced ❌)'}
                 </Typography>
+                {Math.abs(difference) > 0.01 && (
+                  <Button
+                    size="small"
+                    variant="contained"
+                    onClick={handleReconcile}
+                    disabled={reconciling}
+                    sx={{
+                      mt: 0.5,
+                      fontSize: '0.75rem',
+                      py: 0.3,
+                      px: 1.5,
+                      bgcolor: '#f59e0b',
+                      color: '#000',
+                      fontWeight: 'bold',
+                      textTransform: 'none',
+                      '&:hover': { bgcolor: '#d97706' }
+                    }}
+                  >
+                    {reconciling ? 'Balancing...' : '⚡ Reconcile Registers'}
+                  </Button>
+                )}
               </Box>
             </Box>
           </Box>

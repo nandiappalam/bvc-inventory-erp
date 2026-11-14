@@ -13,6 +13,7 @@ export const voucherAPI = {
   update: (id, data) => api(`vouchers/${id}`, { method: 'PUT', body: data }),
   previewVoucherNo: (data) => api('vouchers/preview-no', { method: 'POST', body: data }),
   delete: (id) => api(`vouchers/${id}`, { method: 'DELETE' }),
+  reconcile: () => api('vouchers/reconcile', { method: 'POST' }),
   getLedgers: () => api('vouchers/ledgers'),
   getLedgerGroups: () => api('/ledgergroupmaster')
 };

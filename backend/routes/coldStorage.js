@@ -1947,9 +1947,26 @@ router.post('/bills/:id/approve', async (req, res) => {
     const igstAmt = parseFloat(bill.igst_amount || 0);
 
     // Generate Journal Voucher No: VOC...
-    const countResult = await db.query('SELECT COUNT(*) as count FROM voucher');
-    const vNum = (countResult.rows?.[0]?.count || 0) + 1;
-    const voucherNo = `VOC${vNum.toString().padStart(3, '0')}`;
+    const existingVocRes = await db.query("SELECT voucher_no FROM voucher WHERE voucher_no LIKE 'VOC%' ORDER BY id DESC");
+    let maxVocNum = 0;
+    for (const row of existingVocRes.rows || []) {
+      const match = String(row.voucher_no || '').trim().match(/^VOC-?(\d+)$/i);
+      if (match) {
+        const parsed = parseInt(match[1], 10);
+        if (!Number.isNaN(parsed) && parsed > maxVocNum) maxVocNum = parsed;
+      }
+    }
+    let vNum = maxVocNum + 1;
+    let voucherNo = '';
+    while (true) {
+      const candidate = `VOC${String(vNum).padStart(3, '0')}`;
+      const dup = await db.query('SELECT id FROM voucher WHERE voucher_no = ? LIMIT 1', [candidate]);
+      if (!dup.rows || dup.rows.length === 0) {
+        voucherNo = candidate;
+        break;
+      }
+      vNum++;
+    }
     const vDate = bill.bill_date || new Date().toISOString().split('T')[0];
     const narration = `Cold Storage Charges for ${bill.cold_storage_name} (Inv #${bill.operator_invoice_no || bill.bill_no}) from ${bill.operator_name}`;
 
@@ -2245,7 +2262,7 @@ router.post('/sync-stock', async (req, res) => {
 // --- Charge Master CRUD ---
 router.get('/charges', async (req, res) => {
   try {
-    const result = await db.query('SELECT * FROM cold_storage_charge_master WHERE status = "Active"');
+    const result = await db.query("SELECT * FROM cold_storage_charge_master WHERE status = 'Active'");
     res.json({ success: true, data: result.rows || [] });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });

@@ -73,18 +73,18 @@ async function initAccountingTables(companyId = null) {
         try { await db.run('ALTER TABLE ledgermaster ADD COLUMN ledger_name TEXT', [], companyId); } catch (e) {}
       }
       if (columns.has('name')) {
-        try { await db.run('UPDATE ledgermaster SET ledger_name = name WHERE ledger_name IS NULL OR ledger_name = ""', [], companyId); } catch (e) {}
+        try { await db.run("UPDATE ledgermaster SET ledger_name = name WHERE ledger_name IS NULL OR ledger_name = ''", [], companyId); } catch (e) {}
       }
       if (!columns.has('group_name')) {
         try { await db.run('ALTER TABLE ledgermaster ADD COLUMN group_name TEXT', [], companyId); } catch (e) {}
       }
       if (columns.has('under')) {
-        try { await db.run('UPDATE ledgermaster SET group_name = under WHERE group_name IS NULL OR group_name = ""', [], companyId); } catch (e) {}
+        try { await db.run("UPDATE ledgermaster SET group_name = under WHERE group_name IS NULL OR group_name = ''", [], companyId); } catch (e) {}
       }
       if (!columns.has('ledger_code')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN ledger_code TEXT', [], companyId); } catch (e) {} }
       if (!columns.has('group_id')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN group_id INTEGER', [], companyId); } catch (e) {} }
       if (!columns.has('opening_balance')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN opening_balance REAL DEFAULT 0', [], companyId); } catch (e) {} }
-      if (!columns.has('opening_balance_type')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN opening_balance_type TEXT DEFAULT "Dr"', [], companyId); } catch (e) {} }
+      if (!columns.has('opening_balance_type')) { try { await db.run("ALTER TABLE ledgermaster ADD COLUMN opening_balance_type TEXT DEFAULT 'Dr'", [], companyId); } catch (e) {} }
       if (!columns.has('opening_date')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN opening_date DATE', [], companyId); } catch (e) {} }
       if (!columns.has('linked_party_type')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN linked_party_type TEXT', [], companyId); } catch (e) {} }
       if (!columns.has('linked_party_id')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN linked_party_id INTEGER', [], companyId); } catch (e) {} }
@@ -93,14 +93,14 @@ async function initAccountingTables(companyId = null) {
       if (!columns.has('phone')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN phone TEXT', [], companyId); } catch (e) {} }
       if (!columns.has('email')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN email TEXT', [], companyId); } catch (e) {} }
       if (!columns.has('credit_period')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN credit_period INTEGER DEFAULT 30', [], companyId); } catch (e) {} }
-      if (!columns.has('status')) { try { await db.run('ALTER TABLE ledgermaster ADD COLUMN status TEXT DEFAULT "Active"', [], companyId); } catch (e) {} }
+      if (!columns.has('status')) { try { await db.run("ALTER TABLE ledgermaster ADD COLUMN status TEXT DEFAULT 'Active'", [], companyId); } catch (e) {} }
     } catch (migErr) {
       console.warn('Migration check warning:', migErr.message);
     }
 
     // Seed Ledger Groups if table is empty
     const groupCountRes = await db.query("SELECT COUNT(*) as cnt FROM ledger_groups", [], companyId);
-    const count = groupCountRes?.rows?.[0]?.cnt || 0;
+    const count = parseInt(groupCountRes?.rows?.[0]?.cnt || 0, 10) || 0;
     if (count === 0) {
       console.log('Seeding initial Tally Ledger Groups...');
       for (const g of INITIAL_LEDGER_GROUPS) {
@@ -278,16 +278,247 @@ router.get('/dashboard', async (req, res) => {
 router.get('/groups', async (req, res) => {
   try {
     const result = await db.query(`
-      SELECT lg.*,
-        (SELECT COUNT(*) FROM ledgermaster lm WHERE lm.group_id = lg.id OR LOWER(TRIM(COALESCE(lm.group_name, lm.under))) = LOWER(TRIM(lg.group_name))) as ledger_count,
-        (SELECT COALESCE(SUM(le.debit), 0) FROM ledger_entries le JOIN ledgermaster lm ON le.ledger_id = lm.id WHERE lm.group_id = lg.id) as group_debit,
-        (SELECT COALESCE(SUM(le.credit), 0) FROM ledger_entries le JOIN ledgermaster lm ON le.ledger_id = lm.id WHERE lm.group_id = lg.id) as group_credit
+      SELECT lg.*
       FROM ledger_groups lg
-      ORDER BY lg.group_name ASC
+      ORDER BY lg.account_nature ASC, lg.group_name ASC
     `);
 
-    const groups = result.rows || [];
-    res.json({ success: true, data: groups });
+    const ledgersRes = await db.query(`
+      SELECT lm.*,
+        COALESCE(lm.ledger_name, lm.name) AS ledger_name,
+        COALESCE(lm.group_name, lm.under) AS group_name
+      FROM ledgermaster lm
+      ORDER BY COALESCE(lm.ledger_name, lm.name) ASC
+    `);
+
+    const allLedgers = ledgersRes.rows || [];
+
+    // Aggregate all debit/credit transactions from ledger_entries (and fallback voucher_entry)
+    const ledgerTotalsById = new Map();
+    const ledgerTotalsByName = new Map();
+    const seenEntryKeys = new Set();
+
+    const leRes = await db.query(`
+      SELECT ledger_id, ledger_name, voucher_no,
+        COALESCE(debit, 0) AS debit,
+        COALESCE(credit, 0) AS credit
+      FROM ledger_entries
+    `);
+
+    const ledgerById = new Map();
+    const ledgerByName = new Map();
+    allLedgers.forEach((l) => {
+      if (l.id !== undefined && l.id !== null) {
+        ledgerById.set(Number(l.id), l);
+      }
+      const candidates = [l.ledger_name, l.name, l.printname, l.alias_name];
+      candidates.forEach((c) => {
+        const norm = String(c || '').trim().toLowerCase();
+        if (norm && !ledgerByName.has(norm)) {
+          ledgerByName.set(norm, l);
+        }
+      });
+    });
+
+    const addPosting = (row, allowDuplicateVoucherKey) => {
+      const dr = Number(row.debit || 0);
+      const cr = Number(row.credit || 0);
+      if (dr === 0 && cr === 0) return;
+
+      const normName = String(row.ledger_name || '').trim().toLowerCase();
+      const vNo = String(row.voucher_no || '').trim().toLowerCase();
+      const key = `${vNo}|${normName}|${dr.toFixed(2)}|${cr.toFixed(2)}`;
+      if (!allowDuplicateVoucherKey && vNo && seenEntryKeys.has(key)) {
+        return;
+      }
+      if (allowDuplicateVoucherKey && vNo) {
+        seenEntryKeys.add(key);
+      }
+
+      const matchedByName = normName ? ledgerByName.get(normName) : null;
+      const matchedById = !matchedByName && row.ledger_id ? ledgerById.get(Number(row.ledger_id)) : null;
+      const matched = matchedByName || matchedById;
+
+      if (matched) {
+        const prev = ledgerTotalsById.get(matched.id) || { debit: 0, credit: 0 };
+        prev.debit += dr;
+        prev.credit += cr;
+        ledgerTotalsById.set(matched.id, prev);
+      } else if (normName) {
+        const prev = ledgerTotalsByName.get(normName) || {
+          displayName: String(row.ledger_name || '').trim(),
+          debit: 0,
+          credit: 0
+        };
+        prev.debit += dr;
+        prev.credit += cr;
+        ledgerTotalsByName.set(normName, prev);
+      }
+    };
+
+    for (const row of leRes.rows || []) {
+      addPosting(row, true);
+    }
+
+    try {
+      const veRes = await db.query(`
+        SELECT ve.ledger_id,
+          COALESCE(NULLIF(TRIM(ve.ledger_name), ''), lm.ledger_name, lm.name, '') AS ledger_name,
+          v.voucher_no,
+          COALESCE(ve.debit, 0) AS debit,
+          COALESCE(ve.credit, 0) AS credit
+        FROM voucher_entry ve
+        JOIN voucher v ON v.id = ve.voucher_id
+        LEFT JOIN ledgermaster lm ON lm.id = ve.ledger_id
+      `);
+      for (const row of veRes.rows || []) {
+        addPosting(row, false);
+      }
+    } catch (_) {
+      // voucher_entry may not exist in older schemas
+    }
+
+    const formatLedgerItem = (l, resolvedGroupName) => {
+      const totals = ledgerTotalsById.get(l.id) || { debit: 0, credit: 0 };
+      const openBal = Number(l.opening_balance ?? l.openingbalance ?? 0);
+      const openType = (l.opening_balance_type || l.opening_type || 'Dr').trim() === 'Cr' ? 'Cr' : 'Dr';
+      const totalDebit = Number(totals.debit.toFixed(2));
+      const totalCredit = Number(totals.credit.toFixed(2));
+
+      let closing = openType === 'Dr' ? (openBal + totalDebit - totalCredit) : (openBal + totalCredit - totalDebit);
+      let closingType = openType;
+      if (closing < 0) {
+        closing = Math.abs(closing);
+        closingType = openType === 'Dr' ? 'Cr' : 'Dr';
+      }
+
+      return {
+        id: l.id,
+        name: l.ledger_name || l.name,
+        ledger_name: l.ledger_name || l.name,
+        code: l.ledger_code || l.alias_name || '',
+        opening_balance: Number(openBal.toFixed(2)),
+        opening_balance_type: openType,
+        total_debit: totalDebit,
+        total_credit: totalCredit,
+        closing_balance: Number(closing.toFixed(2)),
+        closing_balance_type: closingType,
+        group_name: resolvedGroupName,
+        status: l.status || 'Active'
+      };
+    };
+
+    const assignedLedgerIds = new Set();
+
+    const groups = (result.rows || []).map(g => {
+      const normGName = String(g.group_name || '').toLowerCase().trim();
+      const groupLedgers = allLedgers.filter(l => {
+        if (assignedLedgerIds.has(l.id)) return false;
+        if (l.group_id && Number(l.group_id) === Number(g.id)) {
+          assignedLedgerIds.add(l.id);
+          return true;
+        }
+        const normLGroup = String(l.group_name || l.under || '').toLowerCase().trim();
+        if (normLGroup === normGName) {
+          assignedLedgerIds.add(l.id);
+          return true;
+        }
+        if (normGName.includes('purchase') && normLGroup.includes('purchase')) {
+          assignedLedgerIds.add(l.id);
+          return true;
+        }
+        if (normGName.includes('sales') && normLGroup.includes('sales')) {
+          assignedLedgerIds.add(l.id);
+          return true;
+        }
+        if (normGName.includes('cash') && normLGroup.includes('cash')) {
+          assignedLedgerIds.add(l.id);
+          return true;
+        }
+        if (normGName.includes('bank') && normLGroup.includes('bank')) {
+          assignedLedgerIds.add(l.id);
+          return true;
+        }
+        if (normGName.includes('duties') && (normLGroup.includes('tax') || normLGroup.includes('gst'))) {
+          assignedLedgerIds.add(l.id);
+          return true;
+        }
+        return false;
+      }).map(l => formatLedgerItem(l, g.group_name));
+
+      return {
+        ...g,
+        name: g.group_name,
+        ledger_count: groupLedgers.length,
+        ledgers: groupLedgers
+      };
+    });
+
+    // Attach any unassigned ledgermaster records to fallback group
+    const unassigned = allLedgers.filter(l => !assignedLedgerIds.has(l.id));
+    if (unassigned.length > 0) {
+      const generalGroup = groups.find(g => g.group_name === 'Direct Expenses' || g.group_name === 'Current Liabilities');
+      if (generalGroup) {
+        unassigned.forEach(l => {
+          generalGroup.ledgers.push(formatLedgerItem(l, generalGroup.group_name));
+        });
+        generalGroup.ledger_count = generalGroup.ledgers.length;
+      }
+    }
+
+    // Attach any active ledger_entries heads missing from ledgermaster to best-matching group
+    if (ledgerTotalsByName.size > 0) {
+      for (const [normName, info] of ledgerTotalsByName.entries()) {
+        let targetGroupName = 'Direct Expenses';
+        if (normName.includes('purchase')) targetGroupName = 'Purchase Accounts';
+        else if (normName.includes('sales')) targetGroupName = 'Sales Accounts';
+        else if (normName.includes('cgst') || normName.includes('sgst') || normName.includes('igst') || normName.includes('gst')) targetGroupName = 'Duties & Taxes';
+        else if (normName.includes('cash')) targetGroupName = 'Cash-in-hand';
+        else if (normName.includes('bank')) targetGroupName = 'Bank Accounts';
+
+        const targetGroup = groups.find(g => g.group_name === targetGroupName) || groups[0];
+        if (targetGroup) {
+          const totalDebit = Number(info.debit.toFixed(2));
+          const totalCredit = Number(info.credit.toFixed(2));
+          const diff = totalDebit - totalCredit;
+          targetGroup.ledgers.push({
+            id: null,
+            name: info.displayName,
+            ledger_name: info.displayName,
+            code: '',
+            opening_balance: 0,
+            opening_balance_type: 'Dr',
+            total_debit: totalDebit,
+            total_credit: totalCredit,
+            closing_balance: Number(Math.abs(diff).toFixed(2)),
+            closing_balance_type: diff >= 0 ? 'Dr' : 'Cr',
+            group_name: targetGroup.group_name,
+            status: 'Active'
+          });
+          targetGroup.ledger_count = targetGroup.ledgers.length;
+        }
+      }
+    }
+
+    // Roll up accurate group_debit, group_credit, and net closing_balance from all member ledgers
+    const finalGroups = groups.map(g => {
+      const groupDebit = g.ledgers.reduce((sum, l) => sum + Number(l.total_debit || 0), 0);
+      const groupCredit = g.ledgers.reduce((sum, l) => sum + Number(l.total_credit || 0), 0);
+      const netSigned = g.ledgers.reduce((sum, l) => {
+        const bal = Number(l.closing_balance || 0);
+        return sum + (l.closing_balance_type === 'Cr' ? -bal : bal);
+      }, 0);
+
+      return {
+        ...g,
+        group_debit: Number(groupDebit.toFixed(2)),
+        group_credit: Number(groupCredit.toFixed(2)),
+        closing_balance: Number(Math.abs(netSigned).toFixed(2)),
+        closing_balance_type: netSigned >= 0 ? 'Dr' : 'Cr'
+      };
+    });
+
+    res.json({ success: true, data: finalGroups });
   } catch (err) {
     console.error('Error fetching ledger groups:', err);
     res.status(500).json({ success: false, error: err.message });
@@ -473,6 +704,14 @@ router.get('/ledger-statement', async (req, res) => {
 
     const lName = targetLedger.name || targetLedger.ledger_name;
     const lId = targetLedger.id;
+
+    // Ensure all Purchase Transporter and Loadman entries are reconciled
+    try {
+      const vouchersRoute = require('./vouchers');
+      if (vouchersRoute && vouchersRoute.reconcilePurchaseTransporterAndLoadmanEntries) {
+        await vouchersRoute.reconcilePurchaseTransporterAndLoadmanEntries();
+      }
+    } catch (_) {}
 
     // Opening Balance calculation before from_date
     let openingVal = Number(targetLedger.opening_balance || 0);

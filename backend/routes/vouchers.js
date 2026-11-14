@@ -44,17 +44,30 @@ const validateVoucherData = (data) => {
   return true;
 };
 
-// Generate auto voucher number (robust & collision-free)
+// Generate auto voucher number (robust, prefix-scoped & collision-free)
 async function generateVoucherNo(voucher_type) {
   try {
     const prefix = PREFIX_MAP[voucher_type] || 'VOC';
-    const countResult = await db.query(
-      'SELECT COUNT(*) as count FROM voucher',
-      []
+    const existingRes = await db.query(
+      'SELECT voucher_no FROM voucher WHERE voucher_no LIKE ? ORDER BY id DESC',
+      [`${prefix}%`]
     );
-    let nextNum = (countResult.rows?.[0]?.count || 0) + 1;
+    let maxNum = 0;
+    const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const exactRegex = new RegExp(`^${escapedPrefix}-?(\\d+)$`, 'i');
+    for (const row of existingRes.rows || []) {
+      const vNo = String(row.voucher_no || '').trim();
+      const match = vNo.match(exactRegex);
+      if (match) {
+        const parsed = parseInt(match[1], 10);
+        if (!Number.isNaN(parsed) && parsed > maxNum) {
+          maxNum = parsed;
+        }
+      }
+    }
+    let nextNum = maxNum + 1;
     while (true) {
-      const candidate = `${prefix}${nextNum.toString().padStart(3, '0')}`;
+      const candidate = `${prefix}${String(nextNum).padStart(3, '0')}`;
       const check = await db.query('SELECT id FROM voucher WHERE voucher_no = ? LIMIT 1', [candidate]);
       if (!check.rows || check.rows.length === 0) {
         return candidate;
@@ -242,9 +255,254 @@ async function healAllTransactions() {
     }
 
     await healPurchaseAndSalesVouchers();
+    await reconcilePurchaseTransporterAndLoadmanEntries();
+    await reconcileUnbalancedVouchers();
     console.log('✓ healAllTransactions completed successfully');
   } catch (error) {
     console.error('Error during healAllTransactions:', error);
+  }
+}
+
+// Reconcile and auto-post missing Credit entries for Transporters & Loadmen from Purchase transactions
+async function reconcilePurchaseTransporterAndLoadmanEntries() {
+  try {
+    const { resolveLedgerId } = require('../services/LedgerService');
+    const purchasesRes = await db.query(`
+      SELECT 
+        p.id,
+        p.s_no,
+        p.inv_no,
+        p.voucher_no,
+        COALESCE(p.inv_no, p.voucher_no, CAST(p.s_no AS TEXT), CAST(p.id AS TEXT)) as invoice_no,
+        p.date,
+        p.transporter,
+        COALESCE(p.transport_charges, p.freight_amount, p.net_transport_amount, 0) as transport_charges,
+        COALESCE(p.transport_payable_type, 'SEPARATE') as transport_payable_type,
+        p.loadman_name,
+        COALESCE(p.loadman_charges, 0) as loadman_charges,
+        COALESCE(p.loadman_payable_type, 'SEPARATE') as loadman_payable_type
+      FROM purchases p
+      WHERE (COALESCE(p.transport_charges, p.freight_amount, p.net_transport_amount, 0) > 0 AND p.transporter IS NOT NULL AND p.transporter != '')
+         OR (COALESCE(p.loadman_charges, 0) > 0 AND p.loadman_name IS NOT NULL AND p.loadman_name != '')
+    `);
+
+    for (const p of (purchasesRes.rows || [])) {
+      const pId = p.id;
+      const invNo = p.invoice_no;
+      const dateVal = p.date || new Date().toISOString().slice(0, 10);
+      
+      let vNo = p.voucher_no;
+      let vId = null;
+      if (!vNo) {
+        const vRes = await db.query(`SELECT id, voucher_no FROM voucher WHERE reference_no = ? OR narration LIKE ? LIMIT 1`, [String(pId), `%${invNo}%`]);
+        if (vRes.rows && vRes.rows[0]) {
+          vId = vRes.rows[0].id;
+          vNo = vRes.rows[0].voucher_no;
+        } else {
+          vNo = `PUR${String(p.s_no || pId).padStart(5, '0')}`;
+        }
+      }
+
+      // 1. Transporter Freight Credit Entry
+      const transName = (p.transporter || '').trim();
+      const transAmt = parseFloat(p.transport_charges || 0);
+      const transPayType = String(p.transport_payable_type).toUpperCase();
+
+      if (transAmt > 0 && transPayType !== 'SUPPLIER_INVOICE' && transName) {
+        const check = await db.query(`
+          SELECT id FROM ledger_entries 
+          WHERE (ledger_id IN (SELECT id FROM ledgermaster WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))) OR LOWER(TRIM(ledger_name)) = LOWER(TRIM(?)))
+            AND credit > 0
+            AND (reference_id = ? OR particulars LIKE ? OR voucher_no = ?)
+          LIMIT 1
+        `, [transName, transName, pId, `%${invNo}%`, vNo]);
+
+        if (!check.rows || check.rows.length === 0) {
+          const transLedgerId = await resolveLedgerId(transName, 'Transporter');
+          const expLedgerId = await resolveLedgerId('Transport Charges', 'Expense');
+
+          const transParticulars = `Transport charges payable for Purchase Invoice #${invNo}`;
+          const expParticulars = `Transport charges for Purchase Invoice #${invNo}`;
+
+          await db.run(`
+            INSERT INTO ledger_entries (
+              ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit,
+              reference_id, reference_type, particulars, voucher_id, transaction_id, transaction_type
+            ) VALUES (?, ?, ?, 'Purchase', ?, 0, ?, ?, 'purchase', ?, ?, ?, 'purchase')
+          `, [transLedgerId, transName, dateVal, vNo, transAmt, pId, transParticulars, vId, pId]);
+
+          await db.run(`
+            INSERT INTO ledger_entries (
+              ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit,
+              reference_id, reference_type, particulars, voucher_id, transaction_id, transaction_type
+            ) VALUES (?, ?, ?, 'Purchase', ?, ?, 0, ?, 'purchase', ?, ?, ?, 'purchase')
+          `, [expLedgerId, 'Transport Charges', dateVal, vNo, transAmt, pId, expParticulars, vId, pId]);
+
+          if (vId) {
+            await db.run(`INSERT INTO voucher_entry (voucher_id, type, ledger_id, ledger_name, debit, credit, remarks) VALUES (?, 'Ledger', ?, ?, 0, ?, ?)`, [vId, transLedgerId, transName, transAmt, transParticulars]);
+            await db.run(`INSERT INTO voucher_entry (voucher_id, type, ledger_id, ledger_name, debit, credit, remarks) VALUES (?, 'Ledger', ?, 'Transport Charges', ?, 0, ?)`, [vId, expLedgerId, transAmt, expParticulars]);
+          }
+        }
+      }
+
+      // 2. Loadman Unloading Credit Entry
+      const loadName = (p.loadman_name || '').trim();
+      const loadAmt = parseFloat(p.loadman_charges || 0);
+      const loadPayType = String(p.loadman_payable_type).toUpperCase();
+
+      if (loadAmt > 0 && loadPayType !== 'SUPPLIER_INVOICE' && loadName) {
+        const check = await db.query(`
+          SELECT id FROM ledger_entries 
+          WHERE (ledger_id IN (SELECT id FROM ledgermaster WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))) OR LOWER(TRIM(ledger_name)) = LOWER(TRIM(?)))
+            AND credit > 0
+            AND (reference_id = ? OR particulars LIKE ? OR voucher_no = ?)
+          LIMIT 1
+        `, [loadName, loadName, pId, `%${invNo}%`, vNo]);
+
+        if (!check.rows || check.rows.length === 0) {
+          const loadLedgerId = await resolveLedgerId(loadName, 'Worker');
+          const expLedgerId = await resolveLedgerId('Loadman Charges', 'Expense');
+
+          const loadParticulars = `Loading/unloading charges payable for Purchase Invoice #${invNo}`;
+          const expParticulars = `Loading/unloading charges for Purchase Invoice #${invNo}`;
+
+          await db.run(`
+            INSERT INTO ledger_entries (
+              ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit,
+              reference_id, reference_type, particulars, voucher_id, transaction_id, transaction_type
+            ) VALUES (?, ?, ?, 'Purchase', ?, 0, ?, ?, 'purchase', ?, ?, ?, 'purchase')
+          `, [loadLedgerId, loadName, dateVal, vNo, loadAmt, pId, loadParticulars, vId, pId]);
+
+          await db.run(`
+            INSERT INTO ledger_entries (
+              ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit,
+              reference_id, reference_type, particulars, voucher_id, transaction_id, transaction_type
+            ) VALUES (?, ?, ?, 'Purchase', ?, ?, 0, ?, 'purchase', ?, ?, ?, 'purchase')
+          `, [expLedgerId, 'Loadman Charges', dateVal, vNo, loadAmt, pId, expParticulars, vId, pId]);
+
+          if (vId) {
+            await db.run(`INSERT INTO voucher_entry (voucher_id, type, ledger_id, ledger_name, debit, credit, remarks) VALUES (?, 'Ledger', ?, ?, 0, ?, ?)`, [vId, loadLedgerId, loadName, loadAmt, loadParticulars]);
+            await db.run(`INSERT INTO voucher_entry (voucher_id, type, ledger_id, ledger_name, debit, credit, remarks) VALUES (?, 'Ledger', ?, 'Loadman Charges', ?, 0, ?)`, [vId, expLedgerId, loadAmt, expParticulars]);
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('Error in reconcilePurchaseTransporterAndLoadmanEntries:', e.message);
+  }
+}
+
+// Reconcile and balance any unbalanced journal or accounting vouchers
+async function reconcileUnbalancedVouchers() {
+  try {
+    console.log('Running reconcileUnbalancedVouchers check...');
+    const unbalanced = await db.query(`
+      SELECT v.id, v.voucher_no, v.voucher_type, v.date, v.reference_no, v.narration,
+             COALESCE(SUM(ve.debit), 0) as total_debit,
+             COALESCE(SUM(ve.credit), 0) as total_credit
+      FROM voucher v
+      JOIN voucher_entry ve ON v.id = ve.voucher_id
+      GROUP BY v.id, v.voucher_no, v.voucher_type, v.date, v.reference_no, v.narration
+      HAVING ABS(COALESCE(SUM(ve.debit), 0) - COALESCE(SUM(ve.credit), 0)) > 0.01
+    `);
+
+    for (const row of unbalanced.rows || []) {
+      const vId = row.id;
+      const vNo = row.voucher_no;
+      const diff = Math.round((Number(row.total_debit) - Number(row.total_credit)) * 100) / 100;
+      console.log(`Reconciling unbalanced voucher ${vNo} (Debit: ${row.total_debit}, Credit: ${row.total_credit}, Diff: ${diff})`);
+
+      if (diff > 0) {
+        // Missing credit entry of diff
+        let targetLedgerName = 'Operational Charges Payable';
+        let targetLedgerType = 'Liability';
+        let targetUnder = 'Current Liabilities';
+
+        const existingEntries = await db.query('SELECT * FROM voucher_entry WHERE voucher_id = ?', [vId]);
+        const entries = existingEntries.rows || [];
+        const isOperational = entries.some(e => {
+          const n = (e.ledger_name || '').toLowerCase();
+          return n.includes('loading') || n.includes('operational') || n.includes('labour') || n.includes('freight');
+        }) || (row.narration && row.narration.toLowerCase().includes('charge'));
+
+        if (!isOperational) {
+          targetLedgerName = 'Suspense & Adjustment Account';
+          targetUnder = 'Current Liabilities';
+        }
+
+        let ledgerId = null;
+        const lmCheck = await db.query('SELECT id FROM ledgermaster WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1', [targetLedgerName]);
+        if (lmCheck.rows && lmCheck.rows.length > 0) {
+          ledgerId = lmCheck.rows[0].id;
+        } else {
+          try {
+            const ins = await db.run(
+              'INSERT INTO ledgermaster (name, printname, under, ledger_type, status) VALUES (?, ?, ?, ?, ?)',
+              [targetLedgerName, targetLedgerName.toUpperCase(), targetUnder, targetLedgerType, 'Active']
+            );
+            ledgerId = ins.lastInsertRowid || ins.lastID;
+          } catch (_) {}
+          if (!ledgerId) {
+            const fallback = await db.query('SELECT id FROM ledgermaster WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1', [targetLedgerName]);
+            ledgerId = fallback.rows?.[0]?.id || 1;
+          }
+        }
+
+        const remarksText = `Balancing credit accrual for ${vNo}`;
+        await db.run(
+          'INSERT INTO voucher_entry (voucher_id, type, ledger_id, ledger_name, debit, credit, remarks) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [vId, 'Cr', ledgerId, targetLedgerName, 0, diff, remarksText]
+        );
+
+        await db.run(
+          `INSERT INTO ledger_entries (ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit, particulars, voucher_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [ledgerId, targetLedgerName, row.date, row.voucher_type, vNo, 0, diff, row.narration || remarksText, vId]
+        );
+        console.log(`✓ Reconciled voucher ${vNo}: Added Credit entry of ₹${diff} to "${targetLedgerName}"`);
+
+      } else if (diff < 0) {
+        // Missing debit entry of Math.abs(diff)
+        const missingDr = Math.abs(diff);
+        let targetLedgerName = 'Loading & Operational Charges';
+        let targetLedgerType = 'Expense';
+        let targetUnder = 'Direct Expenses';
+
+        let ledgerId = null;
+        const lmCheck = await db.query('SELECT id FROM ledgermaster WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1', [targetLedgerName]);
+        if (lmCheck.rows && lmCheck.rows.length > 0) {
+          ledgerId = lmCheck.rows[0].id;
+        } else {
+          try {
+            const ins = await db.run(
+              'INSERT INTO ledgermaster (name, printname, under, ledger_type, status) VALUES (?, ?, ?, ?, ?)',
+              [targetLedgerName, targetLedgerName.toUpperCase(), targetUnder, targetLedgerType, 'Active']
+            );
+            ledgerId = ins.lastInsertRowid || ins.lastID;
+          } catch (_) {}
+          if (!ledgerId) {
+            const fallback = await db.query('SELECT id FROM ledgermaster WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1', [targetLedgerName]);
+            ledgerId = fallback.rows?.[0]?.id || 1;
+          }
+        }
+
+        const remarksText = `Balancing debit accrual for ${vNo}`;
+        await db.run(
+          'INSERT INTO voucher_entry (voucher_id, type, ledger_id, ledger_name, debit, credit, remarks) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [vId, 'Dr', ledgerId, targetLedgerName, missingDr, 0, remarksText]
+        );
+
+        await db.run(
+          `INSERT INTO ledger_entries (ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit, particulars, voucher_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [ledgerId, targetLedgerName, row.date, row.voucher_type, vNo, missingDr, 0, row.narration || remarksText, vId]
+        );
+        console.log(`✓ Reconciled voucher ${vNo}: Added Debit entry of ₹${missingDr} to "${targetLedgerName}"`);
+      }
+    }
+    console.log('✓ reconcileUnbalancedVouchers completed');
+  } catch (err) {
+    console.error('Error during reconcileUnbalancedVouchers:', err);
   }
 }
 
@@ -631,8 +889,12 @@ router.get('/ledgers', async (req, res) => {
 
     // 6. Fetch operational parties (Workers, Loadmen, Drivers, Helpers, Labour)
     try {
-      const pfx = (req.headers['x-company-id'] && parseInt(req.headers['x-company-id'], 10) > 1) ? `c${req.headers['x-company-id']}_` : '';
-      const opParties = await db.all(`SELECT id, name, COALESCE(category, party_category, 'Worker') as cat FROM ${pfx}operational_parties WHERE is_active = 1`).catch(() => []);
+      const companyId = parseInt(req.headers['x-company-id'] || req.companyId || 1, 10) || 1;
+      try {
+        const { ensureOperationalTables } = require('../services/operationalChargeEngine');
+        await ensureOperationalTables(companyId);
+      } catch (_) {}
+      const opParties = await db.all(`SELECT id, name, COALESCE(category, party_category, 'Worker') as cat FROM operational_parties WHERE is_active = 1`).catch(() => []);
       for (const row of opParties || []) {
         const name = row.name;
         if (name && !seenNames.has(name.toLowerCase())) {
@@ -682,6 +944,86 @@ router.get('/ledgers', async (req, res) => {
   }
 });
 
+// Format clean double-entry particulars for display in voucher registers
+function formatVoucherParticulars(v, entries = []) {
+  const vType = String(v.voucher_type || '').toLowerCase();
+  let primary = '';
+  let secondary = '';
+
+  const drEntries = entries.filter(e => Number(e.debit) > 0);
+  const crEntries = entries.filter(e => Number(e.credit) > 0);
+
+  if (vType === 'purchase') {
+    // Primary party is the Supplier (Credit side)
+    const supplierEntry = crEntries.find(e => {
+      const name = (e.ledger_name || '').toLowerCase();
+      const type = (e.ledger_type || '').toLowerCase();
+      return type === 'supplier' || (!name.includes('discount') && !name.includes('bank') && !name.includes('cash') && !name.includes('tax') && !name.includes('loadman') && !name.includes('freight'));
+    }) || crEntries[0];
+
+    primary = supplierEntry ? supplierEntry.ledger_name : (v.reference_no ? `Supplier (${v.reference_no})` : 'Purchase Account');
+
+    const otherAccounts = entries
+      .filter(e => e !== supplierEntry)
+      .map(e => e.ledger_name)
+      .filter(Boolean);
+    const uniqueOthers = Array.from(new Set(otherAccounts));
+    
+    let refPart = v.reference_no ? `Ref: #${v.reference_no}` : '';
+    let accountsPart = uniqueOthers.slice(0, 3).join(', ') + (uniqueOthers.length > 3 ? ` +${uniqueOthers.length - 3} more` : '');
+    secondary = [accountsPart, refPart].filter(Boolean).join(' | ');
+
+  } else if (vType === 'sales') {
+    const custEntry = drEntries.find(e => {
+      const name = (e.ledger_name || '').toLowerCase();
+      const type = (e.ledger_type || '').toLowerCase();
+      return type === 'customer' || (!name.includes('discount') && !name.includes('bank') && !name.includes('cash') && !name.includes('tax'));
+    }) || drEntries[0];
+
+    primary = custEntry ? custEntry.ledger_name : 'Customer Account';
+    const otherAccounts = entries
+      .filter(e => e !== custEntry)
+      .map(e => e.ledger_name)
+      .filter(Boolean);
+    const uniqueOthers = Array.from(new Set(otherAccounts));
+    secondary = uniqueOthers.slice(0, 3).join(', ') + (v.reference_no ? ` | Ref: #${v.reference_no}` : '');
+
+  } else if (vType === 'payment') {
+    const drNames = drEntries.map(e => e.ledger_name).filter(Boolean).join(', ');
+    const crNames = crEntries.map(e => e.ledger_name).filter(Boolean).join(', ');
+    primary = drNames || 'Party Payment';
+    secondary = crNames ? `via ${crNames}` : '';
+
+  } else if (vType === 'receipt') {
+    const crNames = crEntries.map(e => e.ledger_name).filter(Boolean).join(', ');
+    const drNames = drEntries.map(e => e.ledger_name).filter(Boolean).join(', ');
+    primary = crNames || 'Customer Receipt';
+    secondary = drNames ? `into ${drNames}` : '';
+
+  } else if (vType === 'journal') {
+    const drNames = drEntries.map(e => e.ledger_name).filter(Boolean).join(', ');
+    const crNames = crEntries.map(e => e.ledger_name).filter(Boolean).join(', ');
+    if (drNames && crNames) {
+      primary = `${drNames} To ${crNames}`;
+    } else {
+      primary = drNames || crNames || 'Journal Adjustment';
+    }
+    secondary = v.narration || (v.reference_no ? `Ref: ${v.reference_no}` : '');
+
+  } else if (vType === 'contra') {
+    const drNames = drEntries.map(e => e.ledger_name).filter(Boolean).join(', ');
+    const crNames = crEntries.map(e => e.ledger_name).filter(Boolean).join(', ');
+    primary = `Deposit to ${drNames || 'Account'}`;
+    secondary = crNames ? `from ${crNames}` : '';
+
+  } else {
+    primary = v.ledger_names || 'General Ledger';
+    secondary = v.narration || '';
+  }
+
+  return { primary, secondary };
+}
+
 // GET /vouchers
 router.get('/', async (req, res) => {
   try {
@@ -730,10 +1072,70 @@ router.get('/', async (req, res) => {
     query += ' GROUP BY v.id ORDER BY v.date DESC, v.id DESC';
     
     const result = await db.query(query, params);
-    res.json(result.rows);
+    const vouchers = result.rows || [];
+
+    // Batch load entries for rich particulars and audit-compliant ledger formatting
+    const voucherIds = vouchers.map(v => v.id).filter(Boolean);
+    if (voucherIds.length > 0) {
+      const placeholders = voucherIds.map(() => '?').join(',');
+      const entriesRes = await db.query(`
+        SELECT ve.*, COALESCE(NULLIF(ve.ledger_name, ''), lm.name, 'Party Account') as ledger_name,
+               lm.ledger_type, lm.under
+        FROM voucher_entry ve
+        LEFT JOIN ledgermaster lm ON ve.ledger_id = lm.id
+        WHERE ve.voucher_id IN (${placeholders})
+        ORDER BY ve.id ASC
+      `, voucherIds);
+
+      const entriesByVoucher = new Map();
+      for (const e of entriesRes.rows || []) {
+        if (!entriesByVoucher.has(e.voucher_id)) {
+          entriesByVoucher.set(e.voucher_id, []);
+        }
+        entriesByVoucher.get(e.voucher_id).push(e);
+      }
+
+      for (const v of vouchers) {
+        const entList = entriesByVoucher.get(v.id) || [];
+        const { primary, secondary } = formatVoucherParticulars(v, entList);
+        v.primary_particular = primary;
+        v.secondary_particular = secondary;
+        v.particulars_display = primary + (secondary ? ` (${secondary})` : '');
+
+        // Recalculate debit & credit directly from loaded entries for absolute precision
+        if (entList.length > 0) {
+          const calcDebit = entList.reduce((sum, e) => sum + (Number(e.debit) || 0), 0);
+          const calcCredit = entList.reduce((sum, e) => sum + (Number(e.credit) || 0), 0);
+          v.total_debit = calcDebit;
+          v.total_credit = calcCredit;
+          v.is_balanced = Math.abs(calcDebit - calcCredit) < 0.01;
+          v.difference = Math.round((calcDebit - calcCredit) * 100) / 100;
+        } else {
+          v.is_balanced = true;
+          v.difference = 0;
+        }
+
+        if (!v.ledger_names) {
+          v.ledger_names = entList.map(e => e.ledger_name).filter(Boolean).join(', ');
+        }
+      }
+    }
+
+    res.json(vouchers);
   } catch (err) {
     console.error('GET /vouchers error:', err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /vouchers/reconcile - Manual or automated trigger to balance any out-of-balance entries
+router.post('/reconcile', async (req, res) => {
+  try {
+    await reconcileUnbalancedVouchers();
+    res.json({ success: true, message: 'All vouchers checked and balanced successfully.' });
+  } catch (err) {
+    console.error('POST /vouchers/reconcile error:', err);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -746,61 +1148,73 @@ router.post('/', async (req, res) => {
 
     // Pre-resolve any string or non-numeric ledger_id (e.g. TM_1, custom names, etc.)
     const { resolveLedgerId } = require('../utils/ledgerHelper');
+    const resolvedEntries = [];
     for (const entry of data.entries || []) {
-      if (!entry.ledger_id || isNaN(Number(entry.ledger_id)) || Number(entry.ledger_id) <= 0) {
-        const nameToResolve = entry.ledger_name || (typeof entry.ledger_id === 'string' && isNaN(Number(entry.ledger_id)) ? entry.ledger_id : 'General Account');
+      const nextEntry = { ...entry };
+      if (!nextEntry.ledger_id || isNaN(Number(nextEntry.ledger_id)) || Number(nextEntry.ledger_id) <= 0) {
+        const nameToResolve = nextEntry.ledger_name || (typeof nextEntry.ledger_id === 'string' && isNaN(Number(nextEntry.ledger_id)) ? nextEntry.ledger_id : 'General Account');
         const resolvedId = await resolveLedgerId(nameToResolve, data.voucher_type === 'Receipt' ? 'Customer' : 'Supplier');
         if (resolvedId) {
-          entry.ledger_id = resolvedId;
-          entry.ledger_name = nameToResolve;
+          nextEntry.ledger_id = resolvedId;
+          nextEntry.ledger_name = nameToResolve;
         } else {
-          entry.ledger_id = 1;
+          nextEntry.ledger_id = 1;
         }
       }
+      nextEntry.resolved_ledger_name = await resolveLedgerName(nextEntry, '');
+      resolvedEntries.push(nextEntry);
     }
 
-    validateVoucherData(data);
+    validateVoucherData({ ...data, entries: resolvedEntries });
 
     // Auto generate voucher_no if not provided
     let voucher_no = data.voucher_no;
-    const autoGenerate = !voucher_no;
-    if (autoGenerate) {
+    if (!voucher_no) {
       voucher_no = await generateVoucherNo(data.voucher_type);
     }
 
-    // Insert voucher master
-    const voucherResult = await db.run(
-      'INSERT INTO voucher (voucher_type, voucher_no, date, reference_no, narration, status, posted) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [data.voucher_type, voucher_no, data.date, data.reference_no || '', data.narration || '', data.status || 'Approved', data.posted !== undefined ? data.posted : 1]
-    );
-    const voucherId = voucherResult.lastInsertRowid;
+    const conn = await db.getConnection();
+    let voucherId = null;
+    try {
+      await conn.beginTransaction();
 
-    const companyPrefix = (req.headers['x-company-id'] && parseInt(req.headers['x-company-id'], 10) > 1) ? `c${req.headers['x-company-id']}_` : '';
-
-    // Insert entries & post to ledger_entries
-    const ledgerEntries = [];
-    for (const entry of data.entries) {
-      const entryType = entry.type || (Number(entry.debit) > 0 ? 'Dr' : 'Cr');
-      const ledger_name = await resolveLedgerName(entry, companyPrefix);
-
-      await db.run(
-        'INSERT INTO voucher_entry (voucher_id, type, ledger_id, ledger_name, debit, credit, remarks) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [voucherId, entryType, entry.ledger_id, ledger_name, entry.debit || 0, entry.credit || 0, entry.remarks || '']
+      // Insert voucher master
+      const voucherResult = await conn.run(
+        'INSERT INTO voucher (voucher_type, voucher_no, date, reference_no, narration, status, posted) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [data.voucher_type, voucher_no, data.date, data.reference_no || '', data.narration || '', data.status || 'Approved', data.posted !== undefined ? data.posted : 1]
       );
+      voucherId = voucherResult.lastInsertRowid || voucherResult.lastID;
 
-      const particularsText = (entry.remarks && entry.remarks.trim()) 
-        ? entry.remarks.trim() 
-        : ((data.reference_no && data.reference_no.trim()) 
-            ? data.reference_no.trim() 
-            : (data.narration || ''));
+      // Insert entries & post to ledger_entries on same transactional connection
+      for (const entry of resolvedEntries) {
+        const entryType = entry.type || (Number(entry.debit) > 0 ? 'Dr' : 'Cr');
+        const ledger_name = entry.resolved_ledger_name;
 
-      ledgerEntries.push(db.run(
-        `INSERT INTO ledger_entries (ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit, particulars, voucher_id) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [entry.ledger_id, ledger_name, data.date, data.voucher_type, voucher_no, entry.debit || 0, entry.credit || 0, particularsText, voucherId]
-      ));
+        await conn.run(
+          'INSERT INTO voucher_entry (voucher_id, type, ledger_id, ledger_name, debit, credit, remarks) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [voucherId, entryType, entry.ledger_id, ledger_name, entry.debit || 0, entry.credit || 0, entry.remarks || '']
+        );
+
+        const particularsText = (entry.remarks && entry.remarks.trim())
+          ? entry.remarks.trim()
+          : ((data.reference_no && data.reference_no.trim())
+              ? data.reference_no.trim()
+              : (data.narration || ''));
+
+        await conn.run(
+          `INSERT INTO ledger_entries (ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit, particulars, voucher_id) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [entry.ledger_id, ledger_name, data.date, data.voucher_type, voucher_no, entry.debit || 0, entry.credit || 0, particularsText, voucherId]
+        );
+      }
+
+      await conn.commit();
+    } catch (txErr) {
+      try { await conn.rollback(); } catch (_) {}
+      throw txErr;
+    } finally {
+      await conn.release();
     }
-    await Promise.all(ledgerEntries);
 
     // Return created with details
     const created = await db.query(`
@@ -840,61 +1254,80 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// PUT /vouchers/:id - Update (simplified)
+// PUT /vouchers/:id - Update atomically with full validation before mutating
 router.put('/:id', async (req, res) => {
   try {
-    // First delete existing
-    await db.run('DELETE FROM voucher_entry WHERE voucher_id = ?', [req.params.id]);
-    await db.run('DELETE FROM ledger_entries WHERE voucher_no = (SELECT voucher_no FROM voucher WHERE id = ?)', [req.params.id]);
-    
-    // Re-use POST logic (simplified)
+    const existingRes = await db.query('SELECT id, voucher_no FROM voucher WHERE id = ? LIMIT 1', [req.params.id]);
+    if (!existingRes.rows || existingRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Voucher not found' });
+    }
+    const existingVoucher = existingRes.rows[0];
+
     const data = req.body;
     const { resolveLedgerId } = require('../utils/ledgerHelper');
+    const resolvedEntries = [];
     for (const entry of data.entries || []) {
-      if (!entry.ledger_id || isNaN(Number(entry.ledger_id)) || Number(entry.ledger_id) <= 0) {
-        const nameToResolve = entry.ledger_name || (typeof entry.ledger_id === 'string' && isNaN(Number(entry.ledger_id)) ? entry.ledger_id : 'General Account');
+      const nextEntry = { ...entry };
+      if (!nextEntry.ledger_id || isNaN(Number(nextEntry.ledger_id)) || Number(nextEntry.ledger_id) <= 0) {
+        const nameToResolve = nextEntry.ledger_name || (typeof nextEntry.ledger_id === 'string' && isNaN(Number(nextEntry.ledger_id)) ? nextEntry.ledger_id : 'General Account');
         const resolvedId = await resolveLedgerId(nameToResolve, data.voucher_type === 'Receipt' ? 'Customer' : 'Supplier');
         if (resolvedId) {
-          entry.ledger_id = resolvedId;
-          entry.ledger_name = nameToResolve;
+          nextEntry.ledger_id = resolvedId;
+          nextEntry.ledger_name = nameToResolve;
         } else {
-          entry.ledger_id = 1;
+          nextEntry.ledger_id = 1;
         }
       }
+      nextEntry.resolved_ledger_name = await resolveLedgerName(nextEntry, '');
+      resolvedEntries.push(nextEntry);
     }
-    const voucher_no = data.voucher_no || await generateVoucherNo(data.voucher_type);
-    
-    await db.run(`
-      UPDATE voucher SET voucher_type = ?, voucher_no = ?, date = ?, reference_no = ?, narration = ?, status = ?, posted = ? WHERE id = ?
-    `, [data.voucher_type, voucher_no, data.date, data.reference_no || '', data.narration || '', data.status || 'Approved', data.posted !== undefined ? data.posted : 1, req.params.id]);
 
-    const companyPrefix = (req.headers['x-company-id'] && parseInt(req.headers['x-company-id'], 10) > 1) ? `c${req.headers['x-company-id']}_` : '';
+    // Validate BEFORE deleting any existing entries
+    validateVoucherData({ ...data, entries: resolvedEntries });
 
-    // Insert new entries
-    const ledgerEntries = [];
-    for (const entry of data.entries) {
-      const entryType = entry.type || (Number(entry.debit) > 0 ? 'Dr' : 'Cr');
-      const ledger_name = await resolveLedgerName(entry, companyPrefix);
+    const voucher_no = data.voucher_no || existingVoucher.voucher_no || await generateVoucherNo(data.voucher_type);
 
-      await db.run(
-        'INSERT INTO voucher_entry (voucher_id, type, ledger_id, ledger_name, debit, credit, remarks) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [req.params.id, entryType, entry.ledger_id, ledger_name, entry.debit || 0, entry.credit || 0, entry.remarks || '']
-      );
+    const conn = await db.getConnection();
+    try {
+      await conn.beginTransaction();
 
-      const particularsText = (entry.remarks && entry.remarks.trim()) 
-        ? entry.remarks.trim() 
-        : ((data.reference_no && data.reference_no.trim()) 
-            ? data.reference_no.trim() 
-            : (data.narration || ''));
+      await conn.run('DELETE FROM voucher_entry WHERE voucher_id = ?', [req.params.id]);
+      await conn.run('DELETE FROM ledger_entries WHERE voucher_id = ? OR voucher_no = ?', [req.params.id, existingVoucher.voucher_no]);
 
-      ledgerEntries.push(db.run(
-        `INSERT INTO ledger_entries (ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit, particulars, voucher_id) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [entry.ledger_id, ledger_name, data.date, data.voucher_type, voucher_no, entry.debit || 0, entry.credit || 0, particularsText, req.params.id]
-      ));
+      await conn.run(`
+        UPDATE voucher SET voucher_type = ?, voucher_no = ?, date = ?, reference_no = ?, narration = ?, status = ?, posted = ? WHERE id = ?
+      `, [data.voucher_type, voucher_no, data.date, data.reference_no || '', data.narration || '', data.status || 'Approved', data.posted !== undefined ? data.posted : 1, req.params.id]);
+
+      for (const entry of resolvedEntries) {
+        const entryType = entry.type || (Number(entry.debit) > 0 ? 'Dr' : 'Cr');
+        const ledger_name = entry.resolved_ledger_name;
+
+        await conn.run(
+          'INSERT INTO voucher_entry (voucher_id, type, ledger_id, ledger_name, debit, credit, remarks) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [req.params.id, entryType, entry.ledger_id, ledger_name, entry.debit || 0, entry.credit || 0, entry.remarks || '']
+        );
+
+        const particularsText = (entry.remarks && entry.remarks.trim())
+          ? entry.remarks.trim()
+          : ((data.reference_no && data.reference_no.trim())
+              ? data.reference_no.trim()
+              : (data.narration || ''));
+
+        await conn.run(
+          `INSERT INTO ledger_entries (ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit, particulars, voucher_id) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [entry.ledger_id, ledger_name, data.date, data.voucher_type, voucher_no, entry.debit || 0, entry.credit || 0, particularsText, req.params.id]
+        );
+      }
+
+      await conn.commit();
+    } catch (txErr) {
+      try { await conn.rollback(); } catch (_) {}
+      throw txErr;
+    } finally {
+      await conn.release();
     }
-    await Promise.all(ledgerEntries);
-      
+
     res.json({ message: 'Voucher updated successfully' });
   } catch (err) {
     console.error('PUT /vouchers/:id error:', err);
@@ -956,5 +1389,7 @@ router.delete('/:id', async (req, res) => {
 });
 
 router.healPurchaseAndSalesVouchers = healPurchaseAndSalesVouchers;
+router.reconcilePurchaseTransporterAndLoadmanEntries = reconcilePurchaseTransporterAndLoadmanEntries;
+router.healAllTransactions = healAllTransactions;
 module.exports = router;
 

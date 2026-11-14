@@ -8,9 +8,11 @@ const {
   resolveOperationalLedgers
 } = require('../services/operationalChargeEngine');
 
-// Helper for multi-tenant prefix
-function getPrefix(companyId) {
-  return (companyId && companyId > 1) ? `c${companyId}_` : '';
+const { generateNumber } = require('../services/operationalChargeEngine');
+
+// Schema routing in database.js already handles tenant isolation; never prefix table names with c{companyId}_
+function getPrefix() {
+  return '';
 }
 
 // Middleware to ensure company isolation and tables
@@ -166,8 +168,28 @@ router.post('/parties', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Name is required' });
     }
 
-    const countRow = await db.get(`SELECT COUNT(id) as cnt FROM ${pfx}operational_parties`);
-    const party_code = `OPP-${category.substring(0, 3).toUpperCase()}-${String((countRow?.cnt || 0) + 1).padStart(4, '0')}`;
+    const codePrefix = `OPP-${category.substring(0, 3).toUpperCase()}-`;
+    const existingCodes = await db.all(`SELECT party_code FROM ${pfx}operational_parties WHERE party_code LIKE ?`, [`${codePrefix}%`]);
+    let maxCodeNum = 0;
+    const codeRegex = new RegExp(`^${codePrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\d+)$`, 'i');
+    for (const r of existingCodes || []) {
+      const m = String(r.party_code || '').trim().match(codeRegex);
+      if (m) {
+        const parsed = parseInt(m[1], 10);
+        if (!Number.isNaN(parsed) && parsed > maxCodeNum) maxCodeNum = parsed;
+      }
+    }
+    let nextCodeNum = maxCodeNum + 1;
+    let party_code = '';
+    while (true) {
+      const candidate = `${codePrefix}${String(nextCodeNum).padStart(4, '0')}`;
+      const dup = await db.get(`SELECT id FROM ${pfx}operational_parties WHERE party_code = ? LIMIT 1`, [candidate]);
+      if (!dup) {
+        party_code = candidate;
+        break;
+      }
+      nextCodeNum++;
+    }
 
     const ins = await db.run(`
       INSERT INTO ${pfx}operational_parties (
@@ -270,8 +292,28 @@ router.post('/rates', async (req, res) => {
     const description = req.body.description || req.body.notes || '';
     const uom = req.body.uom || (rate_basis === 'PER_KG' ? 'KG' : rate_basis === 'PER_TONNE' ? 'MT' : rate_basis === 'PER_BAG' ? 'BAG' : 'TRIP');
 
-    const countRow = await db.get(`SELECT COUNT(id) as cnt FROM ${pfx}operational_rate_masters`);
-    const rate_code = `RATE-${operation_type.substring(0, 4).toUpperCase()}-${String((countRow?.cnt || 0) + 1).padStart(3, '0')}`;
+    const ratePrefix = `RATE-${operation_type.substring(0, 4).toUpperCase()}-`;
+    const existingRateCodes = await db.all(`SELECT rate_code FROM ${pfx}operational_rate_masters WHERE rate_code LIKE ?`, [`${ratePrefix}%`]);
+    let maxRateNum = 0;
+    const rateRegex = new RegExp(`^${ratePrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\d+)$`, 'i');
+    for (const r of existingRateCodes || []) {
+      const m = String(r.rate_code || '').trim().match(rateRegex);
+      if (m) {
+        const parsed = parseInt(m[1], 10);
+        if (!Number.isNaN(parsed) && parsed > maxRateNum) maxRateNum = parsed;
+      }
+    }
+    let nextRateNum = maxRateNum + 1;
+    let rate_code = '';
+    while (true) {
+      const candidate = `${ratePrefix}${String(nextRateNum).padStart(3, '0')}`;
+      const dup = await db.get(`SELECT id FROM ${pfx}operational_rate_masters WHERE rate_code = ? LIMIT 1`, [candidate]);
+      if (!dup) {
+        rate_code = candidate;
+        break;
+      }
+      nextRateNum++;
+    }
 
     const ins = await db.run(`
       INSERT INTO ${pfx}operational_rate_masters (
@@ -425,12 +467,10 @@ router.delete('/payments/:id', async (req, res) => {
 // -----------------------------------------------------------------------------
 router.get('/next-number', async (req, res) => {
   try {
-    const pfx = getPrefix(req.companyId);
-    const countRow = await db.get(`SELECT COUNT(id) as cnt FROM ${pfx}operational_charges`);
-    const next_charge_no = `OC-${String((countRow?.cnt || 0) + 1).padStart(5, '0')}`;
+    const next_charge_no = await generateNumber(req.companyId, 'CHARGE');
     res.json({ success: true, next_charge_no });
   } catch (err) {
-    res.json({ success: true, next_charge_no: `OC-${Date.now().toString().slice(-5)}` });
+    res.json({ success: true, next_charge_no: `OPC-${Date.now().toString().slice(-5)}` });
   }
 });
 

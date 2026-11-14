@@ -169,10 +169,11 @@ router.post('/', async (req, res) => {
     // Calculate totals
     const totalQty = validItems.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0)
     const totalWt = validItems.reduce((sum, item) => sum + (parseFloat(item.totalWt || item.total_wt || item.total_weight) || 0), 0)
-    const totalAmt = parseFloat(formData.total_amt) || totals?.netAmount || totals?.totalAmount || validItems.reduce((sum, item) => sum + (parseFloat(item.totalAmt || item.total_amt || item.amount) || 0), 0)
+    const itemsAmtSum = validItems.reduce((sum, item) => sum + (parseFloat(item.totalAmt || item.total_amt || item.amount) || 0), 0)
+    const totalAmt = parseFloat(formData.total_amt) || parseFloat(totals?.totalAmt) || parseFloat(totals?.netAmount) || parseFloat(totals?.totalAmount) || parseFloat(totals?.grandTotal) || parseFloat(formData.grand_total) || itemsAmtSum
 
     const deductionsJson = JSON.stringify(formData.selectedDeductions || req.body.selectedDeductions || []);
-    const grandTotalVal = parseFloat(formData.grand_total) || totals?.grandTotal || totalAmt;
+    const grandTotalVal = parseFloat(formData.grand_total) || parseFloat(totals?.grandTotal) || parseFloat(totals?.totalAmt) || totalAmt;
 
     // Insert sales
     const billNo = formData.sNo || formData.s_no || formData.bill_no || '';
@@ -304,7 +305,7 @@ router.post('/', async (req, res) => {
         igstAmount: igstSales,
         isInterstate: isInterstateSales,
         discAmount: 0,
-        baseAmount: parseFloat(totals?.baseAmount) || parseFloat(formData.bill_amt) || (totalAmt - salesTaxVal),
+        baseAmount: parseFloat(totals?.baseAmount) || parseFloat(formData.bill_amt) || Math.max(0, totalAmt - salesTaxVal),
         deductions: formData.deduction_amount ? [{
           deduction: formData.deduction,
           amount: parseFloat(formData.deduction_amount) || 0,
@@ -496,7 +497,8 @@ router.put('/:id', async (req, res) => {
     // Calculate totals
     const totalQty = activeItems.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0)
     const totalWt = activeItems.reduce((sum, item) => sum + (parseFloat(item.totalWt || item.total_wt || item.total_weight || item.weight * item.qty) || 0), 0)
-    const totalAmt = parseFloat(formData.total_amt) || totals?.netAmount || totals?.totalAmount || activeItems.reduce((sum, item) => sum + (parseFloat(item.totalAmt || item.total_amt || item.amount) || 0), 0)
+    const itemsAmtSum = activeItems.reduce((sum, item) => sum + (parseFloat(item.totalAmt || item.total_amt || item.amount) || 0), 0)
+    const totalAmt = parseFloat(formData.total_amt) || parseFloat(totals?.totalAmt) || parseFloat(totals?.netAmount) || parseFloat(totals?.totalAmount) || parseFloat(totals?.grandTotal) || parseFloat(formData.grand_total) || itemsAmtSum
 
     // Revert existing stock changes first
     await revertSalesStock(salesId)
@@ -523,7 +525,7 @@ router.put('/:id', async (req, res) => {
     }
 
     const deductionsJson = JSON.stringify(formData.selectedDeductions || req.body.selectedDeductions || []);
-    const grandTotalVal = parseFloat(formData.grand_total) || totals?.grandTotal || totalAmt;
+    const grandTotalVal = parseFloat(formData.grand_total) || parseFloat(totals?.grandTotal) || parseFloat(totals?.totalAmt) || totalAmt;
 
     // Update sales (full list of columns matching entries.js)
     await db.run(`
@@ -635,6 +637,16 @@ router.put('/:id', async (req, res) => {
       const sgstSales = parseFloat(formData.sgst_amt) || (isInterstateSales ? 0 : Number((salesTaxVal - cgstSales).toFixed(2)));
       const igstSales = parseFloat(formData.igst_amt) || (isInterstateSales ? salesTaxVal : 0);
 
+      let existingVoucherNo = null;
+      try {
+        const sNoStr = String(formData.sNo || formData.bill_no || formData.s_no || '');
+        const existingVRes = await db.query(
+          "SELECT voucher_no FROM voucher WHERE (reference_no = ? OR reference_no = ? OR reference_no = ?) AND voucher_type IN ('Sales', 'SAL') LIMIT 1",
+          [String(salesId), `SAL-${salesId}`, sNoStr]
+        );
+        existingVoucherNo = existingVRes.rows?.[0]?.voucher_no || null;
+      } catch (_) {}
+
       await deleteLedgerEntries(salesId)
       await createSalesLedgerEntries({
         customer: formData.customer_id || formData.customer || '',
@@ -648,12 +660,13 @@ router.put('/:id', async (req, res) => {
         igstAmount: igstSales,
         isInterstate: isInterstateSales,
         discAmount: 0,
-        baseAmount: parseFloat(totals?.baseAmount) || parseFloat(formData.bill_amt) || 0,
+        baseAmount: parseFloat(totals?.baseAmount) || parseFloat(formData.bill_amt) || Math.max(0, totalAmt - salesTaxVal),
         deductions: formData.deduction_amount ? [{
           deduction: formData.deduction,
           amount: parseFloat(formData.deduction_amount) || 0,
           remarks: formData.deduction_remarks || ''
-        }] : []
+        }] : [],
+        existingVoucherNo
       })
       console.log('✓ Sales ledger entries and voucher chain updated for sales ID:', salesId)
     } catch (ledgerError) {

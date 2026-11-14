@@ -70,11 +70,9 @@ async function resolveCompanyMasterTable(tableName, companyId) {
   if (tableName !== 'operational_parties') return tableName;
 
   const activeCompanyId = parseInt(companyId, 10) || 1;
-  if (activeCompanyId <= 1) return tableName;
-
   const { ensureOperationalTables } = require('../services/operationalChargeEngine');
   await ensureOperationalTables(activeCompanyId);
-  return `c${activeCompanyId}_${tableName}`;
+  return 'operational_parties';
 }
 
 // GET /api/masters/item-stock-details/:identifier
@@ -531,40 +529,12 @@ const masterTypeAliases = {
   papad_companies: { table: 'papad_company_master', displayField: 'name', hasStatus: true, uniqueField: 'name' },
   weight: { table: 'weightmaster', displayField: 'name', hasStatus: false, uniqueField: 'name' },
   weights: { table: 'weightmaster', displayField: 'name', hasStatus: false, uniqueField: 'name' },
-  ledger_group: { table: 'ledgergroupmaster', displayField: 'name', hasStatus: true, uniqueField: 'name' },
-  ledger_groups: { table: 'ledgergroupmaster', displayField: 'name', hasStatus: true, uniqueField: 'name' },
+  ledger_group: { table: 'ledger_groups', displayField: 'group_name', hasStatus: false, uniqueField: 'group_name' },
+  ledger_groups: { table: 'ledger_groups', displayField: 'group_name', hasStatus: false, uniqueField: 'group_name' },
   ledger: { table: 'ledgermaster', displayField: 'name', hasStatus: false, uniqueField: 'name' },
-  ledgers: { table: 'ledgermaster', displayField: 'name', hasStatus: false, uniqueField: 'name' },
-  area: { table: 'area_master', displayField: 'name', hasStatus: true, uniqueField: 'name' },
-  areas: { table: 'area_master', displayField: 'name', hasStatus: true, uniqueField: 'name' },
-  city: { table: 'city_master', displayField: 'name', hasStatus: true },
-  cities: { table: 'city_master', displayField: 'name', hasStatus: true },
-  consignee: { table: 'consignee_group_master', displayField: 'name', hasStatus: true },
-  consignees: { table: 'consignee_group_master', displayField: 'name', hasStatus: true },
-  ptrans: { table: 'ptrans_master', displayField: 'name', hasStatus: true },
-  sign: { table: 'sign_master', displayField: 'name', hasStatus: true },
-  signs: { table: 'sign_master', displayField: 'name', hasStatus: true },
-  sign_master: { table: 'sign_master', displayField: 'name', hasStatus: true },
-  sender: { table: 'sender_group_master', displayField: 'name', hasStatus: true },
-  senders: { table: 'sender_group_master', displayField: 'name', hasStatus: true },
-  transport: { table: 'transport_master', displayField: 'name', hasStatus: true },
-  transports: { table: 'transport_master', displayField: 'name', hasStatus: true },
-  godown: { table: 'godown_master', displayField: 'godown_name', hasStatus: false },
-  godowns: { table: 'godown_master', displayField: 'godown_name', hasStatus: false },
-  employee: { table: 'employee_master', displayField: 'name', hasStatus: true },
-  employees: { table: 'employee_master', displayField: 'name', hasStatus: true },
-  employee_master: { table: 'employee_master', displayField: 'name', hasStatus: true },
-  // Legacy table names also supported
-  customer_master: { table: 'customer_master', displayField: 'name', hasStatus: true },
-  supplier_master: { table: 'supplier_master', displayField: 'name', hasStatus: true },
-  flour_mill_master: { table: 'flour_mill_master', displayField: 'flourmill', hasStatus: true },
-  flourmill_master: { table: 'flour_mill_master', displayField: 'flourmill', hasStatus: true },
-  papad_company_master: { table: 'papad_company_master', displayField: 'name', hasStatus: true },
-  papadcompany_master: { table: 'papad_company_master', displayField: 'name', hasStatus: true },
-  weightmaster: { table: 'weightmaster', displayField: 'name', hasStatus: false },
-  weight_master: { table: 'weightmaster', displayField: 'name', hasStatus: false },
-  ledgergroupmaster: { table: 'ledgergroupmaster', displayField: 'name', hasStatus: false },
-  ledger_group_master: { table: 'ledgergroupmaster', displayField: 'name', hasStatus: false },
+  ledgermaster: { table: 'ledgermaster', displayField: 'name', hasStatus: false },
+  ledger_group_master: { table: 'ledger_groups', displayField: 'group_name', hasStatus: false },
+  ledgergroupmaster: { table: 'ledger_groups', displayField: 'group_name', hasStatus: false },
   ledgermaster: { table: 'ledgermaster', displayField: 'name', hasStatus: false },
   ledger_master: { table: 'ledgermaster', displayField: 'name', hasStatus: false },
   area_master: { table: 'area_master', displayField: 'name', hasStatus: true },
@@ -576,6 +546,7 @@ const masterTypeAliases = {
   sender_group_master: { table: 'sender_group_master', displayField: 'name', hasStatus: true },
   person_master: { table: 'person_master', displayField: 'name', hasStatus: true },
   godown_master: { table: 'godown_master', displayField: 'godown_name', hasStatus: false },
+  godowns: { table: 'godown_master', displayField: 'godown_name', hasStatus: false },
   godown_creation: { table: 'godown_master', displayField: 'godown_name', hasStatus: false },
   purchase_orders: { table: 'purchase_orders', displayField: 'id', hasStatus: false },
   purchase_deduction_master: { table: 'deduction_purchase', displayField: 'ded_name', hasStatus: false },

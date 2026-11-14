@@ -10,7 +10,7 @@ export const useMasterData = (masterType) => {
   const [loading, setLoading] = useState(() => !getCachedMasters(masterType).length);
   const [error, setError] = useState(null);
 
-  const fetchMaster = useCallback(async () => {
+  const fetchMaster = useCallback(async (forceRefresh = false) => {
     if (!masterType) {
       setData([]);
       setLoading(false);
@@ -23,12 +23,12 @@ export const useMasterData = (masterType) => {
     }
     setError(null);
     try {
-      const result = await getMasters(masterType);
+      const result = await getMasters(masterType, { forceRefresh });
       if (result) {
         const masters = safeArray(result.data || result);
         if (masters.length > 0) {
           setData(masters);
-        } else if (cached && cached.length > 0) {
+        } else if (!forceRefresh && cached && cached.length > 0) {
           setData(cached);
         } else {
           setData([]);
@@ -46,26 +46,33 @@ export const useMasterData = (masterType) => {
   }, [masterType]);
 
   useEffect(() => {
+    setData(getCachedMasters(masterType));
     fetchMaster();
-  }, [fetchMaster]);
+  }, [masterType, fetchMaster]);
 
-  // Auto-refresh every 5min or on window focus
+  // Auto-refresh every 5min, on window focus, or when active company changes
   useEffect(() => {
     let refreshInterval;
     const handleFocus = () => fetchMaster();
+    const handleCompanyChange = () => {
+      setData(getCachedMasters(masterType));
+      fetchMaster(true);
+    };
 
     if (masterType) {
       refreshInterval = setInterval(fetchMaster, 5 * 60 * 1000);
       window.addEventListener('focus', handleFocus);
+      window.addEventListener('erp_company_changed', handleCompanyChange);
     }
 
     return () => {
       if (refreshInterval) clearInterval(refreshInterval);
       window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('erp_company_changed', handleCompanyChange);
     };
   }, [masterType, fetchMaster]);
 
-  const refresh = useCallback(() => fetchMaster(), [fetchMaster]);
+  const refresh = useCallback(() => fetchMaster(true), [fetchMaster]);
 
   return { data, loading, error, refresh };
 };

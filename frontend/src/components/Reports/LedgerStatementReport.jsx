@@ -48,108 +48,119 @@ const LedgerStatementReport = () => {
   }, [])
 
   // Fetch ledgers for dropdown
-  useEffect(() => {
-    const fetchLedgers = async () => {
-      try {
-        const [suppliersRes, customersRes, papadRes, flourRes, opRes, lmRes, transRes] = await Promise.all([
-          api.getMasters('suppliers'),
-          api.getMasters('customers'),
-          api.getMasters('papad_companies'),
-          api.getMasters('flour_mills'),
-          api.getMasters('operational_parties'),
-          api.get('/masters/all/ledgermaster').catch(() => null),
-          api.getMasters('transporters').catch(() => null)
-        ])
-        
-        const suppliers = (suppliersRes?.success && Array.isArray(suppliersRes.data)) ? suppliersRes.data : []
-        const customers = (customersRes?.success && Array.isArray(customersRes.data)) ? customersRes.data : []
-        const papads = (papadRes?.success && Array.isArray(papadRes.data)) ? papadRes.data : []
-        const flourMills = (flourRes?.success && Array.isArray(flourRes.data)) ? flourRes.data : []
-        const ops = (opRes?.success && Array.isArray(opRes.data)) ? opRes.data : []
-        const generalLedgers = (lmRes?.data && Array.isArray(lmRes.data)) ? lmRes.data : (Array.isArray(lmRes) ? lmRes : [])
-        const transporters = (transRes?.success && Array.isArray(transRes.data)) ? transRes.data : (Array.isArray(transRes) ? transRes : [])
-        
-        const combined = []
-        const seen = new Set()
+  const fetchLedgers = async () => {
+    try {
+      const [suppliersRes, customersRes, papadRes, flourRes, opRes, lmRes, transRes] = await Promise.all([
+        api.getMasters('suppliers', { forceRefresh: true }),
+        api.getMasters('customers', { forceRefresh: true }),
+        api.getMasters('papad_companies', { forceRefresh: true }),
+        api.getMasters('flour_mills', { forceRefresh: true }),
+        api.getMasters('operational_parties', { forceRefresh: true }),
+        api.get('/masters/all/ledgermaster').catch(() => null),
+        api.getMasters('transporters', { forceRefresh: true }).catch(() => null)
+      ])
+      
+      const suppliers = (suppliersRes?.success && Array.isArray(suppliersRes.data)) ? suppliersRes.data : []
+      const customers = (customersRes?.success && Array.isArray(customersRes.data)) ? customersRes.data : []
+      const papads = (papadRes?.success && Array.isArray(papadRes.data)) ? papadRes.data : []
+      const flourMills = (flourRes?.success && Array.isArray(flourRes.data)) ? flourRes.data : []
+      const ops = (opRes?.success && Array.isArray(opRes.data)) ? opRes.data : []
+      const generalLedgers = (lmRes?.data && Array.isArray(lmRes.data)) ? lmRes.data : (Array.isArray(lmRes) ? lmRes : [])
+      const transporters = (transRes?.success && Array.isArray(transRes.data)) ? transRes.data : (Array.isArray(transRes) ? transRes : [])
+      
+      const combined = []
+      const seen = new Set()
 
-        suppliers.forEach(s => {
-          const key = `${s.name}_Supplier`
+      suppliers.forEach(s => {
+        const key = `${s.name}_Supplier`
+        if (!seen.has(key)) {
+          seen.add(key)
+          combined.push({ id: s.id, name: s.name, type: 'Supplier' })
+        }
+      })
+
+      customers.forEach(c => {
+        const key = `${c.name}_Customer`
+        if (!seen.has(key)) {
+          seen.add(key)
+          combined.push({ id: c.id, name: c.name, type: 'Customer' })
+        }
+      })
+
+      papads.forEach(p => {
+        const key = `${p.name}_Papad Company`
+        if (!seen.has(key)) {
+          seen.add(key)
+          combined.push({ id: p.id, name: p.name, type: 'Papad Company' })
+        }
+      })
+
+      flourMills.forEach(f => {
+        const name = f.flourmill || f.name
+        if (name) {
+          const key = `${name}_Flour Mill`
           if (!seen.has(key)) {
             seen.add(key)
-            combined.push({ id: s.id, name: s.name, type: 'Supplier' })
+            combined.push({ id: f.id, name, type: 'Flour Mill' })
           }
-        })
+        }
+      })
 
-        customers.forEach(c => {
-          const key = `${c.name}_Customer`
+      ops.forEach(o => {
+        const name = o.name
+        if (name) {
+          const key = `${name}_Loadman`
           if (!seen.has(key)) {
             seen.add(key)
-            combined.push({ id: c.id, name: c.name, type: 'Customer' })
+            combined.push({ id: o.id, name, type: 'Loadman' })
           }
-        })
+        }
+      })
 
-        papads.forEach(p => {
-          const key = `${p.name}_Papad Company`
+      transporters.forEach(t => {
+        const name = t.name || t.transporter_name || t.print_name
+        if (name) {
+          const key = `${name}_Transporter`
           if (!seen.has(key)) {
             seen.add(key)
-            combined.push({ id: p.id, name: p.name, type: 'Papad Company' })
+            combined.push({ id: t.id, name, type: 'Transporter' })
           }
-        })
+        }
+      })
 
-        flourMills.forEach(f => {
-          const name = f.flourmill || f.name
-          if (name) {
-            const key = `${name}_Flour Mill`
-            if (!seen.has(key)) {
-              seen.add(key)
-              combined.push({ id: f.id, name, type: 'Flour Mill' })
-            }
+      generalLedgers.forEach(l => {
+        const name = l.name
+        const type = l.ledger_type || 'General'
+        if (name) {
+          const key = `${name}_${type}`
+          if (!seen.has(key) && !seen.has(`${name}_Supplier`) && !seen.has(`${name}_Customer`) && !seen.has(`${name}_Loadman`) && !seen.has(`${name}_Transporter`)) {
+            seen.add(key)
+            combined.push({ id: l.id, name, type })
           }
-        })
+        }
+      })
 
-        ops.forEach(o => {
-          const name = o.name
-          if (name) {
-            const key = `${name}_Loadman`
-            if (!seen.has(key)) {
-              seen.add(key)
-              combined.push({ id: o.id, name, type: 'Loadman' })
-            }
-          }
-        })
-
-        transporters.forEach(t => {
-          const name = t.name || t.transporter_name || t.print_name
-          if (name) {
-            const key = `${name}_Transporter`
-            if (!seen.has(key)) {
-              seen.add(key)
-              combined.push({ id: t.id, name, type: 'Transporter' })
-            }
-          }
-        })
-
-        generalLedgers.forEach(l => {
-          const name = l.name
-          const type = l.ledger_type || 'General'
-          if (name) {
-            const key = `${name}_${type}`
-            if (!seen.has(key) && !seen.has(`${name}_Supplier`) && !seen.has(`${name}_Customer`) && !seen.has(`${name}_Loadman`) && !seen.has(`${name}_Transporter`)) {
-              seen.add(key)
-              combined.push({ id: l.id, name, type })
-            }
-          }
-        })
-
-        // Sort alphabetically by name
-        combined.sort((a, b) => (a.name || '').localeCompare(b.name || ''))
-        setLedgers(combined)
-      } catch (err) {
-        console.error('Error fetching ledgers:', err)
-        setLedgers([])
-      }
+      // Sort alphabetically by name
+      combined.sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+      setLedgers(combined)
+    } catch (err) {
+      console.error('Error fetching ledgers:', err)
+      setLedgers([])
     }
+  }
+
+  useEffect(() => {
     fetchLedgers()
+    const handleCompanyChange = () => {
+      setSelectedLedger('')
+      setSelectedType('')
+      setSelectedLedgerId('')
+      setReportData(null)
+      setError('')
+      fetchLedgers()
+    }
+    window.addEventListener('erp_company_changed', handleCompanyChange)
+    return () => window.removeEventListener('erp_company_changed', handleCompanyChange)
   }, [])
 
   // Fetch report data
@@ -207,7 +218,7 @@ const LedgerStatementReport = () => {
         <td style="padding: 6px 8px; border: 1px solid #cbd5e1;">${row.particulars || '-'}</td>
         <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; color: ${parseFloat(row.debit) > 0 ? '#059669' : 'inherit'};">${parseFloat(row.debit || 0) > 0 ? parseFloat(row.debit).toFixed(2) : '-'}</td>
         <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; color: ${parseFloat(row.credit) > 0 ? '#d97706' : 'inherit'};">${parseFloat(row.credit || 0) > 0 ? parseFloat(row.credit).toFixed(2) : '-'}</td>
-        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; font-weight: bold;">${Math.abs(parseFloat(row.balance || 0)).toFixed(2)}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; font-weight: bold;">${Math.abs(parseFloat(row.balance || 0)).toFixed(2)} ${row.balance_type || 'Dr'}</td>
       </tr>
     `).join('');
 
@@ -245,7 +256,7 @@ const LedgerStatementReport = () => {
           <tfoot>
             <tr style="background-color: #e2e8f0; font-weight: bold;">
               <td colspan="6" style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right;">Closing Balance:</td>
-              <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; color: #1f4fb2;">₹ ${Math.abs(parseFloat(calculatedClosingBalance || 0)).toFixed(2)}</td>
+              <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; color: #1f4fb2;">₹ ${Math.abs(parseFloat(calculatedClosingBalance || 0)).toFixed(2)} ${calculatedClosingBalance >= 0 ? 'Dr' : 'Cr'}</td>
             </tr>
           </tfoot>
         </table>
@@ -574,8 +585,8 @@ const LedgerStatementReport = () => {
                         <td className="credit-val">{creditVal > 0 ? `₹${creditVal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '-'}</td>
                         <td className="balance-val">
                           ₹ {Math.abs(balVal).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                          <span style={{ marginLeft: '4px', fontSize: '11px', color: balVal >= 0 ? '#047857' : '#b45309' }}>
-                            {balVal >= 0 ? 'Dr' : 'Cr'}
+                          <span style={{ marginLeft: '4px', fontSize: '11px', color: (row.balance_type || 'Dr') === 'Cr' ? '#b45309' : '#047857' }}>
+                            {row.balance_type || 'Dr'}
                           </span>
                         </td>
                         <td style={{ textAlign: 'center' }}>

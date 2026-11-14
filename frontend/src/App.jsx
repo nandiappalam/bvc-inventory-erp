@@ -591,7 +591,9 @@ const AppLayout = () => {
           <Route path="/master/weight-create" element={<DynamicMasterForm configKey="weight" key="weight" />} />
           <Route path="/master/weight-display" element={<DynamicMasterDisplay configKey="weight" key="weight" />} />
           <Route path="/master/ledger-group-create" element={<DynamicMasterForm configKey="ledger_group" key="ledger_group" />} />
-          <Route path="/master/ledger-group-display" element={<DynamicMasterDisplay configKey="ledger_group" key="ledger_group" />} />
+          <Route path="/master/ledger-group-display" element={<LedgerGroupDisplay />} />
+          <Route path="/master/ledger_group-display" element={<LedgerGroupDisplay />} />
+          <Route path="/master/ledger-groups-display" element={<LedgerGroupDisplay />} />
           <Route path="/master/sender-create" element={<DynamicMasterForm configKey="sender" key="sender" />} />
           <Route path="/master/sender-display" element={<DynamicMasterDisplay configKey="sender" key="sender" />} />
           <Route path="/master/transport-create" element={<DynamicMasterForm configKey="transport" key="transport" />} />

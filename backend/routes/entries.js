@@ -43,17 +43,22 @@ router.post('/sale', async (req, res) => {
     // Auto-generate next Sales s_no if not provided
     let s_no = formData.s_no || formData.sNo;
     if (!s_no) {
-      const maxRes = await db.query("SELECT COALESCE(MAX(s_no), 0) + 1 AS next_sno FROM sales");
-      s_no = maxRes.rows[0]?.next_sno || 1;
+      const maxRes = await db.query("SELECT COALESCE(MAX(CAST(NULLIF(s_no, '') AS INTEGER)), 0) AS max_sno, COALESCE(MAX(id), 0) AS max_id FROM sales");
+      const maxVal = Math.max(
+        parseInt(maxRes.rows?.[0]?.max_sno, 10) || 0,
+        parseInt(maxRes.rows?.[0]?.max_id, 10) || 0
+      );
+      s_no = maxVal + 1;
     }
 
-    // Calculate totals
+    // Calculate totals (support totals.totalAmt, totals.netAmount, totals.totalAmount, totals.grandTotal, and item sums)
     const totalQty = items.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0);
     const totalWt = items.reduce((sum, item) => sum + (parseFloat(item.totalWt || item.weight) || 0), 0);
-    const totalAmt = parseFloat(formData.total_amt) || totals?.netAmount || totals?.totalAmount || 0;
+    const itemsAmtSum = items.reduce((sum, item) => sum + (parseFloat(item.totalAmt || item.total_amt || item.amount) || 0), 0);
+    const totalAmt = parseFloat(formData.total_amt) || parseFloat(totals?.totalAmt) || parseFloat(totals?.netAmount) || parseFloat(totals?.totalAmount) || parseFloat(totals?.grandTotal) || parseFloat(formData.grand_total) || itemsAmtSum;
 
     const deductionsJson = JSON.stringify(formData.selectedDeductions || req.body.selectedDeductions || []);
-    const grandTotalVal = parseFloat(formData.grand_total) || totals?.grandTotal || totalAmt;
+    const grandTotalVal = parseFloat(formData.grand_total) || parseFloat(totals?.grandTotal) || parseFloat(totals?.totalAmt) || totalAmt;
 
     // Insert sales main record
     const salesResult = await db.run(`
@@ -214,15 +219,25 @@ router.post('/sale', async (req, res) => {
 
     // Post to ledger and create Sales Voucher chain
     try {
+      const salesTaxVal = parseFloat(formData.tax_amt) || parseFloat(totals?.taxAmount) || 0;
+      const isInterstateSales = String(formData.tax_type || '').toLowerCase().includes('inter');
+      const cgstSales = parseFloat(formData.cgst_amt) || (isInterstateSales ? 0 : Number((salesTaxVal / 2).toFixed(2)));
+      const sgstSales = parseFloat(formData.sgst_amt) || (isInterstateSales ? 0 : Number((salesTaxVal - cgstSales).toFixed(2)));
+      const igstSales = parseFloat(formData.igst_amt) || (isInterstateSales ? salesTaxVal : 0);
+
       await createSalesLedgerEntries({
         customer: formData.customer_id || formData.customer,
         date: formData.date || new Date().toISOString().split('T')[0],
         invNo: s_no,
         salesId: salesId,
         totalAmount: totalAmt,
-        taxAmount: parseFloat(formData.tax_amt) || 0,
+        taxAmount: salesTaxVal,
+        cgstAmount: cgstSales,
+        sgstAmount: sgstSales,
+        igstAmount: igstSales,
+        isInterstate: isInterstateSales,
         discAmount: 0,
-        baseAmount: parseFloat(totals?.baseAmount) || parseFloat(formData.bill_amt) || 0,
+        baseAmount: parseFloat(totals?.baseAmount) || parseFloat(formData.bill_amt) || Math.max(0, totalAmt - salesTaxVal),
         deductions: formData.deduction_amount ? [{
           deduction: formData.deduction,
           amount: parseFloat(formData.deduction_amount) || 0,

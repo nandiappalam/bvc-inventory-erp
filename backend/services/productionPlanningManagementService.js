@@ -79,7 +79,7 @@ async function createProductionPlan(data) {
       let bomId = it.bomId;
       let bomVer = it.bomVersion || 'V1';
       if (!bomId && it.productName) {
-        const bomRes = await db.query('SELECT id, version FROM bom_headers WHERE LOWER(product_name) = LOWER(?) AND status = "Active" LIMIT 1', [it.productName]);
+        const bomRes = await db.query("SELECT id, version FROM bom_headers WHERE LOWER(product_name) = LOWER(?) AND status = 'Active' LIMIT 1", [it.productName]);
         if (bomRes.rows?.length) {
           bomId = bomRes.rows[0].id;
           bomVer = bomRes.rows[0].version;

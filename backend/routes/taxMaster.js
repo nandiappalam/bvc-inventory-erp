@@ -481,7 +481,7 @@ router.put('/:id', async (req, res) => {
 // POST toggle activate / deactivate
 router.post('/:id/activate', async (req, res) => {
   try {
-    await db.run('UPDATE tax_master SET status = "Active", updated_at = CURRENT_TIMESTAMP WHERE id = ?', [req.params.id]);
+    await db.run("UPDATE tax_master SET status = 'Active', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [req.params.id]);
     res.json({ success: true, message: 'Tax configuration activated' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -490,7 +490,7 @@ router.post('/:id/activate', async (req, res) => {
 
 router.post('/:id/deactivate', async (req, res) => {
   try {
-    await db.run('UPDATE tax_master SET status = "Inactive", updated_at = CURRENT_TIMESTAMP WHERE id = ?', [req.params.id]);
+    await db.run("UPDATE tax_master SET status = 'Inactive', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [req.params.id]);
     res.json({ success: true, message: 'Tax configuration deactivated' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -556,7 +556,7 @@ router.get('/resolve/item/:itemId', async (req, res) => {
     }
 
     if (!taxConfig && item.hsn_code) {
-      const taxRes = await db.query('SELECT * FROM tax_master WHERE hsn_code = ? AND status = "Active" ORDER BY id ASC LIMIT 1', [item.hsn_code]);
+      const taxRes = await db.query("SELECT * FROM tax_master WHERE hsn_code = ? AND status = 'Active' ORDER BY id ASC LIMIT 1", [item.hsn_code]);
       if (taxRes.rows?.length > 0) {
         taxConfig = taxRes.rows[0];
       }

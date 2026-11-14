@@ -134,25 +134,26 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
     if (!bill) return false;
     const bType = String(bill.type || '').toLowerCase();
     const vType = String(bill.voucher_type || '').toLowerCase();
+    const cat = String(bill.category || '').toLowerCase();
     const invNo = String(bill.invoice_no || bill.voucher_no || '').toUpperCase();
     const lName = cleanLedgerName(bill.ledger_name).toLowerCase();
 
-    if (bType === 'payable' || bType === 'purchase' || vType === 'purchase' || vType === 'payment') return true;
+    if (bType === 'payable' || bType === 'purchase' || vType === 'purchase' || vType === 'payment' || cat === 'transport' || cat === 'loadman') return true;
     if (bType === 'receivable' || bType === 'sales' || vType === 'sales' || vType === 'receipt') return false;
-    if (invNo.startsWith('PUR')) return true;
-    if (invNo.startsWith('SAL') || invNo.startsWith('INV')) return false;
+    if (invNo.startsWith('PUR') || invNo.startsWith('TRP') || invNo.startsWith('LDM') || invNo.startsWith('OPC') || invNo.startsWith('PAY')) return true;
+    if (invNo.startsWith('SAL') || invNo.startsWith('INV') || invNo.startsWith('REC')) return false;
 
     if (currentLedgers && currentLedgers.length > 0) {
       const matched = currentLedgers.find(l => cleanLedgerName(l.name).toLowerCase() === lName);
       if (matched) {
         const lType = String(matched.ledger_type || '').toLowerCase();
-        const gName = String(matched.group_name || '').toLowerCase();
-        if (lType === 'supplier' || gName.includes('creditor') || gName.includes('supplier')) return true;
+        const gName = String(matched.group_name || matched.under || '').toLowerCase();
+        if (lType === 'supplier' || lType === 'transporter' || lType === 'worker' || gName.includes('creditor') || gName.includes('supplier') || gName.includes('transporter') || gName.includes('worker') || gName.includes('payable')) return true;
         if (lType === 'customer' || gName.includes('debtor') || gName.includes('customer')) return false;
       }
     }
 
-    if (lName.includes('supplier')) return true;
+    if (lName.includes('supplier') || lName.includes('lorry') || lName.includes('transport') || lName.includes('loadman')) return true;
     return false;
   };
 
@@ -164,20 +165,20 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
     
     const matchedList = currentLedgers && currentLedgers.length > 0 ? currentLedgers : ledgers;
     
-    // Split by comma in case bill.ledger_name has multiple ledger names joined by comma (e.g., "ABC, Sales Account, Output Tax")
+    // Split by comma in case bill.ledger_name has multiple ledger names joined by comma
     const partyParts = rawPartyStr.split(',').map(p => cleanLedgerName(p.trim())).filter(Boolean);
     
     let matchedLedger = null;
     
-    // 1. First attempt: find party matching target type preference (Supplier for Payment, Customer for Receipt)
+    // 1. First attempt: find party matching target type preference (Supplier/Transporter/Worker for Payment, Customer for Receipt)
     for (const part of partyParts) {
       const partLower = part.toLowerCase();
       const found = matchedList.find(l => {
         const lName = cleanLedgerName(l.name).toLowerCase();
         if (lName !== partLower) return false;
         const lType = String(l.ledger_type || '').toLowerCase();
-        const gName = String(l.group_name || '').toLowerCase();
-        if (targetType === 'Payment' && (lType === 'supplier' || gName.includes('creditor') || gName.includes('supplier'))) return true;
+        const gName = String(l.group_name || l.under || '').toLowerCase();
+        if (targetType === 'Payment' && (lType === 'supplier' || lType === 'transporter' || lType === 'worker' || gName.includes('creditor') || gName.includes('supplier') || gName.includes('transporter') || gName.includes('worker') || gName.includes('payable'))) return true;
         if (targetType === 'Receipt' && (lType === 'customer' || gName.includes('debtor') || gName.includes('customer'))) return true;
         return false;
       });
@@ -213,12 +214,13 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
     });
 
     const refVal = String(bill.invoice_no || bill.voucher_no || '');
+    const billTypeDesc = bill.category === 'transport' ? 'Transport Freight' : (bill.category === 'loadman' ? 'Loadman Charge' : (isPayable ? 'Purchase Invoice' : 'Sales Bill'));
 
     setFormData(prev => ({
       ...prev,
       voucher_type: targetType,
       reference_no: refVal ? `${refVal}` : prev.reference_no,
-      narration: `Settlement voucher for ${isPayable ? 'Purchase Invoice' : 'Sales Bill'} #${refVal}`
+      narration: `Settlement voucher for ${billTypeDesc} #${refVal}`
     }));
 
     const settleAmt = String(bill.balance !== undefined ? bill.balance : (bill.amount || ''));
@@ -486,6 +488,7 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
     loadSearchableBills();
     const handleCompanyChange = () => {
       loadSearchableBills();
+      voucherAPI.getLedgers().then(res => setLedgers(safeArray(res))).catch(() => setLedgers([]));
     };
     window.addEventListener('erp_company_changed', handleCompanyChange);
     return () => window.removeEventListener('erp_company_changed', handleCompanyChange);
@@ -902,6 +905,9 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
       } else {
         await voucherAPI.create(submitData);
       }
+      setSelectedQuickBillKey('');
+      setManualSearchNo('');
+      loadSearchableBills();
       navigate('/entry/voucher-display');
     } catch (err) {
       setError(err.message || 'Save failed');
@@ -956,12 +962,12 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
         {/* Quick Bill / Voucher No Search Bar */}
         <Paper variant="outlined" sx={{ p: 2.5, mb: 3, bgcolor: '#f0f4fe', borderColor: '#c7d2fe', borderRadius: 1.5 }}>
           <Typography variant="subtitle2" sx={{ fontWeight: 'bold', color: '#3730a3', mb: 1.5, display: 'flex', alignItems: 'center', gap: 1, fontSize: '0.95rem' }}>
-            🔍 Select / Search by Voucher No or Bill / Invoice No to Settle
+            🔍 Select / Search by Voucher No, Purchase, Sales, Freight, or Expense Bill to Settle
           </Typography>
           <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-end', flexWrap: 'wrap' }}>
             <Box sx={{ flexGrow: 1, minWidth: 280 }}>
               <Typography variant="caption" sx={{ fontWeight: 'bold', color: '#4338ca', display: 'block', mb: 0.5 }}>
-                Select Pending Bill / Invoice from List:
+                Select Pending Bill / Invoice / Expense Payable from List:
               </Typography>
               <Select
                 size="small"
@@ -975,18 +981,28 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
                     const foundBill = searchableBills.find(b => b.key === val);
                     if (foundBill) {
                       applyBillToVoucher(foundBill);
-                      setQuickAlert(`✓ Auto-filled voucher details for ${foundBill.type === 'Payable' ? 'Purchase Invoice' : 'Sales Bill'} #${foundBill.invoice_no || foundBill.voucher_no} (${foundBill.ledger_name}). Outstanding Balance: ₹${parseFloat(foundBill.balance).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`);
+                      const bTypeDesc = foundBill.category === 'transport' ? 'Transport Freight' : (foundBill.category === 'loadman' ? 'Loadman Charge' : (foundBill.type === 'Payable' ? 'Purchase Invoice' : 'Sales Bill'));
+                      setQuickAlert(`✓ Auto-filled voucher details for ${bTypeDesc} #${foundBill.invoice_no || foundBill.voucher_no} (${foundBill.ledger_name}). Outstanding Balance: ₹${parseFloat(foundBill.balance).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`);
                     }
                   }
                 }}
                 sx={{ bgcolor: '#fff' }}
               >
-                <MenuItem value="">-- Select Pending Purchase Invoice / Sales Bill / Voucher --</MenuItem>
-                {searchableBills.map(b => (
-                  <MenuItem key={b.key} value={b.key}>
-                    {b.type === 'Payable' ? '🛒 Purchase Inv' : '🏷️ Sales Bill'} #{b.invoice_no || b.voucher_no} — {b.ledger_name} (Bal: ₹{parseFloat(b.balance).toLocaleString('en-IN', { minimumFractionDigits: 2 })})
-                  </MenuItem>
-                ))}
+                <MenuItem value="">-- Select Pending Purchase / Sales / Freight / Loadman / Expense Payable --</MenuItem>
+                {searchableBills.map(b => {
+                  let icon = '🛒 Purchase Inv';
+                  if (b.category === 'transport') icon = '🚚 Transport Freight';
+                  else if (b.category === 'loadman') icon = '👷 Loadman Charges';
+                  else if (b.voucher_type === 'Operational') icon = '⚡ Operational Charge';
+                  else if (b.type === 'Receivable') icon = '🏷️ Sales Bill';
+                  else if (b.type === 'Payable' && b.category !== 'purchase') icon = '📄 General Payable';
+
+                  return (
+                    <MenuItem key={b.key} value={b.key}>
+                      {icon} #{b.invoice_no || b.voucher_no} — {b.ledger_name} (Bal: ₹{parseFloat(b.balance).toLocaleString('en-IN', { minimumFractionDigits: 2 })})
+                    </MenuItem>
+                  );
+                })}
               </Select>
             </Box>
 
@@ -1194,7 +1210,7 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
               {outstandingBills.length > 0 && (
                 <Box sx={{ p: 2.5, border: '1px solid #cfe2f3', borderRadius: 1.5, bgcolor: '#f4f8fb' }}>
                   <Typography variant="subtitle2" sx={{ fontWeight: 'bold', color: '#1565c0', mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: '0.9rem' }}>📋 Outstanding Purchase Invoices to Settle</span>
+                    <span style={{ fontSize: '0.9rem' }}>📋 Outstanding Invoices & Payables to Settle</span>
                     <Button 
                       size="small" 
                       variant="outlined" 
@@ -1208,7 +1224,8 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
                     <TableHead>
                       <TableRow sx={{ bgcolor: '#f1f3f5' }}>
                         <TableCell padding="checkbox" sx={{ fontWeight: 'bold' }}>Settle</TableCell>
-                        <TableCell sx={{ fontWeight: 'bold' }}>Invoice No</TableCell>
+                        <TableCell sx={{ fontWeight: 'bold' }}>Category / Type</TableCell>
+                        <TableCell sx={{ fontWeight: 'bold' }}>Ref / Inv No</TableCell>
                         <TableCell sx={{ fontWeight: 'bold' }}>Date</TableCell>
                         <TableCell align="right" sx={{ fontWeight: 'bold' }}>Bill Amt (₹)</TableCell>
                         <TableCell align="right" sx={{ fontWeight: 'bold' }}>Outstanding (₹)</TableCell>
@@ -1218,6 +1235,13 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
                     <TableBody>
                       {outstandingBills.map(bill => {
                         const billSelect = selectedBills[bill.invoice_no] || { selected: false, allocated: '' };
+                        let catLabel = '🛒 Purchase';
+                        let catColor = '#1565c0';
+                        if (bill.category === 'transport') { catLabel = '🚚 Transport'; catColor = '#e65100'; }
+                        else if (bill.category === 'loadman') { catLabel = '👷 Loadman'; catColor = '#6a1b9a'; }
+                        else if (bill.voucher_type === 'Operational') { catLabel = '⚡ Operational'; catColor = '#00838f'; }
+                        else if (bill.type === 'Payable' && bill.category !== 'purchase') { catLabel = '📄 Payable'; catColor = '#424242'; }
+
                         return (
                           <TableRow key={bill.invoice_no} hover>
                             <TableCell padding="checkbox">
@@ -1228,6 +1252,7 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
                                 onChange={(e) => handleBillCheckboxChange(bill.invoice_no, e.target.checked, bill.balance)}
                               />
                             </TableCell>
+                            <TableCell sx={{ fontWeight: 'bold', color: catColor, fontSize: '0.85rem' }}>{catLabel}</TableCell>
                             <TableCell sx={{ fontWeight: 'bold' }}>{bill.invoice_no}</TableCell>
                             <TableCell>{bill.date}</TableCell>
                             <TableCell align="right">₹{bill.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</TableCell>

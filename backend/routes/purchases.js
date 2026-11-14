@@ -283,6 +283,8 @@ router.get(['/', '/list', '/purchase-list'], async (req, res) => {
 
   try {
     const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    await ensurePurchasesTableSchema(activeCompanyId);
+
     const sql = `SELECT
       p.id,
       p.s_no AS s_no,
@@ -345,15 +347,15 @@ router.get(['/', '/list', '/purchase-list'], async (req, res) => {
       COALESCE(p.driver_name, p.driver, vm.driver_name, '') AS driver_name,
       COALESCE(CAST(vm.gate_in_time AS TEXT), CAST(vm.created_at AS TEXT), 'Done') AS gate_in,
       COALESCE(p.godown, '') AS godown,
-      p.transport_charges,
-      p.freight_amount,
-      p.net_transport_amount,
-      p.advance_amount,
-      p.mamool_amount,
-      p.weight_cash,
-      p.weight_cash_amount,
-      p.other_additional_charges,
-      p.other_deductions,
+      COALESCE(p.transport_charges, p.net_transport_amount, p.freight_amount, 0) AS transport_charges,
+      COALESCE(p.freight_amount, p.transport_charges, 0) AS freight_amount,
+      COALESCE(p.net_transport_amount, p.transport_charges, p.freight_amount, 0) AS net_transport_amount,
+      COALESCE(p.advance_amount, 0) AS advance_amount,
+      COALESCE(p.mamool_amount, 0) AS mamool_amount,
+      COALESCE(p.weight_cash, p.weight_cash_amount, 0) AS weight_cash,
+      COALESCE(p.weight_cash_amount, p.weight_cash, 0) AS weight_cash_amount,
+      COALESCE(p.other_additional_charges, 0) AS other_additional_charges,
+      COALESCE(p.other_deductions, 0) AS other_deductions,
 
 
       COALESCE(im.item_name, pi.item_name, '') AS item,
@@ -1720,7 +1722,7 @@ router.post('/', async (req, res) => {
         }
       }
 
-      await createPurchaseLedgerEntries({
+      const vRes = await createPurchaseLedgerEntries({
         supplier: supplierParam,
         date: formData.date,
         invNo: finalInvNo,
@@ -1742,6 +1744,9 @@ router.post('/', async (req, res) => {
         loadmanWorkerId: formData.loadman_worker_id || null,
         loadmanPayableType: loadmanPayableTypePur
       })
+      if (vRes?.voucherNo) {
+        try { await db.run('UPDATE purchases SET voucher_no = ? WHERE id = ?', [vRes.voucherNo, purchaseId]); } catch (_) {}
+      }
     } catch (ledgerError) {
       console.error('Error creating ledger entries:', ledgerError)
     }
@@ -2118,8 +2123,22 @@ router.put('/:id', async (req, res) => {
       const workerName = formData.loadman_name || formData.worker_name || null;
       const loadmanPayableTypePur = formData.loadman_payable_type || 'SEPARATE';
 
+      let existingVoucherNo = null;
+      try {
+        const invStr = String(formData.invNo || formData.inv_no || '');
+        const existingVRes = await db.query(
+          "SELECT voucher_no FROM voucher WHERE (reference_no = ? OR reference_no = ? OR reference_no = ?) AND voucher_type IN ('Purchase', 'PUR') LIMIT 1",
+          [String(purchaseId), `PUR-${purchaseId}`, invStr]
+        );
+        existingVoucherNo = existingVRes.rows?.[0]?.voucher_no || null;
+        if (!existingVoucherNo) {
+          const pVRes = await db.query('SELECT voucher_no FROM purchases WHERE id = ? LIMIT 1', [purchaseId]);
+          existingVoucherNo = pVRes.rows?.[0]?.voucher_no || null;
+        }
+      } catch (_) {}
+
       await deleteLedgerEntries(purchaseId, 'Purchase')
-      await createPurchaseLedgerEntries({
+      const vRes = await createPurchaseLedgerEntries({
         supplier: formData.supplier,
         date: sanitizedDate,
         invNo: formData.invNo || formData.inv_no || '',
@@ -2139,8 +2158,12 @@ router.put('/:id', async (req, res) => {
         loadmanCharges: loadmanChargesPur,
         loadmanName: workerName,
         loadmanWorkerId: formData.loadman_worker_id || null,
-        loadmanPayableType: loadmanPayableTypePur
+        loadmanPayableType: loadmanPayableTypePur,
+        existingVoucherNo
       })
+      if (vRes?.voucherNo) {
+        try { await db.run('UPDATE purchases SET voucher_no = ? WHERE id = ?', [vRes.voucherNo, purchaseId]); } catch (_) {}
+      }
     } catch (ledgerError) {
       console.error('Error updating ledger entries for purchase:', ledgerError)
     }
@@ -2462,5 +2485,6 @@ router.get('/:id/weight-audit', async (req, res) => {
   }
 });
 
-module.exports = router
+router.ensurePurchasesTableSchema = ensurePurchasesTableSchema;
+module.exports = router;
 

@@ -80,6 +80,15 @@ module.exports = async function autoMigrate() {
             BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchases" ADD COLUMN IF NOT EXISTS "net_weight" REAL DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
             BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchases" ADD COLUMN IF NOT EXISTS "bill_amt" REAL DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
             BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchases" ADD COLUMN IF NOT EXISTS "total_amt" REAL DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchases" ADD COLUMN IF NOT EXISTS "weight_cash_amount" REAL DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchases" ADD COLUMN IF NOT EXISTS "weight_cash" REAL DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchases" ADD COLUMN IF NOT EXISTS "advance_amount" REAL DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchases" ADD COLUMN IF NOT EXISTS "mamool_amount" REAL DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchases" ADD COLUMN IF NOT EXISTS "other_additional_charges" REAL DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchases" ADD COLUMN IF NOT EXISTS "other_deductions" REAL DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchases" ADD COLUMN IF NOT EXISTS "driver_mobile" TEXT'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchases" ADD COLUMN IF NOT EXISTS "transport_date" TEXT'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchases" ADD COLUMN IF NOT EXISTS "net_transport_amount" REAL DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
 
             -- grains
             BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."grains" ADD COLUMN IF NOT EXISTS "machine_no" TEXT'; EXCEPTION WHEN OTHERS THEN END;

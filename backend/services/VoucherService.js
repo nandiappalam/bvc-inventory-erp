@@ -47,7 +47,12 @@ async function ensureVoucherTables() {
   try {
     const columns = await getTableColumns('voucher_entry');
     if (!columns.has('ledger_name')) {
-      await db.run('CREATE INDEX IF NOT EXISTS idx_voucher_entry_voucher_id ON voucher_entry(voucher_id)');
+      try {
+        await db.run('ALTER TABLE voucher_entry ADD COLUMN ledger_name TEXT');
+      } catch (_) {}
+      try {
+        await db.run('CREATE INDEX IF NOT EXISTS idx_voucher_entry_voucher_id ON voucher_entry(voucher_id)');
+      } catch (_) {}
     }
   } catch (error) {
     console.warn('Voucher index setup skipped:', error.message);
@@ -68,8 +73,24 @@ async function generateVoucherNumber(voucherType) {
   };
   const prefix = prefixMap[normalized] || 'VOC';
 
-  const countResult = await db.query('SELECT COUNT(*) as cnt FROM voucher');
-  let nextNum = (countResult.rows?.[0]?.cnt || 0) + 1;
+  const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const existingRes = await db.query(
+    'SELECT voucher_no FROM voucher WHERE voucher_no LIKE ? ORDER BY id DESC',
+    [`${prefix}%`]
+  );
+  let maxNum = 0;
+  const exactRegex = new RegExp(`^${escapedPrefix}-?(\\d+)$`, 'i');
+  for (const row of existingRes.rows || []) {
+    const vNo = String(row.voucher_no || '').trim();
+    const match = vNo.match(exactRegex);
+    if (match) {
+      const parsed = parseInt(match[1], 10);
+      if (!Number.isNaN(parsed) && parsed > maxNum) {
+        maxNum = parsed;
+      }
+    }
+  }
+  let nextNum = maxNum + 1;
 
   while (true) {
     const candidate = `${prefix}${String(nextNum).padStart(5, '0')}`;
@@ -90,22 +111,26 @@ async function createVoucher(params = {}) {
   const narration = params.narration || '';
   const entries = params.entries || [];
 
-  const voucherNumber = voucherNo;
-  const voucherResult = await db.run(
-    'INSERT INTO voucher (voucher_type, voucher_no, date, reference_no, narration) VALUES (?, ?, ?, ?, ?)',
-    [voucherType, voucherNumber, date, referenceNo, narration]
-  );
-  const voucherId = voucherResult.lastInsertRowid;
+  if (!entries || !Array.isArray(entries) || entries.length < 2) {
+    throw new Error(`Cannot create ${voucherType} voucher ${voucherNo}: At least 2 entries required.`);
+  }
 
+  // Pre-validate double-entry balance and resolve ledgers BEFORE beginning transaction
+  let totalDebit = 0;
+  let totalCredit = 0;
+  const preparedEntries = [];
   for (const entry of entries) {
-    const columns = await getTableColumns('voucher_entry');
     const debitVal = Number(entry.debit ?? entry.debit_amount ?? 0);
     const creditVal = Number(entry.credit ?? entry.credit_amount ?? 0);
-    const remarksVal = entry.remarks || entry.narration || '';
+    if (debitVal < 0 || creditVal < 0) {
+      throw new Error(`Cannot create ${voucherType} voucher ${voucherNo}: Debit and credit amounts cannot be negative.`);
+    }
+    totalDebit += debitVal;
+    totalCredit += creditVal;
 
     let ledgerName = entry.ledgerName || entry.ledger_name;
-    const resolvedLedgerId = entry.ledgerId ?? entry.ledger_id ?? (ledgerName ? await resolveLedgerId(ledgerName) : 0);
-    const safeLedgerId = resolvedLedgerId ?? 0;
+    const resolvedLedgerId = entry.ledgerId ?? entry.ledger_id ?? (ledgerName ? await resolveLedgerId(ledgerName) : 1);
+    const safeLedgerId = (resolvedLedgerId && Number(resolvedLedgerId) > 0) ? Number(resolvedLedgerId) : 1;
 
     if (!ledgerName && safeLedgerId > 0) {
       try {
@@ -115,35 +140,80 @@ async function createVoucher(params = {}) {
     }
     if (!ledgerName) ledgerName = 'General Ledger';
 
-    if (columns.has('ledger_name')) {
-      await db.run(
-        'INSERT INTO voucher_entry (voucher_id, type, ledger_id, ledger_name, debit, credit, remarks) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [voucherId, entry.type || (debitVal > 0 ? 'Dr' : 'Cr'), safeLedgerId, ledgerName, debitVal, creditVal, remarksVal]
-      );
-    } else {
-      await db.run(
-        'INSERT INTO voucher_entry (voucher_id, type, ledger_id, debit, credit, remarks) VALUES (?, ?, ?, ?, ?, ?)',
-        [voucherId, entry.type || (debitVal > 0 ? 'Dr' : 'Cr'), safeLedgerId, debitVal, creditVal, remarksVal]
-      );
-    }
-
-    await createEntry({
+    preparedEntries.push({
+      type: entry.type || (debitVal > 0 ? 'Dr' : 'Cr'),
+      ledgerId: safeLedgerId,
       ledgerName,
-      date,
-      voucherType,
-      voucherNo: voucherNumber,
-      debit: debitVal,
-      credit: creditVal,
-      referenceId: entry.referenceId || referenceNo,
+      debitVal,
+      creditVal,
+      remarksVal: entry.remarks || entry.narration || '',
+      particulars: entry.particulars || entry.remarks || entry.narration || '',
+      referenceId: entry.referenceId || referenceNo || null,
       referenceType: entry.referenceType || 'transaction',
-      particulars: entry.particulars || remarksVal,
-      voucherId,
-      transactionId: entry.transactionId || referenceNo,
-      transactionType: entry.transactionType || 'transaction',
+      transactionId: entry.transactionId || referenceNo || null,
+      transactionType: entry.transactionType || 'transaction'
     });
   }
 
-  return { id: voucherId, voucherId, voucherNo: voucherNumber, voucher_no: voucherNumber, voucherType };
+  if (Math.abs(totalDebit - totalCredit) > 0.01) {
+    throw new Error(
+      `Cannot create ${voucherType} voucher ${voucherNo}: Debit (₹${totalDebit.toFixed(2)}) and Credit (₹${totalCredit.toFixed(2)}) do not balance!`
+    );
+  }
+  if (totalDebit <= 0) {
+    throw new Error(`Cannot create ${voucherType} voucher ${voucherNo}: Voucher amount must be greater than 0.`);
+  }
+
+  const voucherNumber = voucherNo;
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const voucherResult = await conn.run(
+      'INSERT INTO voucher (voucher_type, voucher_no, date, reference_no, narration) VALUES (?, ?, ?, ?, ?)',
+      [voucherType, voucherNumber, date, referenceNo, narration]
+    );
+    const voucherId = voucherResult.lastInsertRowid || voucherResult.lastID;
+
+    for (const item of preparedEntries) {
+      await conn.run(
+        'INSERT INTO voucher_entry (voucher_id, type, ledger_id, ledger_name, debit, credit, remarks) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [voucherId, item.type, item.ledgerId, item.ledgerName, item.debitVal, item.creditVal, item.remarksVal]
+      );
+
+      await conn.run(`
+        INSERT INTO ledger_entries (
+          ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit,
+          reference_id, reference_type, particulars, voucher_id, transaction_id, transaction_type
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [
+        item.ledgerId,
+        item.ledgerName,
+        date,
+        voucherType,
+        voucherNumber,
+        item.debitVal,
+        item.creditVal,
+        item.referenceId,
+        item.referenceType,
+        item.particulars,
+        voucherId,
+        item.transactionId,
+        item.transactionType
+      ]);
+    }
+
+    await conn.commit();
+    return { id: voucherId, voucherId, voucherNo: voucherNumber, voucher_no: voucherNumber, voucherType };
+  } catch (entryErr) {
+    try {
+      await conn.rollback();
+    } catch (_) {}
+    throw entryErr;
+  } finally {
+    await conn.release();
+  }
 }
 
 async function createPurchaseVoucher({

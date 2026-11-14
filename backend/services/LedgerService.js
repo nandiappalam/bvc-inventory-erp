@@ -66,40 +66,55 @@ async function ensureLedgerTables() {
 }
 
 async function resolveLedgerId(ledgerName) {
-  if (!ledgerName) return null;
+  if (!ledgerName || typeof ledgerName !== 'string' || !ledgerName.trim()) return 1;
+  const cleanName = ledgerName.trim();
 
   try {
     await ensureLedgerTables();
-    const existing = await db.query('SELECT id FROM ledgermaster WHERE name = ? LIMIT 1', [ledgerName]);
-    if (existing.rows.length > 0) {
+    const existing = await db.query(
+      'SELECT id FROM ledgermaster WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1',
+      [cleanName]
+    );
+    if (existing.rows && existing.rows.length > 0 && existing.rows[0].id) {
       return existing.rows[0].id;
     }
 
-    const columns = await getTableColumns('ledgermaster');
-    let insertSql = 'INSERT INTO ledgermaster (name) VALUES (?)';
-    let insertParams = [ledgerName];
-
-    if (columns.has('print_name') && columns.has('status')) {
-      insertSql = 'INSERT INTO ledgermaster (name, print_name, status) VALUES (?, ?, ?)';
-      insertParams = [ledgerName, ledgerName, 'Active'];
-    } else if (columns.has('print_name')) {
-      insertSql = 'INSERT INTO ledgermaster (name, print_name) VALUES (?, ?)';
-      insertParams = [ledgerName, ledgerName];
-    } else if (columns.has('status')) {
-      insertSql = 'INSERT INTO ledgermaster (name, status) VALUES (?, ?)';
-      insertParams = [ledgerName, 'Active'];
+    let underVal = 'Current Liabilities';
+    let typeVal = 'Liability';
+    const lower = cleanName.toLowerCase();
+    if (lower.includes('expense') || lower.includes('charges') || lower.includes('wages') || lower.includes('freight') || lower.includes('loading')) {
+      underVal = 'Direct Expenses';
+      typeVal = 'Expense';
+    } else if (lower.includes('bank') || lower.includes('cash')) {
+      underVal = lower.includes('bank') ? 'Bank Accounts' : 'Cash-in-hand';
+      typeVal = 'Asset';
+    } else if (lower.includes('purchase')) {
+      underVal = 'Purchase Accounts';
+      typeVal = 'Expense';
+    } else if (lower.includes('sales')) {
+      underVal = 'Sales Accounts';
+      typeVal = 'Income';
     }
 
-    const insertResult = await db.run(insertSql, insertParams);
-    return insertResult.lastInsertRowid;
+    try {
+      const insertResult = await db.run(
+        'INSERT INTO ledgermaster (name, printname, under, ledger_type, status) VALUES (?, ?, ?, ?, ?)',
+        [cleanName, cleanName.toUpperCase(), underVal, typeVal, 'Active']
+      );
+      const insertedId = insertResult.lastInsertRowid || insertResult.lastID;
+      if (insertedId) return insertedId;
+    } catch (insertErr) {
+      // Fall through to query if already exists or constraint violation
+    }
+
+    const fallback = await db.query(
+      'SELECT id FROM ledgermaster WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1',
+      [cleanName]
+    );
+    return fallback.rows?.[0]?.id || 1;
   } catch (error) {
-    const message = String(error.message || '');
-    if (message.includes('UNIQUE constraint failed') || message.includes('already exists')) {
-      const fallback = await db.query('SELECT id FROM ledgermaster WHERE name = ? LIMIT 1', [ledgerName]);
-      return fallback.rows[0]?.id || null;
-    }
     console.warn('Ledger lookup skipped:', error.message);
-    return null;
+    return 1;
   }
 }
 

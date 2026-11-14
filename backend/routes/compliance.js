@@ -1648,7 +1648,7 @@ router.get('/master-entities', async (req, res) => {
     // 1. Employees (from employee_master)
     let employees = [];
     try {
-      const empRes = await db.query('SELECT id, name as employee_name, emp_id, department, designation, status FROM employee_master WHERE status = "Active" OR status IS NULL ORDER BY name ASC');
+      const empRes = await db.query("SELECT id, name as employee_name, emp_id, department, designation, status FROM employee_master WHERE status = 'Active' OR status IS NULL ORDER BY name ASC");
       employees = empRes.rows || [];
     } catch (e) {
       employees = [

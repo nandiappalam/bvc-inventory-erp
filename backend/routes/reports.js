@@ -2182,9 +2182,7 @@ router.get('/ledger/:ledgerName', async (req, res) => {
     const loadmanDiagnostics = []
     const isLoadmanLedger = ['loadman', 'loadmen'].includes(String(detectedType || '').toLowerCase())
     const activeCompanyId = req.companyId || parseInt(req.headers['x-company-id'], 10) || 1;
-    const operationalPartyTable = activeCompanyId > 1
-      ? `c${activeCompanyId}_operational_parties`
-      : 'operational_parties';
+    const operationalPartyTable = 'operational_parties';
     try {
       const { ensureOperationalTables } = require('../services/operationalChargeEngine');
       await ensureOperationalTables(activeCompanyId);
@@ -2472,7 +2470,6 @@ router.get('/ledger/:ledgerName', async (req, res) => {
     // SOURCE 8: operational_payments & operational_charges
     // -------------------------------------------------------------
     if (opPartyIdList.length > 0 || operationalNameList.length > 0) {
-      const companyPrefix = activeCompanyId > 1 ? `c${activeCompanyId}_` : '';
       try {
         const { ensureOperationalTables } = require('../services/operationalChargeEngine');
         await ensureOperationalTables(activeCompanyId);
@@ -2493,20 +2490,28 @@ router.get('/ledger/:ledgerName', async (req, res) => {
         if (opConds.length > 0) {
           try {
             const payRes = await db.query(`
-              SELECT id, payment_no, payment_date, party_name, paid_amount, reference_no,
+              SELECT id, payment_no, voucher_no, payment_date, party_id, party_name, paid_amount, reference_no,
                      COALESCE(notes, remarks, '') as notes
-              FROM ${companyPrefix}operational_payments
+              FROM operational_payments
               WHERE (${opConds.join(' OR ')})
             `, opParams)
 
             for (const row of payRes.rows || []) {
-              const vNo = row.payment_no || `OPP-${row.id}`
+              const vNo = row.voucher_no || row.payment_no || `OPP-${row.id}`
               const amt = parseFloat(row.paid_amount || 0)
               const key = `${vNo}_${amt}_0`
+              const alreadyPostedByVoucher =
+                (row.voucher_no && seenVoucherNos.has(row.voucher_no)) ||
+                (row.payment_no && seenVoucherNos.has(row.payment_no)) ||
+                allTransactions.some(t =>
+                  (row.voucher_no && t.voucher_no === row.voucher_no) ||
+                  (row.payment_no && String(t.particulars || '').includes(row.payment_no))
+                )
 
-              if (!seenVoucherNos.has(vNo) && !seenKeys.has(key)) {
+              if (!alreadyPostedByVoucher && !seenKeys.has(key)) {
                 seenKeys.add(key)
                 seenVoucherNos.add(vNo)
+                if (row.payment_no) seenVoucherNos.add(row.payment_no)
                 allTransactions.push({
                   id: 700000 + row.id,
                   date: row.payment_date,
@@ -2540,7 +2545,7 @@ router.get('/ledger/:ledgerName', async (req, res) => {
                    accrual_voucher_id,
                    accrual_voucher_no,
                    COALESCE(notes, remarks, '') as notes 
-            FROM ${companyPrefix}operational_charges
+            FROM operational_charges
             WHERE (${opConds.join(' OR ')})
           `, opParams);
 
@@ -3063,19 +3068,23 @@ router.get('/ledger/:ledgerName', async (req, res) => {
         ...t,
         debit,
         credit,
-        balance: Number(runningBalance.toFixed(2))
+        balance: Number(runningBalance.toFixed(2)),
+        balance_type: runningBalance >= 0 ? 'Dr' : 'Cr'
       }
     })
 
     const periodDebit = Number(periodDebitTotal.toFixed(2))
     const periodCredit = Number(periodCreditTotal.toFixed(2))
+    const closingBalVal = Number(runningBalance.toFixed(2))
+    const closingBalType = runningBalance >= 0 ? 'Dr' : 'Cr'
 
     const payload = {
       success: true,
       ledgerName: officialName,
       openingBalance: Number(periodOpeningBalance.toFixed(2)),
       transactions: finalTransactions,
-      closingBalance: Number(runningBalance.toFixed(2)),
+      closingBalance: closingBalVal,
+      closingBalanceType: closingBalType,
       periodDebitTotal: periodDebit,
       periodCreditTotal: periodCredit,
       totalDebit: periodDebit,
@@ -3085,7 +3094,8 @@ router.get('/ledger/:ledgerName', async (req, res) => {
         ledgerName: officialName,
         openingBalance: Number(periodOpeningBalance.toFixed(2)),
         transactions: finalTransactions,
-        closingBalance: Number(runningBalance.toFixed(2)),
+        closingBalance: closingBalVal,
+        closingBalanceType: closingBalType,
         periodDebitTotal: periodDebit,
         periodCreditTotal: periodCredit,
         totalDebit: periodDebit,
@@ -3629,7 +3639,13 @@ router.get('/outstanding-details', async (req, res) => {
             p.net_amount,
             p.total_amount,
             0
-          ) as amount
+          ) as amount,
+          p.transporter,
+          COALESCE(p.transport_charges, p.freight_amount, p.net_transport_amount, 0) as transport_charges,
+          p.transport_payable_type,
+          p.loadman_name,
+          COALESCE(p.loadman_charges, 0) as loadman_charges,
+          p.loadman_payable_type
         FROM purchases p
         LEFT JOIN supplier_master sm ON (
           CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR 
@@ -3657,6 +3673,7 @@ router.get('/outstanding-details', async (req, res) => {
             date: row.date,
             voucher_type: 'Purchase',
             type: 'Payable',
+            category: 'purchase',
             amount: amt,
             paid: 0,
             balance: amt,
@@ -3684,6 +3701,58 @@ router.get('/outstanding-details', async (req, res) => {
             trackedPurchaseKeys.add(String(row.voucher_no).toLowerCase())
             trackedPurchaseKeys.add(`pur-${String(row.voucher_no).toLowerCase()}`)
             purchaseBillsByRef.set(String(row.voucher_no).toLowerCase(), billObj)
+          }
+        }
+
+        // Separate Transporter Freight Payable
+        const transAmt = parseFloat(row.transport_charges || 0)
+        const transPayType = String(row.transport_payable_type || 'SEPARATE').toUpperCase()
+        const transName = (row.transporter || '').trim()
+        if (transAmt > 0 && transPayType !== 'SUPPLIER_INVOICE' && transName) {
+          const transKey = `TRP-${row.invoice_no}_${transName}`
+          if (!billsMap[transKey]) {
+            const tokens = getBillSearchTokens(row.id, row.s_no, row.inv_no || row.invoice_no, 'Transport', row.voucher_no)
+            billsMap[transKey] = {
+              id: `trp_${row.id}`,
+              s_no: row.s_no,
+              voucher_no: row.voucher_no || row.invoice_no,
+              invoice_no: row.invoice_no,
+              date: row.date,
+              voucher_type: 'Transport',
+              type: 'Payable',
+              category: 'transport',
+              amount: transAmt,
+              paid: 0,
+              balance: transAmt,
+              ledger_name: transName,
+              searchTokens: tokens
+            }
+          }
+        }
+
+        // Separate Loadman Unloading Payable
+        const loadAmt = parseFloat(row.loadman_charges || 0)
+        const loadPayType = String(row.loadman_payable_type || 'SEPARATE').toUpperCase()
+        const loadName = (row.loadman_name || '').trim()
+        if (loadAmt > 0 && loadPayType !== 'SUPPLIER_INVOICE' && loadName) {
+          const loadKey = `LDM-${row.invoice_no}_${loadName}`
+          if (!billsMap[loadKey]) {
+            const tokens = getBillSearchTokens(row.id, row.s_no, row.inv_no || row.invoice_no, 'Loadman', row.voucher_no)
+            billsMap[loadKey] = {
+              id: `ldm_${row.id}`,
+              s_no: row.s_no,
+              voucher_no: row.voucher_no || row.invoice_no,
+              invoice_no: row.invoice_no,
+              date: row.date,
+              voucher_type: 'Loadman',
+              type: 'Payable',
+              category: 'loadman',
+              amount: loadAmt,
+              paid: 0,
+              balance: loadAmt,
+              ledger_name: loadName,
+              searchTokens: tokens
+            }
           }
         }
       })
@@ -3729,6 +3798,7 @@ router.get('/outstanding-details', async (req, res) => {
             date: row.date,
             voucher_type: 'Sales',
             type: 'Receivable',
+            category: 'sales',
             amount: amt,
             paid: 0,
             balance: amt,
@@ -3752,7 +3822,62 @@ router.get('/outstanding-details', async (req, res) => {
       console.warn('Error fetching sales for outstanding details:', e.message)
     }
 
-    // 2c. Scan voucher and voucher_entry for standalone Purchase / Sales vouchers
+    // 2c. Operational Charges (Unpaid labour, loading, freight, milling fees)
+    try {
+      const opExists = await tableExists('operational_charges')
+      if (opExists) {
+        const opRes = await db.query(`
+          SELECT 
+            id,
+            charge_no,
+            charge_date,
+            party_name,
+            party_category,
+            source_module,
+            source_transaction_no,
+            operation_type,
+            charge_type,
+            total_amount,
+            final_amount,
+            paid_amount,
+            balance_amount
+          FROM operational_charges
+          WHERE COALESCE(balance_amount, total_amount, 0) > 0.01
+            AND party_name IS NOT NULL AND party_name != ''
+        `)
+        ;(opRes.rows || []).forEach(op => {
+          const pName = op.party_name.trim()
+          const amt = parseFloat(op.final_amount || op.total_amount || 0)
+          const bal = parseFloat(op.balance_amount !== null && op.balance_amount !== undefined ? op.balance_amount : amt)
+          if (amt > 0 && bal > 0.01 && pName) {
+            const opKey = `OPC-${op.charge_no || op.id}_${pName}`
+            if (!billsMap[opKey]) {
+              const cat = (op.party_category || op.charge_type || '').toLowerCase().includes('transport') ? 'transport' : 'loadman'
+              const tokens = getBillSearchTokens(op.id, op.charge_no, op.source_transaction_no || op.charge_no, 'Operational')
+              billsMap[opKey] = {
+                id: `opc_${op.id}`,
+                s_no: op.charge_no || op.id,
+                voucher_no: op.charge_no || op.id,
+                invoice_no: op.source_transaction_no || op.charge_no || op.id,
+                date: op.charge_date || new Date().toISOString().slice(0, 10),
+                voucher_type: 'Operational',
+                type: 'Payable',
+                category: cat,
+                amount: amt,
+                paid: amt - bal,
+                balance: bal,
+                ledger_name: pName,
+                searchTokens: tokens
+              }
+            }
+          }
+        })
+      }
+    } catch (e) {
+      console.warn('Error fetching operational_charges for outstanding details:', e.message)
+    }
+
+    // 2d. Scan voucher and voucher_entry for standalone Purchase / Sales vouchers
     try {
       const vExists = await tableExists('voucher')
       const veExists = await tableExists('voucher_entry')
@@ -3870,6 +3995,7 @@ router.get('/outstanding-details', async (req, res) => {
               date: vData.date,
               voucher_type: vType,
               type: vType === 'Purchase' ? 'Payable' : 'Receivable',
+              category: vType === 'Purchase' ? 'purchase' : 'sales',
               amount: billAmt,
               paid: 0,
               balance: billAmt,
@@ -3883,7 +4009,7 @@ router.get('/outstanding-details', async (req, res) => {
       console.warn('Error fetching vouchers for outstanding details:', e.message)
     }
 
-    // 2d. Scan ledger_entries for any remaining standalone Purchase / Sales entries
+    // 2e. Scan ledger_entries for any remaining standalone Purchase / Sales / Payable / Transporter / Worker entries
     try {
       const leExists = await tableExists('ledger_entries')
       if (leExists) {
@@ -3899,10 +4025,10 @@ router.get('/outstanding-details', async (req, res) => {
             reference_id,
             reference_type
           FROM ledger_entries
-          WHERE voucher_type IN ('Purchase', 'Sales')
+          WHERE voucher_type IN ('Purchase', 'Sales', 'Journal', 'Debit Note', 'Credit Note')
         `)
         ;(leRes.rows || []).forEach(row => {
-          const vType = row.voucher_type === 'Purchase' ? 'Purchase' : 'Sales'
+          const vType = row.voucher_type === 'Purchase' ? 'Purchase' : (row.voucher_type === 'Sales' ? 'Sales' : row.voucher_type)
           const lName = row.ledger_name || ''
 
           // Never consider non-party accounts (Purchase Account, Sales Account, Tax, etc.)
@@ -3916,21 +4042,23 @@ router.get('/outstanding-details', async (req, res) => {
             if (row.reference_type === 'purchase' || trackedPurchaseKeys.has(refId) || trackedPurchaseKeys.has(vNoStr)) {
               return
             }
-          } else {
+          } else if (vType === 'Sales') {
             if (row.reference_type === 'sales' || trackedSalesKeys.has(refId) || trackedSalesKeys.has(vNoStr)) {
               return
             }
           }
 
-          // In purchase: only creditor (credit > 0). In sales: only debtor (debit > 0).
-          const amt = vType === 'Purchase' ? parseFloat(row.credit || 0) : parseFloat(row.debit || 0)
+          // In purchase/payable: only creditor (credit > 0). In sales/receivable: only debtor (debit > 0).
+          const isPayable = row.credit > 0
+          const amt = isPayable ? parseFloat(row.credit || 0) : parseFloat(row.debit || 0)
           if (amt <= 0) return
 
-          const prefix = vType === 'Purchase' ? 'PUR' : 'SAL'
-          const billKey = `${prefix}-${row.voucher_no || row.id}`
+          const prefix = isPayable ? 'PAY' : 'REC'
+          const billKey = `${prefix}-${row.voucher_no || row.id}_${lName}`
 
           if (!billsMap[billKey]) {
             const tokens = getBillSearchTokens(row.id, row.voucher_no, row.voucher_no, vType, row.voucher_no)
+            const cat = lName.toLowerCase().includes('lorry') || lName.toLowerCase().includes('transport') ? 'transport' : (lName.toLowerCase().includes('load') || lName.toLowerCase().includes('worker') ? 'loadman' : 'general')
             billsMap[billKey] = {
               id: row.id,
               s_no: row.voucher_no,
@@ -3938,7 +4066,8 @@ router.get('/outstanding-details', async (req, res) => {
               invoice_no: row.voucher_no,
               date: row.date,
               voucher_type: vType,
-              type: vType === 'Purchase' ? 'Payable' : 'Receivable',
+              type: isPayable ? 'Payable' : 'Receivable',
+              category: cat,
               amount: amt,
               paid: 0,
               balance: amt,
@@ -3956,7 +4085,7 @@ router.get('/outstanding-details', async (req, res) => {
 
     const cleanPartyKey = (name) => {
       if (!name) return ''
-      return String(name).replace(/\s*\((Supplier|Customer|Papad Co|Flour Mill|Creditor|Debtor)\)$/i, '').trim().toLowerCase()
+      return String(name).replace(/\s*\((Supplier|Customer|Papad Co|Flour Mill|Creditor|Debtor|Worker|Transporter)\)$/i, '').trim().toLowerCase()
     }
 
     // 4. Fetch all settlement ledger entries (Payments, Receipts, and Journals)
@@ -4138,8 +4267,14 @@ router.get('/outstanding-details', async (req, res) => {
       const sTokens = extractTokensFromSettlement(s)
       if (sTokens.length === 0) return
 
+      const sPartyKey = cleanPartyKey(s.ledger_name)
+
       for (const bill of allBills) {
         if (bill.balance <= 0.01) continue
+
+        const bPartyKey = cleanPartyKey(bill.ledger_name)
+        const partyMatches = !sPartyKey || !bPartyKey || sPartyKey === bPartyKey || sPartyKey.includes(bPartyKey) || bPartyKey.includes(sPartyKey)
+        if (!partyMatches) continue
 
         const searchTokens = Array.isArray(bill.searchTokens) ? bill.searchTokens : []
         const isMatched = sTokens.some(tok => 
@@ -6897,7 +7032,7 @@ const categoryReportHandler = async (req, res) => {
       if (from_date) { where += ' AND pr.date >= ?'; params.push(from_date); }
       if (to_date) { where += ' AND pr.date <= ?'; params.push(to_date); }
       if (search) { 
-        where += ' AND (LOWER(COALESCE(pcm.name, pr.papad_company, "")) LIKE LOWER(?) OR LOWER(COALESCE(pr.type, "")) LIKE LOWER(?) OR LOWER(CAST(pr.s_no AS TEXT)) LIKE LOWER(?) OR LOWER(COALESCE(pr.remarks, "")) LIKE LOWER(?))'; 
+        where += " AND (LOWER(COALESCE(pcm.name, pr.papad_company, '')) LIKE LOWER(?) OR LOWER(COALESCE(pr.type, '')) LIKE LOWER(?) OR LOWER(CAST(pr.s_no AS TEXT)) LIKE LOWER(?) OR LOWER(COALESCE(pr.remarks, '')) LIKE LOWER(?))"; 
         params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`); 
       }
 

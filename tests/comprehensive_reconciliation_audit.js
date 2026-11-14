@@ -11,7 +11,38 @@
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
-const sqlite3 = require('sqlite3').verbose();
+const { generateToken } = require('../backend/middleware/authMiddleware');
+const TEST_TOKEN = generateToken({ id: 1, username: 'admin', role: 'admin', companyId: 1, company_id: 1 });
+
+let sqlite3 = null;
+try {
+  sqlite3 = require('sqlite3').verbose();
+} catch (_) {
+  const { DatabaseSync } = require('node:sqlite');
+  sqlite3 = {
+    Database: function(filename) {
+      this._db = new DatabaseSync(filename);
+      this.all = (sql, params, cb) => {
+        if (typeof params === 'function') { cb = params; params = []; }
+        const pArr = Array.isArray(params) ? params : (params !== undefined ? [params] : []);
+        try { cb(null, this._db.prepare(sql).all(...pArr)); } catch(e) { cb(e); }
+      };
+      this.get = (sql, params, cb) => {
+        if (typeof params === 'function') { cb = params; params = []; }
+        const pArr = Array.isArray(params) ? params : (params !== undefined ? [params] : []);
+        try { cb(null, this._db.prepare(sql).get(...pArr)); } catch(e) { cb(e); }
+      };
+      this.run = (sql, params, cb) => {
+        if (typeof params === 'function') { cb = params; params = []; }
+        try { this._db.exec(sql); if (cb) cb(null); } catch(e) { if (cb) cb(e); }
+      };
+      this.close = (cb) => {
+        try { this._db.close(); } catch(_) {}
+        if (cb) cb(null);
+      };
+    }
+  };
+}
 
 const BASE_URL = 'http://localhost:3001';
 const DB_PATH = path.join(__dirname, '../database/company_1.db');
@@ -26,6 +57,7 @@ function apiRequest(method, endpoint, body = null, headers = {}) {
       method: method,
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${TEST_TOKEN}`,
         'X-Company-Id': '1',
         ...headers
       }
@@ -231,7 +263,7 @@ async function runAudit() {
 
   // 3.3 Verify payment voucher dual-entry creation
   const paymentVoucher = await getDbRow('SELECT v.voucher_no, v.voucher_type, ve.debit, ve.credit FROM voucher v JOIN voucher_entry ve ON v.id = ve.voucher_id WHERE v.narration LIKE ? LIMIT 2', [`%${chargeData?.charge_no || ''}%`]);
-  const paymentVoucherCount = await getDbRow('SELECT COUNT(*) as cnt FROM voucher WHERE voucher_type = "Payment"');
+  const paymentVoucherCount = await getDbRow("SELECT COUNT(*) as cnt FROM voucher WHERE voucher_type = 'Payment'");
   assert(paymentVoucherCount.cnt > 0, `Operational payment created double-entry payment voucher in general accounting`);
 
   // 3.4 Final settlement payment of remaining ₹400

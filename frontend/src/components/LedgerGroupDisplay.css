@@ -1,0 +1,1054 @@
+/* ==========================================================================
+   LedgerGroupDisplay.css
+   Scoped ERP Blue & White Stylesheet (LGD = Ledger Group Display)
+   Designed to override global element selectors cleanly and avoid layout gaps.
+   ========================================================================== */
+
+.lgd-page {
+  width: 100%;
+  max-width: 100%;
+  padding: 12px 16px 16px;
+  background-color: #eef3fa;
+  color: #1e293b;
+  font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+  box-sizing: border-box;
+}
+
+.lgd-page *,
+.lgd-page *::before,
+.lgd-page *::after {
+  box-sizing: border-box;
+}
+
+/* Explicit SVG icon sizing so global rules never distort icons */
+.lgd-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.lgd-icon-lg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.lgd-icon-empty {
+  width: 34px;
+  height: 34px;
+  color: #94a3b8;
+  margin-bottom: 8px;
+}
+
+.lgd-spin {
+  animation: lgd-rotate 0.9s linear infinite;
+}
+
+@keyframes lgd-rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ==========================================================================
+   1. Page Header Bar (Matches ERP Blue & White Theme)
+   ========================================================================== */
+.lgd-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  background: linear-gradient(135deg, #1f4fb2 0%, #2a5ea0 100%);
+  color: #ffffff;
+  padding: 10px 16px;
+  border-radius: 6px 6px 0 0;
+  box-shadow: 0 2px 4px rgba(15, 23, 42, 0.12);
+}
+
+.lgd-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.lgd-title-wrap {
+  min-width: 0;
+}
+
+.lgd-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: #ffffff;
+  line-height: 1.25;
+  letter-spacing: 0.2px;
+}
+
+.lgd-summary-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
+  font-size: 12px;
+  color: #dbeafe;
+  font-variant-numeric: tabular-nums;
+}
+
+.lgd-header-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Buttons (High specificity to override global button rules in SalesCreate.css / AreaDisplay.css) */
+.lgd-page button.lgd-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 31px;
+  padding: 0 11px;
+  margin: 0;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  box-shadow: none;
+}
+
+.lgd-page button.lgd-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.lgd-page button.lgd-btn-back {
+  background: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.32);
+}
+
+.lgd-page button.lgd-btn-back:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.26);
+}
+
+.lgd-page button.lgd-btn-toolbar {
+  background: #ffffff;
+  color: #1f3f67;
+  border: 1px solid #cbd5e1;
+}
+
+.lgd-page button.lgd-btn-toolbar:hover:not(:disabled) {
+  background: #f1f5f9;
+}
+
+.lgd-page button.lgd-btn-excel {
+  background: #0f766e;
+  color: #ffffff;
+  border: 1px solid #0f766e;
+}
+
+.lgd-page button.lgd-btn-excel:hover:not(:disabled) {
+  background: #0d5e57;
+}
+
+.lgd-page button.lgd-btn-primary {
+  background: #1f4fb2;
+  color: #ffffff;
+  border: 1px solid #163d8f;
+}
+
+.lgd-page button.lgd-btn-primary:hover:not(:disabled) {
+  background: #173f94;
+}
+
+.lgd-page button.lgd-btn-accent {
+  background: #0ea5e9;
+  color: #ffffff;
+  border: 1px solid #0284c7;
+}
+
+.lgd-page button.lgd-btn-accent:hover:not(:disabled) {
+  background: #0284c7;
+}
+
+.lgd-page button.lgd-btn-outline {
+  background: #ffffff;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+}
+
+.lgd-page button.lgd-btn-outline:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #94a3b8;
+}
+
+.lgd-page button.lgd-btn-danger-outline {
+  background: #ffffff;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+.lgd-page button.lgd-btn-danger-outline:hover:not(:disabled) {
+  background: #fef2f2;
+  border-color: #f87171;
+}
+
+.lgd-page button.lgd-btn-danger {
+  background: #dc2626;
+  color: #ffffff;
+  border: 1px solid #b91c1c;
+}
+
+.lgd-page button.lgd-btn-danger:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
+.lgd-page button.lgd-btn-sm {
+  height: 26px;
+  padding: 0 9px;
+  font-size: 11px;
+}
+
+/* ==========================================================================
+   2. Feedback Banners
+   ========================================================================== */
+.lgd-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  margin-top: 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.lgd-banner-error {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+.lgd-banner-success {
+  background: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+
+.lgd-page button.lgd-banner-close {
+  background: transparent;
+  border: none;
+  color: inherit;
+  padding: 2px;
+  margin: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* ==========================================================================
+   3. Compact Filter & Mode Toolbar
+   ========================================================================== */
+.lgd-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  background: #ffffff;
+  border: 1px solid #c5d5e8;
+  border-top: none;
+  padding: 8px 12px;
+  border-radius: 0 0 6px 6px;
+  margin-bottom: 10px;
+}
+
+.lgd-tabs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  background: #eff4fb;
+  padding: 3px;
+  border-radius: 5px;
+  border: 1px solid #d5e1f2;
+}
+
+.lgd-page button.lgd-tab {
+  height: 28px;
+  padding: 0 10px;
+  margin: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.lgd-page button.lgd-tab:hover {
+  color: #1f4fb2;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.lgd-page button.lgd-tab.is-active {
+  background: #1f4fb2;
+  color: #ffffff;
+  border-color: #163d8f;
+}
+
+.lgd-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex: 1;
+  justify-content: flex-end;
+}
+
+.lgd-search-box {
+  position: relative;
+  min-width: 220px;
+  flex: 1 1 240px;
+  max-width: 340px;
+}
+
+.lgd-search-icon {
+  position: absolute;
+  left: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #64748b;
+  pointer-events: none;
+  width: 14px;
+  height: 14px;
+}
+
+.lgd-page input.lgd-search-input {
+  width: 100%;
+  height: 31px;
+  padding: 0 28px 0 30px;
+  border: 1px solid #b6c8e2;
+  border-radius: 4px;
+  background: #f8fbff;
+  color: #0f172a;
+  font-size: 12px;
+  font-family: inherit;
+  margin: 0;
+}
+
+.lgd-page input.lgd-search-input:focus {
+  outline: none;
+  border-color: #1f4fb2;
+  background: #ffffff;
+  box-shadow: 0 0 0 2px rgba(31, 79, 178, 0.14);
+}
+
+.lgd-page button.lgd-search-clear {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  color: #64748b;
+  padding: 2px;
+  margin: 0;
+  cursor: pointer;
+  display: inline-flex;
+}
+
+.lgd-page select.lgd-select {
+  height: 31px;
+  padding: 0 10px;
+  border: 1px solid #b6c8e2;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #1e293b;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  margin: 0;
+}
+
+.lgd-page select.lgd-select:focus {
+  outline: none;
+  border-color: #1f4fb2;
+}
+
+/* ==========================================================================
+   4. Split Master-Detail Workspace (Zero Waste Gap, Zero Bottom Stack)
+   ========================================================================== */
+.lgd-workspace {
+  display: grid;
+  grid-template-columns: 330px minmax(0, 1fr);
+  gap: 12px;
+  align-items: stretch;
+  height: calc(100vh - 205px);
+  min-height: 460px;
+  max-height: 780px;
+}
+
+/* Left Directory Panel */
+.lgd-sidebar {
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+  border: 1px solid #c5d5e8;
+  border-radius: 6px;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.lgd-sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  background: #e8f0ff;
+  border-bottom: 1px solid #c5d5e8;
+  font-size: 12px;
+  font-weight: 700;
+  color: #1f3f67;
+  flex-shrink: 0;
+}
+
+.lgd-sidebar-scroll {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.lgd-section-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: #f1f5f9;
+  border-top: 1px solid #e2e8f0;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.lgd-section-head:first-child {
+  border-top: none;
+}
+
+.lgd-nature-asset { color: #1d4ed8; }
+.lgd-nature-liability { color: #4338ca; }
+.lgd-nature-expense { color: #be123c; }
+.lgd-nature-income { color: #047857; }
+
+.lgd-section-count {
+  color: #64748b;
+  font-weight: 600;
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.lgd-page button.lgd-group-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  margin: 0;
+  text-align: left;
+  background: #ffffff;
+  color: #1e293b;
+  border: none;
+  border-bottom: 1px solid #eef2f6;
+  border-left: 3px solid transparent;
+  border-radius: 0;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.lgd-page button.lgd-group-item:hover {
+  background: #f4f8ff;
+}
+
+.lgd-page button.lgd-group-item.is-selected {
+  background: #e8f0ff;
+  border-left-color: #1f4fb2;
+  color: #1f4fb2;
+}
+
+.lgd-group-item-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.lgd-group-item-text {
+  min-width: 0;
+  flex: 1;
+}
+
+.lgd-group-item-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lgd-group-item-meta {
+  font-size: 11px;
+  color: #64748b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 1px;
+}
+
+.lgd-group-item-right {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.lgd-count-tag {
+  min-width: 22px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 3px;
+  background: #f1f5f9;
+  color: #334155;
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.lgd-group-item.is-selected .lgd-count-tag {
+  background: #1f4fb2;
+  color: #ffffff;
+}
+
+/* Right Detail Pane */
+.lgd-detail {
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+  border: 1px solid #c5d5e8;
+  border-radius: 6px;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.lgd-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 16px;
+  background: #f8fbff;
+  border-bottom: 1px solid #d5e1f2;
+  flex-shrink: 0;
+}
+
+.lgd-detail-info {
+  min-width: 0;
+  flex: 1;
+}
+
+.lgd-detail-kicker {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.lgd-detail-title {
+  margin: 2px 0 2px;
+  font-size: 17px;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.25;
+}
+
+.lgd-detail-parent {
+  margin: 0;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.lgd-detail-parent strong {
+  color: #334155;
+}
+
+.lgd-detail-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* Compact 4-Column Group Activity Bar */
+.lgd-metrics-bar {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  background: #ffffff;
+  border-bottom: 1px solid #d5e1f2;
+  flex-shrink: 0;
+}
+
+.lgd-metric-cell {
+  padding: 8px 16px;
+  border-right: 1px solid #e2e8f0;
+}
+
+.lgd-metric-cell:last-child {
+  border-right: none;
+}
+
+.lgd-metric-label {
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.lgd-metric-value {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+  margin-top: 1px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ==========================================================================
+   5. ERP Data Table (Used in Detail Pane & Full Matrix View)
+   ========================================================================== */
+.lgd-table-scroll {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+  background: #ffffff;
+}
+
+.lgd-matrix-card {
+  background: #ffffff;
+  border: 1px solid #c5d5e8;
+  border-radius: 6px;
+  overflow: hidden;
+  max-height: calc(100vh - 205px);
+  display: flex;
+  flex-direction: column;
+}
+
+.lgd-page table.lgd-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #ffffff;
+  font-size: 12.5px;
+  margin: 0;
+}
+
+.lgd-page table.lgd-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: #1f4fb2;
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 12px;
+  padding: 8px 12px;
+  height: auto;
+  border: 1px solid #3566c9;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.lgd-page table.lgd-table thead th.lgd-th-center {
+  text-align: center;
+}
+
+.lgd-page table.lgd-table thead th.lgd-th-right {
+  text-align: right;
+}
+
+.lgd-page table.lgd-table tbody td {
+  padding: 7px 12px;
+  height: auto;
+  border: 1px solid #dde6f2;
+  color: #1e293b;
+  vertical-align: middle;
+  background: transparent;
+}
+
+.lgd-page table.lgd-table tbody tr:nth-child(even) {
+  background: #f8fbff;
+}
+
+.lgd-page table.lgd-table tbody tr:hover {
+  background: #e8f0ff;
+}
+
+.lgd-td-center {
+  text-align: center;
+}
+
+.lgd-td-right {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.lgd-td-mono {
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.lgd-td-strong {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.lgd-td-muted {
+  color: #64748b;
+}
+
+.lgd-bal-dr {
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+.lgd-bal-cr {
+  color: #b45309;
+  font-weight: 700;
+}
+
+.lgd-status-active {
+  color: #047857;
+  font-weight: 600;
+}
+
+.lgd-status-inactive {
+  color: #64748b;
+  font-weight: 600;
+}
+
+.lgd-row-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.lgd-page button.lgd-link-btn {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  color: #1f4fb2;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-align: left;
+}
+
+.lgd-page button.lgd-link-btn:hover {
+  text-decoration: underline;
+}
+
+/* Inline Sub-Row for Matrix View Expansion */
+.lgd-subrow-cell {
+  background: #f4f8ff !important;
+  padding: 10px 16px !important;
+}
+
+.lgd-subtable {
+  width: 100%;
+  border-collapse: collapse;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+}
+
+.lgd-page table.lgd-subtable thead th {
+  position: static;
+  background: #dbe7fb;
+  color: #1e3a8a;
+  border: 1px solid #bfd3f6;
+  padding: 6px 10px;
+  font-size: 11px;
+}
+
+.lgd-page table.lgd-subtable tbody td {
+  padding: 5px 10px;
+  font-size: 12px;
+  border: 1px solid #e2e8f0;
+}
+
+/* ==========================================================================
+   6. Empty / Loading States
+   ========================================================================== */
+.lgd-empty-box {
+  background: #ffffff;
+  border: 1px solid #c5d5e8;
+  border-radius: 6px;
+  padding: 40px 20px;
+  text-align: center;
+}
+
+.lgd-empty-inner {
+  padding: 36px 20px;
+  text-align: center;
+}
+
+.lgd-empty-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.lgd-empty-desc {
+  margin: 6px auto 14px;
+  font-size: 12.5px;
+  color: #64748b;
+  max-width: 420px;
+}
+
+.lgd-empty-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lgd-loading-box {
+  background: #ffffff;
+  border: 1px solid #c5d5e8;
+  border-radius: 6px;
+  padding: 44px 20px;
+  text-align: center;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* ==========================================================================
+   7. Modals (Create/Edit Group & Delete Confirmation)
+   ========================================================================== */
+.lgd-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1400;
+  background: rgba(15, 23, 42, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.lgd-modal {
+  width: 100%;
+  max-width: 480px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.25);
+  overflow: hidden;
+}
+
+.lgd-modal-sm {
+  max-width: 400px;
+}
+
+.lgd-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: #1f4fb2;
+  color: #ffffff;
+}
+
+.lgd-modal-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lgd-modal-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.lgd-page button.lgd-modal-close {
+  background: transparent;
+  border: none;
+  color: #ffffff;
+  padding: 2px;
+  margin: 0;
+  cursor: pointer;
+  display: inline-flex;
+}
+
+.lgd-modal-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.lgd-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lgd-field-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.lgd-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1e3a8a;
+}
+
+.lgd-required {
+  color: #dc2626;
+}
+
+.lgd-page input.lgd-input,
+.lgd-page select.lgd-input {
+  width: 100%;
+  height: 36px;
+  min-height: 36px;
+  padding: 6px 10px;
+  line-height: 1.4;
+  border: 1px solid #94a3b8;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: inherit;
+  color: #0f172a;
+  background: #ffffff;
+  margin: 0;
+}
+
+.lgd-page textarea.lgd-input {
+  width: 100%;
+  height: auto;
+  min-height: 64px;
+  padding: 8px 10px;
+  line-height: 1.45;
+  border: 1px solid #94a3b8;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: inherit;
+  color: #0f172a;
+  background: #ffffff;
+  margin: 0;
+  resize: vertical;
+}
+
+.lgd-page input.lgd-input:focus,
+.lgd-page select.lgd-input:focus,
+.lgd-page textarea.lgd-input:focus {
+  outline: none;
+  border-color: #1f4fb2;
+  box-shadow: 0 0 0 2px rgba(31, 79, 178, 0.14);
+}
+
+.lgd-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 16px;
+  background: #f8fafc;
+  border-top: 1px solid #e2e8f0;
+}
+
+.lgd-confirm-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #334155;
+}
+
+/* ==========================================================================
+   8. Responsive Adjustments
+   ========================================================================== */
+@media (max-width: 960px) {
+  .lgd-workspace {
+    grid-template-columns: 1fr;
+    height: auto;
+    max-height: none;
+  }
+
+  .lgd-sidebar {
+    max-height: 280px;
+  }
+
+  .lgd-detail {
+    min-height: 320px;
+  }
+
+  .lgd-matrix-card {
+    max-height: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .lgd-metrics-bar {
+    grid-template-columns: 1fr;
+  }
+
+  .lgd-metric-cell {
+    border-right: none;
+    border-bottom: 1px solid #e2e8f0;
+  }
+
+  .lgd-metric-cell:last-child {
+    border-bottom: none;
+  }
+
+  .lgd-field-row {
+    grid-template-columns: 1fr;
+  }
+}

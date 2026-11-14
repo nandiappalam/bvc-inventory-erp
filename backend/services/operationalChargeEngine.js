@@ -418,8 +418,20 @@ async function generateNumber(companyId, type) {
   const col = type === 'CHARGE' ? 'charge_no' : 'payment_no';
 
   try {
-    const row = await db.get(`SELECT COUNT(id) as cnt FROM ${table}`);
-    let nextNum = (row?.cnt || 0) + 1;
+    const rows = await db.all(`SELECT ${col} as code FROM ${table} WHERE ${col} LIKE ? ORDER BY id DESC`, [`${prefixCode}%`]);
+    let maxNum = 0;
+    const escaped = prefixCode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`^${escaped}-?(\\d+)$`, 'i');
+    for (const r of rows || []) {
+      const m = String(r.code || '').trim().match(regex);
+      if (m) {
+        const parsed = parseInt(m[1], 10);
+        if (!Number.isNaN(parsed) && parsed > maxNum) {
+          maxNum = parsed;
+        }
+      }
+    }
+    let nextNum = maxNum + 1;
     while (true) {
       const candidate = `${prefixCode}-${String(nextNum).padStart(5, '0')}`;
       const check = await db.get(`SELECT id FROM ${table} WHERE ${col} = ? LIMIT 1`, [candidate]);
@@ -443,26 +455,44 @@ async function resolveOperationalLedgers(companyId = 1) {
   try {
     // 1. Expense Ledger: Loading & Unloading Charges / Direct Expenses
     expenseLedger = await db.get(
-      `SELECT id, name FROM ${pfx}ledgermaster WHERE UPPER(name) LIKE '%LOADING%' OR UPPER(name) LIKE '%FREIGHT%' OR UPPER(name) LIKE '%DIRECT EXPENSES%' OR UPPER(name) LIKE '%WAGES%' LIMIT 1`
+      `SELECT id, name FROM ${pfx}ledgermaster WHERE UPPER(name) LIKE '%LOADING%' OR UPPER(name) LIKE '%OPERATIONAL CHARGES%' OR UPPER(name) LIKE '%DIRECT EXPENSES%' OR UPPER(name) LIKE '%WAGES%' LIMIT 1`
     );
-    if (!expenseLedger) {
-      const insExp = await db.run(
-        `INSERT INTO ${pfx}ledgermaster (name, printname, under, ledger_type, openingbalance, status)
-         VALUES ('Loading & Operational Charges', 'LOADING & OPERATIONAL CHARGES', 'Direct Expenses', 'Expense', 0, 'Active')`
-      );
-      expenseLedger = { id: insExp.lastID, name: 'Loading & Operational Charges' };
+    if (!expenseLedger || !expenseLedger.id) {
+      try {
+        const insExp = await db.run(
+          `INSERT INTO ${pfx}ledgermaster (name, printname, under, ledger_type, openingbalance, status)
+           VALUES ('Loading & Operational Charges', 'LOADING & OPERATIONAL CHARGES', 'Direct Expenses', 'Expense', 0, 'Active')`
+        );
+        const expId = insExp.lastInsertRowid || insExp.lastID;
+        if (expId) {
+          expenseLedger = { id: expId, name: 'Loading & Operational Charges' };
+        }
+      } catch (_) {}
+      if (!expenseLedger || !expenseLedger.id) {
+        const found = await db.get(`SELECT id, name FROM ${pfx}ledgermaster WHERE LOWER(TRIM(name)) = 'loading & operational charges' LIMIT 1`);
+        if (found) expenseLedger = found;
+      }
     }
 
     // 2. Payable Ledger: Operational Charges Payable / Current Liabilities
     payableLedger = await db.get(
-      `SELECT id, name FROM ${pfx}ledgermaster WHERE UPPER(name) LIKE '%OPERATIONAL CHARGES PAYABLE%' OR UPPER(name) LIKE '%LABOUR CHARGES PAYABLE%' OR UPPER(name) LIKE '%SUNDRY CREDITORS%' LIMIT 1`
+      `SELECT id, name FROM ${pfx}ledgermaster WHERE UPPER(name) LIKE '%OPERATIONAL CHARGES PAYABLE%' OR UPPER(name) LIKE '%LABOUR CHARGES PAYABLE%' OR (UPPER(name) LIKE '%OPERATIONAL%' AND UPPER(under) LIKE '%LIABILIT%') LIMIT 1`
     );
-    if (!payableLedger) {
-      const insPay = await db.run(
-        `INSERT INTO ${pfx}ledgermaster (name, printname, under, ledger_type, openingbalance, status)
-         VALUES ('Operational Charges Payable', 'OPERATIONAL CHARGES PAYABLE', 'Current Liabilities', 'Liability', 0, 'Active')`
-      );
-      payableLedger = { id: insPay.lastID, name: 'Operational Charges Payable' };
+    if (!payableLedger || !payableLedger.id) {
+      try {
+        const insPay = await db.run(
+          `INSERT INTO ${pfx}ledgermaster (name, printname, under, ledger_type, openingbalance, status)
+           VALUES ('Operational Charges Payable', 'OPERATIONAL CHARGES PAYABLE', 'Current Liabilities', 'Liability', 0, 'Active')`
+        );
+        const payId = insPay.lastInsertRowid || insPay.lastID;
+        if (payId) {
+          payableLedger = { id: payId, name: 'Operational Charges Payable' };
+        }
+      } catch (_) {}
+      if (!payableLedger || !payableLedger.id) {
+        const found = await db.get(`SELECT id, name FROM ${pfx}ledgermaster WHERE LOWER(TRIM(name)) = 'operational charges payable' LIMIT 1`);
+        if (found) payableLedger = found;
+      }
     }
 
     // 3. Cash Ledger: Cash in Hand
@@ -540,8 +570,12 @@ async function recordOperationalCharge(params = {}) {
   let accrualVoucherNo = null;
   let isPosted = 0;
 
+  // For Purchases, createPurchaseVoucherChain already includes loadman/unloading charges authoritatively in the Purchase voucher (e.g. PUR00018).
+  // Auto-posting an additional Journal voucher for Purchase would cause double booking and potential duplicate vouchers.
+  const isPurchaseSource = String(sourceModule || '').toLowerCase().includes('purchase');
+
   // Auto-post Accrual Journal/Payment Voucher to Accounting if enabled and finalAmount > 0
-  if (autoPostToAccounts && finalAmount > 0 && expenseLedger && payableLedger) {
+  if (autoPostToAccounts && !isPurchaseSource && finalAmount > 0 && expenseLedger?.id && payableLedger?.id) {
     try {
       const voucherRes = await VoucherService.createVoucher({
         companyId,
@@ -688,7 +722,7 @@ async function recordOperationalPayment(params = {}) {
   let partyName = params.partyName || params.party_name;
   const paymentDate = params.paymentDate || params.payment_date || params.date || new Date().toISOString().split('T')[0];
   const paymentMode = params.paymentMode || params.payment_mode || params.payment_method || 'CASH';
-  const paidAmount = Number(params.paidAmount ?? params.paid_amount ?? 0);
+  const paidAmount = Number(params.paidAmount ?? params.paid_amount ?? params.amount ?? 0);
   const referenceNo = params.referenceNo || params.reference_no || '';
   const paidFromLedgerId = params.paidFromLedgerId || params.paid_from_ledger_id;
   const rawAllocations = params.allocations || [];
@@ -710,13 +744,33 @@ async function recordOperationalPayment(params = {}) {
     } else {
       // Auto-create in master operational_parties so it permanently displays in Master table!
       try {
-        const cRow = await db.get(`SELECT COUNT(id) as cnt FROM ${pfx}operational_parties`);
-        const pCode = `OPP-${String((cRow?.cnt || 0) + 1).padStart(4, '0')}`;
+        const existingCodes = await db.all(`SELECT party_code FROM ${pfx}operational_parties WHERE party_code LIKE 'OPP-%'`);
+        let maxPartyNum = 0;
+        for (const r of existingCodes || []) {
+          const m = String(r.party_code || '').trim().match(/^OPP-(\d+)$/i);
+          if (m) {
+            const parsed = parseInt(m[1], 10);
+            if (!Number.isNaN(parsed) && parsed > maxPartyNum) {
+              maxPartyNum = parsed;
+            }
+          }
+        }
+        let nextPartyNum = maxPartyNum + 1;
+        let pCode = '';
+        while (true) {
+          const candidate = `OPP-${String(nextPartyNum).padStart(4, '0')}`;
+          const dup = await db.get(`SELECT id FROM ${pfx}operational_parties WHERE party_code = ? LIMIT 1`, [candidate]);
+          if (!dup) {
+            pCode = candidate;
+            break;
+          }
+          nextPartyNum++;
+        }
         const pCat = params.party_category || params.category || 'LOADMAN';
         const pMode = paymentMode || 'CASH';
         const pIns = await db.run(
-          `INSERT INTO ${pfx}operational_parties (party_code, name, category, default_payment_mode, is_active) VALUES (?, ?, ?, ?, 1)`,
-          [pCode, cleanName, pCat, pMode]
+          `INSERT INTO ${pfx}operational_parties (party_code, name, category, party_category, default_payment_mode, payment_mode, is_active) VALUES (?, ?, ?, ?, ?, ?, 1)`,
+          [pCode, cleanName, pCat, pCat, pMode, pMode]
         );
         partyId = pIns.lastID;
         partyName = cleanName;
@@ -743,9 +797,24 @@ async function recordOperationalPayment(params = {}) {
 
   let paymentVoucherId = null;
   let paymentVoucherNo = null;
+  let debitLedgerId = payableLedger ? payableLedger.id : null;
+  let debitLedgerName = payableLedger ? payableLedger.name : 'Operational Charges Payable';
 
-  // Post Payment Voucher to Accounts: Debit Operational Charges Payable, Credit Cash / Bank
-  if (autoPostToAccounts && payableLedger && fromLedgerId) {
+  // Prefer the specific worker/party ledger so Voucher & Ledger Statement share a balanced PAY voucher
+  try {
+    const { resolveLedgerId } = require('../utils/ledgerHelper');
+    const resolvedPartyName = partyName || 'General Labour Pool';
+    const resolvedPartyLedgerId = await resolveLedgerId(resolvedPartyName, 'Worker');
+    if (resolvedPartyLedgerId) {
+      debitLedgerId = resolvedPartyLedgerId;
+      debitLedgerName = resolvedPartyName;
+    }
+  } catch (e) {
+    console.warn('[recordOperationalPayment] Worker ledger resolve fallback:', e.message);
+  }
+
+  // Post Payment Voucher to Accounts: Debit Worker/Party (or Operational Charges Payable), Credit Cash / Bank
+  if (autoPostToAccounts && debitLedgerId && fromLedgerId) {
     try {
       let fromLedgerName = 'Cash in Hand';
       try {
@@ -761,11 +830,11 @@ async function recordOperationalPayment(params = {}) {
         narration: `Operational Labour/Transport Payment to ${partyName || 'Party'} - Ref: ${referenceNo || paymentNo}`,
         entries: [
           {
-            ledger_id: payableLedger.id,
-            ledger_name: payableLedger.name,
+            ledger_id: debitLedgerId,
+            ledger_name: debitLedgerName,
             debit: paidAmount,
             credit: 0,
-            remarks: `Clearing operational dues for ${partyName}`
+            remarks: `Clearing operational dues for ${partyName || debitLedgerName} (${paymentNo})`
           },
           {
             ledger_id: fromLedgerId,
@@ -796,41 +865,11 @@ async function recordOperationalPayment(params = {}) {
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       paymentNo, payDate, partyId || 1, partyName || 'General Labour Pool', 'LOADMEN', paymentMode, paymentMode, paidAmount,
-      referenceNo, paymentVoucherId, paymentVoucherNo, fromLedgerId, payableLedger ? payableLedger.id : null,
+      referenceNo, paymentVoucherId, paymentVoucherNo, fromLedgerId, debitLedgerId || (payableLedger ? payableLedger.id : null),
       notes, notes, createdBy, createdBy
     ]
   );
   const paymentId = payIns.lastID;
-
-  // Also ensure party ledger entry is created for General Ledger Statement visibility
-  try {
-    const { resolveLedgerId } = require('../utils/ledgerHelper');
-    const pLedgerId = await resolveLedgerId(partyName || 'General Labour Pool', 'Worker');
-    if (pLedgerId) {
-      await db.run(`
-        INSERT INTO ledger_entries (
-          ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit,
-          reference_id, reference_type, particulars, voucher_id, transaction_id, transaction_type
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, [
-        pLedgerId,
-        partyName || 'General Labour Pool',
-        payDate,
-        'Payment',
-        paymentNo,
-        paidAmount,
-        0,
-        paymentId,
-        'operational_payment',
-        `Operational Payment to ${partyName || 'Party'} - Ref: ${referenceNo || paymentNo}`,
-        paymentVoucherId,
-        paymentId,
-        'operational_payment'
-      ]);
-    }
-  } catch (leErr) {
-    console.warn('[recordOperationalPayment] Party ledger entry creation warning:', leErr.message);
-  }
 
   // Normalize Allocations
   const allocations = (Array.isArray(rawAllocations) ? rawAllocations : []).map(a => ({

@@ -716,6 +716,11 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
         rawVal = String(data.customer_id || data.customerId || data.customer || data.customerName || data.customer_name || '');
       } else if (['godown_id', 'godownId', 'godown'].includes(field.name)) {
         rawVal = String(data.godown_id || data.godownId || data.godown || data.godownName || data.godown_name || '');
+        console.log('DEBUG EntryTopFrame godown rawVal:', rawVal, 'data.supplier_id:', data.supplier_id, 'data.supplier_name:', data.supplier_name);
+        // Safeguard: if godown value matches supplier name, clear it so it doesn't default to supplier
+        if (rawVal && (rawVal === String(data.supplier_id || '') || rawVal === String(data.supplier_name || ''))) {
+          rawVal = '';
+        }
       } else if (['transport_id', 'transportId', 'transporter', 'transport'].includes(field.name)) {
         rawVal = String(data.transporter || data.transport || data.transport_id || data.transportId || '');
       }
@@ -886,7 +891,22 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
           <option value="">Select...</option>
           {selectValue && !effectiveOptions.some(opt => String(getOptionValue(opt)).toLowerCase() === String(selectValue).toLowerCase()) && (
             <option value={selectValue}>
-              {data[field.name + '_name'] || data[field.name + 'Name'] || data.supplierName || data.supplier_name || data.customerName || data.customer_name || data.godownName || data.godown_name || selectValue}
+              {(() => {
+                const baseKey = field.name.replace(/(_id|id)$/i, '');
+                const candidateKeys = [
+                  field.name + '_name',
+                  field.name + 'Name',
+                  baseKey + '_name',
+                  baseKey + 'Name',
+                  baseKey
+                ];
+                for (const k of candidateKeys) {
+                  if (data[k] && typeof data[k] === 'string' && data[k].trim() !== '' && !/^\d+$/.test(data[k]) && data[k] !== selectValue) {
+                    return data[k];
+                  }
+                }
+                return selectValue;
+              })()}
             </option>
           )}
           {effectiveOptions.map((opt, idx) => {

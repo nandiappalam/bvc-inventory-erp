@@ -413,22 +413,36 @@ async function createPurchaseVoucherChain(purchaseData) {
     netAmount = 0,
     narration = '',
     deductions = [],
+    existingVoucherNo: passedVoucherNo = null,
   } = purchaseData
 
-  if (purchaseId) {
-    await deletePurchaseVoucherChain(purchaseId)
+  let existingVoucherNo = passedVoucherNo || null;
+  if (purchaseId || invNo) {
+    if (!existingVoucherNo) {
+      try {
+        const vRes = await db.query(
+          "SELECT voucher_no FROM voucher WHERE (reference_no = ? OR reference_no = ? OR reference_no = ?) AND (voucher_type = 'Purchase' OR voucher_type = 'PUR') LIMIT 1",
+          [String(purchaseId || ''), `PUR-${purchaseId || ''}`, String(invNo || '')]
+        );
+        if (vRes.rows && vRes.rows.length > 0 && vRes.rows[0].voucher_no) {
+          existingVoucherNo = vRes.rows[0].voucher_no;
+        }
+      } catch (_) {}
+    }
+    if (purchaseId) await deletePurchaseVoucherChain(purchaseId);
+    if (invNo) await deletePurchaseVoucherChain(invNo);
   }
 
   const resolvedSupplier = await getPartyName(supplier, 'supplier')
 
   const voucherDate = sanitizeDate(date) || new Date().toISOString().slice(0, 10)
-  const voucherNo = await getNextVoucherNumber('Purchase')
+  const voucherNo = existingVoucherNo || await getNextVoucherNumber('Purchase')
 
   const voucherResult = await db.run(`
     INSERT INTO voucher (voucher_type, voucher_no, date, reference_no, narration)
     VALUES (?, ?, ?, ?, ?)
   `, ['Purchase', voucherNo, voucherDate, String(purchaseId || ''), narration || `Purchase ${invNo || purchaseId}`])
-  const voucherId = voucherResult.lastInsertRowid
+  const voucherId = voucherResult.lastInsertRowid || voucherResult.lastID
 
   const ledgerEntries = []
   const particulars = `Purchase Invoice #${invNo || purchaseId}`
@@ -784,34 +798,42 @@ async function createPurchaseVoucherChain(purchaseData) {
     }
   }
 
-  for (const entry of voucherEntryRows) {
-    const ledgerId = await resolveLedgerId(entry.ledgerName)
-    try {
-      await db.run(`
-        INSERT INTO voucher_entry (voucher_id, type, ledger_id, ledger_name, debit, credit, remarks)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `, [voucherId, 'Ledger', ledgerId, entry.ledgerName, entry.debit || 0, entry.credit || 0, entry.remarks || ''])
-    } catch (error) {
-      const message = String(error.message || '')
-      if (message.includes('no such column: ledger_name') || message.includes('table voucher_entry has no column named ledger_name')) {
+  try {
+    for (const entry of voucherEntryRows) {
+      const ledgerId = await resolveLedgerId(entry.ledgerName, entry.ledgerType || null)
+      try {
         await db.run(`
-          INSERT INTO voucher_entry (voucher_id, type, ledger_id, debit, credit, remarks)
-          VALUES (?, ?, ?, ?, ?, ?)
-        `, [voucherId, 'Ledger', ledgerId ?? 0, entry.debit || 0, entry.credit || 0, entry.remarks || ''])
-      } else if (message.includes('NOT NULL constraint failed: voucher_entry.ledger_id')) {
-        await db.run(`
-          INSERT INTO voucher_entry (voucher_id, type, ledger_id, debit, credit, remarks)
-          VALUES (?, ?, ?, ?, ?, ?)
-        `, [voucherId, 'Ledger', ledgerId ?? 0, entry.debit || 0, entry.credit || 0, entry.remarks || ''])
-      } else {
-        throw error
+          INSERT INTO voucher_entry (voucher_id, type, ledger_id, ledger_name, debit, credit, remarks)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `, [voucherId, 'Ledger', ledgerId, entry.ledgerName, entry.debit || 0, entry.credit || 0, entry.remarks || ''])
+      } catch (error) {
+        const message = String(error.message || '')
+        if (message.includes('no such column: ledger_name') || message.includes('table voucher_entry has no column named ledger_name')) {
+          await db.run(`
+            INSERT INTO voucher_entry (voucher_id, type, ledger_id, debit, credit, remarks)
+            VALUES (?, ?, ?, ?, ?, ?)
+          `, [voucherId, 'Ledger', ledgerId ?? 0, entry.debit || 0, entry.credit || 0, entry.remarks || ''])
+        } else if (message.includes('NOT NULL constraint failed: voucher_entry.ledger_id')) {
+          await db.run(`
+            INSERT INTO voucher_entry (voucher_id, type, ledger_id, debit, credit, remarks)
+            VALUES (?, ?, ?, ?, ?, ?)
+          `, [voucherId, 'Ledger', ledgerId ?? 0, entry.debit || 0, entry.credit || 0, entry.remarks || ''])
+        } else {
+          throw error
+        }
       }
     }
+
+    await Promise.all(ledgerEntries)
+    return { voucherId, voucherNo, voucherType: 'Purchase' }
+  } catch (err) {
+    try {
+      await db.run('DELETE FROM voucher_entry WHERE voucher_id = ?', [voucherId]);
+      await db.run('DELETE FROM ledger_entries WHERE voucher_id = ? OR voucher_no = ?', [voucherId, voucherNo]);
+      await db.run('DELETE FROM voucher WHERE id = ?', [voucherId]);
+    } catch (_) {}
+    throw err;
   }
-
-  await Promise.all(ledgerEntries)
-
-  return { voucherId, voucherNo, voucherType: 'Purchase' }
 }
 
 /**
@@ -845,17 +867,30 @@ async function createSalesVoucherChain(salesData) {
     taxAmount = 0,
     discAmount = 0,
     baseAmount = 0,
-    deductions = []
+    deductions = [],
+    existingVoucherNo: passedVoucherNo = null,
   } = salesData
 
-  if (salesId) {
-    await deleteSalesVoucherChain(salesId)
+  let existingVoucherNo = passedVoucherNo || null;
+  if (salesId || invNo) {
+    if (!existingVoucherNo) {
+      try {
+        const vRes = await db.query(
+          "SELECT voucher_no FROM voucher WHERE (reference_no = ? OR reference_no = ? OR reference_no = ?) AND (voucher_type = 'Sales' OR voucher_type = 'SAL') LIMIT 1",
+          [String(salesId || ''), `SAL-${salesId || ''}`, String(invNo || '')]
+        );
+        if (vRes.rows && vRes.rows.length > 0 && vRes.rows[0].voucher_no) {
+          existingVoucherNo = vRes.rows[0].voucher_no;
+        }
+      } catch (_) {}
+    }
+    if (salesId) await deleteSalesVoucherChain(salesId)
   }
 
   const resolvedCustomer = await getPartyName(customer, 'customer')
 
   const voucherDate = sanitizeDate(date) || new Date().toISOString().slice(0, 10)
-  const voucherNo = await getNextVoucherNumber('Sales')
+  const voucherNo = existingVoucherNo || await getNextVoucherNumber('Sales')
 
   // Support baseAmount if not explicitly passed
   const resolvedBaseAmount = baseAmount || (totalAmount - taxAmount + discAmount)
@@ -864,7 +899,7 @@ async function createSalesVoucherChain(salesData) {
     INSERT INTO voucher (voucher_type, voucher_no, date, reference_no, narration)
     VALUES (?, ?, ?, ?, ?)
   `, ['Sales', voucherNo, voucherDate, String(salesId || ''), `Sales Invoice #${invNo || salesId}`])
-  const voucherId = voucherResult.lastInsertRowid
+  const voucherId = voucherResult.lastInsertRowid || voucherResult.lastID
 
   const ledgerEntries = []
   const particulars = `Sales Invoice #${invNo || salesId}`
@@ -877,6 +912,7 @@ async function createSalesVoucherChain(salesData) {
       debit: Number(totalAmount || 0),
       credit: 0,
       remarks: particulars,
+      ledgerType: 'Customer',
     })
     ledgerEntries.push(
       createLedgerEntry({
@@ -904,6 +940,7 @@ async function createSalesVoucherChain(salesData) {
       debit: 0,
       credit: Number(resolvedBaseAmount || 0),
       remarks: particulars,
+      ledgerType: 'Income',
     })
     ledgerEntries.push(
       createLedgerEntry({
@@ -919,6 +956,7 @@ async function createSalesVoucherChain(salesData) {
         voucherId,
         transactionId: salesId,
         transactionType: 'sales',
+        ledgerType: 'Income',
       })
     )
   }
@@ -1017,28 +1055,37 @@ async function createSalesVoucherChain(salesData) {
     }
   }
 
-  for (const entry of voucherEntryRows) {
-    const ledgerId = await resolveLedgerId(entry.ledgerName)
-    try {
-      await db.run(`
-        INSERT INTO voucher_entry (voucher_id, type, ledger_id, ledger_name, debit, credit, remarks)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `, [voucherId, 'Ledger', ledgerId, entry.ledgerName, entry.debit || 0, entry.credit || 0, entry.remarks || ''])
-    } catch (error) {
-      const message = String(error.message || '')
-      if (message.includes('no such column: ledger_name') || message.includes('table voucher_entry has no column named ledger_name')) {
+  try {
+    for (const entry of voucherEntryRows) {
+      const ledgerId = await resolveLedgerId(entry.ledgerName, entry.ledgerType || null)
+      try {
         await db.run(`
-          INSERT INTO voucher_entry (voucher_id, type, ledger_id, debit, credit, remarks)
-          VALUES (?, ?, ?, ?, ?, ?)
-        `, [voucherId, 'Ledger', ledgerId ?? 0, entry.debit || 0, entry.credit || 0, entry.remarks || ''])
-      } else {
-        console.error('Error inserting sales voucher entry:', error)
+          INSERT INTO voucher_entry (voucher_id, type, ledger_id, ledger_name, debit, credit, remarks)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `, [voucherId, 'Ledger', ledgerId, entry.ledgerName, entry.debit || 0, entry.credit || 0, entry.remarks || ''])
+      } catch (error) {
+        const message = String(error.message || '')
+        if (message.includes('no such column: ledger_name') || message.includes('table voucher_entry has no column named ledger_name')) {
+          await db.run(`
+            INSERT INTO voucher_entry (voucher_id, type, ledger_id, debit, credit, remarks)
+            VALUES (?, ?, ?, ?, ?, ?)
+          `, [voucherId, 'Ledger', ledgerId ?? 0, entry.debit || 0, entry.credit || 0, entry.remarks || ''])
+        } else {
+          throw error
+        }
       }
     }
-  }
 
-  await Promise.all(ledgerEntries)
-  return true
+    await Promise.all(ledgerEntries)
+    return { voucherId, voucherNo, voucherType: 'Sales' }
+  } catch (err) {
+    try {
+      await db.run('DELETE FROM voucher_entry WHERE voucher_id = ?', [voucherId]);
+      await db.run('DELETE FROM ledger_entries WHERE voucher_id = ? OR voucher_no = ?', [voucherId, voucherNo]);
+      await db.run('DELETE FROM voucher WHERE id = ?', [voucherId]);
+    } catch (_) {}
+    throw err;
+  }
 }
 
 async function createSalesLedgerEntries(salesData) {
@@ -1094,52 +1141,86 @@ async function createAdvanceLedgerEntries(advanceData) {
 }
 
 async function deletePurchaseVoucherChain(referenceId) {
+  if (!referenceId) return true;
   try {
-    const voucherRows = await db.query(
-      'SELECT id, voucher_no FROM voucher WHERE reference_no = ? AND voucher_type = ?',
-      [String(referenceId), 'Purchase']
-    )
+    const refStr = String(referenceId).trim();
+    const numId = parseInt(refStr, 10);
+    const validNum = !isNaN(numId) ? numId : -1;
 
-    for (const voucher of voucherRows.rows || []) {
-      await db.run('DELETE FROM voucher_entry WHERE voucher_id = ?', [voucher.id])
-      await db.run('DELETE FROM ledger_entries WHERE voucher_id = ? OR (reference_id = ? AND voucher_type = ? AND voucher_no = ?)', [
-        voucher.id,
-        referenceId,
-        'Purchase',
-        voucher.voucher_no,
-      ])
-      await db.run('DELETE FROM voucher WHERE id = ?', [voucher.id])
+    const voucherRows = await db.query(
+      `SELECT id, voucher_no FROM voucher 
+       WHERE (voucher_type = 'Purchase' OR voucher_type = 'PUR')
+         AND (reference_no = ? OR reference_no = ? OR reference_no = ?)`,
+      [refStr, `PUR-${refStr}`, `PUR${refStr}`]
+    );
+
+    const voucherIds = (voucherRows.rows || []).map(v => v.id);
+    const voucherNos = (voucherRows.rows || []).map(v => v.voucher_no).filter(Boolean);
+
+    for (const vId of voucherIds) {
+      await db.run('DELETE FROM voucher_entry WHERE voucher_id = ?', [vId]);
+      await db.run('DELETE FROM voucher WHERE id = ?', [vId]);
     }
 
-    return true
+    for (const vNo of voucherNos) {
+      await db.run("DELETE FROM ledger_entries WHERE voucher_no = ? AND (voucher_type = 'Purchase' OR voucher_type = 'PUR')", [vNo]);
+    }
+
+    if (validNum > 0) {
+      await db.run(
+        `DELETE FROM ledger_entries 
+         WHERE (voucher_type = 'Purchase' OR reference_type = 'purchase')
+           AND (reference_id = ? OR transaction_id = ?)`,
+        [validNum, validNum]
+      );
+    }
+
+    return true;
   } catch (error) {
-    console.error('Error deleting purchase voucher chain:', error)
-    return false
+    console.error('Error deleting purchase voucher chain:', error);
+    return false;
   }
 }
 
 async function deleteSalesVoucherChain(referenceId) {
+  if (!referenceId) return true;
   try {
-    const voucherRows = await db.query(
-      'SELECT id, voucher_no FROM voucher WHERE reference_no = ? AND voucher_type = ?',
-      [String(referenceId), 'Sales']
-    )
+    const refStr = String(referenceId).trim();
+    const numId = parseInt(refStr, 10);
+    const validNum = !isNaN(numId) ? numId : -1;
 
-    for (const voucher of voucherRows.rows || []) {
-      await db.run('DELETE FROM voucher_entry WHERE voucher_id = ?', [voucher.id])
-      await db.run('DELETE FROM ledger_entries WHERE voucher_id = ? OR (reference_id = ? AND voucher_type = ? AND voucher_no = ?)', [
-        voucher.id,
-        referenceId,
-        'Sales',
-        voucher.voucher_no,
-      ])
-      await db.run('DELETE FROM voucher WHERE id = ?', [voucher.id])
+    const voucherRows = await db.query(
+      `SELECT id, voucher_no FROM voucher 
+       WHERE (voucher_type = 'Sales' OR voucher_type = 'SAL')
+         AND (reference_no = ? OR reference_no = ? OR reference_no = ?)`,
+      [refStr, `SAL-${refStr}`, `SAL${refStr}`]
+    );
+
+    const voucherIds = (voucherRows.rows || []).map(v => v.id);
+    const voucherNos = (voucherRows.rows || []).map(v => v.voucher_no).filter(Boolean);
+
+    for (const vId of voucherIds) {
+      await db.run('DELETE FROM voucher_entry WHERE voucher_id = ?', [vId]);
+      await db.run('DELETE FROM voucher WHERE id = ?', [vId]);
     }
 
-    return true
+    for (const vNo of voucherNos) {
+      await db.run("DELETE FROM ledger_entries WHERE voucher_no = ? AND (voucher_type = 'Sales' OR voucher_type = 'SAL')", [vNo]);
+    }
+
+    if (validNum > 0) {
+      await db.run(
+        `DELETE FROM ledger_entries 
+         WHERE (voucher_type = 'Sales' OR reference_type = 'sales')
+           AND (reference_id = ? OR transaction_id = ?)`,
+        [validNum, validNum]
+      );
+    }
+
+    return true;
   } catch (error) {
-    console.error('Error deleting sales voucher chain:', error)
-    return false
+    console.error('Error deleting sales voucher chain:', error);
+    return false;
   }
 }
 
