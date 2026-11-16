@@ -9,6 +9,7 @@ export const voucherAPI = {
     return api(`/vouchers?${params}`);
   },
   get: (id) => api(`/vouchers/${id}`),
+  lookup: (q) => api(`/vouchers/lookup?q=${encodeURIComponent(q)}`),
   create: (data) => api('vouchers', { method: 'POST', body: data }),
   update: (id, data) => api(`vouchers/${id}`, { method: 'PUT', body: data }),
   previewVoucherNo: (data) => api('vouchers/preview-no', { method: 'POST', body: data }),

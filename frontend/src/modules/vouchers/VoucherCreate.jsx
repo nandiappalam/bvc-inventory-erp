@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Container,
   Paper,
@@ -121,6 +121,9 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
   const [selectedQuickBillKey, setSelectedQuickBillKey] = useState('');
   const [manualSearchNo, setManualSearchNo] = useState('');
   const [quickAlert, setQuickAlert] = useState('');
+  const [matchedVoucherContext, setMatchedVoucherContext] = useState(null);
+  const [contextLoading, setContextLoading] = useState(false);
+  const pendingBillMatchRef = useRef(null);
 
   // Toast state
   const [toast, setToast] = useState({ open: false, message: '', severity: 'success' });
@@ -226,6 +229,11 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
     const settleAmt = String(bill.balance !== undefined ? bill.balance : (bill.amount || ''));
 
     if (matchedLedger) {
+      pendingBillMatchRef.current = {
+        ledgerId: String(matchedLedger.id),
+        remarks: `Ref: ${refVal}`,
+        amount: parseFloat(settleAmt) || 0,
+      };
       if (targetType === 'Payment') {
         setPaymentState(prev => ({
           ...prev,
@@ -245,6 +253,112 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
       }
       fetchLedgerBalance(matchedLedger.name);
       fetchOutstandingBills(matchedLedger.name, targetType, `Ref: ${refVal}`, parseFloat(settleAmt) || 0);
+    }
+  };
+
+  const applyCombinedPartySettlement = (ctx) => {
+    if (!ctx || !Array.isArray(ctx.parties)) return;
+    const unpaidParties = ctx.parties.filter(p => (parseFloat(p.outstanding_amount ?? p.balance) || 0) > 0.01);
+    if (unpaidParties.length === 0) return;
+
+    const refVal = String(ctx.purchase?.inv_no || ctx.voucher?.voucher_no || ctx.query || '');
+    const defaultCashBank = ledgers.find(l => {
+      const lType = String(l.ledger_type || '').toLowerCase();
+      const lName = String(l.name || '').toLowerCase();
+      return lType === 'cash' || lType === 'bank' || lName.includes('bank') || lName.includes('cash');
+    });
+
+    const isPayable = unpaidParties.every(p => p.type !== 'Receivable');
+    const totalAmt = Math.round(unpaidParties.reduce((s, p) => s + (parseFloat(p.outstanding_amount ?? p.balance) || 0), 0) * 100) / 100;
+
+    const journalRows = unpaidParties.map(p => {
+      const matchedL = ledgers.find(l => cleanLedgerName(l.name).toLowerCase() === cleanLedgerName(p.ledger_name).toLowerCase());
+      const amt = Number(p.outstanding_amount ?? p.balance ?? 0);
+      if (p.ledger_name) fetchLedgerBalance(p.ledger_name);
+      return {
+        type: isPayable ? 'Dr' : 'Cr',
+        ledger_id: matchedL?.id || p.ledger_id || '',
+        ledger_name: matchedL?.name || p.ledger_name,
+        debit: isPayable ? amt : '',
+        credit: isPayable ? '' : amt,
+        remarks: `Ref: ${refVal} (${p.role})`
+      };
+    });
+
+    if (defaultCashBank) fetchLedgerBalance(defaultCashBank.name);
+    journalRows.push({
+      type: isPayable ? 'Cr' : 'Dr',
+      ledger_id: defaultCashBank?.id || '',
+      ledger_name: defaultCashBank?.name || '',
+      debit: isPayable ? '' : totalAmt,
+      credit: isPayable ? totalAmt : '',
+      remarks: `Combined settlement for ${ctx.voucher?.voucher_no || refVal}`
+    });
+
+    setFormData(prev => ({
+      ...prev,
+      voucher_type: 'Journal',
+      reference_no: ctx.voucher?.voucher_no || refVal,
+      narration: `Combined settlement for ${ctx.voucher?.voucher_no || 'Voucher'} (Invoice #${refVal}) — ${unpaidParties.map(p => p.ledger_name).join(', ')}`
+    }));
+    setEntries(journalRows);
+    calculateTotals(journalRows);
+    setQuickAlert(`✓ Prepared combined Journal settlement for all ${unpaidParties.length} involved parties (${unpaidParties.map(p => `${p.ledger_name}: ₹${Number(p.outstanding_amount ?? p.balance).toLocaleString('en-IN')}`).join(', ')}). Total: ₹${totalAmt.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`);
+  };
+
+  const handleVoucherLookup = async (rawQuery, preferredBill = null) => {
+    const q = String(rawQuery || '').trim();
+    if (!q && !preferredBill) return;
+
+    const searchLower = q.toLowerCase();
+    const searchCompact = searchLower.replace(/[-\s]/g, '');
+
+    const matchingBills = q
+      ? searchableBills.filter(b => {
+          const vNo = String(b.voucher_no || '').toLowerCase();
+          const invNo = String(b.invoice_no || '').toLowerCase();
+          const tokens = Array.isArray(b.searchTokens) ? b.searchTokens.map(t => String(t).toLowerCase()) : [];
+          return vNo === searchLower || vNo.replace(/-/g, '') === searchCompact || invNo === searchLower || tokens.includes(searchLower) || tokens.includes(searchCompact);
+        })
+      : [];
+
+    setContextLoading(true);
+    let ctx = null;
+    try {
+      const lookupQ = q || preferredBill?.voucher_no || preferredBill?.invoice_no || '';
+      if (lookupQ) {
+        const res = await voucherAPI.lookup(lookupQ);
+        if (res && res.found) {
+          ctx = res;
+          setMatchedVoucherContext(res);
+        } else {
+          setMatchedVoucherContext(null);
+        }
+      }
+    } catch (_) {
+      setMatchedVoucherContext(null);
+    } finally {
+      setContextLoading(false);
+    }
+
+    const billToApply = preferredBill
+      || matchingBills[0]
+      || (ctx?.parties?.find(p => (parseFloat(p.outstanding_amount) || 0) > 0.01) || ctx?.parties?.[0]);
+
+    if (billToApply) {
+      applyBillToVoucher(billToApply);
+      const allParties = ctx?.parties && ctx.parties.length > 0 ? ctx.parties : matchingBills;
+      if (allParties.length > 1) {
+        const summary = allParties.map(p => `${p.ledger_name} (₹${parseFloat(p.outstanding_amount ?? p.balance ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })})`).join(' | ');
+        setQuickAlert(`✓ Loaded Voucher ${ctx?.voucher?.voucher_no || billToApply.voucher_no || ''} (#${billToApply.invoice_no || ''}) with ${allParties.length} involved payables: ${summary}`);
+      } else {
+        const bTypeDesc = billToApply.category === 'transport' ? 'Transport Freight' : (billToApply.category === 'loadman' ? 'Loadman Charge' : (billToApply.type === 'Payable' ? 'Purchase Invoice' : 'Sales Bill'));
+        setQuickAlert(`✓ Auto-filled voucher details for ${bTypeDesc} #${billToApply.invoice_no || billToApply.voucher_no} (${billToApply.ledger_name}). Outstanding Balance: ₹${parseFloat(billToApply.balance ?? billToApply.outstanding_amount ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`);
+      }
+    } else if (ctx && ctx.entries && ctx.entries.length > 0) {
+      setQuickAlert(`✓ Loaded automatic voucher ${ctx.voucher?.voucher_no || q} (${ctx.entries.length} ledger accounts). Select a party below to settle or view ledger & payment details.`);
+    } else {
+      setQuickAlert(`No voucher, pending bill, or invoice found matching "${q}". Please check the number.`);
     }
   };
 
@@ -580,7 +694,13 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
       if (ledger) {
         fetchLedgerBalance(ledger.name);
         if (!actualIsEdit || isEditLoaded) {
-          fetchOutstandingBills(ledger.name, 'Payment');
+          const pending = pendingBillMatchRef.current;
+          if (pending && pending.ledgerId === String(ledger.id)) {
+            pendingBillMatchRef.current = null;
+            fetchOutstandingBills(ledger.name, 'Payment', pending.remarks, pending.amount);
+          } else {
+            fetchOutstandingBills(ledger.name, 'Payment');
+          }
         }
       }
     } else {
@@ -604,7 +724,13 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
       if (ledger) {
         fetchLedgerBalance(ledger.name);
         if (!actualIsEdit || isEditLoaded) {
-          fetchOutstandingBills(ledger.name, 'Receipt');
+          const pending = pendingBillMatchRef.current;
+          if (pending && pending.ledgerId === String(ledger.id)) {
+            pendingBillMatchRef.current = null;
+            fetchOutstandingBills(ledger.name, 'Receipt', pending.remarks, pending.amount);
+          } else {
+            fetchOutstandingBills(ledger.name, 'Receipt');
+          }
         }
       }
     } else {
@@ -980,10 +1106,10 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
                   if (val) {
                     const foundBill = searchableBills.find(b => b.key === val);
                     if (foundBill) {
-                      applyBillToVoucher(foundBill);
-                      const bTypeDesc = foundBill.category === 'transport' ? 'Transport Freight' : (foundBill.category === 'loadman' ? 'Loadman Charge' : (foundBill.type === 'Payable' ? 'Purchase Invoice' : 'Sales Bill'));
-                      setQuickAlert(`✓ Auto-filled voucher details for ${bTypeDesc} #${foundBill.invoice_no || foundBill.voucher_no} (${foundBill.ledger_name}). Outstanding Balance: ₹${parseFloat(foundBill.balance).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`);
+                      handleVoucherLookup(foundBill.voucher_no || foundBill.invoice_no, foundBill);
                     }
+                  } else {
+                    setMatchedVoucherContext(null);
                   }
                 }}
                 sx={{ bgcolor: '#fff' }}
@@ -1013,9 +1139,15 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
               <TextField
                 size="small"
                 fullWidth
-                placeholder="e.g. 1, PUR-001, S001..."
+                placeholder="e.g. PUR00019, 5361, S001..."
                 value={manualSearchNo}
                 onChange={(e) => setManualSearchNo(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && manualSearchNo.trim()) {
+                    e.preventDefault();
+                    handleVoucherLookup(manualSearchNo);
+                  }
+                }}
                 sx={{ bgcolor: '#fff' }}
               />
             </Box>
@@ -1024,20 +1156,11 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
               <Button
                 variant="contained"
                 size="medium"
-                onClick={() => {
-                  if (!manualSearchNo.trim()) return;
-                  const searchUpper = manualSearchNo.trim().toLowerCase();
-                  const found = searchableBills.find(b => String(b.invoice_no).toLowerCase() === searchUpper || String(b.voucher_no || '').toLowerCase() === searchUpper);
-                  if (found) {
-                    applyBillToVoucher(found);
-                    setQuickAlert(`✓ Auto-filled voucher details for ${found.type === 'Payable' ? 'Purchase Invoice' : 'Sales Bill'} #${found.invoice_no} (${found.ledger_name}). Outstanding Balance: ₹${parseFloat(found.balance).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`);
-                  } else {
-                    setQuickAlert(`No pending bill or invoice found matching "${manualSearchNo}". Please check the number.`);
-                  }
-                }}
+                disabled={contextLoading}
+                onClick={() => handleVoucherLookup(manualSearchNo)}
                 sx={{ bgcolor: '#4f46e5', fontWeight: 'bold', px: 3, textTransform: 'none', height: 40 }}
               >
-                Proceed with Voucher
+                {contextLoading ? 'Searching...' : 'Proceed with Voucher'}
               </Button>
             </Box>
           </Box>
@@ -1046,6 +1169,193 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
             <Alert severity="success" sx={{ mt: 2, py: 0.5, fontWeight: 'bold' }} onClose={() => setQuickAlert('')}>
               {quickAlert}
             </Alert>
+          )}
+
+          {matchedVoucherContext && matchedVoucherContext.found && (
+            <Paper variant="outlined" sx={{ mt: 2.5, p: 2, bgcolor: '#ffffff', borderColor: '#a5b4fc', borderRadius: 1.5 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1, pb: 1.5, borderBottom: '1px solid #e2e8f0' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 800, color: '#1e3a8a' }}>
+                    📑 Automatic Voucher Details: {matchedVoucherContext.voucher?.voucher_no || matchedVoucherContext.query}
+                  </Typography>
+                  {matchedVoucherContext.voucher?.voucher_type && (
+                    <Chip label={matchedVoucherContext.voucher.voucher_type} size="small" color="primary" variant="outlined" sx={{ fontWeight: 'bold' }} />
+                  )}
+                  {matchedVoucherContext.purchase?.inv_no && (
+                    <Chip label={`Inv #${matchedVoucherContext.purchase.inv_no}`} size="small" sx={{ fontWeight: 'bold', bgcolor: '#eef2ff', color: '#3730a3' }} />
+                  )}
+                  {matchedVoucherContext.voucher?.date && (
+                    <Chip label={`Date: ${matchedVoucherContext.voucher.date}`} size="small" variant="outlined" />
+                  )}
+                  {matchedVoucherContext.purchase?.vehicle_no && (
+                    <Chip label={`Vehicle: ${matchedVoucherContext.purchase.vehicle_no}`} size="small" variant="outlined" />
+                  )}
+                </Box>
+                <Button size="small" color="inherit" onClick={() => setMatchedVoucherContext(null)} sx={{ textTransform: 'none', fontWeight: 'bold' }}>
+                  Close Breakdown ✕
+                </Button>
+              </Box>
+
+              {/* 1. ALL INVOLVED PAYABLE / RECEIVABLE PARTIES */}
+              {matchedVoucherContext.parties && matchedVoucherContext.parties.length > 0 && (
+                <Box sx={{ mt: 2 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1, mb: 1 }}>
+                    <Typography variant="caption" sx={{ fontWeight: 800, color: '#1e40af', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                      👥 Involved Parties & Payable / Settlement Status ({matchedVoucherContext.parties.length})
+                    </Typography>
+                    {matchedVoucherContext.parties.filter(p => (p.outstanding_amount || 0) > 0.01).length > 1 && (
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        color="secondary"
+                        onClick={() => applyCombinedPartySettlement(matchedVoucherContext)}
+                        sx={{ textTransform: 'none', fontWeight: 'bold', py: 0.25 }}
+                      >
+                        Settle All Unpaid Parties Together (Journal)
+                      </Button>
+                    )}
+                  </Box>
+                  <Table size="small" sx={{ border: '1px solid #e2e8f0', mb: 2 }}>
+                    <TableHead>
+                      <TableRow sx={{ bgcolor: '#f8fafc' }}>
+                        <TableCell sx={{ fontWeight: 'bold', py: 0.75 }}>Role</TableCell>
+                        <TableCell sx={{ fontWeight: 'bold', py: 0.75 }}>Ledger Account</TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 'bold', py: 0.75 }}>Billed Amt (₹)</TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 'bold', py: 0.75 }}>Paid (₹)</TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 'bold', py: 0.75 }}>Outstanding (₹)</TableCell>
+                        <TableCell align="center" sx={{ fontWeight: 'bold', py: 0.75 }}>Settle Party</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {matchedVoucherContext.parties.map((p, idx) => {
+                        const activePartyId = formData.voucher_type === 'Payment' ? paymentState.party_ledger_id : receiptState.party_ledger_id;
+                        const activeLedger = ledgers.find(l => l.id == activePartyId);
+                        const isCurrentlySelected = activeLedger && cleanLedgerName(activeLedger.name).toLowerCase() === cleanLedgerName(p.ledger_name).toLowerCase();
+                        const outAmt = Number(p.outstanding_amount || 0);
+                        const roleIcon = p.role === 'Transporter' ? '🚚' : p.role === 'Loadman' ? '👷' : p.role === 'Customer' ? '🏷️' : '🏭';
+                        return (
+                          <TableRow key={`${p.ledger_name}_${idx}`} sx={{ bgcolor: isCurrentlySelected ? '#eff6ff' : 'inherit' }}>
+                            <TableCell sx={{ py: 0.75, fontWeight: 'bold', fontSize: '0.8rem' }}>{roleIcon} {p.role}</TableCell>
+                            <TableCell sx={{ py: 0.75, fontWeight: 'bold' }}>{p.ledger_name}</TableCell>
+                            <TableCell align="right" sx={{ py: 0.75 }}>₹{Number(p.billed_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</TableCell>
+                            <TableCell align="right" sx={{ py: 0.75, color: '#15803d', fontWeight: 600 }}>₹{Number(p.paid_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</TableCell>
+                            <TableCell align="right" sx={{ py: 0.75, color: outAmt > 0.01 ? '#b91c1c' : '#15803d', fontWeight: 'bold' }}>
+                              ₹{outAmt.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                            </TableCell>
+                            <TableCell align="center" sx={{ py: 0.75 }}>
+                              <Button
+                                size="small"
+                                variant={isCurrentlySelected ? 'contained' : 'outlined'}
+                                color={outAmt > 0.01 ? 'primary' : 'success'}
+                                onClick={() => {
+                                  applyBillToVoucher({
+                                    ...p,
+                                    balance: outAmt > 0.01 ? outAmt : Number(p.billed_amount || 0),
+                                    amount: Number(p.billed_amount || 0)
+                                  });
+                                  setQuickAlert(`✓ Switched settlement form to ${p.role}: ${p.ledger_name} (Amount: ₹${(outAmt > 0.01 ? outAmt : Number(p.billed_amount || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })})`);
+                                }}
+                                sx={{ textTransform: 'none', fontWeight: 'bold', fontSize: '0.75rem', py: 0.2 }}
+                              >
+                                {isCurrentlySelected ? '✓ Selected' : (outAmt > 0.01 ? 'Select to Pay' : 'Paid (View)')}
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </Box>
+              )}
+
+              {/* 2. COMPLETE AUTOMATIC VOUCHER DOUBLE-ENTRY LEDGER ACCOUNTS */}
+              {matchedVoucherContext.entries && matchedVoucherContext.entries.length > 0 && (
+                <Box sx={{ mt: 1.5 }}>
+                  <Typography variant="caption" sx={{ fontWeight: 800, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.03em', display: 'block', mb: 1 }}>
+                    📒 All Ledger Accounts Posted in Automatic Voucher ({matchedVoucherContext.entries.length} Entries)
+                  </Typography>
+                  <Table size="small" sx={{ border: '1px solid #e2e8f0', mb: 2 }}>
+                    <TableHead>
+                      <TableRow sx={{ bgcolor: '#1e3a8a' }}>
+                        <TableCell sx={{ color: '#fff', fontWeight: 'bold', py: 0.75, width: 60 }}>Dr/Cr</TableCell>
+                        <TableCell sx={{ color: '#fff', fontWeight: 'bold', py: 0.75 }}>Ledger Account Name</TableCell>
+                        <TableCell sx={{ color: '#fff', fontWeight: 'bold', py: 0.75 }}>Category / Role</TableCell>
+                        <TableCell align="right" sx={{ color: '#fff', fontWeight: 'bold', py: 0.75 }}>Debit (₹)</TableCell>
+                        <TableCell align="right" sx={{ color: '#fff', fontWeight: 'bold', py: 0.75 }}>Credit (₹)</TableCell>
+                        <TableCell sx={{ color: '#fff', fontWeight: 'bold', py: 0.75 }}>Remarks</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {matchedVoucherContext.entries.map((ent, idx) => (
+                        <TableRow key={ent.id || idx} hover>
+                          <TableCell sx={{ py: 0.6, fontWeight: 'bold', color: ent.type === 'Dr' ? '#b91c1c' : '#15803d' }}>{ent.type}</TableCell>
+                          <TableCell sx={{ py: 0.6, fontWeight: 600 }}>{ent.ledger_name}</TableCell>
+                          <TableCell sx={{ py: 0.6, fontSize: '0.78rem', color: '#475569' }}>{ent.role || ent.group_name || 'Ledger'}</TableCell>
+                          <TableCell align="right" sx={{ py: 0.6, fontWeight: ent.debit > 0 ? 700 : 400 }}>
+                            {ent.debit > 0 ? `₹${ent.debit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}
+                          </TableCell>
+                          <TableCell align="right" sx={{ py: 0.6, fontWeight: ent.credit > 0 ? 700 : 400 }}>
+                            {ent.credit > 0 ? `₹${ent.credit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}
+                          </TableCell>
+                          <TableCell sx={{ py: 0.6, fontSize: '0.78rem', color: '#64748b' }}>{ent.remarks || '—'}</TableCell>
+                        </TableRow>
+                      ))}
+                      <TableRow sx={{ bgcolor: '#f1f5f9' }}>
+                        <TableCell colSpan={3} align="right" sx={{ fontWeight: 800, py: 0.75 }}>TOTAL:</TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 800, py: 0.75, color: '#b91c1c' }}>
+                          ₹{Number(matchedVoucherContext.voucher?.total_debit || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        </TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 800, py: 0.75, color: '#15803d' }}>
+                          ₹{Number(matchedVoucherContext.voucher?.total_credit || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        </TableCell>
+                        <TableCell sx={{ py: 0.75, fontWeight: 'bold', color: '#15803d' }}>
+                          {matchedVoucherContext.voucher?.is_balanced ? 'Balanced ✓' : 'Check Balance'}
+                        </TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </Box>
+              )}
+
+              {/* 3. RECORDED PAYMENT / SETTLEMENT HISTORY */}
+              <Box sx={{ mt: 1 }}>
+                <Typography variant="caption" sx={{ fontWeight: 800, color: '#0f766e', textTransform: 'uppercase', letterSpacing: '0.03em', display: 'block', mb: 1 }}>
+                  💳 Payment & Settlement Details for this Voucher ({matchedVoucherContext.settlements?.length || 0})
+                </Typography>
+                {matchedVoucherContext.settlements && matchedVoucherContext.settlements.length > 0 ? (
+                  <Table size="small" sx={{ border: '1px solid #cbd5e1' }}>
+                    <TableHead>
+                      <TableRow sx={{ bgcolor: '#f0fdfa' }}>
+                        <TableCell sx={{ fontWeight: 'bold', py: 0.6 }}>Payment Voucher</TableCell>
+                        <TableCell sx={{ fontWeight: 'bold', py: 0.6 }}>Date</TableCell>
+                        <TableCell sx={{ fontWeight: 'bold', py: 0.6 }}>Type</TableCell>
+                        <TableCell sx={{ fontWeight: 'bold', py: 0.6 }}>Party Account</TableCell>
+                        <TableCell sx={{ fontWeight: 'bold', py: 0.6 }}>Cash / Bank Mode</TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 'bold', py: 0.6 }}>Amount (₹)</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {matchedVoucherContext.settlements.map((sv) => (
+                        <TableRow key={sv.id} hover>
+                          <TableCell sx={{ py: 0.6, fontWeight: 'bold', color: '#0f766e' }}>{sv.voucher_no}</TableCell>
+                          <TableCell sx={{ py: 0.6 }}>{sv.date}</TableCell>
+                          <TableCell sx={{ py: 0.6 }}>{sv.voucher_type}</TableCell>
+                          <TableCell sx={{ py: 0.6, fontWeight: 600 }}>{sv.party_names || '—'}</TableCell>
+                          <TableCell sx={{ py: 0.6 }}>{sv.account_names || '—'}</TableCell>
+                          <TableCell align="right" sx={{ py: 0.6, fontWeight: 'bold' }}>
+                            ₹{Number(sv.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                ) : (
+                  <Typography variant="caption" sx={{ display: 'block', p: 1, bgcolor: '#f8fafc', border: '1px dashed #cbd5e1', borderRadius: 1, color: '#64748b' }}>
+                    No payment / settlement vouchers recorded yet for this voucher. Select any party above (`TRY`, Transporter, or Loadman) to record a settlement below.
+                  </Typography>
+                )}
+              </Box>
+            </Paper>
           )}
         </Paper>
 

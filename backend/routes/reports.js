@@ -1,6 +1,8 @@
 const express = require('express')
 const router = express.Router()
 const db = require('../config/database')
+const AccountingEngine = require('../services/AccountingEngine')
+const { enrichStatementRow } = require('../utils/statementParticularsHelper')
 
 const isWastageItem = (itemName, itemGroup) => {
   const grp = (itemGroup || '').toLowerCase();
@@ -1953,6 +1955,10 @@ router.get('/profit-loss', async (req, res) => {
 // ============================================================
 router.get('/ledger/:ledgerName', async (req, res) => {
   try {
+    const activeCompanyId = parseInt(req.companyId || req.headers['x-company-id'] || req.query?.company_id || 1, 10) || 1;
+    const cDb = db.forCompany(activeCompanyId);
+    await AccountingEngine.ensureAccountingSchema(cDb, { companyId: activeCompanyId });
+
     const rawLedgerName = decodeURIComponent(req.params.ledgerName || '')
     const {
       from_date,
@@ -1962,31 +1968,35 @@ router.get('/ledger/:ledgerName', async (req, res) => {
       id: queryId,
       loadman_id: queryLoadmanId
     } = req.query
-    
-    // Detect type suffix like " (Supplier)", " (Customer)", " (Papad Company)", etc.
+
+    // Detect type suffix like " (Supplier)", " (Customer)", " (Worker)", etc.
     let detectedType = type || null
     const suffixMatch = rawLedgerName.match(/\s*\((Supplier|Customer|Papad Company|Flour Mill|Expense|Income|Bank|Cash|Party|Tax|Asset|Liability|General|Creditor|Debtor|Worker|Driver|Loadman|Loadmen|Transporter|Helper|Artisan|Contractor)\)$/i)
     if (suffixMatch && !detectedType) {
       detectedType = suffixMatch[1]
     }
-    
+
     const cleanName = rawLedgerName
       .replace(/\s*\((Supplier|Customer|Papad Company|Flour Mill|Expense|Income|Bank|Cash|Party|Tax|Asset|Liability|General|Creditor|Debtor|Worker|Driver|Loadman|Loadmen|Transporter|Helper|Artisan|Contractor)\)$/i, '')
       .trim()
-    
+
     let officialName = cleanName || rawLedgerName
     let openingBalance = 0
-    let ledgerMasterIds = new Set()
-    let exactLedgerNames = new Set()
-    let supplierIds = new Set()
-    let customerIds = new Set()
-    let papadCompanyIds = new Set()
-    let flourMillIds = new Set()
+    const ledgerMasterIds = new Set()
+    const exactLedgerNames = new Set()
+    const supplierIds = new Set()
+    const customerIds = new Set()
+    const papadCompanyIds = new Set()
+    const flourMillIds = new Set()
+    const loadmanDiagnostics = []
 
-    if (queryLedgerId) ledgerMasterIds.add(Number(queryLedgerId))
-    if (queryId) ledgerMasterIds.add(Number(queryId))
-    if (!isNaN(cleanName) && Number.isInteger(Number(cleanName))) {
-      ledgerMasterIds.add(Number(cleanName))
+    const generalTypes = new Set(['general', 'asset', 'liability', 'income', 'expense', 'bank', 'cash', 'tax', 'creditor', 'debtor', 'party'])
+    const normalizedDetectedType = detectedType ? String(detectedType).trim().toLowerCase() : null
+    const isGeneralOrCoreLedger = !normalizedDetectedType || generalTypes.has(normalizedDetectedType)
+
+    // Only accept queryLedgerId when it actually identifies a general ledgermaster record (never mix party row ids into ledgermaster.id)
+    if (queryLedgerId && isGeneralOrCoreLedger && /^\d+$/.test(String(queryLedgerId))) {
+      ledgerMasterIds.add(Number(queryLedgerId))
     }
     if (cleanName) {
       exactLedgerNames.add(cleanName.trim().toLowerCase())
@@ -2004,28 +2014,41 @@ router.get('/ledger/:ledgerName', async (req, res) => {
       return num
     }
 
-    // 1. Look in ledgermaster
+    // 1. Look in ledgermaster strictly by exact name (never parse numeric worker/party name like "5" as ledgermaster.id!)
     try {
-      const lmQuery = await db.query(
-        `SELECT id, name, printname, openingbalance, opening_type, ledger_type 
-         FROM ledgermaster 
-         WHERE id = ? OR name = ? OR TRIM(name) = ? OR LOWER(TRIM(name)) = LOWER(?) 
-            OR printname = ?`,
-        [parseInt(cleanName) || -1, cleanName, cleanName, cleanName, cleanName]
-      )
+      const lmSql = (isGeneralOrCoreLedger && queryLedgerId && /^\d+$/.test(String(queryLedgerId)))
+        ? `SELECT id, COALESCE(NULLIF(TRIM(ledger_name), ''), name) AS resolved_name, name, printname,
+                  COALESCE(opening_balance, openingbalance, 0) AS ob,
+                  COALESCE(opening_balance_type, opening_type, 'Dr') AS ot,
+                  ledger_type
+           FROM ledgermaster
+           WHERE id = ? OR LOWER(TRIM(COALESCE(NULLIF(TRIM(ledger_name), ''), name))) = LOWER(?) OR LOWER(TRIM(COALESCE(printname, ''))) = LOWER(?)`
+        : `SELECT id, COALESCE(NULLIF(TRIM(ledger_name), ''), name) AS resolved_name, name, printname,
+                  COALESCE(opening_balance, openingbalance, 0) AS ob,
+                  COALESCE(opening_balance_type, opening_type, 'Dr') AS ot,
+                  ledger_type
+           FROM ledgermaster
+           WHERE LOWER(TRIM(COALESCE(NULLIF(TRIM(ledger_name), ''), name))) = LOWER(?) OR LOWER(TRIM(COALESCE(printname, ''))) = LOWER(?)`
+
+      const lmParams = (isGeneralOrCoreLedger && queryLedgerId && /^\d+$/.test(String(queryLedgerId)))
+        ? [Number(queryLedgerId), cleanName, cleanName]
+        : [cleanName, cleanName]
+
+      const lmQuery = await cDb.query(lmSql, lmParams)
       if (lmQuery.rows && lmQuery.rows.length > 0) {
-        const best = lmQuery.rows.find(r => 
-          (detectedType && r.ledger_type && r.ledger_type.toLowerCase() === detectedType.toLowerCase()) ||
-          r.name.toLowerCase() === cleanName.toLowerCase()
+        const best = lmQuery.rows.find(r =>
+          (normalizedDetectedType && r.ledger_type && r.ledger_type.toLowerCase() === normalizedDetectedType) ||
+          String(r.resolved_name || '').toLowerCase() === cleanName.toLowerCase()
         ) || lmQuery.rows[0]
-        
-        officialName = best.name || officialName
-        openingBalance = parseSignedBalance(best.openingbalance, best.opening_type)
-        
+
+        officialName = best.resolved_name || best.name || officialName
+        openingBalance = parseSignedBalance(best.ob, best.ot)
+
         lmQuery.rows.forEach(r => {
           if (r.id) ledgerMasterIds.add(Number(r.id))
-          if (r.name) exactLedgerNames.add(r.name.trim().toLowerCase())
-          if (r.printname) exactLedgerNames.add(r.printname.trim().toLowerCase())
+          if (r.resolved_name) exactLedgerNames.add(String(r.resolved_name).trim().toLowerCase())
+          if (r.name) exactLedgerNames.add(String(r.name).trim().toLowerCase())
+          if (r.printname) exactLedgerNames.add(String(r.printname).trim().toLowerCase())
         })
       }
     } catch (e) {
@@ -2033,13 +2056,15 @@ router.get('/ledger/:ledgerName', async (req, res) => {
     }
 
     // 2. Look in supplier_master
-    if (!detectedType || detectedType.toLowerCase() === 'supplier') {
+    if (!normalizedDetectedType || normalizedDetectedType === 'supplier') {
       try {
-        const smQuery = await db.query(
+        const matchId = (normalizedDetectedType === 'supplier' && (queryId || queryLedgerId) && /^\d+$/.test(String(queryId || queryLedgerId)))
+          ? Number(queryId || queryLedgerId)
+          : -1
+        const smQuery = await cDb.query(
           `SELECT id, name, print_name, opening_balance, balance_type FROM supplier_master 
-           WHERE id = ? OR name = ? OR TRIM(name) = ? OR LOWER(TRIM(name)) = LOWER(?) 
-              OR print_name = ?`,
-          [parseInt(cleanName) || -1, cleanName, cleanName, cleanName, cleanName]
+           WHERE id = ? OR LOWER(TRIM(name)) = LOWER(?) OR LOWER(TRIM(COALESCE(print_name, ''))) = LOWER(?)`,
+          [matchId, cleanName, cleanName]
         )
         if (smQuery.rows && smQuery.rows.length > 0) {
           smQuery.rows.forEach(r => {
@@ -2050,14 +2075,12 @@ router.get('/ledger/:ledgerName', async (req, res) => {
               openingBalance = parseSignedBalance(r.opening_balance, r.balance_type)
             }
           })
-
-          // Link to ledgermaster ID
           for (const r of smQuery.rows) {
-            const matchedLm = await db.query(
-              "SELECT id, name FROM ledgermaster WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1",
-              [r.name]
+            const matchedLm = await cDb.query(
+              "SELECT id FROM ledgermaster WHERE LOWER(TRIM(COALESCE(NULLIF(TRIM(ledger_name), ''), name))) = LOWER(TRIM(?)) LIMIT 1",
+              [r.print_name || r.name]
             )
-            if (matchedLm.rows && matchedLm.rows.length > 0) {
+            if (matchedLm.rows && matchedLm.rows[0]?.id) {
               ledgerMasterIds.add(Number(matchedLm.rows[0].id))
             }
           }
@@ -2066,13 +2089,15 @@ router.get('/ledger/:ledgerName', async (req, res) => {
     }
 
     // 3. Look in customer_master
-    if (!detectedType || detectedType.toLowerCase() === 'customer') {
+    if (!normalizedDetectedType || normalizedDetectedType === 'customer') {
       try {
-        const cmQuery = await db.query(
+        const matchId = (normalizedDetectedType === 'customer' && (queryId || queryLedgerId) && /^\d+$/.test(String(queryId || queryLedgerId)))
+          ? Number(queryId || queryLedgerId)
+          : -1
+        const cmQuery = await cDb.query(
           `SELECT id, name, print_name, opening_balance, balance_type FROM customer_master 
-           WHERE id = ? OR name = ? OR TRIM(name) = ? OR LOWER(TRIM(name)) = LOWER(?) 
-              OR print_name = ?`,
-          [parseInt(cleanName) || -1, cleanName, cleanName, cleanName, cleanName]
+           WHERE id = ? OR LOWER(TRIM(name)) = LOWER(?) OR LOWER(TRIM(COALESCE(print_name, ''))) = LOWER(?)`,
+          [matchId, cleanName, cleanName]
         )
         if (cmQuery.rows && cmQuery.rows.length > 0) {
           cmQuery.rows.forEach(r => {
@@ -2083,13 +2108,12 @@ router.get('/ledger/:ledgerName', async (req, res) => {
               openingBalance = parseSignedBalance(r.opening_balance, r.balance_type)
             }
           })
-
           for (const r of cmQuery.rows) {
-            const matchedLm = await db.query(
-              "SELECT id, name FROM ledgermaster WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1",
-              [r.name]
+            const matchedLm = await cDb.query(
+              "SELECT id FROM ledgermaster WHERE LOWER(TRIM(COALESCE(NULLIF(TRIM(ledger_name), ''), name))) = LOWER(TRIM(?)) LIMIT 1",
+              [r.print_name || r.name]
             )
-            if (matchedLm.rows && matchedLm.rows.length > 0) {
+            if (matchedLm.rows && matchedLm.rows[0]?.id) {
               ledgerMasterIds.add(Number(matchedLm.rows[0].id))
             }
           }
@@ -2098,13 +2122,12 @@ router.get('/ledger/:ledgerName', async (req, res) => {
     }
 
     // 4. Look in papad_company_master
-    if (!detectedType || detectedType.toLowerCase().includes('papad')) {
+    if (!normalizedDetectedType || normalizedDetectedType.includes('papad')) {
       try {
-        const pmQuery = await db.query(
+        const pmQuery = await cDb.query(
           `SELECT id, name, print_name, opening_balance FROM papad_company_master 
-           WHERE id = ? OR name = ? OR TRIM(name) = ? OR LOWER(TRIM(name)) = LOWER(?) 
-              OR print_name = ?`,
-          [parseInt(cleanName) || -1, cleanName, cleanName, cleanName, cleanName]
+           WHERE LOWER(TRIM(name)) = LOWER(?) OR LOWER(TRIM(COALESCE(print_name, ''))) = LOWER(?)`,
+          [cleanName, cleanName]
         )
         if (pmQuery.rows && pmQuery.rows.length > 0) {
           pmQuery.rows.forEach(r => {
@@ -2115,13 +2138,12 @@ router.get('/ledger/:ledgerName', async (req, res) => {
               openingBalance = parseSignedBalance(r.opening_balance, 'Dr')
             }
           })
-
           for (const r of pmQuery.rows) {
-            const matchedLm = await db.query(
-              "SELECT id, name FROM ledgermaster WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1",
-              [r.name]
+            const matchedLm = await cDb.query(
+              "SELECT id FROM ledgermaster WHERE LOWER(TRIM(COALESCE(NULLIF(TRIM(ledger_name), ''), name))) = LOWER(TRIM(?)) LIMIT 1",
+              [r.print_name || r.name]
             )
-            if (matchedLm.rows && matchedLm.rows.length > 0) {
+            if (matchedLm.rows && matchedLm.rows[0]?.id) {
               ledgerMasterIds.add(Number(matchedLm.rows[0].id))
             }
           }
@@ -2130,12 +2152,12 @@ router.get('/ledger/:ledgerName', async (req, res) => {
     }
 
     // 5. Look in flour_mill_master
-    if (!detectedType || detectedType.toLowerCase().includes('flour')) {
+    if (!normalizedDetectedType || normalizedDetectedType.includes('flour')) {
       try {
-        const fmQuery = await db.query(
+        const fmQuery = await cDb.query(
           `SELECT id, flourmill, name, print_name FROM flour_mill_master 
-           WHERE id = ? OR flourmill = ? OR name = ? OR TRIM(flourmill) = ?`,
-          [parseInt(cleanName) || -1, cleanName, cleanName, cleanName]
+           WHERE LOWER(TRIM(COALESCE(flourmill, ''))) = LOWER(?) OR LOWER(TRIM(COALESCE(name, ''))) = LOWER(?)`,
+          [cleanName, cleanName]
         )
         if (fmQuery.rows && fmQuery.rows.length > 0) {
           fmQuery.rows.forEach(r => {
@@ -2148,27 +2170,24 @@ router.get('/ledger/:ledgerName', async (req, res) => {
     }
 
     // 5b. Look in transport_master
-    let transportIds = new Set()
-    if (!detectedType || detectedType.toLowerCase().includes('transport') || detectedType.toLowerCase().includes('lorry')) {
+    if (!normalizedDetectedType || isGeneralOrCoreLedger || normalizedDetectedType.includes('transport') || normalizedDetectedType.includes('lorry')) {
       try {
-        const tmQuery = await db.query(
+        const tmQuery = await cDb.query(
           `SELECT id, name, print_name FROM transport_master 
-           WHERE id = ? OR name = ? OR TRIM(name) = ? OR LOWER(TRIM(name)) = LOWER(?) 
-              OR print_name = ?`,
-          [parseInt(cleanName) || -1, cleanName, cleanName, cleanName, cleanName]
+           WHERE LOWER(TRIM(name)) = LOWER(?) OR LOWER(TRIM(COALESCE(print_name, ''))) = LOWER(?)`,
+          [cleanName, cleanName]
         )
         if (tmQuery.rows && tmQuery.rows.length > 0) {
           tmQuery.rows.forEach(r => {
-            if (r.id) transportIds.add(Number(r.id))
             if (r.name) exactLedgerNames.add(r.name.trim().toLowerCase())
             if (r.print_name) exactLedgerNames.add(r.print_name.trim().toLowerCase())
           })
           for (const r of tmQuery.rows) {
-            const matchedLm = await db.query(
-              "SELECT id, name FROM ledgermaster WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1",
-              [r.name]
+            const matchedLm = await cDb.query(
+              "SELECT id FROM ledgermaster WHERE LOWER(TRIM(COALESCE(NULLIF(TRIM(ledger_name), ''), name))) = LOWER(TRIM(?)) LIMIT 1",
+              [r.print_name || r.name]
             )
-            if (matchedLm.rows && matchedLm.rows.length > 0) {
+            if (matchedLm.rows && matchedLm.rows[0]?.id) {
               ledgerMasterIds.add(Number(matchedLm.rows[0].id))
             }
           }
@@ -2177,197 +2196,153 @@ router.get('/ledger/:ledgerName', async (req, res) => {
     }
 
     // 6. Look in operational_parties (Workers, Loadmen, Drivers, Transporters, etc.)
-    let operationalPartyIds = new Set()
-    const loadmanLegacyNames = new Set()
-    const loadmanDiagnostics = []
-    const isLoadmanLedger = ['loadman', 'loadmen'].includes(String(detectedType || '').toLowerCase())
-    const activeCompanyId = req.companyId || parseInt(req.headers['x-company-id'], 10) || 1;
-    const operationalPartyTable = 'operational_parties';
+    const isLoadmanLedger = ['loadman', 'loadmen', 'worker', 'driver', 'helper', 'artisan', 'contractor'].includes(String(normalizedDetectedType || ''))
     try {
       const { ensureOperationalTables } = require('../services/operationalChargeEngine');
       await ensureOperationalTables(activeCompanyId);
     } catch (_) {}
 
-    if (isLoadmanLedger) {
+    if (!normalizedDetectedType || isGeneralOrCoreLedger || isLoadmanLedger) {
       try {
         let opQuery;
         if (queryLoadmanId && /^\d+$/.test(String(queryLoadmanId))) {
-          operationalPartyIds.add(Number(queryLoadmanId));
-          opQuery = await db.query(
-            `SELECT id, name FROM ${operationalPartyTable} WHERE id = ?`,
+          opQuery = await cDb.query(
+            `SELECT id, name FROM operational_parties WHERE id = ?`,
             [Number(queryLoadmanId)]
           );
         }
         if (!opQuery?.rows?.length) {
-          opQuery = await db.query(
-            `SELECT id, name FROM ${operationalPartyTable} WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))`,
+          opQuery = await cDb.query(
+            `SELECT id, name FROM operational_parties WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))`,
             [cleanName]
           );
         }
-
-        if (opQuery.rows?.length === 1) {
+        if (opQuery.rows && opQuery.rows.length > 0) {
           const party = opQuery.rows[0];
-          operationalPartyIds.add(Number(party.id));
           officialName = party.name || officialName;
           exactLedgerNames.add(String(party.name || '').trim().toLowerCase());
-          const nameCount = await db.query(
-            `SELECT COUNT(*) AS count FROM ${operationalPartyTable}
-             WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))`,
+          const matchedLm = await cDb.query(
+            "SELECT id FROM ledgermaster WHERE LOWER(TRIM(COALESCE(NULLIF(TRIM(ledger_name), ''), name))) = LOWER(TRIM(?)) LIMIT 1",
             [party.name]
-          );
-          if (Number(nameCount.rows?.[0]?.count || 0) === 1) {
-            loadmanLegacyNames.add(String(party.name || '').trim().toLowerCase());
-          } else {
-            loadmanDiagnostics.push(
-              'Multiple loadman masters use this name. Name-only historical purchases were excluded; select a specific loadman master record.'
-            );
+          )
+          if (matchedLm.rows && matchedLm.rows[0]?.id) {
+            ledgerMasterIds.add(Number(matchedLm.rows[0].id))
           }
-        } else if (opQuery.rows?.length > 1) {
-          loadmanDiagnostics.push(
-            'Multiple loadman masters use this name. Name-only historical purchases were excluded; select a specific loadman master record.'
-          );
         }
       } catch (error) {
-        console.warn('Error resolving loadman master for ledger statement:', error.message);
+        console.warn('Error resolving operational party for ledger statement:', error.message);
       }
-    } else {
-      try {
-        const opQuery = await db.query(
-          `SELECT id, name, party_code FROM ${operationalPartyTable}
-           WHERE id = ? OR name = ? OR TRIM(name) = ? OR LOWER(TRIM(name)) = LOWER(?)
-              OR LOWER(TRIM(name)) = LOWER(?) OR party_code = ?`,
-          [parseInt(cleanName) || -1, cleanName, cleanName, cleanName, rawLedgerName, cleanName]
-        )
-        if (opQuery.rows && opQuery.rows.length > 0) {
-          opQuery.rows.forEach(r => {
-            if (r.id) operationalPartyIds.add(Number(r.id))
-            if (r.name) exactLedgerNames.add(r.name.trim().toLowerCase())
-          })
-        }
-      } catch (e) {}
     }
-
-    // Also check if cleanName or rawLedgerName exists as loadman_name in purchases table
-    let foundInPurchasesAsLoadman = false;
-    try {
-      const purLoadmanRes = await db.query(
-        `SELECT DISTINCT loadman_name, loadman_worker_id FROM purchases 
-         WHERE LOWER(TRIM(loadman_name)) = LOWER(TRIM(?)) OR LOWER(TRIM(loadman_name)) = LOWER(TRIM(?))`,
-        [cleanName, rawLedgerName]
-      );
-      for (const r of purLoadmanRes.rows || []) {
-        if (r.loadman_name) {
-          foundInPurchasesAsLoadman = true;
-          exactLedgerNames.add(String(r.loadman_name).trim().toLowerCase());
-          loadmanLegacyNames.add(String(r.loadman_name).trim().toLowerCase());
-        }
-        if (r.loadman_worker_id) {
-          operationalPartyIds.add(Number(r.loadman_worker_id));
-        }
-      }
-    } catch (_) {}
 
     const lmIdList = Array.from(ledgerMasterIds)
     const nameList = Array.from(exactLedgerNames).filter(Boolean)
-    const suppIdList = Array.from(supplierIds)
-    const custIdList = Array.from(customerIds)
-    const papadIdList = Array.from(papadCompanyIds)
-    const opPartyIdList = Array.from(operationalPartyIds)
-    const loadmanLegacyNameList = Array.from(loadmanLegacyNames).filter(Boolean)
-    const operationalNameList = isLoadmanLedger ? loadmanLegacyNameList : nameList
-
     if (lmIdList.length === 0 && nameList.length === 0) {
       nameList.push(cleanName.toLowerCase())
     }
 
-    let allTransactions = []
-    const seenKeys = new Set()
-    const seenVoucherNos = new Set()
+    const allTransactions = []
+    const seenRowKeys = new Set()
 
     // -------------------------------------------------------------
-    // -------------------------------------------------------------
-    // SOURCE 1: ledger_entries (The centralized accounting postings)
+    // SOURCE 1: Canonical ledger_entries joined with voucher
+    // Note: Do NOT filter v.is_reversed = 0 so original + reversal Journal both appear and cancel cleanly!
+    // Filter COALESCE(le.is_reversed, 0) = 0 only for soft-reversed line exclusions.
     // -------------------------------------------------------------
     try {
-      let entryConds = []
-      let entryParams = []
+      const entryConds = []
+      const entryParams = []
 
-      if (nameList.length > 0 && lmIdList.length > 0) {
+      if (lmIdList.length > 0 && nameList.length > 0) {
         entryConds.push(`(
-          LOWER(TRIM(ledger_name)) IN (${nameList.map(() => '?').join(', ')})
-          OR (
-            ledger_id IN (${lmIdList.map(() => '?').join(', ')})
-            AND (ledger_name IS NULL OR ledger_name = '' OR LOWER(TRIM(ledger_name)) IN (${nameList.map(() => '?').join(', ')}))
-          )
+          le.ledger_id IN (${lmIdList.map(() => '?').join(', ')})
+          OR (le.ledger_id IS NULL AND LOWER(TRIM(le.ledger_name)) IN (${nameList.map(() => '?').join(', ')}))
+          OR LOWER(TRIM(le.ledger_name)) IN (${nameList.map(() => '?').join(', ')})
         )`)
-        entryParams.push(...nameList, ...lmIdList, ...nameList)
+        entryParams.push(...lmIdList, ...nameList, ...nameList)
       } else if (nameList.length > 0) {
-        entryConds.push(`LOWER(TRIM(ledger_name)) IN (${nameList.map(() => '?').join(', ')})`)
+        entryConds.push(`LOWER(TRIM(le.ledger_name)) IN (${nameList.map(() => '?').join(', ')})`)
         entryParams.push(...nameList)
       } else if (lmIdList.length > 0) {
-        entryConds.push(`ledger_id IN (${lmIdList.map(() => '?').join(', ')})`)
+        entryConds.push(`le.ledger_id IN (${lmIdList.map(() => '?').join(', ')})`)
         entryParams.push(...lmIdList)
       }
 
       if (entryConds.length > 0) {
         const leQuery = `
           SELECT 
-            id,
-            date,
-            voucher_type,
-            voucher_no,
-            particulars,
-            debit,
-            credit,
-            ledger_id,
-            ledger_name,
-            reference_id,
-            reference_type
-          FROM ledger_entries
-          WHERE (${entryConds.join(' OR ')})
+            le.id,
+            le.voucher_id,
+            le.date,
+            COALESCE(NULLIF(TRIM(v.voucher_type), ''), le.voucher_type, 'Journal') AS voucher_type,
+            COALESCE(NULLIF(TRIM(v.voucher_no), ''), le.voucher_no, '-') AS voucher_no,
+            le.counterparty_summary,
+            le.particulars AS raw_particulars,
+            le.debit,
+            le.credit,
+            le.ledger_id,
+            le.ledger_name,
+            le.reference_id,
+            le.reference_type,
+            v.reference_no AS voucher_reference_no,
+            v.narration AS voucher_narration,
+            v.source_module AS voucher_source_module,
+            v.source_id AS voucher_source_id,
+            ve.remarks AS entry_remarks,
+            p.id AS joined_purchase_id,
+            p.inv_no AS purchase_inv_no,
+            p.s_no AS purchase_s_no,
+            p.vehicle_no AS purchase_vehicle_no,
+            s.id AS joined_sales_id,
+            s.s_no AS sales_s_no,
+            COALESCE(v.is_reversed, 0) AS v_is_reversed
+          FROM ledger_entries le
+          LEFT JOIN voucher v ON le.voucher_id = v.id
+          LEFT JOIN voucher_entry ve ON ve.id = le.voucher_entry_id
+          LEFT JOIN purchases p ON (
+            (LOWER(COALESCE(le.reference_type, '')) = 'purchase' AND le.reference_id IS NOT NULL AND p.id = le.reference_id)
+            OR (LOWER(COALESCE(v.source_module, '')) = 'purchase' AND v.source_id IS NOT NULL AND p.id = v.source_id)
+          )
+          LEFT JOIN sales s ON (
+            (LOWER(COALESCE(le.reference_type, '')) = 'sales' AND le.reference_id IS NOT NULL AND s.id = le.reference_id)
+            OR (LOWER(COALESCE(v.source_module, '')) = 'sales' AND v.source_id IS NOT NULL AND s.id = v.source_id)
+          )
+          WHERE COALESCE(le.is_reversed, 0) = 0
+            AND (${entryConds.join(' OR ')})
+          ORDER BY le.date ASC, le.id ASC
         `
-        const leRes = await db.query(leQuery, entryParams)
+        const leRes = await cDb.query(leQuery, entryParams)
         for (const row of leRes.rows || []) {
           const debit = parseFloat(row.debit || 0)
           const credit = parseFloat(row.credit || 0)
-          const vNo = row.voucher_no || `LE-${row.id}`
-          const key = `${vNo}_${debit}_${credit}`
-          const rowLedgerLower = String(row.ledger_name || '').trim().toLowerCase()
-          const rowPartLower = String(row.particulars || '').trim().toLowerCase()
+          const rowKey = `LE_${row.id}`
+          if (seenRowKeys.has(rowKey)) continue
+          seenRowKeys.add(rowKey)
 
-          // Strict accounting validation: do not allow cross-head leakage
-          if (/sgst/i.test(cleanName) && !rowPartLower.includes('sgst') && (rowLedgerLower.includes('purchase') || (rowPartLower.includes('purchase #') && !rowPartLower.includes('sgst')))) {
-            continue
-          }
-          if (/cgst/i.test(cleanName) && !rowPartLower.includes('cgst') && (rowLedgerLower.includes('purchase') || (rowPartLower.includes('purchase #') && !rowPartLower.includes('cgst')))) {
-            continue
-          }
-          if (/igst/i.test(cleanName) && !rowPartLower.includes('igst') && (rowLedgerLower.includes('purchase') || (rowPartLower.includes('purchase #') && !rowPartLower.includes('igst')))) {
-            continue
-          }
-          if (detectedType === 'Supplier' || suppIdList.length > 0) {
-            if (/^(cgst|sgst|igst)\s+on\s+purchase/i.test(rowPartLower) || rowLedgerLower.includes('input cgst') || rowLedgerLower.includes('input sgst') || rowLedgerLower.includes('purchase account')) {
-              continue
-            }
-          }
-          
-          if (!seenKeys.has(key)) {
-            seenKeys.add(key)
-            if (row.voucher_no) seenVoucherNos.add(row.voucher_no)
-            allTransactions.push({
-              id: row.id,
-              date: row.date,
-              voucher_type: row.voucher_type || 'Journal',
-              voucher_no: row.voucher_no || '-',
-              particulars: row.particulars || `${row.voucher_type || 'Voucher'} #${row.voucher_no || row.id}`,
-              debit,
-              credit,
-              ledger_id: row.ledger_id,
-              ledger_name: row.ledger_name,
-              reference_id: row.reference_id || null,
-              reference_type: row.reference_type || null
-            })
-          }
+          const enriched = enrichStatementRow(row)
+
+          allTransactions.push({
+            id: row.id,
+            voucher_id: row.voucher_id || null,
+            date: row.date,
+            voucher_type: row.voucher_type || 'Journal',
+            voucher_no: row.voucher_no || '-',
+            particulars: enriched.particulars,
+            inv_no: enriched.inv_no,
+            invoice_no: enriched.invoice_no,
+            purchase_id: enriched.purchase_id,
+            counterparty_summary: enriched.counterparty_summary,
+            narration: enriched.narration,
+            remarks: enriched.remarks,
+            reference_no: enriched.reference_no,
+            subtext: enriched.subtext,
+            debit,
+            credit,
+            ledger_id: row.ledger_id,
+            ledger_name: row.ledger_name,
+            reference_id: enriched.purchase_id || row.reference_id || null,
+            reference_type: row.reference_type || null,
+            is_reversed: Number(row.v_is_reversed || 0) === 1
+          })
         }
       }
     } catch (e) {
@@ -2375,22 +2350,19 @@ router.get('/ledger/:ledgerName', async (req, res) => {
     }
 
     // -------------------------------------------------------------
-    // SOURCE 2: voucher + voucher_entry (Any posted voucher types)
-    // (Payment, Receipt, Contra, Journal, Advance, Credit Note, Debit Note, etc.)
+    // SOURCE 2: Un-migrated legacy voucher + voucher_entry fallback
+    // STRICTLY only where NO rows exist in ledger_entries for that voucher_id
     // -------------------------------------------------------------
     try {
-      let vConds = []
-      let vParams = []
+      const vConds = []
+      const vParams = []
 
-      if (nameList.length > 0 && lmIdList.length > 0) {
+      if (lmIdList.length > 0 && nameList.length > 0) {
         vConds.push(`(
-          LOWER(TRIM(COALESCE(ve.ledger_name, lm.name, ''))) IN (${nameList.map(() => '?').join(', ')})
-          OR (
-            ve.ledger_id IN (${lmIdList.map(() => '?').join(', ')})
-            AND (ve.ledger_name IS NULL OR ve.ledger_name = '' OR LOWER(TRIM(ve.ledger_name)) IN (${nameList.map(() => '?').join(', ')}))
-          )
+          ve.ledger_id IN (${lmIdList.map(() => '?').join(', ')})
+          OR LOWER(TRIM(COALESCE(ve.ledger_name, lm.name, ''))) IN (${nameList.map(() => '?').join(', ')})
         )`)
-        vParams.push(...nameList, ...lmIdList, ...nameList)
+        vParams.push(...lmIdList, ...nameList)
       } else if (nameList.length > 0) {
         vConds.push(`LOWER(TRIM(COALESCE(ve.ledger_name, lm.name, ''))) IN (${nameList.map(() => '?').join(', ')})`)
         vParams.push(...nameList)
@@ -2407,553 +2379,73 @@ router.get('/ledger/:ledgerName', async (req, res) => {
             v.date,
             v.voucher_type,
             v.voucher_no,
-            v.reference_no,
-            COALESCE(NULLIF(TRIM(ve.remarks), ''), NULLIF(TRIM(v.reference_no), ''), NULLIF(TRIM(v.narration), ''), v.voucher_type) as particulars,
+            v.reference_no AS voucher_reference_no,
+            v.narration AS voucher_narration,
+            v.source_module AS voucher_source_module,
+            v.source_id AS voucher_source_id,
+            ve.remarks AS entry_remarks,
+            COALESCE(NULLIF(TRIM(ve.remarks), ''), NULLIF(TRIM(v.reference_no), ''), NULLIF(TRIM(v.narration), ''), v.voucher_type) as raw_particulars,
             ve.debit,
             ve.credit,
             ve.ledger_id,
-            COALESCE(lm.name, ve.ledger_name, '') as ledger_name
+            COALESCE(lm.ledger_name, lm.name, ve.ledger_name, '') as ledger_name,
+            p.id AS joined_purchase_id,
+            p.inv_no AS purchase_inv_no,
+            p.s_no AS purchase_s_no,
+            p.vehicle_no AS purchase_vehicle_no,
+            s.id AS joined_sales_id,
+            s.s_no AS sales_s_no,
+            COALESCE(v.is_reversed, 0) AS v_is_reversed
           FROM voucher_entry ve
           JOIN voucher v ON v.id = ve.voucher_id
           LEFT JOIN ledgermaster lm ON lm.id = ve.ledger_id
-          WHERE (${vConds.join(' OR ')})
+          LEFT JOIN purchases p ON (LOWER(COALESCE(v.source_module, '')) = 'purchase' AND v.source_id IS NOT NULL AND p.id = v.source_id)
+          LEFT JOIN sales s ON (LOWER(COALESCE(v.source_module, '')) = 'sales' AND v.source_id IS NOT NULL AND s.id = v.source_id)
+          WHERE NOT EXISTS (SELECT 1 FROM ledger_entries le2 WHERE le2.voucher_id = v.id)
+            AND (${vConds.join(' OR ')})
+          ORDER BY v.date ASC, ve.id ASC
         `
-        const vRes = await db.query(vQuery, vParams)
+        const vRes = await cDb.query(vQuery, vParams)
         for (const row of vRes.rows || []) {
           const debit = parseFloat(row.debit || 0)
           const credit = parseFloat(row.credit || 0)
-          const vNo = row.voucher_no || `V-${row.id}`
-          const key = `${vNo}_${debit}_${credit}`
-          const rowLedgerLower = String(row.ledger_name || '').trim().toLowerCase()
-          const rowPartLower = String(row.particulars || '').trim().toLowerCase()
+          const rowKey = `VE_${row.id}`
+          if (seenRowKeys.has(rowKey)) continue
+          seenRowKeys.add(rowKey)
 
-          // Strict accounting validation: do not allow cross-head leakage
-          if (/sgst/i.test(cleanName) && !rowPartLower.includes('sgst') && (rowLedgerLower.includes('purchase') || (rowPartLower.includes('purchase #') && !rowPartLower.includes('sgst')))) {
-            continue
-          }
-          if (/cgst/i.test(cleanName) && !rowPartLower.includes('cgst') && (rowLedgerLower.includes('purchase') || (rowPartLower.includes('purchase #') && !rowPartLower.includes('cgst')))) {
-            continue
-          }
-          if (/igst/i.test(cleanName) && !rowPartLower.includes('igst') && (rowLedgerLower.includes('purchase') || (rowPartLower.includes('purchase #') && !rowPartLower.includes('igst')))) {
-            continue
-          }
-          if (detectedType === 'Supplier' || suppIdList.length > 0) {
-            if (/^(cgst|sgst|igst)\s+on\s+purchase/i.test(rowPartLower) || rowLedgerLower.includes('input cgst') || rowLedgerLower.includes('input sgst') || rowLedgerLower.includes('purchase account')) {
-              continue
-            }
-          }
-          
-          if (!seenKeys.has(key)) {
-            seenKeys.add(key)
-            if (row.voucher_no) seenVoucherNos.add(row.voucher_no)
-            allTransactions.push({
-              id: row.id ? (100000 + row.id) : (100000 + allTransactions.length),
-              date: row.date,
-              voucher_type: row.voucher_type || 'Voucher',
-              voucher_no: row.voucher_no || '-',
-              particulars: row.particulars,
-              debit,
-              credit,
-              ledger_id: row.ledger_id,
-              ledger_name: row.ledger_name,
-              reference_id: row.reference_no || row.voucher_id || null,
-              reference_type: row.voucher_type || null
-            })
-          }
+          const enriched = enrichStatementRow(row)
+
+          allTransactions.push({
+            id: 1000000 + Number(row.id || 0),
+            voucher_id: row.voucher_id || null,
+            date: row.date,
+            voucher_type: row.voucher_type || 'Voucher',
+            voucher_no: row.voucher_no || '-',
+            particulars: enriched.particulars,
+            inv_no: enriched.inv_no,
+            invoice_no: enriched.invoice_no,
+            purchase_id: enriched.purchase_id,
+            counterparty_summary: enriched.counterparty_summary,
+            narration: enriched.narration,
+            remarks: enriched.remarks,
+            reference_no: enriched.reference_no,
+            subtext: enriched.subtext,
+            debit,
+            credit,
+            ledger_id: row.ledger_id,
+            ledger_name: row.ledger_name,
+            reference_id: enriched.purchase_id || row.voucher_reference_no || row.voucher_id || null,
+            reference_type: row.voucher_type || null,
+            is_reversed: Number(row.v_is_reversed || 0) === 1
+          })
         }
       }
     } catch (e) {
-      console.warn('Error fetching from voucher/voucher_entry:', e.message)
+      console.warn('Error fetching un-migrated legacy voucher_entry rows:', e.message)
     }
 
     // -------------------------------------------------------------
-    // SOURCE 8: operational_payments & operational_charges
-    // -------------------------------------------------------------
-    if (opPartyIdList.length > 0 || operationalNameList.length > 0) {
-      try {
-        const { ensureOperationalTables } = require('../services/operationalChargeEngine');
-        await ensureOperationalTables(activeCompanyId);
-      } catch (_) {}
-
-      try {
-        let opConds = []
-        let opParams = []
-        if (opPartyIdList.length > 0) {
-          opConds.push(`party_id IN (${opPartyIdList.map(() => '?').join(', ')})`)
-          opParams.push(...opPartyIdList)
-        }
-        if (operationalNameList.length > 0) {
-          opConds.push(`LOWER(TRIM(party_name)) IN (${operationalNameList.map(() => '?').join(', ')})`)
-          opParams.push(...operationalNameList)
-        }
-
-        if (opConds.length > 0) {
-          try {
-            const payRes = await db.query(`
-              SELECT id, payment_no, voucher_no, payment_date, party_id, party_name, paid_amount, reference_no,
-                     COALESCE(notes, remarks, '') as notes
-              FROM operational_payments
-              WHERE (${opConds.join(' OR ')})
-            `, opParams)
-
-            for (const row of payRes.rows || []) {
-              const vNo = row.voucher_no || row.payment_no || `OPP-${row.id}`
-              const amt = parseFloat(row.paid_amount || 0)
-              const key = `${vNo}_${amt}_0`
-              const alreadyPostedByVoucher =
-                (row.voucher_no && seenVoucherNos.has(row.voucher_no)) ||
-                (row.payment_no && seenVoucherNos.has(row.payment_no)) ||
-                allTransactions.some(t =>
-                  (row.voucher_no && t.voucher_no === row.voucher_no) ||
-                  (row.payment_no && String(t.particulars || '').includes(row.payment_no))
-                )
-
-              if (!alreadyPostedByVoucher && !seenKeys.has(key)) {
-                seenKeys.add(key)
-                seenVoucherNos.add(vNo)
-                if (row.payment_no) seenVoucherNos.add(row.payment_no)
-                allTransactions.push({
-                  id: 700000 + row.id,
-                  date: row.payment_date,
-                  voucher_type: 'Payment',
-                  voucher_no: vNo,
-                  particulars: `Operational Payment to ${row.party_name || cleanName}${row.reference_no ? ' - Ref: ' + row.reference_no : ''}`,
-                  debit: amt,
-                  credit: 0,
-                  ledger_id: row.party_id,
-                  ledger_name: officialName
-                })
-              }
-            }
-          } catch (error) {
-            console.warn('Error fetching operational payments in ledger statement:', error.message)
-            if (!isLoadmanLedger) throw error
-          }
-        }
-
-        if (opConds.length > 0) {
-          const chgRes = await db.query(`
-            SELECT id, charge_no, 
-                   COALESCE(date, charge_date, '') as date, 
-                   party_id,
-                   party_name, 
-                   COALESCE(final_amount, total_amount, amount, 0) as final_amount, 
-                   operation_type, 
-                   source_module,
-                   source_transaction_no,
-                   source_transaction_id,
-                   accrual_voucher_id,
-                   accrual_voucher_no,
-                   COALESCE(notes, remarks, '') as notes 
-            FROM operational_charges
-            WHERE (${opConds.join(' OR ')})
-          `, opParams);
-
-          for (const row of chgRes.rows || []) {
-            const vNo = row.charge_no || `OPC-${row.id}`;
-            const amt = parseFloat(row.final_amount || 0);
-            const key = `${vNo}_0_${amt}`;
-
-            // Deduplication: if accrual voucher or source purchase is already accounted
-            const isPurchaseCharge = String(row.source_module || '').toUpperCase() === 'PURCHASE' ||
-                                     /purchase/i.test(String(row.notes || '')) ||
-                                     /auto-recorded from purchase/i.test(String(row.notes || ''));
-
-            const isAlreadyAccounted = allTransactions.some(t => {
-              const v = String(t.voucher_no || '').toLowerCase();
-              const p = String(t.particulars || '').toLowerCase();
-              const refId = String(t.reference_id || '').toLowerCase();
-              const tDate = String(t.date || '').slice(0, 10);
-              const rDate = String(row.date || '').slice(0, 10);
-
-              if (row.accrual_voucher_no && (v === row.accrual_voucher_no.toLowerCase() || p.includes(row.accrual_voucher_no.toLowerCase()))) return true;
-              if (row.charge_no && (v === row.charge_no.toLowerCase() || p.includes(row.charge_no.toLowerCase()))) return true;
-
-              if (row.source_transaction_id && (refId === String(row.source_transaction_id).toLowerCase() || p.includes(`#${row.source_transaction_id}`))) return true;
-              if (row.source_transaction_no && (v.includes(String(row.source_transaction_no).toLowerCase()) || p.includes(String(row.source_transaction_no).toLowerCase()) || refId === String(row.source_transaction_no).toLowerCase())) return true;
-
-              if (row.notes) {
-                const m = row.notes.match(/Purchase #([A-Za-z0-9\-_]+)/i);
-                if (m && m[1]) {
-                  const pNo = m[1].toLowerCase();
-                  if (v.includes(pNo) || p.includes(pNo) || refId === pNo || p.includes(`#${pNo}`)) return true;
-                }
-              }
-
-              // Purchase-originated operational charge matching an existing purchase voucher with same amount
-              if (isPurchaseCharge && Math.abs((t.credit || 0) - amt) < 0.01 && (!rDate || !tDate || tDate === rDate)) {
-                if (t.voucher_type === 'Purchase' || p.includes('load') || p.includes('unload') || p.includes('charges') || p.includes('freight')) {
-                  return true;
-                }
-              }
-
-              return false;
-            });
-            if (isAlreadyAccounted) continue;
-
-            if (!seenVoucherNos.has(vNo) && !seenKeys.has(key)) {
-              seenKeys.add(key);
-              seenVoucherNos.add(vNo);
-              allTransactions.push({
-                id: 800000 + row.id,
-                date: row.date,
-                voucher_type: 'Journal',
-                voucher_no: vNo,
-                particulars: `${row.operation_type || 'Operational'} Charge #${vNo}${row.notes ? ' - ' + row.notes : ''}`,
-                debit: 0,
-                credit: amt,
-                ledger_id: row.party_id,
-                ledger_name: officialName,
-                reference_id: row.source_transaction_id || row.source_transaction_no || null,
-                reference_type: row.source_module || 'Operational'
-              });
-            }
-          }
-        }
-      } catch (e) {
-        console.warn('Error checking operational payments/charges in ledger statement:', e.message);
-      }
-    }
-
-    // -------------------------------------------------------------
-    // SOURCE 9: purchase activities assigned to a loadman
-    // -------------------------------------------------------------
-    const allLoadmanNamesToMatch = Array.from(new Set([
-      cleanName.toLowerCase().trim(),
-      rawLedgerName.toLowerCase().trim(),
-      ...nameList.map(n => n.toLowerCase().trim()),
-      ...loadmanLegacyNameList.map(n => n.toLowerCase().trim())
-    ])).filter(Boolean);
-
-    const isLoadmanContext = isLoadmanLedger ||
-                             foundInPurchasesAsLoadman ||
-                             opPartyIdList.length > 0 ||
-                             loadmanLegacyNameList.length > 0 ||
-                             allLoadmanNamesToMatch.length > 0;
-
-    if (isLoadmanContext) {
-      try {
-        await ensurePurchaseLoadmanColumns(activeCompanyId);
-
-        const purchaseConditions = [];
-        const purchaseParams = [];
-        if (opPartyIdList.length > 0) {
-          purchaseConditions.push(`loadman_worker_id IN (${opPartyIdList.map(() => '?').join(', ')})`);
-          purchaseParams.push(...opPartyIdList);
-        }
-        if (allLoadmanNamesToMatch.length > 0) {
-          purchaseConditions.push(`LOWER(TRIM(loadman_name)) IN (${allLoadmanNamesToMatch.map(() => '?').join(', ')})`);
-          purchaseParams.push(...allLoadmanNamesToMatch);
-        }
-
-        if (purchaseConditions.length > 0) {
-          const purchaseRes = await db.query(`
-            SELECT id, s_no, inv_no, date, supplier, loadman_worker_id, loadman_name,
-                   loadman_qty_kg, loadman_rate_per_kg, loadman_charges,
-                   total_qty, total_weight
-            FROM purchases
-            WHERE (${purchaseConditions.join(' OR ')})
-          `, purchaseParams);
-          const purchases = purchaseRes.rows || [];
-          const purchaseIds = purchases.map(purchase => purchase.id).filter(id => id !== null && id !== undefined);
-          const itemsByPurchase = new Map();
-
-          if (purchaseIds.length > 0) {
-            const itemRes = await db.query(`
-              SELECT purchase_id, item_name, qty, total_weight
-              FROM purchase_items
-              WHERE purchase_id IN (${purchaseIds.map(() => '?').join(', ')})
-              ORDER BY id ASC
-            `, purchaseIds);
-            for (const item of itemRes.rows || []) {
-              const purchaseItems = itemsByPurchase.get(String(item.purchase_id)) || [];
-              purchaseItems.push(item);
-              itemsByPurchase.set(String(item.purchase_id), purchaseItems);
-            }
-          }
-
-          for (const purchase of purchases) {
-            const voucherNo = purchase.inv_no || `PUR-${purchase.s_no || purchase.id}`;
-            const key = `PURCHASE-ACTIVITY-${purchase.id}`;
-            if (seenKeys.has(key)) continue;
-
-            const recordedCharges = Number(purchase.loadman_charges || 0);
-
-            // Strict deduplication: If this purchase is already posted in accounting
-            const alreadyInAccounts = allTransactions.some(t => {
-              const v = String(t.voucher_no || '').toLowerCase();
-              const p = String(t.particulars || '').toLowerCase();
-              const inv = String(purchase.inv_no || '').toLowerCase();
-              const sNo = String(purchase.s_no || '').toLowerCase();
-              const pId = String(purchase.id || '').toLowerCase();
-              const refId = String(t.reference_id || '').toLowerCase();
-              const tDate = String(t.date || '').slice(0, 10);
-              const pDate = String(purchase.date || '').slice(0, 10);
-
-              if (pId && (refId === pId || p.includes(`#${pId}`) || v.includes(`#${pId}`))) return true;
-              if (sNo && (refId === sNo || v.includes(`pur000${sNo}`) || v.includes(`pur-${sNo}`) || p.includes(`pur-${sNo}`) || p.includes(`#${sNo}`))) return true;
-              if (inv && (v.includes(inv) || p.includes(inv))) return true;
-
-              if (recordedCharges > 0 && Math.abs((t.credit || 0) - recordedCharges) < 0.01 && (!pDate || !tDate || tDate === pDate)) {
-                if (t.voucher_type === 'Purchase' || p.includes('load') || p.includes('unload') || p.includes('unloading')) {
-                  return true;
-                }
-              }
-
-              return false;
-            });
-            if (alreadyInAccounts) continue;
-
-            seenKeys.add(key);
-
-            const items = itemsByPurchase.get(String(purchase.id)) || [];
-            const itemDetails = items.map(item => {
-              const qty = Number(item.qty || 0);
-              const weight = Number(item.total_weight || 0);
-              return `${item.item_name || 'Item'}: qty ${qty}${weight ? `, ${weight} kg` : ''}`;
-            });
-            const qty = Number(purchase.loadman_qty_kg || purchase.total_weight || 0);
-            const loadmanName = purchase.loadman_name || officialName;
-
-            let sName = purchase.supplier || '';
-            if (/^\d+$/.test(String(sName))) {
-              try {
-                const sRes = await db.query('SELECT name, print_name FROM supplier_master WHERE id = ?', [sName]);
-                if (sRes.rows && sRes.rows[0]) sName = sRes.rows[0].print_name || sRes.rows[0].name;
-              } catch (_) {}
-            }
-
-            const particulars = [
-              `Unloading Fee: ${loadmanName}`,
-              sName ? `Supplier: ${sName}` : '',
-              itemDetails.length > 0 ? itemDetails.join('; ') : `Qty: ${Number(purchase.total_qty || 0)}, Weight: ${Number(purchase.total_weight || 0)} kg`,
-              `Loadman quantity: ${qty} kg`,
-              recordedCharges > 0 ? `Unloading Charges: ₹${recordedCharges.toFixed(2)}` : ''
-            ].filter(Boolean).join(' | ');
-
-            allTransactions.push({
-              id: 900000 + Number(purchase.id || 0),
-              date: purchase.date,
-              voucher_type: 'Purchase Unloading',
-              voucher_no: voucherNo,
-              particulars,
-              debit: 0,
-              credit: recordedCharges,
-              ledger_id: purchase.loadman_worker_id || null,
-              ledger_name: loadmanName,
-              quantity: qty,
-              weight: Number(purchase.total_weight || 0),
-              loadman_charges: recordedCharges
-            });
-          }
-        }
-
-        // Older Cold Storage inward records
-        if (opPartyIdList.length > 0 || allLoadmanNamesToMatch.length > 0) {
-          try {
-            const conditions = [];
-            const params = [];
-            if (opPartyIdList.length > 0) {
-              conditions.push(`csv.loadman_worker_id IN (${opPartyIdList.map(() => '?').join(', ')})`);
-              params.push(...opPartyIdList);
-            }
-            if (allLoadmanNamesToMatch.length > 0) {
-              conditions.push(`LOWER(TRIM(csv.loadman_name)) IN (${allLoadmanNamesToMatch.map(() => '?').join(', ')})`);
-              params.push(...allLoadmanNamesToMatch);
-            }
-
-            if (conditions.length > 0) {
-              const csiRes = await db.query(`
-                SELECT csv.id, csv.voucher_no, csv.voucher_date, csv.purchase_id,
-                       csv.purchase_inv_no, csv.loadman_worker_id, csv.loadman_name,
-                       csv.loadman_qty_kg, csv.loadman_charges, csv.handling_amount,
-                       p.s_no, p.inv_no, p.date AS purchase_date, p.supplier,
-                       p.total_qty, p.total_weight
-                FROM cold_storage_vouchers csv
-                LEFT JOIN purchases p ON p.id = csv.purchase_id
-                WHERE csv.voucher_type = 'IN' AND (${conditions.join(' OR ')})
-              `, params);
-              const csiRows = csiRes.rows || [];
-              const purchaseIds = [...new Set(csiRows.map(row => row.purchase_id).filter(Boolean))];
-              const itemsByPurchase = new Map();
-
-              if (purchaseIds.length > 0) {
-                const itemRes = await db.query(`
-                  SELECT purchase_id, item_name, qty, total_weight
-                  FROM purchase_items
-                  WHERE purchase_id IN (${purchaseIds.map(() => '?').join(', ')})
-                  ORDER BY id ASC
-                `, purchaseIds);
-                for (const item of itemRes.rows || []) {
-                  const purchaseItems = itemsByPurchase.get(String(item.purchase_id)) || [];
-                  purchaseItems.push(item);
-                  itemsByPurchase.set(String(item.purchase_id), purchaseItems);
-                }
-              }
-
-              for (const row of csiRows) {
-                const purchaseKey = row.purchase_id ? `PURCHASE-ACTIVITY-${row.purchase_id}` : '';
-                if (purchaseKey && seenKeys.has(purchaseKey)) continue;
-                if (purchaseKey) seenKeys.add(purchaseKey);
-
-                const charge = Number(row.loadman_charges ?? row.handling_amount ?? 0);
-
-                // Deduplication check
-                const alreadyHandled = allTransactions.some(t => {
-                  const v = String(t.voucher_no || '').toLowerCase();
-                  const p = String(t.particulars || '').toLowerCase();
-                  const refId = String(t.reference_id || '').toLowerCase();
-                  const pId = String(row.purchase_id || '').toLowerCase();
-                  const pInv = String(row.purchase_inv_no || '').toLowerCase();
-                  const vNo = String(row.voucher_no || '').toLowerCase();
-                  const tDate = String(t.date || '').slice(0, 10);
-                  const rDate = String(row.voucher_date || row.purchase_date || '').slice(0, 10);
-
-                  if (vNo && (v === vNo || p.includes(vNo))) return true;
-                  if (pInv && (v.includes(pInv) || p.includes(pInv))) return true;
-                  if (pId && (refId === pId || p.includes(`#${pId}`))) return true;
-
-                  if (charge > 0 && Math.abs((t.credit || 0) - charge) < 0.01 && (!rDate || !tDate || tDate === rDate)) {
-                    if (t.voucher_type === 'Purchase' || p.includes('load') || p.includes('unload') || p.includes('inward')) return true;
-                  }
-                  return false;
-                });
-                if (alreadyHandled) continue;
-
-                const items = itemsByPurchase.get(String(row.purchase_id)) || [];
-                const itemDetails = items.map(item =>
-                  `${item.item_name || 'Item'}: qty ${Number(item.qty || 0)}${Number(item.total_weight || 0) ? `, ${Number(item.total_weight)} kg` : ''}`
-                );
-                const quantity = Number(row.loadman_qty_kg || row.total_weight || 0);
-
-                let sName = row.supplier || '';
-                if (/^\d+$/.test(String(sName))) {
-                  try {
-                    const sRes = await db.query('SELECT name, print_name FROM supplier_master WHERE id = ?', [sName]);
-                    if (sRes.rows && sRes.rows[0]) sName = sRes.rows[0].print_name || sRes.rows[0].name;
-                  } catch (_) {}
-                }
-
-                const particulars = [
-                  `Cold Storage Inward Unloading: ${row.loadman_name || officialName}`,
-                  sName ? `Supplier: ${sName}` : '',
-                  row.purchase_inv_no ? `Purchase Invoice: #${row.purchase_inv_no}` : '',
-                  itemDetails.length > 0 ? itemDetails.join('; ') : `Qty: ${Number(row.total_qty || 0)}, Weight: ${Number(row.total_weight || 0)} kg`,
-                  quantity > 0 ? `Loadman handled: ${quantity} kg` : '',
-                  charge > 0 ? `Unloading Charges: ₹${charge.toFixed(2)}` : ''
-                ].filter(Boolean).join(' | ');
-
-                allTransactions.push({
-                  id: 950000 + Number(row.id || 0),
-                  date: row.voucher_date || row.purchase_date,
-                  voucher_type: 'Purchase Unloading',
-                  voucher_no: row.voucher_no || (row.purchase_inv_no ? `PUR-${row.purchase_inv_no}` : `CSI-${row.id}`),
-                  particulars,
-                  debit: 0,
-                  credit: charge,
-                  ledger_id: row.loadman_worker_id || null,
-                  ledger_name: row.loadman_name || officialName,
-                  quantity,
-                  weight: Number(row.total_weight || 0),
-                  loadman_charges: charge
-                });
-              }
-            }
-          } catch (e) {
-            console.warn('Error fetching cold storage loadman activities for statement:', e.message);
-          }
-        }
-      } catch (err) {
-        console.warn('Error reading purchase loadman activity in ledger statement:', err.message);
-      }
-    }
-
-    // -------------------------------------------------------------
-    // SOURCE 10: purchase activities assigned to a transporter
-    // -------------------------------------------------------------
-    const isTransporterContext = ['transport', 'transporter', 'lorry'].includes(String(detectedType || '').toLowerCase()) ||
-                                 (typeof transportIds !== 'undefined' && transportIds.size > 0);
-
-    if (isTransporterContext) {
-      try {
-        const transNames = Array.from(exactLedgerNames).filter(Boolean);
-        const transParams = [];
-        const transConds = [];
-        if (typeof transportIds !== 'undefined' && transportIds.size > 0) {
-          const tIdsArr = Array.from(transportIds);
-          transConds.push(`(transporter IN (${tIdsArr.map(() => '?').join(', ')}) OR transport IN (${tIdsArr.map(() => '?').join(', ')}))`);
-          transParams.push(...tIdsArr, ...tIdsArr);
-        }
-        if (transNames.length > 0) {
-          transConds.push(`(LOWER(TRIM(transporter)) IN (${transNames.map(() => '?').join(', ')}) OR LOWER(TRIM(transport)) IN (${transNames.map(() => '?').join(', ')}))`);
-          transParams.push(...transNames, ...transNames);
-        }
-
-        if (transConds.length > 0) {
-          const transPurRes = await db.query(`
-            SELECT id, s_no, inv_no, date, supplier, transporter, transport,
-                   COALESCE(NULLIF(net_transport_amount, 0), NULLIF(transport_charges, 0), freight_amount, 0) as freight_amount,
-                   vehicle_no, lorry_no, total_qty, total_weight
-            FROM purchases
-            WHERE (${transConds.join(' OR ')})
-          `, transParams);
-
-          for (const p of (transPurRes.rows || [])) {
-            const fAmt = parseFloat(p.freight_amount || 0);
-            if (fAmt <= 0) continue;
-            const voucherNo = p.inv_no || `PUR-${p.s_no || p.id}`;
-            const key = `TRANS-PUR-${p.id}_${fAmt}`;
-            if (seenKeys.has(key)) continue;
-
-            const alreadyCovered = allTransactions.some(t => {
-              const v = String(t.voucher_no || '').toLowerCase();
-              const pStr = String(t.particulars || '').toLowerCase();
-              const inv = String(p.inv_no || '').toLowerCase();
-              const sNo = String(p.s_no || '').toLowerCase();
-              const pId = String(p.id || '').toLowerCase();
-              const refId = String(t.reference_id || '').toLowerCase();
-              const tDate = String(t.date || '').slice(0, 10);
-              const pDate = String(p.date || '').slice(0, 10);
-
-              if (pId && (refId === pId || pStr.includes(`#${pId}`))) return true;
-              if (sNo && (refId === sNo || v.includes(`pur000${sNo}`) || v.includes(`pur-${sNo}`) || pStr.includes(`#${sNo}`))) return true;
-              if (inv && (v.includes(inv) || pStr.includes(inv))) return true;
-              if (Math.abs((t.credit || 0) - fAmt) < 0.01 && (!pDate || !tDate || tDate === pDate)) {
-                if (t.voucher_type === 'Purchase' || pStr.includes('freight') || pStr.includes('transport')) return true;
-              }
-              return false;
-            });
-            if (alreadyCovered) continue;
-
-            seenKeys.add(key);
-            let sName = p.supplier || '';
-            if (/^\d+$/.test(String(sName))) {
-              try {
-                const sRes = await db.query('SELECT name, print_name FROM supplier_master WHERE id = ?', [sName]);
-                if (sRes.rows && sRes.rows[0]) sName = sRes.rows[0].print_name || sRes.rows[0].name;
-              } catch (_) {}
-            }
-
-            allTransactions.push({
-              id: 980000 + Number(p.id || 0),
-              date: p.date,
-              voucher_type: 'Purchase',
-              voucher_no: voucherNo,
-              particulars: `Freight Charges for Purchase #${voucherNo} | Vehicle: ${p.vehicle_no || p.lorry_no || 'N/A'}${sName ? ' | Supplier: ' + sName : ''} | Weight: ${p.total_weight || 0} kg`,
-              debit: 0,
-              credit: fAmt,
-              ledger_id: null,
-              ledger_name: p.transporter || p.transport || officialName
-            });
-          }
-        }
-      } catch (trErr) {
-        console.warn('Error fetching transport transactions for statement:', trErr.message);
-      }
-    }
-
-    // -------------------------------------------------------------
-    // 8. Final deduplication, sort chronologically and calculate running balance
+    // Chronological sorting and period running-balance computation
     // -------------------------------------------------------------
     const normalizeDateStr = (d) => {
       if (!d) return ''
@@ -2966,83 +2458,16 @@ router.get('/ledger/:ledgerName', async (req, res) => {
     }
 
     allTransactions.sort((a, b) => {
-      const dateA = a.date ? new Date(a.date).getTime() : 0
-      const dateB = b.date ? new Date(b.date).getTime() : 0
-      if (dateA !== dateB) return dateA - dateB
+      const dA = normalizeDateStr(a.date)
+      const dB = normalizeDateStr(b.date)
+      if (dA !== dB) return dA.localeCompare(dB)
       return (a.id || 0) - (b.id || 0)
     })
 
-    // Final deduplication pass: eliminate duplicate rows originating from the same purchase activity (Loadman / Transporter)
-    const dedupedTransactions = [];
-    const seenPurchaseMap = new Map();
-
-    const extractPurchaseRef = (t) => {
-      const p = String(t.particulars || '');
-      const v = String(t.voucher_no || '');
-      const ref = String(t.reference_id || '');
-
-      // 1. "Auto-recorded from Purchase #111" or "Purchase #111"
-      const pMatch = p.match(/(?:from\s+purchase|purchase)\s*#\s*([A-Za-z0-9\-_]+)/i);
-      if (pMatch && pMatch[1]) {
-        return pMatch[1].toLowerCase().replace(/^pur-?0*/i, '');
-      }
-
-      // 2. "Loading charges payable for #111" or "Freight charges payable for #111"
-      const chargeMatch = p.match(/(?:loading|unloading|freight|transport).*?#([A-Za-z0-9\-_]+)/i);
-      if (chargeMatch && chargeMatch[1] && !/^opc-/i.test(chargeMatch[1])) {
-        return chargeMatch[1].toLowerCase().replace(/^pur-?0*/i, '');
-      }
-
-      // 3. Purchase Unloading or Purchase Freight voucher type
-      if (t.voucher_type === 'Purchase Unloading' || t.voucher_type === 'Purchase Freight') {
-        const raw = (v || ref).toLowerCase().replace(/^pur-?0*/i, '');
-        if (raw) return raw;
-      }
-
-      // 4. Voucher no starting with PUR
-      if (/^pur/i.test(v)) {
-        return v.toLowerCase().replace(/^pur-?0*/i, '');
-      }
-
-      // 5. Reference ID if reference type is purchase
-      if (String(t.reference_type || '').toLowerCase() === 'purchase' && ref) {
-        return ref.toLowerCase().replace(/^pur-?0*/i, '');
-      }
-
-      return null;
-    };
-
-    const getVoucherPriority = (t) => {
-      if (t.voucher_type === 'Purchase') return 3;
-      if (t.voucher_type === 'Journal') return 2;
-      return 1;
-    };
+    let periodOpeningBalance = openingBalance
+    const activeTransactions = []
 
     for (const t of allTransactions) {
-      const pRef = extractPurchaseRef(t);
-      const cr = Number(parseFloat(t.credit || 0).toFixed(2));
-      const dr = Number(parseFloat(t.debit || 0).toFixed(2));
-
-      if (pRef && (cr > 0 || dr > 0)) {
-        const key = `pur_${pRef}_${cr}_${dr}`;
-        if (seenPurchaseMap.has(key)) {
-          const existingIdx = seenPurchaseMap.get(key);
-          const existingT = dedupedTransactions[existingIdx];
-          if (getVoucherPriority(t) > getVoucherPriority(existingT)) {
-            dedupedTransactions[existingIdx] = t;
-          }
-          continue;
-        }
-        seenPurchaseMap.set(key, dedupedTransactions.length);
-      }
-
-      dedupedTransactions.push(t);
-    }
-
-    let periodOpeningBalance = openingBalance
-    let activeTransactions = []
-
-    for (const t of dedupedTransactions) {
       const tDateStr = normalizeDateStr(t.date)
       const debit = parseFloat(t.debit || 0)
       const credit = parseFloat(t.credit || 0)
@@ -3068,7 +2493,8 @@ router.get('/ledger/:ledgerName', async (req, res) => {
         ...t,
         debit,
         credit,
-        balance: Number(runningBalance.toFixed(2)),
+        balance: Number(Math.abs(runningBalance).toFixed(2)),
+        signed_balance: Number(runningBalance.toFixed(2)),
         balance_type: runningBalance >= 0 ? 'Dr' : 'Cr'
       }
     })
@@ -3634,16 +3060,16 @@ router.get('/outstanding-details', async (req, res) => {
           'Payable' as type,
           COALESCE(sm.print_name, sm.name, CAST(p.supplier AS TEXT), 'Supplier') as ledger_name,
           COALESCE(
+            NULLIF(p.grand_total, 0),
+            NULLIF(p.net_amount, 0),
             (SELECT SUM(pi.amount) FROM purchase_items pi WHERE CAST(pi.purchase_id AS TEXT) = CAST(p.id AS TEXT)),
-            p.grand_total,
-            p.net_amount,
             p.total_amount,
             0
           ) as amount,
-          p.transporter,
-          COALESCE(p.transport_charges, p.freight_amount, p.net_transport_amount, 0) as transport_charges,
+          COALESCE(tm.print_name, tm.name, NULLIF(TRIM(CAST(p.transporter AS TEXT)), ''), '') as transporter,
+          COALESCE(p.net_transport_amount, p.transport_charges, p.freight_amount, 0) as transport_charges,
           p.transport_payable_type,
-          p.loadman_name,
+          COALESCE(pm.name, op.name, op.print_name, op.linked_ledger_name, NULLIF(TRIM(CAST(p.loadman_name AS TEXT)), ''), '') as loadman_name,
           COALESCE(p.loadman_charges, 0) as loadman_charges,
           p.loadman_payable_type
         FROM purchases p
@@ -3651,6 +3077,17 @@ router.get('/outstanding-details', async (req, res) => {
           CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR 
           sm.name = CAST(p.supplier AS TEXT) OR 
           sm.print_name = CAST(p.supplier AS TEXT)
+        )
+        LEFT JOIN transport_master tm ON (
+          CAST(tm.id AS TEXT) = CAST(p.transporter AS TEXT) OR
+          LOWER(TRIM(tm.name)) = LOWER(TRIM(CAST(p.transporter AS TEXT)))
+        )
+        LEFT JOIN person_master pm ON (
+          p.loadman_worker_id IS NOT NULL AND CAST(pm.id AS TEXT) = CAST(p.loadman_worker_id AS TEXT)
+        )
+        LEFT JOIN operational_parties op ON (
+          (p.loadman_worker_id IS NOT NULL AND CAST(op.id AS TEXT) = CAST(p.loadman_worker_id AS TEXT))
+          OR CAST(op.id AS TEXT) = CAST(p.loadman_name AS TEXT)
         )
       `
       const purchaseParams = []
@@ -3708,7 +3145,7 @@ router.get('/outstanding-details', async (req, res) => {
         const transAmt = parseFloat(row.transport_charges || 0)
         const transPayType = String(row.transport_payable_type || 'SEPARATE').toUpperCase()
         const transName = (row.transporter || '').trim()
-        if (transAmt > 0 && transPayType !== 'SUPPLIER_INVOICE' && transName) {
+        if (transAmt > 0 && transPayType !== 'SUPPLIER_INVOICE' && transName && !/^\d+$/.test(transName)) {
           const transKey = `TRP-${row.invoice_no}_${transName}`
           if (!billsMap[transKey]) {
             const tokens = getBillSearchTokens(row.id, row.s_no, row.inv_no || row.invoice_no, 'Transport', row.voucher_no)
@@ -3734,7 +3171,7 @@ router.get('/outstanding-details', async (req, res) => {
         const loadAmt = parseFloat(row.loadman_charges || 0)
         const loadPayType = String(row.loadman_payable_type || 'SEPARATE').toUpperCase()
         const loadName = (row.loadman_name || '').trim()
-        if (loadAmt > 0 && loadPayType !== 'SUPPLIER_INVOICE' && loadName) {
+        if (loadAmt > 0 && loadPayType !== 'SUPPLIER_INVOICE' && loadName && !/^\d+$/.test(loadName)) {
           const loadKey = `LDM-${row.invoice_no}_${loadName}`
           if (!billsMap[loadKey]) {
             const tokens = getBillSearchTokens(row.id, row.s_no, row.inv_no || row.invoice_no, 'Loadman', row.voucher_no)
@@ -4154,13 +3591,23 @@ router.get('/outstanding-details', async (req, res) => {
           LEFT JOIN ledgermaster lm ON CAST(ve.ledger_id AS TEXT) = CAST(lm.id AS TEXT)
           WHERE v.voucher_type IN ('Payment', 'Receipt', 'Journal')
         `)
-        const existingKeys = new Set(settlements.map(s => `${s.voucher_no}_${s.debit}_${s.credit}`))
+        const existingByKey = new Map()
+        settlements.forEach(s => {
+          existingByKey.set(`${s.voucher_no}_${s.debit}_${s.credit}`, s)
+        })
         ;(vRes.rows || []).forEach(vr => {
           const vKey = `${vr.voucher_no}_${vr.debit}_${vr.credit}`
-          if (!existingKeys.has(vKey)) {
-            existingKeys.add(vKey)
-            const combinedParticulars = [vr.remarks, vr.reference_no, vr.narration].filter(Boolean).join(' ')
-            settlements.push({
+          const combinedParticulars = [vr.remarks, vr.reference_no, vr.narration].filter(Boolean).join(' ')
+          const existing = existingByKey.get(vKey)
+          if (existing) {
+            if (!existing.reference_no && vr.reference_no) existing.reference_no = vr.reference_no
+            if (!existing.narration && vr.narration) existing.narration = vr.narration
+            if (!existing.remarks && vr.remarks) existing.remarks = vr.remarks
+            if (combinedParticulars) {
+              existing.particulars = [existing.particulars, combinedParticulars].filter(Boolean).join(' ')
+            }
+          } else {
+            const added = {
               id: `v_${vr.id}`,
               ledger_name: vr.ledger_name || 'Party',
               date: vr.date,
@@ -4168,10 +3615,13 @@ router.get('/outstanding-details', async (req, res) => {
               voucher_no: vr.voucher_no,
               reference_no: vr.reference_no || '',
               narration: vr.narration || '',
+              remarks: vr.remarks || '',
               debit: parseFloat(vr.debit || 0),
               credit: parseFloat(vr.credit || 0),
               particulars: combinedParticulars
-            })
+            }
+            existingByKey.set(vKey, added)
+            settlements.push(added)
           }
         })
       }

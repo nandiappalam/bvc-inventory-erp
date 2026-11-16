@@ -1,408 +1,132 @@
 /**
  * Ledger Entry Helper Module
- * Provides voucher-aware ledger entry creation for ERP transactions.
+ * Authoritative double-entry wrapper delegating all numbering, validation,
+ * ledger resolution, idempotent posting, and scoped deletion to AccountingEngine.
  */
 
-const db = require('../config/database')
+const db = require('../config/database');
+const AccountingEngine = require('../services/AccountingEngine');
+const LedgerService = require('../services/LedgerService');
+
+const { toPaise, fromPaise, round2 } = AccountingEngine;
 
 function sanitizeDate(val) {
   if (val === null || val === undefined) return null;
   const s = String(val).trim();
   if (s === '' || s === 'null' || s === 'undefined') return null;
-  const ddmmyyyy = s.match(/^(\d{1,2})\s*[-\/]\s*(\d{1,2})\s*[-\/]\s*(\d{4})$/);
-  if (ddmmyyyy) {
-    return `${ddmmyyyy[3]}-${ddmmyyyy[2].padStart(2, '0')}-${ddmmyyyy[1].padStart(2, '0')}`;
-  }
-  return s;
+  return AccountingEngine.normalizeDateIso(s);
 }
 
-async function ensureVoucherTables() {
-  try {
-    await db.run(`
-      CREATE TABLE IF NOT EXISTS voucher (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        voucher_type TEXT NOT NULL,
-        voucher_no TEXT UNIQUE NOT NULL,
-        date TEXT NOT NULL,
-        reference_no TEXT,
-        narration TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `)
-    await db.run(`
-      CREATE TABLE IF NOT EXISTS voucher_entry (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        voucher_id INTEGER NOT NULL,
-        type TEXT NOT NULL,
-        ledger_id INTEGER,
-        ledger_name TEXT,
-        debit REAL DEFAULT 0,
-        credit REAL DEFAULT 0,
-        remarks TEXT,
-        FOREIGN KEY (voucher_id) REFERENCES voucher(id) ON DELETE CASCADE
-      )
-    `)
-    await db.run(`
-      CREATE TABLE IF NOT EXISTS ledger_entries (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        ledger_id INTEGER,
-        ledger_name TEXT NOT NULL,
-        date DATE NOT NULL,
-        voucher_type TEXT NOT NULL,
-        voucher_no TEXT,
-        debit REAL DEFAULT 0,
-        credit REAL DEFAULT 0,
-        reference_id INTEGER,
-        reference_type TEXT,
-        particulars TEXT,
-        voucher_id INTEGER,
-        transaction_id INTEGER,
-        transaction_type TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (ledger_id) REFERENCES ledgermaster(id)
-      )
-    `)
-  } catch (error) {
-    console.error('Error ensuring voucher tables:', error)
-  }
-
-  try {
-    const tableInfo = await db.query('PRAGMA table_info(ledger_entries)')
-    const columns = new Set((tableInfo.rows || []).map((row) => row.name))
-    if (!columns.has('reference_type')) {
-      await db.run('ALTER TABLE ledger_entries ADD COLUMN reference_type TEXT')
-    }
-    if (!columns.has('voucher_id')) {
-      await db.run('ALTER TABLE ledger_entries ADD COLUMN voucher_id INTEGER')
-    }
-    if (!columns.has('transaction_id')) {
-      await db.run('ALTER TABLE ledger_entries ADD COLUMN transaction_id INTEGER')
-    }
-    if (!columns.has('transaction_type')) {
-      await db.run('ALTER TABLE ledger_entries ADD COLUMN transaction_type TEXT')
-    }
-  } catch (error) {
-    console.error('Error ensuring ledger entry columns:', error)
-  }
-
-  try {
-    await db.run('CREATE INDEX IF NOT EXISTS idx_voucher_reference_no ON voucher(reference_no)')
-    await db.run('CREATE INDEX IF NOT EXISTS idx_voucher_entry_voucher_id ON voucher_entry(voucher_id)')
-    await db.run('CREATE INDEX IF NOT EXISTS idx_ledger_entries_voucher ON ledger_entries(voucher_type, voucher_no)')
-  } catch (error) {
-    console.error('Error creating voucher indexes:', error)
-  }
+async function ensureVoucherTables(companyId = null) {
+  const cId = AccountingEngine.getActiveCompanyId(companyId);
+  await AccountingEngine.ensureAccountingSchema(db.forCompany(cId));
 }
 
-ensureVoucherTables()
-
-/**
- * Get next voucher number for a given prefix.
- * @param {string} prefix - Voucher type prefix (e.g., 'PUR', 'SAL', 'ADV')
- * @returns {string} - Formatted voucher number
- */
-async function getNextVoucherNumber(prefix) {
-  try {
-    const normalizedPrefix = String(prefix || '').toUpperCase()
-    const prefixMap = {
-      PURCHASE: 'PUR',
-      PUR: 'PUR',
-      SALES: 'SAL',
-      SAL: 'SAL',
-      'PURCHASE RETURN': 'DN',
-      PURCHASE_RETURN: 'DN',
-      'DEBIT NOTE': 'DN',
-      DEBIT_NOTE: 'DN',
-      PR: 'DN',
-      DN: 'DN',
-      ADVANCE: 'ADV',
-      ADV: 'ADV',
-      PAYMENT: 'PAY',
-      PAY: 'PAY',
-      RECEIPT: 'REC',
-      REC: 'REC',
-      JOURNAL: 'JNL',
-      JNL: 'JNL',
-      CONTRA: 'CON',
-      CON: 'CON',
-    }
-    const voucherPrefix = prefixMap[normalizedPrefix] || normalizedPrefix
-
-    const result = await db.query(`
-      SELECT voucher_no FROM voucher
-      WHERE voucher_no LIKE ? OR UPPER(voucher_type) = ? OR UPPER(voucher_type) = ?
-      ORDER BY id DESC LIMIT 50
-    `, [`${voucherPrefix}%`, normalizedPrefix, voucherPrefix])
-
-    let maxNum = 0
-    if (result.rows && result.rows.length > 0) {
-      for (const row of result.rows) {
-        const vNo = String(row.voucher_no || '')
-        const match = vNo.match(/(\d+)$/)
-        if (match) {
-          const num = parseInt(match[1], 10)
-          if (!isNaN(num) && num > maxNum) {
-            maxNum = num
-          }
-        }
-      }
-    }
-
-    let nextNum = maxNum + 1
-    let candidate = `${voucherPrefix}${String(nextNum).padStart(5, '0')}`
-
-    let isUnique = false
-    while (!isUnique) {
-      const check = await db.query('SELECT id FROM voucher WHERE voucher_no = ? LIMIT 1', [candidate])
-      if (!check.rows || check.rows.length === 0) {
-        isUnique = true
-      } else {
-        nextNum++
-        candidate = `${voucherPrefix}${String(nextNum).padStart(5, '0')}`
-      }
-    }
-
-    return candidate
-  } catch (error) {
-    console.error('Error generating voucher number:', error)
-    return `${String(prefix || 'VOC').toUpperCase()}${Date.now().toString().slice(-5)}`
-  }
+async function getNextVoucherNumber(prefix, companyId = null, date = null) {
+  const cId = AccountingEngine.getActiveCompanyId(companyId);
+  const raw = String(prefix || 'Journal').trim();
+  const upper = raw.toUpperCase();
+  const map = {
+    PUR: 'Purchase',
+    PURCHASE: 'Purchase',
+    SAL: 'Sales',
+    SALES: 'Sales',
+    DN: 'Debit Note',
+    PR: 'Debit Note',
+    'DEBIT NOTE': 'Debit Note',
+    'PURCHASE RETURN': 'Debit Note',
+    PURCHASE_RETURN: 'Debit Note',
+    CN: 'Credit Note',
+    SR: 'Credit Note',
+    'CREDIT NOTE': 'Credit Note',
+    'SALES RETURN': 'Credit Note',
+    SALES_RETURN: 'Credit Note',
+    ADV: 'Advance',
+    ADVANCE: 'Advance',
+    PAY: 'Payment',
+    PAYMENT: 'Payment',
+    REC: 'Receipt',
+    RECEIPT: 'Receipt',
+    CON: 'Contra',
+    CONTRA: 'Contra',
+    JNL: 'Journal',
+    JOURNAL: 'Journal',
+    OPC: 'Operational Charge',
+    CSB: 'Cold Storage Bill',
+  };
+  const voucherType = map[upper] || raw;
+  return AccountingEngine.nextVoucherNumber({ companyId: cId, voucherType, date });
 }
 
-async function getPartyName(partyVal, preferredType = null) {
-  if (!partyVal) return 'Unknown Party';
-  if (!isNaN(partyVal) && Number.isInteger(Number(partyVal))) {
-    const id = parseInt(partyVal, 10);
+async function getPartyName(partyVal, preferredType = null, companyId = null) {
+  if (partyVal === null || partyVal === undefined || partyVal === '') return null;
+  const cId = AccountingEngine.getActiveCompanyId(companyId);
+  const runner = db.forCompany(cId);
+
+  if (!isNaN(partyVal) && /^\d+$/.test(String(partyVal).trim())) {
+    const id = parseInt(String(partyVal).trim(), 10);
     const type = preferredType ? preferredType.toLowerCase() : null;
 
+    const lookups = [];
     if (type === 'supplier') {
-      try {
-        const res = await db.query('SELECT name FROM supplier_master WHERE id = ?', [id]);
-        if (res.rows && res.rows.length > 0 && res.rows[0].name) {
-          return res.rows[0].name;
-        }
-      } catch (e) {}
+      lookups.push({ sql: 'SELECT COALESCE(NULLIF(TRIM(print_name), \'\'), name) AS resolved FROM supplier_master WHERE id = ?', params: [id] });
     } else if (type === 'customer') {
-      try {
-        const res = await db.query('SELECT name FROM customer_master WHERE id = ?', [id]);
-        if (res.rows && res.rows.length > 0 && res.rows[0].name) {
-          return res.rows[0].name;
-        }
-      } catch (e) {}
+      lookups.push({ sql: 'SELECT COALESCE(NULLIF(TRIM(print_name), \'\'), name) AS resolved FROM customer_master WHERE id = ?', params: [id] });
     } else if (type === 'papad_company' || type === 'papad company') {
-      try {
-        const res = await db.query('SELECT name FROM papad_company_master WHERE id = ?', [id]);
-        if (res.rows && res.rows.length > 0 && res.rows[0].name) {
-          return res.rows[0].name;
-        }
-      } catch (e) {}
+      lookups.push({ sql: 'SELECT name AS resolved FROM papad_company_master WHERE id = ?', params: [id] });
     } else if (type === 'flour_mill' || type === 'flour mill') {
-      try {
-        const res = await db.query('SELECT flourmill FROM flour_mill_master WHERE id = ?', [id]);
-        if (res.rows && res.rows.length > 0 && res.rows[0].flourmill) {
-          return res.rows[0].flourmill;
-        }
-      } catch (e) {}
+      lookups.push({ sql: 'SELECT flourmill AS resolved FROM flour_mill_master WHERE id = ?', params: [id] });
     } else if (type === 'transporter' || type === 'transport') {
-      try {
-        const res = await db.query('SELECT name, print_name FROM transport_master WHERE id = ?', [id]);
-        if (res.rows && res.rows.length > 0) {
-          return res.rows[0].print_name || res.rows[0].name;
-        }
-      } catch (e) {}
+      lookups.push({ sql: 'SELECT COALESCE(NULLIF(TRIM(print_name), \'\'), name) AS resolved FROM transport_master WHERE id = ?', params: [id] });
     } else if (type === 'worker' || type === 'loadman') {
-      try {
-        // Unloading teams / Loadmen are often in person_master or workers table
-        const res = await db.query('SELECT name FROM person_master WHERE id = ?', [id]);
-        if (res.rows && res.rows.length > 0 && res.rows[0].name) {
-          return res.rows[0].name;
-        }
-      } catch (e) {}
+      lookups.push({ sql: 'SELECT name AS resolved FROM person_master WHERE id = ?', params: [id] });
+      lookups.push({ sql: 'SELECT name AS resolved FROM operational_parties WHERE id = ?', params: [id] });
     }
 
-    // Fallbacks
-    // 1. Try supplier_master
-    try {
-      const res = await db.query('SELECT name FROM supplier_master WHERE id = ?', [id]);
-      if (res.rows && res.rows.length > 0 && res.rows[0].name) {
-        return res.rows[0].name;
-      }
-    } catch (e) {}
-    // 2. Try customer_master
-    try {
-      const res = await db.query('SELECT name FROM customer_master WHERE id = ?', [id]);
-      if (res.rows && res.rows.length > 0 && res.rows[0].name) {
-        return res.rows[0].name;
-      }
-    } catch (e) {}
-    // 3. Try papad_company_master
-    try {
-      const res = await db.query('SELECT name FROM papad_company_master WHERE id = ?', [id]);
-      if (res.rows && res.rows.length > 0 && res.rows[0].name) {
-        return res.rows[0].name;
-      }
-    } catch (e) {}
-    // 4. Try flour_mill_master
-    try {
-      const res = await db.query('SELECT flourmill FROM flour_mill_master WHERE id = ?', [id]);
-      if (res.rows && res.rows.length > 0 && res.rows[0].flourmill) {
-        return res.rows[0].flourmill;
-      }
-    } catch (e) {}
+    // Fallback cascade if preferred type omitted or not found
+    lookups.push(
+      { sql: 'SELECT COALESCE(NULLIF(TRIM(print_name), \'\'), name) AS resolved FROM supplier_master WHERE id = ?', params: [id] },
+      { sql: 'SELECT COALESCE(NULLIF(TRIM(print_name), \'\'), name) AS resolved FROM customer_master WHERE id = ?', params: [id] },
+      { sql: 'SELECT name AS resolved FROM papad_company_master WHERE id = ?', params: [id] },
+      { sql: 'SELECT flourmill AS resolved FROM flour_mill_master WHERE id = ?', params: [id] }
+    );
+
+    for (const q of lookups) {
+      try {
+        const res = await runner.query(q.sql, q.params);
+        if (res.rows && res.rows[0]?.resolved) {
+          return String(res.rows[0].resolved).trim();
+        }
+      } catch (_) {}
+    }
   }
-  return String(partyVal);
+  return String(partyVal).trim();
 }
 
-async function resolveLedgerId(ledgerName, ledgerType = null) {
-  if (!ledgerName) return null
-
-  try {
-    await db.run(`
-      CREATE TABLE IF NOT EXISTS ledgermaster (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT UNIQUE NOT NULL
-      )
-    `)
-  } catch (error) {
-    console.warn('Ledger master table setup skipped:', error.message)
+async function resolveLedgerId(ledgerName, ledgerType = null, companyId = null) {
+  if (!ledgerName || !String(ledgerName).trim()) {
+    throw new Error('Ledger name is required to resolve ledger ID.');
   }
+  const cId = AccountingEngine.getActiveCompanyId(companyId);
+  const resolved = await AccountingEngine.resolveOrCreateLedger({
+    companyId: cId,
+    name: String(ledgerName).trim(),
+    ledgerType,
+  });
+  return resolved.id;
+}
 
-  try {
-    let existing;
-    if (ledgerType) {
-      // First try exact name and ledger_type
-      existing = await db.query('SELECT id FROM ledgermaster WHERE name = ? AND ledger_type = ? LIMIT 1', [ledgerName, ledgerType])
-      if (existing.rows.length === 0) {
-        // Try trimming/starting with and matching type
-        existing = await db.query('SELECT id FROM ledgermaster WHERE (TRIM(name) = ? OR name LIKE ?) AND ledger_type = ? LIMIT 1', [ledgerName.trim(), ledgerName.trim() + '%', ledgerType])
-      }
-    }
-    
-    if (!existing || existing.rows.length === 0) {
-      // Fallback: name match
-      existing = await db.query('SELECT id FROM ledgermaster WHERE name = ? LIMIT 1', [ledgerName])
-      if (existing.rows.length === 0) {
-        existing = await db.query('SELECT id FROM ledgermaster WHERE TRIM(name) = ? LIMIT 1', [ledgerName.trim()])
-      }
-    }
-
-    if (existing && existing.rows.length > 0) {
-      return existing.rows[0].id
-    }
-
-    const tableInfo = await db.query('PRAGMA table_info(ledgermaster)')
-    const columns = new Set((tableInfo.rows || []).map((row) => row.name))
-
-    const fields = ['name']
-    const values = [ledgerName]
-
-    if (columns.has('print_name')) {
-      fields.push('print_name')
-      values.push(ledgerName)
-    }
-    if (columns.has('status')) {
-      fields.push('status')
-      values.push('Active')
-    }
-    if (columns.has('ledger_type') && ledgerType) {
-      fields.push('ledger_type')
-      values.push(ledgerType)
-    }
-    if (columns.has('under')) {
-      const underVal = (ledgerType === 'Worker' || ledgerType === 'loadman')
-        ? 'Current Liabilities'
-        : (ledgerType === 'Supplier' || ledgerType === 'supplier'
-          ? 'Sundry Creditors'
-          : (ledgerType === 'Customer' || ledgerType === 'customer'
-            ? 'Sundry Debtors'
-            : (ledgerType === 'Expense' ? 'Direct Expenses' : 'Primary')));
-      fields.push('under')
-      values.push(underVal)
-    }
-
-    const placeholders = fields.map(() => '?').join(', ')
-    const insertSql = `INSERT INTO ledgermaster (${fields.join(', ')}) VALUES (${placeholders})`
-
-    const insertResult = await db.run(insertSql, values)
-    return insertResult.lastInsertRowid
-  } catch (error) {
-    const message = String(error.message || '')
-    if (message.includes('UNIQUE constraint failed') || message.includes('already exists')) {
-      let existing;
-      if (ledgerType) {
-        existing = await db.query('SELECT id FROM ledgermaster WHERE name = ? AND ledger_type = ? LIMIT 1', [ledgerName, ledgerType])
-        if (existing.rows.length === 0) {
-          existing = await db.query('SELECT id FROM ledgermaster WHERE (TRIM(name) = ? OR name LIKE ?) AND ledger_type = ? LIMIT 1', [ledgerName.trim(), ledgerName.trim() + '%', ledgerType])
-        }
-      }
-      if (!existing || existing.rows.length === 0) {
-        existing = await db.query('SELECT id FROM ledgermaster WHERE name = ? LIMIT 1', [ledgerName])
-      }
-      return existing.rows[0]?.id || null
-    }
-    console.warn('Ledger lookup skipped:', error.message)
-    return null
-  }
+async function createLedgerEntry(params = {}) {
+  return LedgerService.createEntry(params);
 }
 
 /**
- * Create a single ledger entry.
- * @param {object} params - Ledger entry parameters
+ * Compute balanced double-entry lines for Purchase and post atomically via AccountingEngine.
  */
-async function createLedgerEntry({
-  ledgerName,
-  date,
-  voucherType,
-  voucherNo,
-  debit = 0,
-  credit = 0,
-  referenceId = null,
-  referenceType = null,
-  particulars = '',
-  voucherId = null,
-  transactionId = null,
-  transactionType = null,
-  ledgerType = null,
-  ledgerId = null,
-}) {
-  try {
-    const safeLedgerName = ledgerName || 'General Ledger'
-    const lId = ledgerId || await resolveLedgerId(safeLedgerName, ledgerType)
-    const cleanEntryDate = sanitizeDate(date) || new Date().toISOString().slice(0, 10)
-
-    await db.run(`
-      INSERT INTO ledger_entries (
-        ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit,
-        reference_id, reference_type, particulars, voucher_id, transaction_id, transaction_type
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
-      lId,
-      safeLedgerName,
-      cleanEntryDate,
-      voucherType || 'General',
-      voucherNo || '',
-      debit || 0,
-      credit || 0,
-      referenceId,
-      referenceType,
-      particulars,
-      voucherId,
-      transactionId,
-      transactionType,
-    ])
-
-    return true
-  } catch (error) {
-    console.error('Error creating ledger entry:', error)
-    return false
-  }
-}
-
 async function createPurchaseVoucherChain(purchaseData) {
-  await ensureVoucherTables()
-
+  const cId = AccountingEngine.getActiveCompanyId(purchaseData.companyId);
   const {
+    conn = null,
     supplier,
     date,
     invNo,
@@ -413,451 +137,249 @@ async function createPurchaseVoucherChain(purchaseData) {
     netAmount = 0,
     narration = '',
     deductions = [],
+    roundOff = 0,
+    vatAmount = 0,
+    mamoolAmount = 0,
+    weightCashAmount = 0,
+    otherAdditionalCharges = 0,
+    otherDeductions = 0,
     existingVoucherNo: passedVoucherNo = null,
-  } = purchaseData
+  } = purchaseData;
 
-  let existingVoucherNo = passedVoucherNo || null;
-  if (purchaseId || invNo) {
-    if (!existingVoucherNo) {
-      try {
-        const vRes = await db.query(
-          "SELECT voucher_no FROM voucher WHERE (reference_no = ? OR reference_no = ? OR reference_no = ?) AND (voucher_type = 'Purchase' OR voucher_type = 'PUR') LIMIT 1",
-          [String(purchaseId || ''), `PUR-${purchaseId || ''}`, String(invNo || '')]
-        );
-        if (vRes.rows && vRes.rows.length > 0 && vRes.rows[0].voucher_no) {
-          existingVoucherNo = vRes.rows[0].voucher_no;
-        }
-      } catch (_) {}
-    }
-    if (purchaseId) await deletePurchaseVoucherChain(purchaseId);
-    if (invNo) await deletePurchaseVoucherChain(invNo);
+  const resolvedSupplier = await getPartyName(supplier, 'supplier', cId);
+  if (!resolvedSupplier) {
+    throw new Error('Purchase voucher requires a valid Supplier ledger.');
   }
 
-  const resolvedSupplier = await getPartyName(supplier, 'supplier')
+  const voucherDate = sanitizeDate(date) || new Date().toISOString().slice(0, 10);
+  const invLabel = invNo || purchaseId;
 
-  const voucherDate = sanitizeDate(date) || new Date().toISOString().slice(0, 10)
-  const voucherNo = existingVoucherNo || await getNextVoucherNumber('Purchase')
-
-  const voucherResult = await db.run(`
-    INSERT INTO voucher (voucher_type, voucher_no, date, reference_no, narration)
-    VALUES (?, ?, ?, ?, ?)
-  `, ['Purchase', voucherNo, voucherDate, String(purchaseId || ''), narration || `Purchase ${invNo || purchaseId}`])
-  const voucherId = voucherResult.lastInsertRowid || voucherResult.lastID
-
-  const ledgerEntries = []
-  const particulars = `Purchase Invoice #${invNo || purchaseId}`
-
-
-  const voucherEntryRows = []
-
-  // 1. Purchase Account (Taxable Base Value)
-  if (Number(baseAmount || 0) > 0) {
-    voucherEntryRows.push({
-      ledgerName: 'Purchase Account',
-      debit: Number(baseAmount || 0),
-      credit: 0,
-      remarks: `Purchase #${invNo || purchaseId} - ${resolvedSupplier || 'Supplier'}`,
-      ledgerType: 'Expense',
-    })
-    ledgerEntries.push(
-      createLedgerEntry({
-        ledgerName: 'Purchase Account',
-        date: voucherDate,
-        voucherType: 'Purchase',
-        voucherNo,
-        debit: Number(baseAmount || 0),
-        credit: 0,
-        referenceId: purchaseId,
-        referenceType: 'purchase',
-        particulars: `Purchase #${invNo || purchaseId} - ${resolvedSupplier || 'Supplier'}`,
-        voucherId,
-        transactionId: purchaseId,
-        transactionType: 'purchase',
-        ledgerType: 'Expense',
-      })
-    )
-  }
-
-  // 2. Input GST Tax Posting (CGST / SGST for Intra-State or IGST for Inter-State)
-  let cgst = Number(purchaseData.cgstAmount || 0);
-  let sgst = Number(purchaseData.sgstAmount || 0);
-  let igst = Number(purchaseData.igstAmount || 0);
-  const totalTax = Number(taxAmount || 0);
-
-  if (cgst === 0 && sgst === 0 && igst === 0 && totalTax > 0) {
+  let cgstPaise = toPaise(purchaseData.cgstAmount || 0);
+  let sgstPaise = toPaise(purchaseData.sgstAmount || 0);
+  let igstPaise = toPaise(purchaseData.igstAmount || 0);
+  const totalTaxPaise = toPaise(taxAmount || 0);
+  if (cgstPaise === 0 && sgstPaise === 0 && igstPaise === 0 && totalTaxPaise > 0) {
     if (purchaseData.isInterstate || purchaseData.isInterState) {
-      igst = totalTax;
+      igstPaise = totalTaxPaise;
     } else {
-      cgst = Number((totalTax / 2).toFixed(2));
-      sgst = Number((totalTax - cgst).toFixed(2));
+      cgstPaise = Math.round(totalTaxPaise / 2);
+      sgstPaise = totalTaxPaise - cgstPaise;
     }
   }
+  const effectiveTaxPaise = cgstPaise + sgstPaise + igstPaise;
+  const vatPaise = toPaise(vatAmount || 0);
+  const discPaise = toPaise(discAmount || 0);
 
-  if (cgst > 0) {
-    voucherEntryRows.push({ ledgerName: 'Input CGST', debit: cgst, credit: 0, remarks: `CGST on Purchase #${invNo || purchaseId}`, ledgerType: 'Tax' });
-    ledgerEntries.push(createLedgerEntry({ ledgerName: 'Input CGST', date: voucherDate, voucherType: 'Purchase', voucherNo, debit: cgst, credit: 0, referenceId: purchaseId, referenceType: 'purchase', particulars: `CGST on Purchase #${invNo || purchaseId}`, voucherId, transactionId: purchaseId, transactionType: 'purchase', ledgerType: 'Tax' }));
-  }
-  if (sgst > 0) {
-    voucherEntryRows.push({ ledgerName: 'Input SGST', debit: sgst, credit: 0, remarks: `SGST on Purchase #${invNo || purchaseId}`, ledgerType: 'Tax' });
-    ledgerEntries.push(createLedgerEntry({ ledgerName: 'Input SGST', date: voucherDate, voucherType: 'Purchase', voucherNo, debit: sgst, credit: 0, referenceId: purchaseId, referenceType: 'purchase', particulars: `SGST on Purchase #${invNo || purchaseId}`, voucherId, transactionId: purchaseId, transactionType: 'purchase', ledgerType: 'Tax' }));
-  }
-  if (igst > 0) {
-    voucherEntryRows.push({ ledgerName: 'Input IGST', debit: igst, credit: 0, remarks: `IGST on Purchase #${invNo || purchaseId}`, ledgerType: 'Tax' });
-    ledgerEntries.push(createLedgerEntry({ ledgerName: 'Input IGST', date: voucherDate, voucherType: 'Purchase', voucherNo, debit: igst, credit: 0, referenceId: purchaseId, referenceType: 'purchase', particulars: `IGST on Purchase #${invNo || purchaseId}`, voucherId, transactionId: purchaseId, transactionType: 'purchase', ledgerType: 'Tax' }));
+  let basePaise = toPaise(baseAmount || 0);
+  if (basePaise === 0 && toPaise(netAmount) > 0) {
+    basePaise = Math.max(0, toPaise(netAmount) - effectiveTaxPaise - vatPaise + discPaise);
   }
 
-  // 3. Discount Received (Credit)
-  if (Number(discAmount || 0) > 0) {
-    voucherEntryRows.push({
-      ledgerName: 'Discount Received',
-      debit: 0,
-      credit: Number(discAmount || 0),
-      remarks: `Discount on Purchase #${invNo || purchaseId}`,
-      ledgerType: 'Income',
-    })
-    ledgerEntries.push(
-      createLedgerEntry({
-        ledgerName: 'Discount Received',
-        date: voucherDate,
-        voucherType: 'Purchase',
-        voucherNo,
-        debit: 0,
-        credit: Number(discAmount || 0),
-        referenceId: purchaseId,
-        referenceType: 'purchase',
-        particulars: `Discount on Purchase #${invNo || purchaseId}`,
-        voucherId,
-        transactionId: purchaseId,
-        transactionType: 'purchase',
-        ledgerType: 'Income',
-      })
-    )
-  }
-
-  // Transport & Loadman parameter handling
-  const transportCharges = Number(purchaseData.transportCharges || purchaseData.freightAmount || purchaseData.transport_charges || 0);
+  const transportPaise = toPaise(purchaseData.transportCharges || purchaseData.freightAmount || purchaseData.transport_charges || 0);
   const rawTransporter = purchaseData.transporter || purchaseData.transporterName || purchaseData.transport || '';
-  const transporterName = await getPartyName(rawTransporter, 'transporter');
+  const transporterName = await getPartyName(rawTransporter, 'transporter', cId);
   const transportPayableType = String(purchaseData.transportPayableType || purchaseData.transport_payable_type || 'SEPARATE').toUpperCase();
 
-  const loadmanCharges = Number(purchaseData.loadmanCharges || purchaseData.loadman_charges || 0);
+  const loadmanPaise = toPaise(purchaseData.loadmanCharges || purchaseData.loadman_charges || 0);
   const rawLoadman = purchaseData.loadmanName || purchaseData.loadman_name || '';
-  const loadmanName = await getPartyName(rawLoadman, 'worker');
-  const loadmanWorkerId = purchaseData.loadmanWorkerId || purchaseData.loadman_worker_id;
+  const loadmanName = await getPartyName(rawLoadman, 'worker', cId);
   const loadmanPayableType = String(purchaseData.loadmanPayableType || purchaseData.loadman_payable_type || 'SEPARATE').toUpperCase();
 
-  // 4. Supplier Account (Gross Invoice Value = Base + Tax - Discount)
-  // If transport or loadman is billed inside supplier invoice, add to gross invoice
-  let supplierGrossInvoice = Number((Number(baseAmount || 0) + totalTax - Number(discAmount || 0)).toFixed(2));
-  if (transportPayableType === 'SUPPLIER_INVOICE' && transportCharges > 0) {
-    supplierGrossInvoice = Number((supplierGrossInvoice + transportCharges).toFixed(2));
-  }
-  if (loadmanPayableType === 'SUPPLIER_INVOICE' && loadmanCharges > 0) {
-    supplierGrossInvoice = Number((supplierGrossInvoice + loadmanCharges).toFixed(2));
+  const mamoolPaise = toPaise(mamoolAmount);
+  const weightCashPaise = toPaise(weightCashAmount);
+  const otherAddPaise = toPaise(otherAdditionalCharges);
+  const otherDedPaise = toPaise(otherDeductions);
+  let roundOffPaise = toPaise(roundOff);
+
+  const lines = [];
+  const baseRemarks = `Purchase #${invLabel} - ${resolvedSupplier}`;
+
+  if (basePaise > 0) {
+    lines.push({
+      ledgerName: 'Purchase Account',
+      ledgerType: 'Expense',
+      debit: fromPaise(basePaise),
+      credit: 0,
+      remarks: baseRemarks,
+      particulars: `To ${resolvedSupplier} (Purchase #${invLabel})`,
+    });
   }
 
-  if (resolvedSupplier && supplierGrossInvoice > 0) {
-    voucherEntryRows.push({
-      ledgerName: resolvedSupplier,
-      debit: 0,
-      credit: supplierGrossInvoice,
-      remarks: `Purchase invoice #${invNo || purchaseId}`,
-      ledgerType: 'Supplier',
-    })
-    ledgerEntries.push(
-      createLedgerEntry({
-        ledgerName: resolvedSupplier,
-        date: voucherDate,
-        voucherType: 'Purchase',
-        voucherNo,
-        debit: 0,
-        credit: supplierGrossInvoice,
-        referenceId: purchaseId,
-        referenceType: 'purchase',
-        particulars: `Purchase invoice #${invNo || purchaseId}`,
-        voucherId,
-        transactionId: purchaseId,
-        transactionType: 'purchase',
-        ledgerType: 'Supplier',
-      })
-    )
+  if (cgstPaise > 0) {
+    lines.push({ ledgerName: 'Input CGST', ledgerType: 'Tax', debit: fromPaise(cgstPaise), credit: 0, remarks: `CGST on Purchase #${invLabel}` });
+  }
+  if (sgstPaise > 0) {
+    lines.push({ ledgerName: 'Input SGST', ledgerType: 'Tax', debit: fromPaise(sgstPaise), credit: 0, remarks: `SGST on Purchase #${invLabel}` });
+  }
+  if (igstPaise > 0) {
+    lines.push({ ledgerName: 'Input IGST', ledgerType: 'Tax', debit: fromPaise(igstPaise), credit: 0, remarks: `IGST on Purchase #${invLabel}` });
+  }
+  if (vatPaise > 0) {
+    lines.push({ ledgerName: 'Input VAT', ledgerType: 'Tax', debit: fromPaise(vatPaise), credit: 0, remarks: `VAT on Purchase #${invLabel}` });
+  }
+  if (discPaise > 0) {
+    lines.push({ ledgerName: 'Discount Received', ledgerType: 'Income', debit: 0, credit: fromPaise(discPaise), remarks: `Discount on Purchase #${invLabel}` });
   }
 
-  // 5. Deductions Handling (Quality / Shortage / Return claim)
-  // Deductions reduce the amount payable to the supplier:
-  // Dr: Supplier Account (Supplier - deduction)
-  // Cr: Purchase Deduction Recovery
-  if (deductions && deductions.length > 0) {
+  // Deductions & Additional Charges
+  let addChargesToSupplierPaise = 0;
+  let lessDeductionsFromSupplierPaise = 0;
+
+  if (Array.isArray(deductions)) {
     for (const d of deductions) {
-      const dAmount = Number(d.amount || 0);
-      if (dAmount > 0) {
-        const dName = d.deduction_name || d.name || 'Quality/Shortage Deduction';
-        const isLess = !d.type || String(d.type).toUpperCase() === 'LESS';
-
-        if (isLess) {
-          // Debit supplier to reduce payable
-          if (resolvedSupplier) {
-            voucherEntryRows.push({
-              ledgerName: resolvedSupplier,
-              debit: dAmount,
-              credit: 0,
-              remarks: `Deduction adjustment (${dName}) on #${invNo || purchaseId}`,
-              ledgerType: 'Supplier',
-            });
-            ledgerEntries.push(
-              createLedgerEntry({
-                ledgerName: resolvedSupplier,
-                date: voucherDate,
-                voucherType: 'Purchase',
-                voucherNo,
-                debit: dAmount,
-                credit: 0,
-                referenceId: purchaseId,
-                referenceType: 'purchase',
-                particulars: `Quality/shortage deduction (${dName})`,
-                voucherId,
-                transactionId: purchaseId,
-                transactionType: 'purchase',
-                ledgerType: 'Supplier',
-              })
-            );
-          }
-
-          // Credit Purchase Deduction Recovery account
-          const recoveryLedgerName = d.account_head || 'Purchase Deduction Recovery';
-          voucherEntryRows.push({
-            ledgerName: recoveryLedgerName,
-            debit: 0,
-            credit: dAmount,
-            remarks: `Supplier ${dName} claim recovery on #${invNo || purchaseId}`,
-            ledgerType: 'Income',
-          });
-          ledgerEntries.push(
-            createLedgerEntry({
-              ledgerName: recoveryLedgerName,
-              date: voucherDate,
-              voucherType: 'Purchase',
-              voucherNo,
-              debit: 0,
-              credit: dAmount,
-              referenceId: purchaseId,
-              referenceType: 'purchase',
-              particulars: `Supplier ${dName} claim recovery on #${invNo || purchaseId}`,
-              voucherId,
-              transactionId: purchaseId,
-              transactionType: 'purchase',
-              ledgerType: 'Income',
-            })
-          );
-        } else {
-          // Additional charge (Type = ADD)
-          voucherEntryRows.push({
-            ledgerName: dName,
-            debit: dAmount,
-            credit: 0,
-            remarks: `${dName} on #${invNo || purchaseId}`,
-            ledgerType: 'Expense',
-          });
-          ledgerEntries.push(
-            createLedgerEntry({
-              ledgerName: dName,
-              date: voucherDate,
-              voucherType: 'Purchase',
-              voucherNo,
-              debit: dAmount,
-              credit: 0,
-              referenceId: purchaseId,
-              referenceType: 'purchase',
-              particulars: `${dName} on #${invNo || purchaseId}`,
-              voucherId,
-              transactionId: purchaseId,
-              transactionType: 'purchase',
-              ledgerType: 'Expense',
-            })
-          );
-        }
+      const dPaise = toPaise(d.amount || 0);
+      if (dPaise <= 0) continue;
+      const dName = d.deduction_name || d.name || 'Quality/Shortage Deduction';
+      const isLess = !d.type || String(d.type).toUpperCase() === 'LESS';
+      if (isLess) {
+        lessDeductionsFromSupplierPaise += dPaise;
+        lines.push({
+          ledgerName: d.account_head || 'Purchase Deduction Recovery',
+          ledgerType: 'Income',
+          debit: 0,
+          credit: fromPaise(dPaise),
+          remarks: `Deduction recovery (${dName}) on #${invLabel}`,
+        });
+      } else {
+        addChargesToSupplierPaise += dPaise;
+        lines.push({
+          ledgerName: dName,
+          ledgerType: 'Expense',
+          debit: fromPaise(dPaise),
+          credit: 0,
+          remarks: `${dName} on #${invLabel}`,
+        });
       }
     }
   }
 
-  // 6. Transport / Freight Charges
-  if (transportCharges > 0) {
-    voucherEntryRows.push({
-      ledgerName: 'Transport Charges',
-      debit: transportCharges,
-      credit: 0,
-      remarks: `Transport charges for #${invNo || purchaseId}`,
-      ledgerType: 'Expense',
-    });
-    ledgerEntries.push(
-      createLedgerEntry({
-        ledgerName: 'Transport Charges',
-        date: voucherDate,
-        voucherType: 'Purchase',
-        voucherNo,
-        debit: transportCharges,
-        credit: 0,
-        referenceId: purchaseId,
-        referenceType: 'purchase',
-        particulars: `Transport charges for #${invNo || purchaseId}`,
-        voucherId,
-        transactionId: purchaseId,
-        transactionType: 'purchase',
-        ledgerType: 'Expense',
-      })
-    );
+  if (mamoolPaise > 0) {
+    lessDeductionsFromSupplierPaise += mamoolPaise;
+    lines.push({ ledgerName: 'Mamool Recovery', ledgerType: 'Income', debit: 0, credit: fromPaise(mamoolPaise), remarks: `Mamool on #${invLabel}` });
+  }
+  if (weightCashPaise > 0) {
+    lessDeductionsFromSupplierPaise += weightCashPaise;
+    lines.push({ ledgerName: 'Weight Cash Recovery', ledgerType: 'Income', debit: 0, credit: fromPaise(weightCashPaise), remarks: `Weight cash on #${invLabel}` });
+  }
+  if (otherDedPaise > 0) {
+    lessDeductionsFromSupplierPaise += otherDedPaise;
+    lines.push({ ledgerName: 'Purchase Deduction Recovery', ledgerType: 'Income', debit: 0, credit: fromPaise(otherDedPaise), remarks: `Other deductions on #${invLabel}` });
+  }
+  if (otherAddPaise > 0) {
+    addChargesToSupplierPaise += otherAddPaise;
+    lines.push({ ledgerName: 'Other Purchase Charges', ledgerType: 'Expense', debit: fromPaise(otherAddPaise), credit: 0, remarks: `Other charges on #${invLabel}` });
+  }
 
-    if (transportPayableType !== 'SUPPLIER_INVOICE') {
-      const transporterLedger = transporterName || 'Transporter Payable';
-      const resolvedTransporterLedgerId = await resolveLedgerId(transporterLedger, 'Transporter');
-
-      voucherEntryRows.push({
-        ledgerName: transporterLedger,
-        debit: 0,
-        credit: transportCharges,
-        remarks: `Transport charges payable for #${invNo || purchaseId}`,
+  // Transport Charges
+  if (transportPaise > 0) {
+    lines.push({ ledgerName: 'Transport Charges', ledgerType: 'Expense', debit: fromPaise(transportPaise), credit: 0, remarks: `Transport charges for #${invLabel}` });
+    if (transportPayableType === 'SUPPLIER_INVOICE') {
+      addChargesToSupplierPaise += transportPaise;
+    } else {
+      lines.push({
+        ledgerName: transporterName || 'Transporter Payable',
         ledgerType: 'Transporter',
-      });
-      ledgerEntries.push(
-        createLedgerEntry({
-          ledgerName: transporterLedger,
-          date: voucherDate,
-          voucherType: 'Purchase',
-          voucherNo,
-          debit: 0,
-          credit: transportCharges,
-          referenceId: purchaseId,
-          referenceType: 'purchase',
-          particulars: `Transport charges payable for #${invNo || purchaseId}`,
-          voucherId,
-          transactionId: purchaseId,
-          transactionType: 'purchase',
-          ledgerType: 'Transporter',
-          ledgerId: resolvedTransporterLedgerId,
-        })
-      );
-    }
-  }
-
-  // 7. Loadman / Unloading Charges
-  if (loadmanCharges > 0) {
-    voucherEntryRows.push({
-      ledgerName: 'Loadman Charges',
-      debit: loadmanCharges,
-      credit: 0,
-      remarks: `Loading/unloading charges for #${invNo || purchaseId}`,
-      ledgerType: 'Expense',
-    });
-    ledgerEntries.push(
-      createLedgerEntry({
-        ledgerName: 'Loadman Charges',
-        date: voucherDate,
-        voucherType: 'Purchase',
-        voucherNo,
-        debit: loadmanCharges,
-        credit: 0,
-        referenceId: purchaseId,
-        referenceType: 'purchase',
-        particulars: `Loading/unloading charges for #${invNo || purchaseId}`,
-        voucherId,
-        transactionId: purchaseId,
-        transactionType: 'purchase',
-        ledgerType: 'Expense',
-      })
-    );
-
-    if (loadmanPayableType !== 'SUPPLIER_INVOICE') {
-      const workerLedger = loadmanName || 'Loadman Payable';
-      const resolvedWorkerLedgerId = await resolveLedgerId(workerLedger, 'Worker');
-
-      voucherEntryRows.push({
-        ledgerName: workerLedger,
         debit: 0,
-        credit: loadmanCharges,
-        remarks: `Loading charges payable for #${invNo || purchaseId}`,
-        ledgerType: 'Worker',
+        credit: fromPaise(transportPaise),
+        remarks: `Transport charges payable for #${invLabel}`,
       });
-      ledgerEntries.push(
-        createLedgerEntry({
-          ledgerName: workerLedger,
-          date: voucherDate,
-          voucherType: 'Purchase',
-          voucherNo,
-          debit: 0,
-          credit: loadmanCharges,
-          referenceId: purchaseId,
-          referenceType: 'purchase',
-          particulars: `Loading charges payable for #${invNo || purchaseId}`,
-          voucherId,
-          transactionId: purchaseId,
-          transactionType: 'purchase',
-          ledgerType: 'Worker',
-          ledgerId: resolvedWorkerLedgerId,
-        })
-      );
     }
   }
 
-  try {
-    for (const entry of voucherEntryRows) {
-      const ledgerId = await resolveLedgerId(entry.ledgerName, entry.ledgerType || null)
-      try {
-        await db.run(`
-          INSERT INTO voucher_entry (voucher_id, type, ledger_id, ledger_name, debit, credit, remarks)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-        `, [voucherId, 'Ledger', ledgerId, entry.ledgerName, entry.debit || 0, entry.credit || 0, entry.remarks || ''])
-      } catch (error) {
-        const message = String(error.message || '')
-        if (message.includes('no such column: ledger_name') || message.includes('table voucher_entry has no column named ledger_name')) {
-          await db.run(`
-            INSERT INTO voucher_entry (voucher_id, type, ledger_id, debit, credit, remarks)
-            VALUES (?, ?, ?, ?, ?, ?)
-          `, [voucherId, 'Ledger', ledgerId ?? 0, entry.debit || 0, entry.credit || 0, entry.remarks || ''])
-        } else if (message.includes('NOT NULL constraint failed: voucher_entry.ledger_id')) {
-          await db.run(`
-            INSERT INTO voucher_entry (voucher_id, type, ledger_id, debit, credit, remarks)
-            VALUES (?, ?, ?, ?, ?, ?)
-          `, [voucherId, 'Ledger', ledgerId ?? 0, entry.debit || 0, entry.credit || 0, entry.remarks || ''])
-        } else {
-          throw error
-        }
-      }
+  // Loadman Charges
+  if (loadmanPaise > 0) {
+    lines.push({ ledgerName: 'Loadman Charges', ledgerType: 'Expense', debit: fromPaise(loadmanPaise), credit: 0, remarks: `Loading/unloading charges for #${invLabel}` });
+    if (loadmanPayableType === 'SUPPLIER_INVOICE') {
+      addChargesToSupplierPaise += loadmanPaise;
+    } else {
+      lines.push({
+        ledgerName: loadmanName || 'Loadman Payable',
+        ledgerType: 'Worker',
+        debit: 0,
+        credit: fromPaise(loadmanPaise),
+        remarks: `Loading charges payable for #${invLabel}`,
+      });
     }
-
-    await Promise.all(ledgerEntries)
-    return { voucherId, voucherNo, voucherType: 'Purchase' }
-  } catch (err) {
-    try {
-      await db.run('DELETE FROM voucher_entry WHERE voucher_id = ?', [voucherId]);
-      await db.run('DELETE FROM ledger_entries WHERE voucher_id = ? OR voucher_no = ?', [voucherId, voucherNo]);
-      await db.run('DELETE FROM voucher WHERE id = ?', [voucherId]);
-    } catch (_) {}
-    throw err;
   }
+
+  const grossBeforeDedPaise = basePaise + effectiveTaxPaise + vatPaise - discPaise + addChargesToSupplierPaise;
+  const netPayableToSupplierPaise = Math.max(0, grossBeforeDedPaise - lessDeductionsFromSupplierPaise + roundOffPaise);
+
+  // If roundOff wasn't explicitly passed, check if netAmount has sub-rupee rounding difference against netPayableToSupplierPaise
+  if (roundOffPaise === 0 && toPaise(netAmount) > 0) {
+    const netAmtPaise = toPaise(netAmount);
+    const diff = netAmtPaise - netPayableToSupplierPaise;
+    if (diff !== 0 && Math.abs(diff) <= 100 && lessDeductionsFromSupplierPaise === 0) {
+      roundOffPaise = diff;
+    }
+  }
+
+  if (roundOffPaise > 0) {
+    lines.push({ ledgerName: 'Round Off', ledgerType: 'Expense', debit: fromPaise(roundOffPaise), credit: 0, remarks: `Round off on #${invLabel}` });
+  } else if (roundOffPaise < 0) {
+    lines.push({ ledgerName: 'Round Off', ledgerType: 'Income', debit: 0, credit: fromPaise(-roundOffPaise), remarks: `Round off on #${invLabel}` });
+  }
+
+  if (grossBeforeDedPaise > 0 || roundOffPaise !== 0) {
+    // Post gross invoice credit + explicit deduction debit if deductions exist so audit trail shows full bill and deduction, OR net supplier credit
+    if (lessDeductionsFromSupplierPaise > 0 && grossBeforeDedPaise > 0) {
+      lines.push({
+        ledgerName: resolvedSupplier,
+        ledgerType: 'Supplier',
+        debit: 0,
+        credit: fromPaise(Math.max(0, grossBeforeDedPaise + roundOffPaise)),
+        remarks: `Purchase invoice #${invLabel}`,
+      });
+      lines.push({
+        ledgerName: resolvedSupplier,
+        ledgerType: 'Supplier',
+        debit: fromPaise(lessDeductionsFromSupplierPaise),
+        credit: 0,
+        remarks: `Deduction adjustment on Purchase #${invLabel}`,
+      });
+    } else if (netPayableToSupplierPaise > 0) {
+      lines.push({
+        ledgerName: resolvedSupplier,
+        ledgerType: 'Supplier',
+        debit: 0,
+        credit: fromPaise(Math.max(0, grossBeforeDedPaise + roundOffPaise)),
+        remarks: `Purchase invoice #${invLabel}`,
+      });
+    }
+  }
+
+  const taggedLines = lines.map((l) => ({
+    ...l,
+    referenceId: purchaseId,
+    referenceType: 'purchase',
+    transactionId: purchaseId,
+    transactionType: 'purchase',
+  }));
+
+  return AccountingEngine.postVoucher({
+    conn,
+    companyId: cId,
+    voucherType: 'Purchase',
+    prefix: 'PUR',
+    existingVoucherNo: passedVoucherNo || null,
+    date: voucherDate,
+    referenceNo: String(purchaseId || invNo || ''),
+    narration: narration || `Purchase Invoice #${invLabel}`,
+    sourceModule: 'purchase',
+    sourceId: purchaseId ? Number(purchaseId) : null,
+    postingKey: purchaseId ? `purchase:${purchaseId}` : null,
+    lines: taggedLines,
+    allowUpdate: true,
+    preserveVoucherNoOnUpdate: true,
+  });
 }
 
-/**
- * Create purchase ledger entries.
- * Creates entries for:
- * - Supplier (Credit) - Net amount
- * - Purchase Account (Debit) - Base amount
- * - Tax/Ledger (Debit) - Tax amount
- * - Discount (Credit) - Discount amount
- */
 async function createPurchaseLedgerEntries(purchaseData) {
-  return createPurchaseVoucherChain(purchaseData)
+  return createPurchaseVoucherChain(purchaseData);
 }
 
-/**
- * Create sales voucher chain and ledger entries
- * Creates entries for:
- * - Customer (Debit) - Receivable
- * - Sales Account (Credit) - Revenue
- * - Tax (Credit) - Output tax
- */
 async function createSalesVoucherChain(salesData) {
-  await ensureVoucherTables()
-
+  const cId = AccountingEngine.getActiveCompanyId(salesData.companyId);
   const {
     customer,
     date,
@@ -868,373 +390,201 @@ async function createSalesVoucherChain(salesData) {
     discAmount = 0,
     baseAmount = 0,
     deductions = [],
+    roundOff = 0,
+    narration = '',
     existingVoucherNo: passedVoucherNo = null,
-  } = salesData
+  } = salesData;
 
-  let existingVoucherNo = passedVoucherNo || null;
-  if (salesId || invNo) {
-    if (!existingVoucherNo) {
-      try {
-        const vRes = await db.query(
-          "SELECT voucher_no FROM voucher WHERE (reference_no = ? OR reference_no = ? OR reference_no = ?) AND (voucher_type = 'Sales' OR voucher_type = 'SAL') LIMIT 1",
-          [String(salesId || ''), `SAL-${salesId || ''}`, String(invNo || '')]
-        );
-        if (vRes.rows && vRes.rows.length > 0 && vRes.rows[0].voucher_no) {
-          existingVoucherNo = vRes.rows[0].voucher_no;
-        }
-      } catch (_) {}
-    }
-    if (salesId) await deleteSalesVoucherChain(salesId)
+  const resolvedCustomer = await getPartyName(customer, 'customer', cId);
+  if (!resolvedCustomer) {
+    throw new Error('Sales voucher requires a valid Customer ledger.');
   }
 
-  const resolvedCustomer = await getPartyName(customer, 'customer')
+  const voucherDate = sanitizeDate(date) || new Date().toISOString().slice(0, 10);
+  const invLabel = invNo || salesId;
 
-  const voucherDate = sanitizeDate(date) || new Date().toISOString().slice(0, 10)
-  const voucherNo = existingVoucherNo || await getNextVoucherNumber('Sales')
-
-  // Support baseAmount if not explicitly passed
-  const resolvedBaseAmount = baseAmount || (totalAmount - taxAmount + discAmount)
-
-  const voucherResult = await db.run(`
-    INSERT INTO voucher (voucher_type, voucher_no, date, reference_no, narration)
-    VALUES (?, ?, ?, ?, ?)
-  `, ['Sales', voucherNo, voucherDate, String(salesId || ''), `Sales Invoice #${invNo || salesId}`])
-  const voucherId = voucherResult.lastInsertRowid || voucherResult.lastID
-
-  const ledgerEntries = []
-  const particulars = `Sales Invoice #${invNo || salesId}`
-  const voucherEntryRows = []
-
-  // Customer Debit (A/C Receivable)
-  if (resolvedCustomer) {
-    voucherEntryRows.push({
-      ledgerName: resolvedCustomer,
-      debit: Number(totalAmount || 0),
-      credit: 0,
-      remarks: particulars,
-      ledgerType: 'Customer',
-    })
-    ledgerEntries.push(
-      createLedgerEntry({
-        ledgerName: resolvedCustomer,
-        date: voucherDate,
-        voucherType: 'Sales',
-        voucherNo,
-        debit: Number(totalAmount || 0),
-        credit: 0,
-        referenceId: salesId,
-        referenceType: 'sales',
-        particulars,
-        voucherId,
-        transactionId: salesId,
-        transactionType: 'sales',
-        ledgerType: 'Customer',
-      })
-    )
-  }
-
-  // Sales Credit (Revenue Account)
-  if (Number(resolvedBaseAmount || 0) > 0) {
-    voucherEntryRows.push({
-      ledgerName: 'Sales Account',
-      debit: 0,
-      credit: Number(resolvedBaseAmount || 0),
-      remarks: particulars,
-      ledgerType: 'Income',
-    })
-    ledgerEntries.push(
-      createLedgerEntry({
-        ledgerName: 'Sales Account',
-        date: voucherDate,
-        voucherType: 'Sales',
-        voucherNo,
-        debit: 0,
-        credit: Number(resolvedBaseAmount || 0),
-        referenceId: salesId,
-        referenceType: 'sales',
-        particulars,
-        voucherId,
-        transactionId: salesId,
-        transactionType: 'sales',
-        ledgerType: 'Income',
-      })
-    )
-  }
-
-  // Output Tax Credit (CGST/SGST/IGST split or aggregate)
-  let cgst = Number(salesData.cgstAmount || 0);
-  let sgst = Number(salesData.sgstAmount || 0);
-  let igst = Number(salesData.igstAmount || 0);
-  const totalTax = Number(taxAmount || 0);
-
-  if (cgst === 0 && sgst === 0 && igst === 0 && totalTax > 0) {
-    if (salesData.isInterstate) {
-      igst = totalTax;
+  let cgstPaise = toPaise(salesData.cgstAmount || 0);
+  let sgstPaise = toPaise(salesData.sgstAmount || 0);
+  let igstPaise = toPaise(salesData.igstAmount || 0);
+  const totalTaxPaise = toPaise(taxAmount || 0);
+  if (cgstPaise === 0 && sgstPaise === 0 && igstPaise === 0 && totalTaxPaise > 0) {
+    if (salesData.isInterstate || salesData.isInterState) {
+      igstPaise = totalTaxPaise;
     } else {
-      cgst = Number((totalTax / 2).toFixed(2));
-      sgst = Number((totalTax - cgst).toFixed(2));
+      cgstPaise = Math.round(totalTaxPaise / 2);
+      sgstPaise = totalTaxPaise - cgstPaise;
     }
   }
-
-  if (cgst > 0 || sgst > 0 || igst > 0) {
-    if (cgst > 0) {
-      voucherEntryRows.push({ ledgerName: 'Output CGST', debit: 0, credit: cgst, remarks: `CGST on ${particulars}` });
-      ledgerEntries.push(createLedgerEntry({ ledgerName: 'Output CGST', date: voucherDate, voucherType: 'Sales', voucherNo, debit: 0, credit: cgst, referenceId: salesId, referenceType: 'sales', particulars: `CGST on ${particulars}`, voucherId, transactionId: salesId, transactionType: 'sales' }));
-    }
-    if (sgst > 0) {
-      voucherEntryRows.push({ ledgerName: 'Output SGST', debit: 0, credit: sgst, remarks: `SGST on ${particulars}` });
-      ledgerEntries.push(createLedgerEntry({ ledgerName: 'Output SGST', date: voucherDate, voucherType: 'Sales', voucherNo, debit: 0, credit: sgst, referenceId: salesId, referenceType: 'sales', particulars: `SGST on ${particulars}`, voucherId, transactionId: salesId, transactionType: 'sales' }));
-    }
-    if (igst > 0) {
-      voucherEntryRows.push({ ledgerName: 'Output IGST', debit: 0, credit: igst, remarks: `IGST on ${particulars}` });
-      ledgerEntries.push(createLedgerEntry({ ledgerName: 'Output IGST', date: voucherDate, voucherType: 'Sales', voucherNo, debit: 0, credit: igst, referenceId: salesId, referenceType: 'sales', particulars: `IGST on ${particulars}`, voucherId, transactionId: salesId, transactionType: 'sales' }));
-    }
+  const effectiveTaxPaise = cgstPaise + sgstPaise + igstPaise;
+  const discPaise = toPaise(discAmount || 0);
+  let basePaise = toPaise(baseAmount || 0);
+  if (basePaise === 0 && toPaise(totalAmount) > 0) {
+    basePaise = Math.max(0, toPaise(totalAmount) - effectiveTaxPaise + discPaise);
   }
 
-  // Discount Debit
-  if (Number(discAmount || 0) > 0) {
-    voucherEntryRows.push({
-      ledgerName: 'Discount Allowed',
-      debit: Number(discAmount || 0),
-      credit: 0,
-      remarks: `Discount on ${particulars}`,
-    })
-    ledgerEntries.push(
-      createLedgerEntry({
-        ledgerName: 'Discount Allowed',
-        date: voucherDate,
-        voucherType: 'Sales',
-        voucherNo,
-        debit: Number(discAmount || 0),
-        credit: 0,
-        referenceId: salesId,
-        referenceType: 'sales',
-        particulars: `Discount on ${particulars}`,
-        voucherId,
-        transactionId: salesId,
-        transactionType: 'sales',
-      })
-    )
+  let lessDedPaise = 0;
+  let addDedPaise = 0;
+  const lines = [];
+
+  if (basePaise > 0) {
+    lines.push({ ledgerName: 'Sales Account', ledgerType: 'Income', debit: 0, credit: fromPaise(basePaise), remarks: `Sales Invoice #${invLabel}` });
+  }
+  if (cgstPaise > 0) {
+    lines.push({ ledgerName: 'Output CGST', ledgerType: 'Tax', debit: 0, credit: fromPaise(cgstPaise), remarks: `CGST on Sales #${invLabel}` });
+  }
+  if (sgstPaise > 0) {
+    lines.push({ ledgerName: 'Output SGST', ledgerType: 'Tax', debit: 0, credit: fromPaise(sgstPaise), remarks: `SGST on Sales #${invLabel}` });
+  }
+  if (igstPaise > 0) {
+    lines.push({ ledgerName: 'Output IGST', ledgerType: 'Tax', debit: 0, credit: fromPaise(igstPaise), remarks: `IGST on Sales #${invLabel}` });
+  }
+  if (discPaise > 0) {
+    lines.push({ ledgerName: 'Discount Allowed', ledgerType: 'Expense', debit: fromPaise(discPaise), credit: 0, remarks: `Discount on Sales #${invLabel}` });
   }
 
-  // Deductions processing
-  if (deductions && deductions.length > 0) {
+  if (Array.isArray(deductions)) {
     for (const d of deductions) {
-      const dAmount = Number(d.amount || d.deduction_amount || 0);
-      if (dAmount > 0) {
-        const dName = d.deduction_name || d.name || d.deduction || 'Sales Deduction';
-        const isLess = d.type === undefined || String(d.type).toUpperCase() === 'LESS';
-        
-        const debit = isLess ? dAmount : 0;
-        const credit = isLess ? 0 : dAmount;
-        
-        voucherEntryRows.push({
-          ledgerName: dName,
-          debit: debit,
-          credit: credit,
-          remarks: `${dName} on ${particulars}`,
-        });
-        
-        ledgerEntries.push(
-          createLedgerEntry({
-            ledgerName: dName,
-            date: voucherDate,
-            voucherType: 'Sales',
-            voucherNo,
-            debit: debit,
-            credit: credit,
-            referenceId: salesId,
-            referenceType: 'sales',
-            particulars: `${dName} on ${particulars}`,
-            voucherId,
-            transactionId: salesId,
-            transactionType: 'sales',
-          })
-        );
+      const dPaise = toPaise(d.amount || d.deduction_amount || 0);
+      if (dPaise <= 0) continue;
+      const dName = d.deduction_name || d.name || d.deduction || 'Sales Deduction';
+      const isLess = d.type === undefined || String(d.type).toUpperCase() === 'LESS';
+      if (isLess) {
+        lessDedPaise += dPaise;
+        lines.push({ ledgerName: dName, ledgerType: 'Expense', debit: fromPaise(dPaise), credit: 0, remarks: `${dName} on Sales #${invLabel}` });
+      } else {
+        addDedPaise += dPaise;
+        lines.push({ ledgerName: dName, ledgerType: 'Income', debit: 0, credit: fromPaise(dPaise), remarks: `${dName} on Sales #${invLabel}` });
       }
     }
   }
 
-  try {
-    for (const entry of voucherEntryRows) {
-      const ledgerId = await resolveLedgerId(entry.ledgerName, entry.ledgerType || null)
-      try {
-        await db.run(`
-          INSERT INTO voucher_entry (voucher_id, type, ledger_id, ledger_name, debit, credit, remarks)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-        `, [voucherId, 'Ledger', ledgerId, entry.ledgerName, entry.debit || 0, entry.credit || 0, entry.remarks || ''])
-      } catch (error) {
-        const message = String(error.message || '')
-        if (message.includes('no such column: ledger_name') || message.includes('table voucher_entry has no column named ledger_name')) {
-          await db.run(`
-            INSERT INTO voucher_entry (voucher_id, type, ledger_id, debit, credit, remarks)
-            VALUES (?, ?, ?, ?, ?, ?)
-          `, [voucherId, 'Ledger', ledgerId ?? 0, entry.debit || 0, entry.credit || 0, entry.remarks || ''])
-        } else {
-          throw error
-        }
-      }
+  const netReceivablePaise = basePaise + effectiveTaxPaise - discPaise - lessDedPaise + addDedPaise;
+  let roundOffPaise = toPaise(roundOff);
+  if (roundOffPaise === 0 && toPaise(totalAmount) > 0) {
+    const diff = toPaise(totalAmount) - netReceivablePaise;
+    if (diff !== 0 && Math.abs(diff) <= 100) {
+      roundOffPaise = diff;
     }
-
-    await Promise.all(ledgerEntries)
-    return { voucherId, voucherNo, voucherType: 'Sales' }
-  } catch (err) {
-    try {
-      await db.run('DELETE FROM voucher_entry WHERE voucher_id = ?', [voucherId]);
-      await db.run('DELETE FROM ledger_entries WHERE voucher_id = ? OR voucher_no = ?', [voucherId, voucherNo]);
-      await db.run('DELETE FROM voucher WHERE id = ?', [voucherId]);
-    } catch (_) {}
-    throw err;
   }
+  if (roundOffPaise > 0) {
+    lines.push({ ledgerName: 'Round Off', ledgerType: 'Income', debit: 0, credit: fromPaise(roundOffPaise), remarks: `Round off on Sales #${invLabel}` });
+  } else if (roundOffPaise < 0) {
+    lines.push({ ledgerName: 'Round Off', ledgerType: 'Expense', debit: fromPaise(-roundOffPaise), credit: 0, remarks: `Round off on Sales #${invLabel}` });
+  }
+
+  const customerDrPaise = Math.max(0, netReceivablePaise + roundOffPaise);
+  if (customerDrPaise > 0) {
+    lines.unshift({
+      ledgerName: resolvedCustomer,
+      ledgerType: 'Customer',
+      debit: fromPaise(customerDrPaise),
+      credit: 0,
+      remarks: `Sales Invoice #${invLabel}`,
+    });
+  }
+
+  const taggedLines = lines.map((l) => ({
+    ...l,
+    referenceId: salesId,
+    referenceType: 'sales',
+    transactionId: salesId,
+    transactionType: 'sales',
+  }));
+
+  return AccountingEngine.postVoucher({
+    companyId: cId,
+    voucherType: 'Sales',
+    prefix: 'SAL',
+    existingVoucherNo: passedVoucherNo || null,
+    date: voucherDate,
+    referenceNo: String(salesId || invNo || ''),
+    narration: narration || `Sales Invoice #${invLabel}`,
+    sourceModule: 'sales',
+    sourceId: salesId ? Number(salesId) : null,
+    postingKey: salesId ? `sales:${salesId}` : null,
+    lines: taggedLines,
+    allowUpdate: true,
+    preserveVoucherNoOnUpdate: true,
+  });
 }
 
 async function createSalesLedgerEntries(salesData) {
-  return createSalesVoucherChain(salesData)
+  return createSalesVoucherChain(salesData);
 }
 
-/**
- * Create advance payment ledger entries
- */
 async function createAdvanceLedgerEntries(advanceData) {
+  const cId = AccountingEngine.getActiveCompanyId(advanceData.companyId);
   const {
     papadCompany,
     date,
     sNo,
     advanceId,
     amount = 0,
-  } = advanceData
+    drCr = 'Dr',
+    payMode = 'Cash',
+    remarks = '',
+  } = advanceData;
 
-  const resolvedPapadCompany = await getPartyName(papadCompany, 'papad_company')
+  const amtPaise = toPaise(amount);
+  if (amtPaise <= 0) {
+    throw new Error('Advance amount must be greater than zero.');
+  }
 
-  const voucherNo = await getNextVoucherNumber('Advance')
+  const resolvedParty = await getPartyName(papadCompany, 'papad_company', cId);
+  if (!resolvedParty) {
+    throw new Error('Advance entry requires a valid party.');
+  }
 
-  try {
-    await createLedgerEntry({
-      ledgerName: 'Cash',
-      date,
-      voucherType: 'Advance',
-      voucherNo,
-      debit: 0,
-      credit: amount,
+  const payLower = String(payMode || '').trim().toLowerCase();
+  const isBank = payLower.includes('bank') || payLower.includes('neft') || payLower.includes('rtgs') || payLower.includes('imps') || payLower.includes('upi') || payLower.includes('cheque');
+  const settlementLedger = isBank ? 'Bank Account' : 'Cash in Hand';
+  const voucherDate = sanitizeDate(date) || new Date().toISOString().slice(0, 10);
+  const isPartyDebit = String(drCr || 'Dr').trim().toUpperCase() !== 'CR';
+  const amtVal = fromPaise(amtPaise);
+
+  const lines = [
+    {
+      ledgerName: resolvedParty,
+      ledgerType: 'Customer',
+      debit: isPartyDebit ? amtVal : 0,
+      credit: isPartyDebit ? 0 : amtVal,
+      remarks: remarks || `Advance ${isPartyDebit ? 'given to' : 'received from'} ${resolvedParty} (Ref: ${sNo || advanceId})`,
       referenceId: advanceId,
       referenceType: 'advance',
-      particulars: `Advance to: ${resolvedPapadCompany}, Ref: ${sNo}`,
-    })
-
-    await createLedgerEntry({
-      ledgerName: resolvedPapadCompany,
-      date,
-      voucherType: 'Advance',
-      voucherNo,
-      debit: amount,
-      credit: 0,
+      transactionId: advanceId,
+      transactionType: 'advance',
+    },
+    {
+      ledgerName: settlementLedger,
+      groupName: isBank ? 'Bank Accounts' : 'Cash-in-hand',
+      debit: isPartyDebit ? 0 : amtVal,
+      credit: isPartyDebit ? amtVal : 0,
+      remarks: remarks || `Advance settlement via ${payMode || 'Cash'} (Ref: ${sNo || advanceId})`,
       referenceId: advanceId,
       referenceType: 'advance',
-      particulars: `Advance Given, Ref: ${sNo}`,
-    })
+      transactionId: advanceId,
+      transactionType: 'advance',
+    },
+  ];
 
-    return true
-  } catch (error) {
-    console.error('Error creating advance ledger entries:', error)
-    return false
-  }
+  return AccountingEngine.postVoucher({
+    companyId: cId,
+    voucherType: 'Advance',
+    prefix: 'ADV',
+    date: voucherDate,
+    referenceNo: String(advanceId || sNo || ''),
+    narration: remarks || `Advance Ref #${sNo || advanceId} - ${resolvedParty}`,
+    sourceModule: 'advance',
+    sourceId: advanceId ? Number(advanceId) : null,
+    postingKey: advanceId ? `advance:${advanceId}` : null,
+    lines,
+    allowUpdate: true,
+    preserveVoucherNoOnUpdate: true,
+  });
 }
 
-async function deletePurchaseVoucherChain(referenceId) {
-  if (!referenceId) return true;
-  try {
-    const refStr = String(referenceId).trim();
-    const numId = parseInt(refStr, 10);
-    const validNum = !isNaN(numId) ? numId : -1;
-
-    const voucherRows = await db.query(
-      `SELECT id, voucher_no FROM voucher 
-       WHERE (voucher_type = 'Purchase' OR voucher_type = 'PUR')
-         AND (reference_no = ? OR reference_no = ? OR reference_no = ?)`,
-      [refStr, `PUR-${refStr}`, `PUR${refStr}`]
-    );
-
-    const voucherIds = (voucherRows.rows || []).map(v => v.id);
-    const voucherNos = (voucherRows.rows || []).map(v => v.voucher_no).filter(Boolean);
-
-    for (const vId of voucherIds) {
-      await db.run('DELETE FROM voucher_entry WHERE voucher_id = ?', [vId]);
-      await db.run('DELETE FROM voucher WHERE id = ?', [vId]);
-    }
-
-    for (const vNo of voucherNos) {
-      await db.run("DELETE FROM ledger_entries WHERE voucher_no = ? AND (voucher_type = 'Purchase' OR voucher_type = 'PUR')", [vNo]);
-    }
-
-    if (validNum > 0) {
-      await db.run(
-        `DELETE FROM ledger_entries 
-         WHERE (voucher_type = 'Purchase' OR reference_type = 'purchase')
-           AND (reference_id = ? OR transaction_id = ?)`,
-        [validNum, validNum]
-      );
-    }
-
-    return true;
-  } catch (error) {
-    console.error('Error deleting purchase voucher chain:', error);
-    return false;
-  }
-}
-
-async function deleteSalesVoucherChain(referenceId) {
-  if (!referenceId) return true;
-  try {
-    const refStr = String(referenceId).trim();
-    const numId = parseInt(refStr, 10);
-    const validNum = !isNaN(numId) ? numId : -1;
-
-    const voucherRows = await db.query(
-      `SELECT id, voucher_no FROM voucher 
-       WHERE (voucher_type = 'Sales' OR voucher_type = 'SAL')
-         AND (reference_no = ? OR reference_no = ? OR reference_no = ?)`,
-      [refStr, `SAL-${refStr}`, `SAL${refStr}`]
-    );
-
-    const voucherIds = (voucherRows.rows || []).map(v => v.id);
-    const voucherNos = (voucherRows.rows || []).map(v => v.voucher_no).filter(Boolean);
-
-    for (const vId of voucherIds) {
-      await db.run('DELETE FROM voucher_entry WHERE voucher_id = ?', [vId]);
-      await db.run('DELETE FROM voucher WHERE id = ?', [vId]);
-    }
-
-    for (const vNo of voucherNos) {
-      await db.run("DELETE FROM ledger_entries WHERE voucher_no = ? AND (voucher_type = 'Sales' OR voucher_type = 'SAL')", [vNo]);
-    }
-
-    if (validNum > 0) {
-      await db.run(
-        `DELETE FROM ledger_entries 
-         WHERE (voucher_type = 'Sales' OR reference_type = 'sales')
-           AND (reference_id = ? OR transaction_id = ?)`,
-        [validNum, validNum]
-      );
-    }
-
-    return true;
-  } catch (error) {
-    console.error('Error deleting sales voucher chain:', error);
-    return false;
-  }
-}
-
-/**
- * Create Purchase Return / Debit Note voucher chain and ledger entries
- * Generates:
- * - Supplier (Debit) - Reduces accounts payable
- * - Purchase Return / Purchase Account (Credit) - Reverses expense
- * - Input CGST/SGST/IGST (Credit) - Reverses ITC
- * - Deductions (Freight, handling, etc.)
- */
 async function createPurchaseReturnVoucherChain(returnData) {
-  await ensureVoucherTables()
-
+  const cId = AccountingEngine.getActiveCompanyId(returnData.companyId);
   const {
     supplier,
     date,
@@ -1246,183 +596,126 @@ async function createPurchaseReturnVoucherChain(returnData) {
     discAmount = 0,
     netAmount = 0,
     grandTotal = 0,
+    autoWages = 0,
+    vat = 0,
+    deductions = [],
     narration = '',
-    deductions = []
-  } = returnData
+  } = returnData;
 
-  const effectiveId = purchaseReturnId || returnData.id
-  if (effectiveId) {
-    await deletePurchaseReturnVoucherChain(effectiveId)
-  }
-  if (returnInvNo) {
-    await deletePurchaseReturnVoucherChain(returnInvNo)
-  }
-  if (sNo) {
-    await deletePurchaseReturnVoucherChain(sNo)
+  const effectiveId = purchaseReturnId || returnData.id;
+  const resolvedSupplier = await getPartyName(supplier, 'supplier', cId);
+  if (!resolvedSupplier) {
+    throw new Error('Purchase Return requires a valid Supplier.');
   }
 
-  const resolvedSupplier = await getPartyName(supplier, 'supplier')
-  const voucherDate = sanitizeDate(date) || new Date().toISOString().slice(0, 10)
-  const voucherNo = await getNextVoucherNumber('Debit Note')
-  const invoiceRef = returnInvNo || sNo || effectiveId || ''
-  const effectiveNarration = narration || `Debit Note / Purchase Return #${invoiceRef} to ${resolvedSupplier || supplier || 'Vendor'}`
+  const voucherDate = sanitizeDate(date) || new Date().toISOString().slice(0, 10);
+  const invoiceRef = returnInvNo || sNo || effectiveId || '';
 
-  const totalPayableDebit = Number(grandTotal || netAmount || 0)
-  const resolvedBaseAmount = Number(baseAmount || (totalPayableDebit - (Number(taxAmount) || 0) + (Number(discAmount) || 0)))
+  const cgstPaise = toPaise(returnData.cgstAmount || 0);
+  const sgstPaise = toPaise(returnData.sgstAmount || 0);
+  const igstPaise = toPaise(returnData.igstAmount || 0);
+  const taxPaise = toPaise(taxAmount || 0);
+  const vatPaise = toPaise(vat || 0);
+  const discPaise = toPaise(discAmount || 0);
+  const wagesPaise = toPaise(autoWages || 0);
 
-  const voucherResult = await db.run(`
-    INSERT INTO voucher (voucher_type, voucher_no, date, reference_no, narration)
-    VALUES (?, ?, ?, ?, ?)
-  `, ['Debit Note', voucherNo, voucherDate, String(effectiveId || invoiceRef), effectiveNarration])
-  const voucherId = voucherResult.lastInsertRowid || voucherResult.lastID
+  let effectiveTaxPaise = cgstPaise + sgstPaise + igstPaise;
+  let autoCgst = cgstPaise;
+  let autoSgst = sgstPaise;
+  let autoIgst = igstPaise;
+  if (effectiveTaxPaise === 0 && taxPaise > 0) {
+    if (returnData.isInterstate) {
+      autoIgst = taxPaise;
+    } else {
+      autoCgst = Math.round(taxPaise / 2);
+      autoSgst = taxPaise - autoCgst;
+    }
+    effectiveTaxPaise = autoCgst + autoSgst + autoIgst;
+  }
 
-  const ledgerEntries = []
-  const particulars = `Purchase Return / Debit Note #${invoiceRef}`
-  const voucherEntryRows = []
+  let basePaise = toPaise(baseAmount || 0);
+  const grandTotalPaise = toPaise(grandTotal || netAmount || 0);
+  if (basePaise === 0 && grandTotalPaise > 0) {
+    basePaise = Math.max(0, grandTotalPaise - effectiveTaxPaise - vatPaise + discPaise);
+  }
 
-  // 1. Debit Supplier (A/C Payable reduction)
-  if (resolvedSupplier && totalPayableDebit > 0) {
-    voucherEntryRows.push({
+  const lines = [];
+  if (basePaise > 0) {
+    lines.push({ ledgerName: 'Purchase Return Account', ledgerType: 'Expense', debit: 0, credit: fromPaise(basePaise), remarks: `Purchase Return / Debit Note #${invoiceRef}` });
+  }
+  if (autoCgst > 0) {
+    lines.push({ ledgerName: 'Input CGST', ledgerType: 'Tax', debit: 0, credit: fromPaise(autoCgst), remarks: `CGST Reversal #${invoiceRef}` });
+  }
+  if (autoSgst > 0) {
+    lines.push({ ledgerName: 'Input SGST', ledgerType: 'Tax', debit: 0, credit: fromPaise(autoSgst), remarks: `SGST Reversal #${invoiceRef}` });
+  }
+  if (autoIgst > 0) {
+    lines.push({ ledgerName: 'Input IGST', ledgerType: 'Tax', debit: 0, credit: fromPaise(autoIgst), remarks: `IGST Reversal #${invoiceRef}` });
+  }
+  if (vatPaise > 0) {
+    lines.push({ ledgerName: 'Input VAT', ledgerType: 'Tax', debit: 0, credit: fromPaise(vatPaise), remarks: `VAT Reversal #${invoiceRef}` });
+  }
+  if (discPaise > 0) {
+    lines.push({ ledgerName: 'Discount Received', ledgerType: 'Income', debit: fromPaise(discPaise), credit: 0, remarks: `Discount Reversal #${invoiceRef}` });
+  }
+  if (wagesPaise > 0) {
+    lines.push({ ledgerName: 'Auto Wages Recovery', ledgerType: 'Income', debit: 0, credit: fromPaise(wagesPaise), remarks: `Auto wages #${invoiceRef}` });
+  }
+
+  let dedNetPaise = 0;
+  if (Array.isArray(deductions)) {
+    for (const d of deductions) {
+      const dPaise = toPaise(d.amount || 0);
+      if (dPaise <= 0) continue;
+      const dName = d.deduction_name || d.name || 'Purchase Return Deduction';
+      const isLess = !d.type || String(d.type).toUpperCase() === 'LESS';
+      if (isLess) {
+        dedNetPaise -= dPaise;
+        lines.push({ ledgerName: dName, ledgerType: 'Expense', debit: fromPaise(dPaise), credit: 0, remarks: `${dName} #${invoiceRef}` });
+      } else {
+        dedNetPaise += dPaise;
+        lines.push({ ledgerName: dName, ledgerType: 'Income', debit: 0, credit: fromPaise(dPaise), remarks: `${dName} #${invoiceRef}` });
+      }
+    }
+  }
+
+  const supplierDebitPaise = Math.max(0, basePaise + effectiveTaxPaise + vatPaise + wagesPaise - discPaise + dedNetPaise);
+  if (supplierDebitPaise > 0) {
+    lines.unshift({
       ledgerName: resolvedSupplier,
-      debit: totalPayableDebit,
+      ledgerType: 'Supplier',
+      debit: fromPaise(supplierDebitPaise),
       credit: 0,
-      remarks: particulars,
-    })
-    ledgerEntries.push(
-      createLedgerEntry({
-        ledgerName: resolvedSupplier,
-        date: voucherDate,
-        voucherType: 'Debit Note',
-        voucherNo,
-        debit: totalPayableDebit,
-        credit: 0,
-        referenceId: effectiveId,
-        referenceType: 'purchase_return',
-        particulars,
-        voucherId,
-        transactionId: effectiveId,
-        transactionType: 'purchase_return',
-        ledgerType: 'Supplier',
-      })
-    )
+      remarks: `Debit Note #${invoiceRef}`,
+    });
   }
 
-  // 2. Credit Purchase Return Account (or Purchase Account)
-  if (resolvedBaseAmount > 0) {
-    voucherEntryRows.push({
-      ledgerName: 'Purchase Return Account',
-      debit: 0,
-      credit: resolvedBaseAmount,
-      remarks: particulars,
-    })
-    ledgerEntries.push(
-      createLedgerEntry({
-        ledgerName: 'Purchase Return Account',
-        date: voucherDate,
-        voucherType: 'Debit Note',
-        voucherNo,
-        debit: 0,
-        credit: resolvedBaseAmount,
-        referenceId: effectiveId,
-        referenceType: 'purchase_return',
-        particulars,
-        voucherId,
-        transactionId: effectiveId,
-        transactionType: 'purchase_return',
-      })
-    )
-  }
+  const taggedLines = lines.map((l) => ({
+    ...l,
+    referenceId: effectiveId,
+    referenceType: 'purchase_return',
+    transactionId: effectiveId,
+    transactionType: 'purchase_return',
+  }));
 
-  // 3. Credit Input Tax Reversals
-  const cgst = Number(returnData.cgstAmount || 0)
-  const sgst = Number(returnData.sgstAmount || 0)
-  const igst = Number(returnData.igstAmount || 0)
-  const totalTax = Number(taxAmount || 0)
-
-  if (cgst > 0 || sgst > 0 || igst > 0) {
-    if (cgst > 0) {
-      voucherEntryRows.push({ ledgerName: 'Input CGST', debit: 0, credit: cgst, remarks: particulars })
-      ledgerEntries.push(createLedgerEntry({
-        ledgerName: 'Input CGST', date: voucherDate, voucherType: 'Debit Note', voucherNo, debit: 0, credit: cgst,
-        referenceId: effectiveId, referenceType: 'purchase_return', particulars, voucherId, transactionId: effectiveId, transactionType: 'purchase_return'
-      }))
-    }
-    if (sgst > 0) {
-      voucherEntryRows.push({ ledgerName: 'Input SGST', debit: 0, credit: sgst, remarks: particulars })
-      ledgerEntries.push(createLedgerEntry({
-        ledgerName: 'Input SGST', date: voucherDate, voucherType: 'Debit Note', voucherNo, debit: 0, credit: sgst,
-        referenceId: effectiveId, referenceType: 'purchase_return', particulars, voucherId, transactionId: effectiveId, transactionType: 'purchase_return'
-      }))
-    }
-    if (igst > 0) {
-      voucherEntryRows.push({ ledgerName: 'Input IGST', debit: 0, credit: igst, remarks: particulars })
-      ledgerEntries.push(createLedgerEntry({
-        ledgerName: 'Input IGST', date: voucherDate, voucherType: 'Debit Note', voucherNo, debit: 0, credit: igst,
-        referenceId: effectiveId, referenceType: 'purchase_return', particulars, voucherId, transactionId: effectiveId, transactionType: 'purchase_return'
-      }))
-    }
-  } else if (totalTax > 0) {
-    voucherEntryRows.push({ ledgerName: 'Input GST Tax', debit: 0, credit: totalTax, remarks: particulars })
-    ledgerEntries.push(createLedgerEntry({
-      ledgerName: 'Input GST Tax', date: voucherDate, voucherType: 'Debit Note', voucherNo, debit: 0, credit: totalTax,
-      referenceId: effectiveId, referenceType: 'purchase_return', particulars, voucherId, transactionId: effectiveId, transactionType: 'purchase_return'
-    }))
-  }
-
-  // 4. Save voucher_entry rows
-  for (const entry of voucherEntryRows) {
-    const lId = await resolveLedgerId(entry.ledgerName)
-    await db.run(`
-      INSERT INTO voucher_entry (voucher_id, type, ledger_id, ledger_name, debit, credit, remarks)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `, [
-      voucherId,
-      entry.debit > 0 ? 'Dr' : 'Cr',
-      lId,
-      entry.ledgerName,
-      entry.debit || 0,
-      entry.credit || 0,
-      entry.remarks || ''
-    ])
-  }
-
-  await Promise.all(ledgerEntries)
-  return { voucherId, voucherNo }
+  return AccountingEngine.postVoucher({
+    companyId: cId,
+    voucherType: 'Debit Note',
+    prefix: 'DN',
+    date: voucherDate,
+    referenceNo: String(effectiveId || invoiceRef),
+    narration: narration || `Debit Note / Purchase Return #${invoiceRef} to ${resolvedSupplier}`,
+    sourceModule: 'purchase_return',
+    sourceId: effectiveId ? Number(effectiveId) : null,
+    postingKey: effectiveId ? `purchase_return:${effectiveId}` : null,
+    lines: taggedLines,
+    allowUpdate: true,
+    preserveVoucherNoOnUpdate: true,
+  });
 }
 
-async function deletePurchaseReturnVoucherChain(referenceId) {
-  try {
-    const refStr = String(referenceId)
-    const voucherRows = await db.query(
-      "SELECT id, voucher_no FROM voucher WHERE (reference_no = ? OR reference_no LIKE ?) AND (voucher_type = 'Debit Note' OR voucher_type = 'Purchase Return')",
-      [refStr, `%${refStr}%`]
-    )
-
-    for (const voucher of voucherRows.rows || []) {
-      await db.run('DELETE FROM voucher_entry WHERE voucher_id = ?', [voucher.id])
-      await db.run("DELETE FROM ledger_entries WHERE voucher_id = ? OR (reference_id = ? AND (voucher_type = 'Debit Note' OR voucher_type = 'Purchase Return' OR reference_type = 'purchase_return'))", [
-        voucher.id,
-        referenceId,
-      ])
-      await db.run('DELETE FROM voucher WHERE id = ?', [voucher.id])
-    }
-
-    await db.run("DELETE FROM ledger_entries WHERE (reference_id = ? OR transaction_id = ?) AND (reference_type = 'purchase_return' OR transaction_type = 'purchase_return' OR voucher_type = 'Debit Note' OR voucher_type = 'Purchase Return')", [referenceId, referenceId])
-    return true
-  } catch (error) {
-    console.error('Error deleting purchase return voucher chain:', error)
-    return false
-  }
-}
-
-/**
- * Create Sales Return / Credit Note voucher chain and ledger entries
- * - Customer Account (Credit) - Reverses customer receivable
- * - Sales Return Account / Sales Account (Debit) - Reverses sales revenue
- * - Output GST (Debit) - Reverses tax liability
- */
 async function createSalesReturnVoucherChain(returnData) {
-  await ensureVoucherTables()
+  const cId = AccountingEngine.getActiveCompanyId(returnData.companyId);
   const {
     customer,
     date,
@@ -1435,336 +728,201 @@ async function createSalesReturnVoucherChain(returnData) {
     cgstAmount = 0,
     sgstAmount = 0,
     igstAmount = 0,
-    narration = ''
-  } = returnData
+    deductionAmount = 0,
+    narration = '',
+  } = returnData;
 
-  const effectiveId = salesReturnId || returnData.id
-  if (effectiveId) {
-    await deleteSalesReturnVoucherChain(effectiveId)
+  const effectiveId = salesReturnId || returnData.id;
+  const resolvedCustomer = await getPartyName(customer, 'customer', cId);
+  if (!resolvedCustomer) {
+    throw new Error('Sales Return requires a valid Customer.');
   }
 
-  const invoiceRef = returnInvNo || sNo || effectiveId || 'SRT'
-  const voucherDate = sanitizeDate(date) || new Date().toISOString().split('T')[0]
-  const totalVal = Math.abs(parseFloat(totalAmount) || 0)
-  const baseVal = Math.abs(parseFloat(baseAmount) || totalVal)
-  const taxVal = Math.abs(parseFloat(taxAmount) || 0)
-  if (totalVal <= 0) return null
+  const voucherDate = sanitizeDate(date) || new Date().toISOString().slice(0, 10);
+  const invoiceRef = returnInvNo || sNo || effectiveId || 'SRT';
 
-  let resolvedCustomer = customer
-  if (customer && /^\d+$/.test(String(customer))) {
-    const custRes = await db.query('SELECT print_name, name FROM customer_master WHERE id = ?', [customer])
-    if (custRes.rows?.length > 0) {
-      resolvedCustomer = custRes.rows[0].print_name || custRes.rows[0].name
+  let cgstPaise = toPaise(cgstAmount || 0);
+  let sgstPaise = toPaise(sgstAmount || 0);
+  let igstPaise = toPaise(igstAmount || 0);
+  const taxPaise = toPaise(taxAmount || 0);
+  if (cgstPaise === 0 && sgstPaise === 0 && igstPaise === 0 && taxPaise > 0) {
+    if (returnData.isInterstate) {
+      igstPaise = taxPaise;
+    } else {
+      cgstPaise = Math.round(taxPaise / 2);
+      sgstPaise = taxPaise - cgstPaise;
     }
   }
+  const effectiveTaxPaise = cgstPaise + sgstPaise + igstPaise;
+  const dedPaise = toPaise(deductionAmount || 0);
+  const totalValPaise = Math.abs(toPaise(totalAmount || 0));
+  let basePaise = Math.abs(toPaise(baseAmount || 0));
+  if (basePaise === 0 && totalValPaise > 0) {
+    basePaise = Math.max(0, totalValPaise - effectiveTaxPaise + dedPaise);
+  }
+  if (totalValPaise <= 0 && basePaise <= 0) return null;
 
-  const effectiveNarration = narration || `Credit Note / Sales Return #${invoiceRef} for ${resolvedCustomer || customer || 'Customer'}`
-  const voucherNo = await getNextVoucherNumber('CN')
+  const lines = [];
+  if (basePaise > 0) {
+    lines.push({ ledgerName: 'Sales Return Account', ledgerType: 'Income', debit: fromPaise(basePaise), credit: 0, remarks: `Sales Return / Credit Note #${invoiceRef}` });
+  }
+  if (cgstPaise > 0) {
+    lines.push({ ledgerName: 'Output CGST', ledgerType: 'Tax', debit: fromPaise(cgstPaise), credit: 0, remarks: `CGST Reversal #${invoiceRef}` });
+  }
+  if (sgstPaise > 0) {
+    lines.push({ ledgerName: 'Output SGST', ledgerType: 'Tax', debit: fromPaise(sgstPaise), credit: 0, remarks: `SGST Reversal #${invoiceRef}` });
+  }
+  if (igstPaise > 0) {
+    lines.push({ ledgerName: 'Output IGST', ledgerType: 'Tax', debit: fromPaise(igstPaise), credit: 0, remarks: `IGST Reversal #${invoiceRef}` });
+  }
+  if (dedPaise > 0) {
+    lines.push({ ledgerName: 'Sales Return Deductions', ledgerType: 'Income', debit: 0, credit: fromPaise(dedPaise), remarks: `Deduction on Sales Return #${invoiceRef}` });
+  }
 
-  const vResult = await db.run(`
-    INSERT INTO voucher (voucher_type, voucher_no, date, reference_no, narration)
-    VALUES ('Credit Note', ?, ?, ?, ?)
-  `, [voucherNo, voucherDate, String(effectiveId || invoiceRef), effectiveNarration])
+  const customerCreditPaise = Math.max(0, basePaise + effectiveTaxPaise - dedPaise);
+  if (customerCreditPaise > 0) {
+    lines.unshift({
+      ledgerName: resolvedCustomer,
+      ledgerType: 'Customer',
+      debit: 0,
+      credit: fromPaise(customerCreditPaise),
+      remarks: `Credit Note #${invoiceRef}`,
+    });
+  }
 
-  const voucherId = vResult.lastID || vResult.lastInsertRowid
-  const particulars = `Sales Return / Credit Note #${invoiceRef}`
-
-  const voucherEntryRows = []
-  const ledgerEntries = []
-
-  // 1. Credit Customer (reverses receivable)
-  voucherEntryRows.push({
-    ledgerName: resolvedCustomer || 'Customer Account',
-    debit: 0,
-    credit: totalVal,
-    remarks: particulars
-  })
-  ledgerEntries.push(createLedgerEntry({
-    ledgerName: resolvedCustomer || 'Customer Account',
-    date: voucherDate,
-    voucherType: 'Credit Note',
-    voucherNo,
-    debit: 0,
-    credit: totalVal,
+  const taggedLines = lines.map((l) => ({
+    ...l,
     referenceId: effectiveId,
     referenceType: 'sales_return',
-    particulars,
-    voucherId,
     transactionId: effectiveId,
-    transactionType: 'sales_return'
-  }))
+    transactionType: 'sales_return',
+  }));
 
-  // 2. Debit Sales Return Account
-  let salesReturnLedger = 'Sales Return Account'
-  try {
-    const returnLedgerCheck = await db.query("SELECT id FROM ledgermaster WHERE LOWER(name) = 'sales return account' OR LOWER(printname) = 'sales return account'")
-    if (!returnLedgerCheck.rows?.length) {
-      salesReturnLedger = 'Sales Account'
-    }
-  } catch (e) {
-    salesReturnLedger = 'Sales Account'
-  }
-
-  voucherEntryRows.push({
-    ledgerName: salesReturnLedger,
-    debit: baseVal,
-    credit: 0,
-    remarks: particulars
-  })
-  ledgerEntries.push(createLedgerEntry({
-    ledgerName: salesReturnLedger,
-    date: voucherDate,
+  return AccountingEngine.postVoucher({
+    companyId: cId,
     voucherType: 'Credit Note',
-    voucherNo,
-    debit: baseVal,
-    credit: 0,
-    referenceId: effectiveId,
-    referenceType: 'sales_return',
-    particulars,
-    voucherId,
-    transactionId: effectiveId,
-    transactionType: 'sales_return'
-  }))
-
-  // 3. Debit Output GST
-  const cgst = parseFloat(cgstAmount) || 0
-  const sgst = parseFloat(sgstAmount) || 0
-  const igst = parseFloat(igstAmount) || 0
-
-  if (cgst > 0 || sgst > 0 || igst > 0) {
-    if (cgst > 0) {
-      voucherEntryRows.push({ ledgerName: 'CGST Output', debit: cgst, credit: 0, remarks: particulars })
-      ledgerEntries.push(createLedgerEntry({
-        ledgerName: 'CGST Output', date: voucherDate, voucherType: 'Credit Note', voucherNo, debit: cgst, credit: 0,
-        referenceId: effectiveId, referenceType: 'sales_return', particulars, voucherId, transactionId: effectiveId, transactionType: 'sales_return'
-      }))
-    }
-    if (sgst > 0) {
-      voucherEntryRows.push({ ledgerName: 'SGST Output', debit: sgst, credit: 0, remarks: particulars })
-      ledgerEntries.push(createLedgerEntry({
-        ledgerName: 'SGST Output', date: voucherDate, voucherType: 'Credit Note', voucherNo, debit: sgst, credit: 0,
-        referenceId: effectiveId, referenceType: 'sales_return', particulars, voucherId, transactionId: effectiveId, transactionType: 'sales_return'
-      }))
-    }
-    if (igst > 0) {
-      voucherEntryRows.push({ ledgerName: 'IGST Output', debit: igst, credit: 0, remarks: particulars })
-      ledgerEntries.push(createLedgerEntry({
-        ledgerName: 'IGST Output', date: voucherDate, voucherType: 'Credit Note', voucherNo, debit: igst, credit: 0,
-        referenceId: effectiveId, referenceType: 'sales_return', particulars, voucherId, transactionId: effectiveId, transactionType: 'sales_return'
-      }))
-    }
-  } else if (taxVal > 0) {
-    const halfTax = Number((taxVal / 2).toFixed(2))
-    voucherEntryRows.push({ ledgerName: 'CGST Output', debit: halfTax, credit: 0, remarks: particulars })
-    ledgerEntries.push(createLedgerEntry({
-      ledgerName: 'CGST Output', date: voucherDate, voucherType: 'Credit Note', voucherNo, debit: halfTax, credit: 0,
-      referenceId: effectiveId, referenceType: 'sales_return', particulars, voucherId, transactionId: effectiveId, transactionType: 'sales_return'
-    }))
-    voucherEntryRows.push({ ledgerName: 'SGST Output', debit: halfTax, credit: 0, remarks: particulars })
-    ledgerEntries.push(createLedgerEntry({
-      ledgerName: 'SGST Output', date: voucherDate, voucherType: 'Credit Note', voucherNo, debit: halfTax, credit: 0,
-      referenceId: effectiveId, referenceType: 'sales_return', particulars, voucherId, transactionId: effectiveId, transactionType: 'sales_return'
-    }))
-  }
-
-  // 4. Save voucher_entry rows
-  for (const entry of voucherEntryRows) {
-    const lId = await resolveLedgerId(entry.ledgerName)
-    await db.run(`
-      INSERT INTO voucher_entry (voucher_id, type, ledger_id, ledger_name, debit, credit, remarks)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `, [
-      voucherId,
-      entry.debit > 0 ? 'Dr' : 'Cr',
-      lId,
-      entry.ledgerName,
-      entry.debit || 0,
-      entry.credit || 0,
-      entry.remarks || ''
-    ])
-  }
-
-  await Promise.all(ledgerEntries)
-  return { voucherId, voucherNo }
+    prefix: 'CN',
+    date: voucherDate,
+    referenceNo: String(effectiveId || invoiceRef),
+    narration: narration || `Credit Note / Sales Return #${invoiceRef} for ${resolvedCustomer}`,
+    sourceModule: 'sales_return',
+    sourceId: effectiveId ? Number(effectiveId) : null,
+    postingKey: effectiveId ? `sales_return:${effectiveId}` : null,
+    lines: taggedLines,
+    allowUpdate: true,
+    preserveVoucherNoOnUpdate: true,
+  });
 }
 
-async function deleteSalesReturnVoucherChain(referenceId) {
-  try {
-    const voucherRows = await db.query(
-      "SELECT id, voucher_no FROM voucher WHERE reference_no = ? AND (voucher_type = 'Credit Note' OR voucher_type = 'Sales Return')",
-      [String(referenceId)]
-    )
+async function deletePurchaseVoucherChain(referenceId, companyId = null) {
+  if (!referenceId) return true;
+  const cId = AccountingEngine.getActiveCompanyId(companyId);
+  await AccountingEngine.deleteVoucherBySource({
+    companyId: cId,
+    sourceModule: 'purchase',
+    sourceId: /^\d+$/.test(String(referenceId)) ? Number(referenceId) : null,
+    voucherTypes: ['Purchase', 'PUR'],
+    referenceNo: String(referenceId),
+  });
+  return true;
+}
 
-    for (const voucher of voucherRows.rows || []) {
-      await db.run('DELETE FROM voucher_entry WHERE voucher_id = ?', [voucher.id])
-      await db.run("DELETE FROM ledger_entries WHERE voucher_id = ? OR (reference_id = ? AND (voucher_type = 'Credit Note' OR voucher_type = 'Sales Return' OR reference_type = 'sales_return'))", [
-        voucher.id,
-        referenceId,
-      ])
-      await db.run('DELETE FROM voucher WHERE id = ?', [voucher.id])
-    }
+async function deleteSalesVoucherChain(referenceId, companyId = null) {
+  if (!referenceId) return true;
+  const cId = AccountingEngine.getActiveCompanyId(companyId);
+  await AccountingEngine.deleteVoucherBySource({
+    companyId: cId,
+    sourceModule: 'sales',
+    sourceId: /^\d+$/.test(String(referenceId)) ? Number(referenceId) : null,
+    voucherTypes: ['Sales', 'SAL'],
+    referenceNo: String(referenceId),
+  });
+  return true;
+}
 
-    await db.run("DELETE FROM ledger_entries WHERE reference_id = ? AND (reference_type = 'sales_return' OR voucher_type = 'Credit Note' OR voucher_type = 'Sales Return')", [referenceId])
-    return true
-  } catch (error) {
-    console.error('Error deleting sales return voucher chain:', error)
-    return false
-  }
+async function deleteAdvanceVoucherChain(referenceId, companyId = null) {
+  if (!referenceId) return true;
+  const cId = AccountingEngine.getActiveCompanyId(companyId);
+  await AccountingEngine.deleteVoucherBySource({
+    companyId: cId,
+    sourceModule: 'advance',
+    sourceId: /^\d+$/.test(String(referenceId)) ? Number(referenceId) : null,
+    voucherTypes: ['Advance', 'ADV'],
+    referenceNo: String(referenceId),
+  });
+  return true;
+}
+
+async function deletePurchaseReturnVoucherChain(referenceId, companyId = null) {
+  if (!referenceId) return true;
+  const cId = AccountingEngine.getActiveCompanyId(companyId);
+  await AccountingEngine.deleteVoucherBySource({
+    companyId: cId,
+    sourceModule: 'purchase_return',
+    sourceId: /^\d+$/.test(String(referenceId)) ? Number(referenceId) : null,
+    voucherTypes: ['Debit Note', 'Purchase Return', 'DN'],
+    referenceNo: String(referenceId),
+  });
+  return true;
+}
+
+async function deleteSalesReturnVoucherChain(referenceId, companyId = null) {
+  if (!referenceId) return true;
+  const cId = AccountingEngine.getActiveCompanyId(companyId);
+  await AccountingEngine.deleteVoucherBySource({
+    companyId: cId,
+    sourceModule: 'sales_return',
+    sourceId: /^\d+$/.test(String(referenceId)) ? Number(referenceId) : null,
+    voucherTypes: ['Credit Note', 'Sales Return', 'CN'],
+    referenceNo: String(referenceId),
+  });
+  return true;
 }
 
 /**
- * Delete ledger entries for a reference.
+ * Strictly module-scoped ledger deletion.
+ * Requires an explicit sourceModule / voucherType to prevent cross-module record collisions.
  */
-async function deleteLedgerEntries(referenceId) {
-  try {
-    await deletePurchaseVoucherChain(referenceId)
-    await deleteSalesVoucherChain(referenceId)
-    await deletePurchaseReturnVoucherChain(referenceId)
-    await deleteSalesReturnVoucherChain(referenceId)
-    await db.run('DELETE FROM ledger_entries WHERE reference_id = ?', [referenceId])
-    return true
-  } catch (error) {
-    console.error('Error deleting ledger entries:', error)
-    return false
+async function deleteLedgerEntries(referenceId, sourceModule = null, companyId = null) {
+  if (!referenceId) return true;
+  const mod = String(sourceModule || '').trim().toLowerCase();
+  if (!mod) {
+    throw new Error('deleteLedgerEntries requires explicit sourceModule (purchase, sales, advance, purchase_return, sales_return) to prevent cross-module deletion.');
   }
-}
+  const cId = AccountingEngine.getActiveCompanyId(companyId);
+  if (mod === 'purchase' || mod === 'pur') return deletePurchaseVoucherChain(referenceId, cId);
+  if (mod === 'sales' || mod === 'sale' || mod === 'sal') return deleteSalesVoucherChain(referenceId, cId);
+  if (mod === 'advance' || mod === 'adv') return deleteAdvanceVoucherChain(referenceId, cId);
+  if (mod === 'purchase_return' || mod === 'purchase return' || mod === 'debit note' || mod === 'dn') return deletePurchaseReturnVoucherChain(referenceId, cId);
+  if (mod === 'sales_return' || mod === 'sales return' || mod === 'credit note' || mod === 'cn') return deleteSalesReturnVoucherChain(referenceId, cId);
 
-async function syncAllLedgers() {
-  await ensureVoucherTables()
-
-  console.log('--- STARTING LEDGER SYNCHRONIZATION ---')
-  try {
-    // 1. Disable foreign key constraints temporarily
-    await db.run('PRAGMA foreign_keys = OFF')
-
-    // 2. Clear current voucher & ledger_entries tables
-    await db.run('DELETE FROM ledger_entries')
-    await db.run('DELETE FROM voucher_entry')
-    await db.run('DELETE FROM voucher')
-
-    // Reset sqlite sequence
-    try {
-      await db.run("UPDATE sqlite_sequence SET seq = 0 WHERE name IN ('ledger_entries', 'voucher_entry', 'voucher')")
-    } catch (e) {}
-
-    // 3. Rebuild Sales ledgers
-    const sales = await db.query('SELECT * FROM sales')
-    console.log(`Rebuilding ledger entries for ${sales.rows?.length || 0} sales...`)
-    for (const sale of sales.rows || []) {
-      try {
-        const totalAmt = Number(sale.total_amount ?? sale.total_amt ?? sale.grand_total ?? 0)
-        const taxAmt = Number(sale.tax_amount ?? sale.tax_amt ?? 0)
-        const baseAmt = Number(sale.base_amount ?? sale.bill_amt ?? (totalAmt - taxAmt) ?? 0)
-        await createSalesVoucherChain({
-          customer: sale.customer_id || sale.customer,
-          date: sale.date,
-          invNo: sale.s_no,
-          salesId: sale.id,
-          totalAmount: totalAmt,
-          taxAmount: taxAmt,
-          discAmount: Number(sale.disc_amount || 0),
-          baseAmount: baseAmt,
-        })
-      } catch (err) {
-        console.error(`Error syncing sale #${sale.id}:`, err)
-      }
-    }
-
-    // 4. Rebuild Purchase ledgers
-    const purchases = await db.query('SELECT * FROM purchases')
-    console.log(`Rebuilding ledger entries for ${purchases.rows?.length || 0} purchases...`)
-    for (const pur of purchases.rows || []) {
-      try {
-        const baseAmt = Number(pur.base_amount ?? pur.bill_amt ?? pur.total_amount ?? pur.total_amt ?? 0)
-        const taxAmt = Number(pur.tax_amount ?? pur.tax_amt ?? 0)
-        const discAmt = Number(pur.disc_amount ?? 0)
-        const netAmt = Number(pur.grand_total ?? pur.net_amount ?? (baseAmt + taxAmt - discAmt) ?? pur.total_amount ?? pur.total_amt ?? 0)
-        await createPurchaseVoucherChain({
-          supplier: pur.supplier_id || pur.supplier,
-          date: pur.date,
-          invNo: pur.s_no,
-          purchaseId: pur.id,
-          totalAmount: netAmt,
-          baseAmount: baseAmt,
-          taxAmount: taxAmt,
-          discAmount: discAmt,
-          netAmount: netAmt,
-          cgstAmount: Number(pur.cgst_amount || 0),
-          sgstAmount: Number(pur.sgst_amount || 0),
-          igstAmount: Number(pur.igst_amount || 0),
-        })
-      } catch (err) {
-        console.error(`Error syncing purchase #${pur.id}:`, err)
-      }
-    }
-
-    // 5. Rebuild Purchase Return ledgers
-    try {
-      const pReturns = await db.query('SELECT * FROM purchase_returns')
-      console.log(`Rebuilding ledger entries for ${pReturns.rows?.length || 0} purchase returns...`)
-      for (const pr of pReturns.rows || []) {
-        try {
-          await createPurchaseReturnVoucherChain({
-            supplier: pr.supplier,
-            date: pr.date,
-            returnInvNo: pr.return_inv_no || pr.s_no,
-            sNo: pr.s_no,
-            purchaseReturnId: pr.id,
-            baseAmount: pr.base_amount || pr.total_amount,
-            taxAmount: pr.tax_amount || 0,
-            discAmount: pr.disc_amount || 0,
-            netAmount: pr.net_amount || pr.grand_total,
-            grandTotal: pr.grand_total || pr.net_amount || pr.total_amount,
-            narration: pr.remarks || `Purchase Return #${pr.return_inv_no || pr.s_no}`
-          })
-        } catch (err) {
-          console.error(`Error syncing purchase return #${pr.id}:`, err)
-        }
-      }
-    } catch (e) {
-      console.warn('Notice: purchase_returns table not available for sync:', e.message)
-    }
-
-    // 6. Rebuild Advances ledgers
-    const advances = await db.query('SELECT * FROM advances')
-    console.log(`Rebuilding ledger entries for ${advances.rows?.length || 0} advances...`)
-    for (const adv of advances.rows || []) {
-      try {
-        await createAdvanceLedgerEntries({
-          papadCompany: adv.papad_company_id || adv.papad_company,
-          date: adv.date,
-          sNo: adv.s_no,
-          advanceId: adv.id,
-          amount: adv.amount || 0,
-        })
-      } catch (err) {
-        console.error(`Error syncing advance #${adv.id}:`, err)
-      }
-    }
-
-    console.log('--- LEDGER SYNCHRONIZATION COMPLETED SUCCESSFULLY ---')
-  } catch (error) {
-    console.error('CRITICAL: Ledger synchronization failed:', error)
-  } finally {
-    // Re-enable foreign key constraints
-    await db.run('PRAGMA foreign_keys = ON')
-  }
+  await AccountingEngine.deleteVoucherBySource({
+    companyId: cId,
+    sourceModule: mod,
+    sourceId: /^\d+$/.test(String(referenceId)) ? Number(referenceId) : null,
+    referenceNo: String(referenceId),
+  });
+  return true;
 }
 
 module.exports = {
+  sanitizeDate,
+  getPartyName,
   getNextVoucherNumber,
   createLedgerEntry,
   createPurchaseLedgerEntries,
   createPurchaseVoucherChain,
   createPurchaseReturnVoucherChain,
   createSalesReturnVoucherChain,
+  createSalesVoucherChain,
   createSalesLedgerEntries,
   createAdvanceLedgerEntries,
   deleteLedgerEntries,
   deletePurchaseVoucherChain,
+  deleteSalesVoucherChain,
+  deleteAdvanceVoucherChain,
   deletePurchaseReturnVoucherChain,
   deleteSalesReturnVoucherChain,
   resolveLedgerId,
   ensureVoucherTables,
-  syncAllLedgers,
-}
+};

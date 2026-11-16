@@ -14,6 +14,7 @@ const { calculateLineTax } = require('../services/taxEngine')
 const { getColdStorageTariff, calculateLabourCharge, createOrUpdateColdStorageBill } = require('../services/ColdStorageBillingService')
 const { ensureColdStorageSchema } = require('../utils/coldStorageSchema')
 const OpChargeEngine = require('../services/operationalChargeEngine')
+const AccountingEngine = require('../services/AccountingEngine')
 
 async function ensurePurchasesTableSchema(companyId = null) {
   try {
@@ -34,10 +35,23 @@ async function ensurePurchasesTableSchema(companyId = null) {
     }
 
     const colsToAdd = [
+      { name: 'voucher_no', type: 'TEXT' },
+      { name: 'cgst_amount', type: 'REAL DEFAULT 0' },
+      { name: 'sgst_amount', type: 'REAL DEFAULT 0' },
+      { name: 'igst_amount', type: 'REAL DEFAULT 0' },
+      { name: 'cess_amount', type: 'REAL DEFAULT 0' },
+      { name: 'taxable_amount', type: 'REAL DEFAULT 0' },
+      { name: 'exempt_amount', type: 'REAL DEFAULT 0' },
+      { name: 'sub_total', type: 'REAL DEFAULT 0' },
+      { name: 'total_deductions', type: 'REAL DEFAULT 0' },
+      { name: 'round_off', type: 'REAL DEFAULT 0' },
+      { name: 'tax_mode', type: "TEXT DEFAULT 'Exclusive'" },
+      { name: 'loadman_qty_kg', type: 'REAL DEFAULT 0' },
+      { name: 'additional_charges', type: 'REAL DEFAULT 0' },
       { name: 'transport_charges', type: 'REAL DEFAULT 0' },
       { name: 'freight_amount', type: 'REAL DEFAULT 0' },
-      { name: 'transport_payable_type', type: 'TEXT DEFAULT "SEPARATE"' },
-      { name: 'loadman_payable_type', type: 'TEXT DEFAULT "SEPARATE"' },
+      { name: 'transport_payable_type', type: "TEXT DEFAULT 'SEPARATE'" },
+      { name: 'loadman_payable_type', type: "TEXT DEFAULT 'SEPARATE'" },
       { name: 'loadman_name', type: 'TEXT' },
       { name: 'loadman_worker_id', type: 'INTEGER' },
       { name: 'loadman_rate_per_kg', type: 'REAL DEFAULT 0.50' },
@@ -49,7 +63,7 @@ async function ensurePurchasesTableSchema(companyId = null) {
       { name: 'other_additional_charges', type: 'REAL DEFAULT 0' },
       { name: 'other_deductions', type: 'REAL DEFAULT 0' },
       { name: 'remarks_narration', type: 'TEXT' },
-      { name: 'tare_weight_status', type: 'TEXT DEFAULT "Pending"' },
+      { name: 'tare_weight_status', type: "TEXT DEFAULT 'Pending'" },
       { name: 'tare_weight_date', type: 'TEXT' },
       { name: 'tare_weight_time', type: 'TEXT' },
       { name: 'weighbridge_location', type: 'TEXT' },
@@ -59,7 +73,7 @@ async function ensurePurchasesTableSchema(companyId = null) {
       { name: 'unloading_time', type: 'TEXT' },
       { name: 'weighbridge_operator', type: 'TEXT' },
       { name: 'operator_name', type: 'TEXT' },
-      { name: 'weight_status', type: 'TEXT DEFAULT "TARE_PENDING"' },
+      { name: 'weight_status', type: "TEXT DEFAULT 'TARE_PENDING'" },
       { name: 'transporter', type: 'TEXT' },
       { name: 'transport', type: 'TEXT' },
       { name: 'vehicle_no', type: 'TEXT' },
@@ -98,14 +112,33 @@ async function ensurePurchasesTableSchema(companyId = null) {
   }
 }
 
-ensurePurchasesTableSchema();
+const _purSchemaInit = new Set();
+const initializedCompanyDbs = new Set();
 
-// Middleware to ensure cold storage schema exists for purchase auto-inward actions
+if (typeof db.registerCacheInvalidator === 'function') {
+  db.registerCacheInvalidator((cId) => {
+    if (cId === null || cId === undefined) {
+      _purSchemaInit.clear();
+      initializedCompanyDbs.clear();
+    } else {
+      const parsed = parseInt(cId, 10) || 1;
+      _purSchemaInit.delete(parsed);
+      initializedCompanyDbs.delete(parsed);
+    }
+  });
+}
+
+// Middleware to ensure purchases & cold storage schemas exist per active company (lazy cached)
 router.use(async (req, res, next) => {
   try {
-    const cId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
-    await ensureColdStorageSchema(cId);
-    await ensurePurchasesTableSchema(cId);
+    const cId = parseInt(req.companyId || req.headers['x-company-id'] || req.query?.company_id || 1, 10) || 1;
+    req.companyId = cId;
+    if (!_purSchemaInit.has(cId)) {
+      await AccountingEngine.ensureAccountingSchema(db.forCompany(cId), { companyId: cId });
+      await ensureColdStorageSchema(cId);
+      await ensurePurchasesTableSchema(cId);
+      _purSchemaInit.add(cId);
+    }
   } catch (err) {
     console.warn('[purchases] Cold storage schema check notice:', err.message);
   }
@@ -145,7 +178,6 @@ const getPurchaseWeights = (formData = {}) => {
 };
 
 // Ensure purchase deductions table and transport/vehicle columns exist for ERP purchase structure
-const initializedCompanyDbs = new Set();
 const ensurePurchaseDeductions = async (companyId = 1) => {
   const cId = parseInt(companyId, 10) || 1;
   if (initializedCompanyDbs.has(cId)) return;
@@ -187,12 +219,12 @@ const ensurePurchaseDeductions = async (companyId = 1) => {
       'ALTER TABLE purchases ADD COLUMN other_additional_charges REAL DEFAULT 0',
       'ALTER TABLE purchases ADD COLUMN other_deductions REAL DEFAULT 0',
       'ALTER TABLE purchases ADD COLUMN net_transport_amount REAL DEFAULT 0',
-      'ALTER TABLE purchases ADD COLUMN transport_payable_type TEXT DEFAULT "SEPARATE"',
+      "ALTER TABLE purchases ADD COLUMN transport_payable_type TEXT DEFAULT 'SEPARATE'",
       'ALTER TABLE purchases ADD COLUMN loadman_name TEXT',
       'ALTER TABLE purchases ADD COLUMN loadman_worker_id INTEGER',
       'ALTER TABLE purchases ADD COLUMN loadman_rate_per_kg REAL DEFAULT 0.50',
       'ALTER TABLE purchases ADD COLUMN loadman_charges REAL DEFAULT 0',
-      'ALTER TABLE purchases ADD COLUMN loadman_payable_type TEXT DEFAULT "SEPARATE"',
+      "ALTER TABLE purchases ADD COLUMN loadman_payable_type TEXT DEFAULT 'SEPARATE'",
       'ALTER TABLE purchases ADD COLUMN gross_weight REAL DEFAULT 0',
       'ALTER TABLE purchases ADD COLUMN tare_weight REAL DEFAULT 0',
       'ALTER TABLE purchases ADD COLUMN net_weight REAL DEFAULT 0',
@@ -201,7 +233,7 @@ const ensurePurchaseDeductions = async (companyId = 1) => {
       'ALTER TABLE purchases ADD COLUMN unloading_time TEXT',
       'ALTER TABLE purchases ADD COLUMN weighment_ref_no TEXT',
       'ALTER TABLE purchases ADD COLUMN operator_name TEXT',
-      'ALTER TABLE purchases ADD COLUMN weight_status TEXT DEFAULT "TARE_PENDING"',
+      "ALTER TABLE purchases ADD COLUMN weight_status TEXT DEFAULT 'TARE_PENDING'",
       'ALTER TABLE purchases ADD COLUMN stock_type TEXT',
       'ALTER TABLE purchases ADD COLUMN purchase_order_id INTEGER',
       'ALTER TABLE purchases ADD COLUMN po_no TEXT',
@@ -237,7 +269,7 @@ const ensurePurchaseDeductions = async (companyId = 1) => {
       `);
     } catch (_) {}
     for (const sql of [
-      'ALTER TABLE purchase_items ADD COLUMN tax_type TEXT DEFAULT "Taxable"',
+      "ALTER TABLE purchase_items ADD COLUMN tax_type TEXT DEFAULT 'Taxable'",
       'ALTER TABLE purchase_items ADD COLUMN gst_rate REAL DEFAULT 0',
       'ALTER TABLE purchase_items ADD COLUMN hsn_code TEXT'
     ]) {
@@ -255,7 +287,7 @@ const ensurePurchaseDeductions = async (companyId = 1) => {
 
 router.use(async (req, res, next) => {
   try {
-    const cId = req.headers['x-company-id'] || req.query.company_id || 1;
+    const cId = parseInt(req.companyId || req.headers['x-company-id'] || req.query?.company_id || 1, 10) || 1;
     await ensurePurchaseDeductions(cId);
     next();
   } catch (err) {
@@ -699,8 +731,15 @@ router.get('/:id/ledger-statement', async (req, res) => {
 
     try {
       let vRes = await db.query(
-        "SELECT * FROM voucher WHERE reference_no = ? AND (voucher_type = 'Purchase' OR voucher_type LIKE '%PUR%') ORDER BY id DESC LIMIT 1",
-        [String(purchaseId)],
+        `SELECT * FROM voucher
+          WHERE COALESCE(is_reversed, 0) = 0
+            AND (
+              (LOWER(COALESCE(source_module, '')) = 'purchase' AND source_id = ?)
+              OR UPPER(TRIM(voucher_no)) = UPPER(TRIM(?))
+              OR (reference_no IN (?, ?) AND voucher_type IN ('Purchase', 'PUR'))
+            )
+          ORDER BY id DESC LIMIT 1`,
+        [Number(purchaseId), String(purchase.voucher_no || ''), String(purchaseId), `PUR-${purchaseId}`],
         activeCompanyId
       );
       if (vRes.rows && vRes.rows.length > 0) {
@@ -719,11 +758,18 @@ router.get('/:id/ledger-statement', async (req, res) => {
     // Also check ledger_entries table
     try {
       const leRes = await db.query(
-        "SELECT * FROM ledger_entries WHERE reference_id = ? AND (voucher_type = 'Purchase' OR voucher_type LIKE '%PUR%') ORDER BY id ASC",
-        [String(purchaseId)],
+        `SELECT * FROM ledger_entries
+          WHERE COALESCE(is_reversed, 0) = 0
+            AND (voucher_id = ? OR (reference_id = ? AND LOWER(COALESCE(reference_type, '')) = 'purchase'))
+          ORDER BY id ASC`,
+        [voucherId || -1, Number(purchaseId)],
         activeCompanyId
       );
       ledgerEntries = leRes.rows || [];
+      if (!voucherId && ledgerEntries.length > 0 && ledgerEntries[0].voucher_id) {
+        voucherId = ledgerEntries[0].voucher_id;
+        voucherNo = ledgerEntries[0].voucher_no || voucherNo;
+      }
     } catch (leErr) {
       console.warn('Notice checking ledger_entries for purchase ledger-statement:', leErr.message);
     }
@@ -745,7 +791,7 @@ router.get('/:id/ledger-statement', async (req, res) => {
     const sgstAmount = Number(purchase.sgst_amount || (isInterstate ? 0 : taxAmount - cgstAmount));
     const igstAmount = Number(purchase.igst_amount || (isInterstate ? taxAmount : 0));
     const discAmount = Number(purchase.disc_amount || computedDisFromItems || 0);
-    const transportCharges = Number(purchase.transport_charges || purchase.freight_amount || 0);
+    const transportCharges = Number(purchase.net_transport_amount || purchase.transport_charges || purchase.freight_amount || 0);
     const loadmanCharges = Number(purchase.loadman_charges || 0);
     
     // Resolve Supplier Name
@@ -924,40 +970,52 @@ router.get('/:id/ledger-statement', async (req, res) => {
       });
     }
 
-    // Explicitly add Transport & Loadman to journal entries if not already there
-    // (The previous logic was doing it but let's make it cleaner and more robust)
-    
-    // Re-calculating based on standard ERP logic
-    const finalEntries = [];
-    let idx = 1;
-    
-    // Purchase (Dr)
-    finalEntries.push({ no: idx++, ledger_name: 'Purchase Account', account_head: 'Direct Expenses', debit: baseAmount, credit: 0, particulars: 'Taxable purchase value' });
-    
-    // Tax (Dr)
-    if (cgstAmount > 0) finalEntries.push({ no: idx++, ledger_name: 'Input CGST', account_head: 'Duties & Taxes', debit: cgstAmount, credit: 0, particulars: 'CGST Input' });
-    if (sgstAmount > 0) finalEntries.push({ no: idx++, ledger_name: 'Input SGST', account_head: 'Duties & Taxes', debit: sgstAmount, credit: 0, particulars: 'SGST Input' });
-    if (igstAmount > 0) finalEntries.push({ no: idx++, ledger_name: 'Input IGST', account_head: 'Duties & Taxes', debit: igstAmount, credit: 0, particulars: 'IGST Input' });
-    
-    // Supplier (Cr) - Gross Invoice
-    finalEntries.push({ no: idx++, ledger_name: supplierName, account_head: 'Sundry Creditors', debit: 0, credit: grossSupplierInvoice, particulars: `Purchase Invoice ${voucherNo}` });
-    
-    // Transport (Dr/Cr)
-    if (transportCharges > 0) {
-      finalEntries.push({ no: idx++, ledger_name: 'Transport Charges', account_head: 'Direct Expenses', debit: transportCharges, credit: 0, particulars: 'Freight Inward' });
-      finalEntries.push({ no: idx++, ledger_name: transporterName, account_head: 'Transporter Payable', debit: 0, credit: transportCharges, particulars: 'Freight Payable' });
-    }
-    
-    // Loadman (Dr/Cr)
-    if (loadmanCharges > 0) {
-      finalEntries.push({ no: idx++, ledger_name: 'Loadman Charges', account_head: 'Direct Expenses', debit: loadmanCharges, credit: 0, particulars: 'Unloading Fees' });
-      finalEntries.push({ no: idx++, ledger_name: loadmanName, account_head: 'Loadman Payable', debit: 0, credit: loadmanCharges, particulars: 'Labour Payable' });
-    }
-    
-    // Deductions (Dr/Cr)
-    if (totalDeductions > 0) {
-      finalEntries.push({ no: idx++, ledger_name: `${supplierName} (Adj)`, account_head: 'Sundry Creditors', debit: totalDeductions, credit: 0, particulars: 'Shortage/Quality Deduction' });
-      finalEntries.push({ no: idx++, ledger_name: 'Purchase Deduction Recovery', account_head: 'Indirect Income', debit: 0, credit: totalDeductions, particulars: 'Deduction Recovery' });
+    // Use persisted double-entry voucher_entry rows whenever available so statement matches exact live GL
+    const transPayableType = String(purchase.transport_payable_type || 'SEPARATE').toUpperCase();
+    const loadmanPayableType = String(purchase.loadman_payable_type || 'SEPARATE').toUpperCase();
+
+    let finalEntries = [];
+    if (rawVEntries && rawVEntries.length > 0) {
+      finalEntries = rawVEntries.map((ve, idx) => ({
+        no: idx + 1,
+        ledger_name: ve.ledger_name || 'Ledger Account',
+        account_head: ve.type === 'Dr' ? 'Debit Entry' : 'Credit Entry',
+        debit: Number(ve.debit || 0),
+        credit: Number(ve.credit || 0),
+        particulars: ve.remarks || `${voucherNo}`
+      }));
+    } else {
+      let idx = 1;
+      const supplierExtraFromIncluded =
+        (transportCharges > 0 && transPayableType === 'SUPPLIER_INVOICE' ? transportCharges : 0) +
+        (loadmanCharges > 0 && loadmanPayableType === 'SUPPLIER_INVOICE' ? loadmanCharges : 0);
+      const calcGrossSupplier = Number((baseAmount + taxAmount - discAmount + supplierExtraFromIncluded).toFixed(2));
+      const effectiveGrossSupplier = (purchase.grand_total && Number(purchase.grand_total) > 0 && supplierExtraFromIncluded === 0 && totalDeductions === 0)
+        ? Number(purchase.grand_total)
+        : calcGrossSupplier;
+
+      finalEntries.push({ no: idx++, ledger_name: 'Purchase Account', account_head: 'Direct Expenses', debit: baseAmount, credit: 0, particulars: 'Taxable purchase value' });
+      if (cgstAmount > 0) finalEntries.push({ no: idx++, ledger_name: 'Input CGST', account_head: 'Duties & Taxes', debit: cgstAmount, credit: 0, particulars: 'CGST Input' });
+      if (sgstAmount > 0) finalEntries.push({ no: idx++, ledger_name: 'Input SGST', account_head: 'Duties & Taxes', debit: sgstAmount, credit: 0, particulars: 'SGST Input' });
+      if (igstAmount > 0) finalEntries.push({ no: idx++, ledger_name: 'Input IGST', account_head: 'Duties & Taxes', debit: igstAmount, credit: 0, particulars: 'IGST Input' });
+      finalEntries.push({ no: idx++, ledger_name: supplierName, account_head: 'Sundry Creditors', debit: 0, credit: effectiveGrossSupplier, particulars: `Purchase Invoice ${voucherNo}` });
+
+      if (transportCharges > 0) {
+        finalEntries.push({ no: idx++, ledger_name: 'Transport Charges', account_head: 'Direct Expenses', debit: transportCharges, credit: 0, particulars: 'Freight Inward' });
+        if (transPayableType !== 'SUPPLIER_INVOICE') {
+          finalEntries.push({ no: idx++, ledger_name: transporterName, account_head: 'Transporter Payable', debit: 0, credit: transportCharges, particulars: 'Freight Payable' });
+        }
+      }
+      if (loadmanCharges > 0) {
+        finalEntries.push({ no: idx++, ledger_name: 'Loadman Charges', account_head: 'Direct Expenses', debit: loadmanCharges, credit: 0, particulars: 'Unloading Fees' });
+        if (loadmanPayableType !== 'SUPPLIER_INVOICE') {
+          finalEntries.push({ no: idx++, ledger_name: loadmanName, account_head: 'Loadman Payable', debit: 0, credit: loadmanCharges, particulars: 'Labour Payable' });
+        }
+      }
+      if (totalDeductions > 0) {
+        finalEntries.push({ no: idx++, ledger_name: `${supplierName} (Adj)`, account_head: 'Sundry Creditors', debit: totalDeductions, credit: 0, particulars: 'Shortage/Quality Deduction' });
+        finalEntries.push({ no: idx++, ledger_name: 'Purchase Deduction Recovery', account_head: 'Indirect Income', debit: 0, credit: totalDeductions, particulars: 'Deduction Recovery' });
+      }
     }
 
     journalEntries = finalEntries;
@@ -1116,6 +1174,7 @@ router.get('/:id/ledger-statement', async (req, res) => {
 // POST create new purchase
 router.post('/', async (req, res) => {
   try {
+    const activeCompanyId = parseInt(req.companyId || req.headers['x-company-id'] || req.query?.company_id || 1, 10) || 1;
     const { formData, items, totals, deductions } = req.body
 
     if (!formData.date || !formData.supplier || !items || items.length === 0) {
@@ -1144,27 +1203,29 @@ router.post('/', async (req, res) => {
     const transporter = formData.transporter || formData.transport || '';
     const vehicle_no = formData.vehicle_no || formData.lorry_no || '';
     const driver_name = formData.driver_name || formData.driver || '';
+    const workerName = formData.loadman_name || formData.worker_name || null;
 
-    let finalSno = parseInt(formData.sno || formData.s_no, 10);
-    if (!finalSno || isNaN(finalSno)) {
+    const txResult = await db.forCompany(activeCompanyId).withTransaction(async () => {
+      let finalSno = parseInt(formData.sno || formData.s_no, 10);
+      if (!finalSno || isNaN(finalSno)) {
+        try {
+          const snoRes = await db.query('SELECT COALESCE(MAX(s_no), 0) + 1 AS next_sno FROM purchases', [], activeCompanyId);
+          finalSno = parseInt(snoRes.rows[0]?.next_sno, 10) || 1;
+        } catch (e) {
+          finalSno = 1;
+        }
+      }
+
+      let finalInvNo = (formData.invNo || formData.inv_no || '').trim();
+      if (!finalInvNo) {
+        finalInvNo = `PUR-${finalSno}`;
+      }
       try {
-        const snoRes = await db.query('SELECT COALESCE(MAX(s_no), 0) + 1 AS next_sno FROM purchases');
-        finalSno = parseInt(snoRes.rows[0]?.next_sno, 10) || 1;
-      } catch (e) {
-        finalSno = 1;
-      }
-    }
-
-    let finalInvNo = (formData.invNo || formData.inv_no || '').trim();
-    if (!finalInvNo) {
-      finalInvNo = `PUR-${finalSno}`;
-    }
-    try {
-      const invCheck = await db.query('SELECT id FROM purchases WHERE inv_no = ? LIMIT 1', [finalInvNo]);
-      if (invCheck.rows && invCheck.rows.length > 0) {
-        finalInvNo = `${finalInvNo}-${Date.now().toString().slice(-4)}`;
-      }
-    } catch (e) {}
+        const invCheck = await db.query('SELECT id FROM purchases WHERE inv_no = ? LIMIT 1', [finalInvNo], activeCompanyId);
+        if (invCheck.rows && invCheck.rows.length > 0) {
+          finalInvNo = `${finalInvNo}-${Date.now().toString().slice(-4)}`;
+        }
+      } catch (e) {}
 
     let resolvedGodownId = null;
     let resolvedGodownName = '';
@@ -1225,6 +1286,58 @@ router.post('/', async (req, res) => {
       resolvedSupplierName = String(formData.supplier || '');
     }
 
+    let resolvedTransporterName = transporter || '';
+    if (resolvedTransporterName && /^\d+$/.test(String(resolvedTransporterName).trim())) {
+      try {
+        const tRes = await db.query('SELECT name, print_name FROM transport_master WHERE id = ?', [parseInt(resolvedTransporterName, 10)], activeCompanyId);
+        if (tRes.rows && tRes.rows[0]) {
+          resolvedTransporterName = tRes.rows[0].print_name || tRes.rows[0].name;
+        }
+      } catch (_) {}
+    }
+
+    let resolvedWorkerName = workerName || '';
+    if (formData.loadman_worker_id && (!resolvedWorkerName || /^\d+$/.test(String(resolvedWorkerName).trim()))) {
+      try {
+        const pmRes = await db.query('SELECT name FROM person_master WHERE id = ?', [parseInt(formData.loadman_worker_id, 10)], activeCompanyId);
+        if (pmRes.rows && pmRes.rows[0]) {
+          resolvedWorkerName = pmRes.rows[0].name;
+        } else {
+          const opRes = await db.query('SELECT name, print_name, linked_ledger_name FROM operational_parties WHERE id = ?', [parseInt(formData.loadman_worker_id, 10)], activeCompanyId);
+          if (opRes.rows && opRes.rows[0]) {
+            resolvedWorkerName = opRes.rows[0].linked_ledger_name || opRes.rows[0].print_name || opRes.rows[0].name;
+          }
+        }
+      } catch (_) {}
+    } else if (resolvedWorkerName && /^\d+$/.test(String(resolvedWorkerName).trim())) {
+      try {
+        const opRes = await db.query('SELECT name, print_name, linked_ledger_name FROM operational_parties WHERE id = ?', [parseInt(resolvedWorkerName, 10)], activeCompanyId);
+        if (opRes.rows && opRes.rows[0]) {
+          resolvedWorkerName = opRes.rows[0].linked_ledger_name || opRes.rows[0].print_name || opRes.rows[0].name;
+        }
+      } catch (_) {}
+    }
+
+    const freightAmtPost = parseFloat(formData.freight_amount || formData.transport_charges || 0);
+    const advAmtPost = parseFloat(formData.advance_amount || 0);
+    const mamoolAmtPost = parseFloat(formData.mamool_amount || 0);
+    const wtCashAmtPost = parseFloat(formData.weight_cash || formData.weight_cash_amount || 0);
+    const otherAddlAmtPost = parseFloat(formData.other_additional_charges || 0);
+    const otherDedAmtPost = parseFloat(formData.other_deductions || 0);
+    const totalDedPost = advAmtPost + mamoolAmtPost + otherDedAmtPost;
+    const totalAddlPost = wtCashAmtPost + otherAddlAmtPost;
+    const calcNetTransAmtPost = Math.max(0, parseFloat((freightAmtPost - totalDedPost + totalAddlPost).toFixed(2)));
+    const netTransAmtPost = parseFloat(formData.net_transport_amount) > 0
+      ? parseFloat(formData.net_transport_amount)
+      : (calcNetTransAmtPost > 0 ? calcNetTransAmtPost : freightAmtPost);
+    const transportChargesPost = netTransAmtPost > 0 ? netTransAmtPost : freightAmtPost;
+
+    const purTaxVal = parseFloat(totals.taxAmount) || 0;
+    const isInterstatePur = String(formData.taxType || formData.tax_type || '').toLowerCase().includes('inter');
+    const cgstPur = parseFloat(totals.cgstAmount || totals.cgst_amount) || (isInterstatePur ? 0 : Number((purTaxVal / 2).toFixed(2)));
+    const sgstPur = parseFloat(totals.sgstAmount || totals.sgst_amount) || (isInterstatePur ? 0 : Number((purTaxVal - cgstPur).toFixed(2)));
+    const igstPur = parseFloat(totals.igstAmount || totals.igst_amount) || (isInterstatePur ? purTaxVal : 0);
+
     const insertValues = [
       finalSno,
       formData.date || new Date().toISOString().slice(0, 10),
@@ -1244,8 +1357,8 @@ router.post('/', async (req, res) => {
       formData.tax_percent || 0,
       resolvedGodownName,
       formData.remarks || '',
-      transporter,
-      transporter,
+      resolvedTransporterName,
+      resolvedTransporterName,
       vehicle_no,
       vehicle_no,
       driver_name,
@@ -1255,7 +1368,7 @@ router.post('/', async (req, res) => {
       parseFloat(totals.totalAmount) || 0,
       parseFloat(totals.baseAmount) || 0,
       parseFloat(totals.discAmount) || 0,
-      parseFloat(totals.taxAmount) || 0,
+      purTaxVal,
       parseFloat(totals.netAmount) || 0,
       parseFloat(totals.deductionAmount || totals.deduction_amount) || 0,
       parseFloat(totals.grandTotal) || 0,
@@ -1266,9 +1379,9 @@ router.post('/', async (req, res) => {
       po_no,
       purchase_order_id,
       po_no,
-      parseFloat(formData.transport_charges || formData.net_transport_amount || formData.freight_amount || 0),
-      parseFloat(formData.freight_amount || formData.net_transport_amount || formData.transport_charges || 0),
-      formData.loadman_name || '',
+      transportChargesPost,
+      freightAmtPost,
+      resolvedWorkerName,
       parseFloat(formData.loadman_charges || 0),
       formData.transport_payable_type || 'SEPARATE',
       formData.loadman_payable_type || 'SEPARATE'
@@ -1288,18 +1401,6 @@ router.post('/', async (req, res) => {
     const purchaseId = purchaseResult.lastID
 
     try {
-      const freightAmt = parseFloat(formData.freight_amount || formData.transport_charges || 0);
-      const advAmt = parseFloat(formData.advance_amount || 0);
-      const mamoolAmt = parseFloat(formData.mamool_amount || 0);
-      const wtCashAmt = parseFloat(formData.weight_cash || formData.weight_cash_amount || 0);
-      const otherAddlAmt = parseFloat(formData.other_additional_charges || 0);
-      const otherDedAmt = parseFloat(formData.other_deductions || 0);
-      const totalDed = advAmt + mamoolAmt + otherDedAmt;
-      const totalAddl = wtCashAmt + otherAddlAmt;
-      const calcNetTransAmt = Math.max(0, parseFloat((freightAmt - totalDed + totalAddl).toFixed(2)));
-      const netTransAmt = parseFloat(formData.net_transport_amount) > 0 ? parseFloat(formData.net_transport_amount) : (calcNetTransAmt > 0 ? calcNetTransAmt : freightAmt);
-      const transportChargesVal = netTransAmt > 0 ? netTransAmt : freightAmt;
-
       await db.run(`
         UPDATE purchases SET
           transport_charges = ?,
@@ -1312,20 +1413,36 @@ router.post('/', async (req, res) => {
           other_deductions = ?,
           net_transport_amount = ?,
           driver_mobile = ?,
-          transport_date = ?
+          transport_date = ?,
+          cgst_amount = ?,
+          sgst_amount = ?,
+          igst_amount = ?,
+          sub_total = ?,
+          round_off = ?,
+          tax_mode = ?,
+          total_deductions = ?,
+          loadman_worker_id = ?
         WHERE id = ?
       `, [
-        transportChargesVal,
-        freightAmt,
-        advAmt,
-        mamoolAmt,
-        wtCashAmt,
-        wtCashAmt,
-        otherAddlAmt,
-        otherDedAmt,
-        netTransAmt,
+        transportChargesPost,
+        freightAmtPost,
+        advAmtPost,
+        mamoolAmtPost,
+        wtCashAmtPost,
+        wtCashAmtPost,
+        otherAddlAmtPost,
+        otherDedAmtPost,
+        netTransAmtPost,
         formData.driver_mobile || '',
         formData.transport_date || '',
+        cgstPur,
+        sgstPur,
+        igstPur,
+        parseFloat(totals.subTotal || totals.sub_total || totals.netAmount) || 0,
+        parseFloat(totals.roundOff || totals.round_off || 0),
+        formData.tax_mode || (isInterstatePur ? 'IGST' : 'CGST_SGST'),
+        parseFloat(totals.deductionAmount || totals.deduction_amount) || 0,
+        formData.loadman_worker_id || null,
         purchaseId
       ]);
     } catch (e) {
@@ -1345,7 +1462,7 @@ router.post('/', async (req, res) => {
       }
     }
 
-    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    // Atomic company context already active via withTransaction above
 
     for (const item of items) {
       const normalizedItem = normalizePurchaseItem(item)
@@ -1428,7 +1545,6 @@ router.post('/', async (req, res) => {
     // ------------------------------------------------------------------------
     // UNIVERSAL OPERATIONAL CHARGE RECORDING (LOADMAN / UNLOADING)
     // ------------------------------------------------------------------------
-    const workerName = formData.loadman_name || formData.worker_name || null;
     // Note: OpChargeEngine.recordOperationalCharge removed here to prevent duplicate ledger/voucher entries; createPurchaseVoucherChain handles authoritative accounting.
 
     // Check if the target godown is Cold Storage and automatically create/update linked Cold Storage IN voucher & items
@@ -1718,45 +1834,19 @@ router.post('/', async (req, res) => {
       ])
     }
 
-    try {
-      const purTaxVal = parseFloat(totals.taxAmount) || 0;
-      const isInterstatePur = String(formData.taxType || formData.tax_type || '').toLowerCase().includes('inter');
-      const cgstPur = parseFloat(totals.cgstAmount || totals.cgst_amount) || (isInterstatePur ? 0 : Number((purTaxVal / 2).toFixed(2)));
-      const sgstPur = parseFloat(totals.sgstAmount || totals.sgst_amount) || (isInterstatePur ? 0 : Number((purTaxVal - cgstPur).toFixed(2)));
-      const igstPur = parseFloat(totals.igstAmount || totals.igst_amount) || (isInterstatePur ? purTaxVal : 0);
-
-      const transportChargesPur = parseFloat(formData.transport_charges || formData.net_transport_amount || formData.freight_amount || formData.freight || 0);
-      const transporterPur = transporter || formData.transporter || formData.transport || '';
+      const transportChargesPur = transportChargesPost;
+      const transporterPur = resolvedTransporterName || transporter || formData.transporter || formData.transport || '';
       const transportPayableTypePur = formData.transport_payable_type || 'SEPARATE';
       const loadmanChargesPur = parseFloat(formData.loadman_charges || formData.unloading_charges || 0);
       const loadmanPayableTypePur = formData.loadman_payable_type || 'SEPARATE';
 
-      let supplierParam = formData.supplier_name || '';
-      if (!supplierParam || /^\d+$/.test(String(formData.supplier))) {
-        const supId = parseInt(formData.supplier || formData.supplier_id, 10);
-        if (!isNaN(supId)) {
-          const sRes = await db.query('SELECT name, print_name FROM supplier_master WHERE id = ?', [supId]);
-          if (sRes.rows && sRes.rows[0]) {
-            supplierParam = sRes.rows[0].print_name || sRes.rows[0].name;
-          }
-        }
-      }
+      let supplierParam = resolvedSupplierName || formData.supplier_name || '';
       if (!supplierParam) {
         supplierParam = String(formData.supplier || 'Supplier');
       }
 
-      let transporterParam = transporterPur;
-      if (/^\d+$/.test(String(transporterPur))) {
-        const trId = parseInt(transporterPur, 10);
-        if (!isNaN(trId)) {
-          const tRes = await db.query('SELECT name, print_name FROM transport_master WHERE id = ?', [trId]);
-          if (tRes.rows && tRes.rows[0]) {
-            transporterParam = tRes.rows[0].print_name || tRes.rows[0].name;
-          }
-        }
-      }
-
       const vRes = await createPurchaseLedgerEntries({
+        companyId: activeCompanyId,
         supplier: supplierParam,
         date: formData.date,
         invNo: finalInvNo,
@@ -1769,23 +1859,30 @@ router.post('/', async (req, res) => {
         isInterstate: isInterstatePur,
         discAmount: parseFloat(totals.discAmount) || 0,
         netAmount: parseFloat(totals.grandTotal) || 0,
+        roundOff: parseFloat(totals.roundOff || totals.round_off || 0),
         deductions: deductions || [],
-        transporter: transporterParam,
+        mamoolAmount: mamoolAmtPost,
+        weightCashAmount: wtCashAmtPost,
+        otherAdditionalCharges: otherAddlAmtPost,
+        otherDeductions: otherDedAmtPost,
+        transporter: transporterPur,
         transportCharges: transportChargesPur,
         transportPayableType: transportPayableTypePur,
         loadmanCharges: loadmanChargesPur,
-        loadmanName: workerName,
+        loadmanName: resolvedWorkerName,
         loadmanWorkerId: formData.loadman_worker_id || null,
         loadmanPayableType: loadmanPayableTypePur
-      })
+      });
       if (vRes?.voucherNo) {
-        try { await db.run('UPDATE purchases SET voucher_no = ? WHERE id = ?', [vRes.voucherNo, purchaseId]); } catch (_) {}
+        await db.run('UPDATE purchases SET voucher_no = ? WHERE id = ?', [vRes.voucherNo, purchaseId], activeCompanyId);
       }
-    } catch (ledgerError) {
-      console.error('Error creating ledger entries:', ledgerError)
-    }
 
-    // Trigger Central Notification & WhatsApp/SMS Alert
+      return { purchaseId, voucherNo: vRes?.voucherNo || null, resolvedGodownName };
+    });
+
+    const { purchaseId, voucherNo: createdVoucherNo, resolvedGodownName: finalGodownName } = txResult;
+
+    // Trigger Central Notification & WhatsApp/SMS Alert (post-commit)
     try {
       const { triggerTransactionNotification } = require('../utils/transactionNotifier');
       const itemDesc = items && items.length > 0 ? items.map(i => `${i.qty || 0} ${i.item_name || 'Bags'}`).slice(0, 3).join(', ') : 'Raw Material';
@@ -1807,7 +1904,7 @@ router.post('/', async (req, res) => {
           quantity: `${totals.totalWeight || 0} KG`,
           bags: totals.totalQty || 0,
           vehicle: vehicle_no || 'N/A',
-          godown: resolvedGodownName || 'Main Godown',
+          godown: finalGodownName || 'Main Godown',
           qc_status: 'PENDING',
           iqr_status: 'PENDING',
           created_by: req.user?.username || 'Store Operator',
@@ -1818,7 +1915,7 @@ router.post('/', async (req, res) => {
       console.warn('Central Notification Warning for Purchase:', notifErr.message);
     }
 
-    res.status(201).json({ success: true, message: 'Purchase saved successfully!', id: purchaseId })
+    res.status(201).json({ success: true, message: 'Purchase saved successfully!', id: purchaseId, voucher_no: createdVoucherNo })
   } catch (error) {
     console.error('Error saving purchase:', error)
     res.status(500).json({ message: 'Error saving purchase', error: error.message })
@@ -1839,34 +1936,10 @@ function sanitizeDate(val) {
 // PUT update purchase
 router.put('/:id', async (req, res) => {
   try {
+    const activeCompanyId = parseInt(req.companyId || req.headers['x-company-id'] || req.query?.company_id || 1, 10) || 1;
     const { formData, items, totals, deductions } = req.body
     const purchaseId = req.params.id
     const safeDeductions = Array.isArray(deductions) ? deductions : [];
-
-    const purchase_order_id = formData.purchase_order_id || formData.purchaseOrderId || formData.po_id || formData.source_order_id || null;
-    const po_no = formData.po_no || formData.poNo || formData.source_order_no || null;
-    const transporter = formData.transporter || formData.transport || '';
-    const vehicle_no = formData.vehicle_no || formData.lorry_no || '';
-    const driver_name = formData.driver_name || formData.driver || '';
-
-    let resolvedGodownId = null;
-    let resolvedGodownName = formData.godown || '';
-    const rawGodown = formData.godown_id || formData.godownId || formData.godown || null;
-    if (rawGodown && /^\d+$/.test(String(rawGodown))) {
-      resolvedGodownId = parseInt(rawGodown, 10);
-    }
-    try {
-      if (resolvedGodownId) {
-        const gRes = await db.query('SELECT godown_name FROM godown_master WHERE CAST(id AS TEXT) = ?', [String(resolvedGodownId)]);
-        if (gRes.rows && gRes.rows[0]) resolvedGodownName = gRes.rows[0].godown_name;
-      } else if (resolvedGodownName) {
-        const gRes = await db.query('SELECT id, godown_name FROM godown_master WHERE LOWER(godown_name) = LOWER(?)', [resolvedGodownName]);
-        if (gRes.rows && gRes.rows[0]) {
-          resolvedGodownId = gRes.rows[0].id;
-          resolvedGodownName = gRes.rows[0].godown_name;
-        }
-      }
-    } catch (e) {}
 
     const sanitizedDate = sanitizeDate(formData.date) || new Date().toISOString().slice(0, 10);
     const sanitizedInvDate = sanitizeDate(formData.invDate || formData.inv_date);
@@ -1875,230 +1948,283 @@ router.put('/:id', async (req, res) => {
       return res.status(400).json({ success: false, message: purchaseWeights.error });
     }
 
-    let resolvedSupplierName = formData.supplier_name || '';
-    if (!resolvedSupplierName || /^\d+$/.test(String(formData.supplier))) {
-      const sId = parseInt(formData.supplier || formData.supplier_id, 10);
-      if (!isNaN(sId)) {
+    const txResult = await db.forCompany(activeCompanyId).withTransaction(async () => {
+      const purchase_order_id = formData.purchase_order_id || formData.purchaseOrderId || formData.po_id || formData.source_order_id || null;
+      const po_no = formData.po_no || formData.poNo || formData.source_order_no || null;
+      const transporter = formData.transporter || formData.transport || '';
+      const vehicle_no = formData.vehicle_no || formData.lorry_no || '';
+      const driver_name = formData.driver_name || formData.driver || '';
+
+      let resolvedGodownId = null;
+      let resolvedGodownName = formData.godown || '';
+      const rawGodown = formData.godown_id || formData.godownId || formData.godown || null;
+      if (rawGodown && /^\d+$/.test(String(rawGodown))) {
+        resolvedGodownId = parseInt(rawGodown, 10);
+      }
+      try {
+        if (resolvedGodownId) {
+          const gRes = await db.query('SELECT godown_name FROM godown_master WHERE CAST(id AS TEXT) = ?', [String(resolvedGodownId)], activeCompanyId);
+          if (gRes.rows && gRes.rows[0]) resolvedGodownName = gRes.rows[0].godown_name;
+        } else if (resolvedGodownName) {
+          const gRes = await db.query('SELECT id, godown_name FROM godown_master WHERE LOWER(godown_name) = LOWER(?)', [resolvedGodownName], activeCompanyId);
+          if (gRes.rows && gRes.rows[0]) {
+            resolvedGodownId = gRes.rows[0].id;
+            resolvedGodownName = gRes.rows[0].godown_name;
+          }
+        }
+      } catch (e) {}
+
+      let resolvedSupplierName = formData.supplier_name || '';
+      if (!resolvedSupplierName || /^\d+$/.test(String(formData.supplier))) {
+        const sId = parseInt(formData.supplier || formData.supplier_id, 10);
+        if (!isNaN(sId)) {
+          try {
+            const sRes = await db.query('SELECT name, print_name FROM supplier_master WHERE id = ?', [sId], activeCompanyId);
+            if (sRes.rows && sRes.rows[0]) {
+              resolvedSupplierName = sRes.rows[0].print_name || sRes.rows[0].name;
+            }
+          } catch (_) {}
+        }
+      }
+      if (!resolvedSupplierName) {
+        resolvedSupplierName = String(formData.supplier || formData.supplier_id || '');
+      }
+
+      const existingRowRes = await db.query('SELECT id, voucher_no FROM purchases WHERE id = ? LIMIT 1', [purchaseId], activeCompanyId);
+      if (!existingRowRes.rows || existingRowRes.rows.length === 0) {
+        const notFoundErr = new Error('Purchase not found; no details were updated.');
+        notFoundErr.statusCode = 404;
+        throw notFoundErr;
+      }
+      const prevVoucherNo = existingRowRes.rows[0].voucher_no || null;
+
+      let resolvedTransporterName = transporter;
+      if (resolvedTransporterName && /^\d+$/.test(String(resolvedTransporterName).trim())) {
         try {
-          const sRes = await db.query('SELECT name, print_name FROM supplier_master WHERE id = ?', [sId]);
-          if (sRes.rows && sRes.rows[0]) {
-            resolvedSupplierName = sRes.rows[0].print_name || sRes.rows[0].name;
+          const tRes = await db.query('SELECT name, print_name FROM transport_master WHERE id = ?', [parseInt(resolvedTransporterName, 10)], activeCompanyId);
+          if (tRes.rows && tRes.rows[0]) {
+            resolvedTransporterName = tRes.rows[0].print_name || tRes.rows[0].name;
           }
         } catch (_) {}
       }
-    }
-    if (!resolvedSupplierName) {
-      resolvedSupplierName = String(formData.supplier || formData.supplier_id || '');
-    }
 
-    const updateResult = await db.run(`
-      UPDATE purchases SET
-        s_no = ?, date = ?, inv_no = ?, supplier = ?, pay_type = ?,
-        inv_date = ?, type = ?, stock_type = ?, contact_person = ?, address = ?, area = ?, phone = ?, gst_no = ?, email = ?,
-        tax_type = ?, tax_percent = ?, godown = ?,
-        remarks = ?, transporter = ?, transport = ?, vehicle_no = ?, lorry_no = ?, driver_name = ?, driver = ?,
-        total_qty = ?, total_weight = ?, total_amount = ?,
-        base_amount = ?, disc_amount = ?, tax_amount = ?, net_amount = ?,
-        deduction_amount = ?, grand_total = ?,
-        gross_weight = ?, tare_weight = ?, net_weight = ?,
-        purchase_order_id = ?, po_no = ?, source_order_id = ?, source_order_no = ?,
-        transport_charges = ?, freight_amount = ?, loadman_name = ?, loadman_charges = ?, transport_payable_type = ?, loadman_payable_type = ?,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `, [
-      formData.sno || formData.s_no,
-      sanitizedDate,
-      formData.invNo || formData.inv_no,
-      resolvedSupplierName,
-      formData.payType || formData.pay_type,
-      sanitizedInvDate,
-      formData.type,
-      formData.stock_type || formData.stockType || 'RM',
-      formData.contact_person,
-      formData.address,
-      formData.area,
-      formData.phone,
-      formData.gst_no,
-      formData.email,
-      formData.taxType || formData.tax_type,
-      formData.tax_percent || 0,
-      resolvedGodownName || formData.godown || '',
-      formData.remarks,
-      transporter,
-      transporter,
-      vehicle_no,
-      vehicle_no,
-      driver_name,
-      driver_name,
-      totals.totalQty,
-      totals.totalWeight,
-      totals.totalAmount,
-      totals.baseAmount,
-      totals.discAmount,
-      totals.taxAmount,
-      totals.netAmount,
-      totals.deductionAmount || totals.deduction_amount,
-      totals.grandTotal,
-      purchaseWeights.grossWeight,
-      purchaseWeights.tareWeight,
-      purchaseWeights.netWeight,
-      purchase_order_id,
-      po_no,
-      purchase_order_id,
-      po_no,
-      parseFloat(formData.transport_charges || formData.freight_amount || 0),
-      parseFloat(formData.freight_amount || formData.transport_charges || 0),
-      formData.loadman_name || '',
-      parseFloat(formData.loadman_charges || 0),
-      formData.transport_payable_type || 'SEPARATE',
-      formData.loadman_payable_type || 'SEPARATE',
-      purchaseId
-    ])
-    if (updateResult?.changes === 0) {
-      return res.status(404).json({ success: false, message: 'Purchase not found; no details were updated.' });
-    }
+      let resolvedWorkerName = formData.loadman_name || formData.worker_name || '';
+      const rawWorkerId = formData.loadman_worker_id || (!isNaN(resolvedWorkerName) && /^\d+$/.test(String(resolvedWorkerName).trim()) ? resolvedWorkerName : null);
+      if (rawWorkerId && (!resolvedWorkerName || /^\d+$/.test(String(resolvedWorkerName).trim()))) {
+        try {
+          const wRes = await db.query('SELECT name FROM person_master WHERE id = ?', [parseInt(rawWorkerId, 10)], activeCompanyId);
+          if (wRes.rows && wRes.rows[0]?.name) {
+            resolvedWorkerName = wRes.rows[0].name;
+          } else {
+            const opRes = await db.query('SELECT name FROM operational_parties WHERE id = ?', [parseInt(rawWorkerId, 10)], activeCompanyId);
+            if (opRes.rows && opRes.rows[0]?.name) {
+              resolvedWorkerName = opRes.rows[0].name;
+            }
+          }
+        } catch (_) {}
+      }
 
-    try {
-      const freightAmt = parseFloat(formData.freight_amount || formData.transport_charges || 0);
-      const advAmt = parseFloat(formData.advance_amount || 0);
-      const mamoolAmt = parseFloat(formData.mamool_amount || 0);
-      const wtCashAmt = parseFloat(formData.weight_cash || formData.weight_cash_amount || 0);
-      const otherAddlAmt = parseFloat(formData.other_additional_charges || 0);
-      const otherDedAmt = parseFloat(formData.other_deductions || 0);
+      const purTaxVal = parseFloat(totals?.taxAmount || 0) || 0;
+      const isInterstatePur = String(formData.taxType || formData.tax_type || '').toLowerCase().includes('inter');
+      const cgstPur = parseFloat(totals?.cgstAmount || totals?.cgst_amount) || (isInterstatePur ? 0 : Number((purTaxVal / 2).toFixed(2)));
+      const sgstPur = parseFloat(totals?.sgstAmount || totals?.sgst_amount) || (isInterstatePur ? 0 : Number((purTaxVal - cgstPur).toFixed(2)));
+      const igstPur = parseFloat(totals?.igstAmount || totals?.igst_amount) || (isInterstatePur ? purTaxVal : 0);
+
+      const freightAmt = parseFloat(formData.freight_amount || formData.transport_charges || 0) || 0;
+      const advAmt = parseFloat(formData.advance_amount || 0) || 0;
+      const mamoolAmt = parseFloat(formData.mamool_amount || 0) || 0;
+      const wtCashAmt = parseFloat(formData.weight_cash || formData.weight_cash_amount || 0) || 0;
+      const otherAddlAmt = parseFloat(formData.other_additional_charges || 0) || 0;
+      const otherDedAmt = parseFloat(formData.other_deductions || 0) || 0;
       const totalDed = advAmt + mamoolAmt + otherDedAmt;
       const totalAddl = wtCashAmt + otherAddlAmt;
       const calcNetTransAmt = Math.max(0, parseFloat((freightAmt - totalDed + totalAddl).toFixed(2)));
       const netTransAmt = parseFloat(formData.net_transport_amount) > 0 ? parseFloat(formData.net_transport_amount) : (calcNetTransAmt > 0 ? calcNetTransAmt : freightAmt);
       const transportChargesVal = netTransAmt > 0 ? netTransAmt : freightAmt;
+      const loadmanChargesVal = parseFloat(formData.loadman_charges || formData.unloading_charges || 0) || 0;
 
       await db.run(`
         UPDATE purchases SET
-          transport_charges = ?,
-          freight_amount = ?,
-          advance_amount = ?,
-          mamool_amount = ?,
-          weight_cash = ?,
-          weight_cash_amount = ?,
-          other_additional_charges = ?,
-          other_deductions = ?,
-          net_transport_amount = ?,
-          driver_mobile = ?,
-          transport_date = ?
+          s_no = ?, date = ?, inv_no = ?, supplier = ?, pay_type = ?,
+          inv_date = ?, type = ?, stock_type = ?, contact_person = ?, address = ?, area = ?, phone = ?, gst_no = ?, email = ?,
+          tax_type = ?, tax_mode = ?, tax_percent = ?, godown = ?,
+          remarks = ?, transporter = ?, transport = ?, vehicle_no = ?, lorry_no = ?, driver_name = ?, driver = ?,
+          total_qty = ?, total_weight = ?, total_amount = ?,
+          base_amount = ?, taxable_amount = ?, disc_amount = ?, tax_amount = ?,
+          cgst_amount = ?, sgst_amount = ?, igst_amount = ?,
+          sub_total = ?, net_amount = ?,
+          deduction_amount = ?, total_deductions = ?, round_off = ?, grand_total = ?,
+          gross_weight = ?, tare_weight = ?, net_weight = ?,
+          purchase_order_id = ?, po_no = ?, source_order_id = ?, source_order_no = ?,
+          transport_charges = ?, freight_amount = ?, net_transport_amount = ?,
+          advance_amount = ?, mamool_amount = ?, weight_cash = ?, weight_cash_amount = ?,
+          other_additional_charges = ?, other_deductions = ?, driver_mobile = ?, transport_date = ?,
+          loadman_name = ?, loadman_worker_id = ?, loadman_qty_kg = ?, loadman_rate_per_kg = ?,
+          loadman_charges = ?, additional_charges = ?,
+          transport_payable_type = ?, loadman_payable_type = ?,
+          updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `, [
+        formData.sno || formData.s_no,
+        sanitizedDate,
+        formData.invNo || formData.inv_no,
+        resolvedSupplierName,
+        formData.payType || formData.pay_type,
+        sanitizedInvDate,
+        formData.type,
+        formData.stock_type || formData.stockType || 'RM',
+        formData.contact_person,
+        formData.address,
+        formData.area,
+        formData.phone,
+        formData.gst_no,
+        formData.email,
+        formData.taxType || formData.tax_type,
+        formData.tax_mode || formData.taxType || formData.tax_type || 'Exclusive',
+        formData.tax_percent || 0,
+        resolvedGodownName || formData.godown || '',
+        formData.remarks,
+        resolvedTransporterName,
+        resolvedTransporterName,
+        vehicle_no,
+        vehicle_no,
+        driver_name,
+        driver_name,
+        totals.totalQty,
+        totals.totalWeight,
+        totals.totalAmount,
+        totals.baseAmount,
+        parseFloat(totals?.taxableAmount || totals?.baseAmount || 0) || 0,
+        totals.discAmount,
+        purTaxVal,
+        cgstPur,
+        sgstPur,
+        igstPur,
+        parseFloat(totals?.subTotal || totals?.netAmount || 0) || 0,
+        totals.netAmount,
+        totals.deductionAmount || totals.deduction_amount || 0,
+        parseFloat(totals?.totalDeductions || totals?.deductionAmount || totals?.deduction_amount || 0) || 0,
+        parseFloat(totals?.roundOff || totals?.round_off || 0) || 0,
+        totals.grandTotal,
+        purchaseWeights.grossWeight,
+        purchaseWeights.tareWeight,
+        purchaseWeights.netWeight,
+        purchase_order_id,
+        po_no,
+        purchase_order_id,
+        po_no,
         transportChargesVal,
         freightAmt,
+        netTransAmt,
         advAmt,
         mamoolAmt,
         wtCashAmt,
         wtCashAmt,
         otherAddlAmt,
         otherDedAmt,
-        netTransAmt,
         formData.driver_mobile || '',
         formData.transport_date || '',
+        resolvedWorkerName || '',
+        rawWorkerId ? parseInt(rawWorkerId, 10) : null,
+        parseFloat(formData.loadman_qty_kg || totals.totalWeight || 0) || 0,
+        parseFloat(formData.loadman_rate_per_kg || 0.50) || 0.50,
+        loadmanChargesVal,
+        parseFloat(formData.additional_charges || 0) || 0,
+        formData.transport_payable_type || 'SEPARATE',
+        formData.loadman_payable_type || 'SEPARATE',
         purchaseId
-      ]);
-    } catch (e) {
-      console.error('ERROR updating transport details on purchase update:', e);
-    }
+      ], activeCompanyId);
 
-    // Preserve existing stock lot statuses before deletion
-    const existingLotsResult = await db.query(`
-      SELECT lot_no, qc_status, unloading_status, godown_id, usable_for_production, approval_status, approval_date 
-      FROM stock_lots 
-      WHERE purchase_id = ?
-    `, [purchaseId]);
-    const preservedStatuses = {};
-    for (const lot of existingLotsResult.rows) {
-      if (lot.lot_no) {
-        preservedStatuses[lot.lot_no.toUpperCase()] = lot;
-      }
-    }
-
-    await db.run('DELETE FROM stock_lots WHERE purchase_id = ?', [purchaseId])
-    await db.run('DELETE FROM stock WHERE reference_id = ? AND type = ?', [purchaseId, 'Purchase'])
-    await db.run('DELETE FROM purchase_items WHERE purchase_id = ?', [purchaseId])
-    await db.run('DELETE FROM purchase_deductions WHERE purchase_id = ?', [purchaseId])
-
-    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
-
-    for (const item of items) {
-      const normalizedItem = normalizePurchaseItem(item)
-      const qty = normalizedItem.qty
-      const rate = normalizedItem.rate
-      const discPercent = normalizedItem.disc_percent
-      const taxPercent = normalizedItem.tax_percent
-      const perUnitWeight = normalizedItem.per_unit_weight
-      const totalWt = Number((normalizedItem.total_weight || (qty * perUnitWeight)).toFixed(3));
-
-      const lineTax = calculateLineTax({
-        qty,
-        rate,
-        discPercent,
-        discAmount: normalizedItem.disc_amount,
-        taxType: normalizedItem.tax_type || (taxPercent === 0 ? 'Nil Rated' : 'Taxable'),
-        taxMode: formData.tax_mode || formData.taxType || formData.tax_type || 'Exclusive',
-        gstRate: taxPercent,
-        hsnCode: normalizedItem.hsn_code
-      });
-      const baseAmount = lineTax.grossAmount;
-      const discountAmount = lineTax.discAmount;
-      const taxAmount = lineTax.totalTax;
-      const amount = lineTax.totalAmount;
-
-
-      let lotNo = normalizedItem.lot_no
-      if (!lotNo || lotNo === '') {
-        lotNo = await reserveNextLotNumber(activeCompanyId);
-      } else {
-        await recordLotNumber(lotNo, activeCompanyId);
-      }
-
-      await db.run(`
-        INSERT INTO purchase_items (
-          purchase_id, item_id, item_name, lot_no, per_unit_weight, qty, total_weight, rate,
-          disc_percent, disc_amount, tax_percent, gst_rate, tax_type, hsn_code, tax_amount, amount
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, [
-        purchaseId,
-        normalizedItem.item_id,
-        normalizedItem.item_name,
-        lotNo,
-        perUnitWeight,
-        qty,
-        totalWt,
-        rate,
-        discPercent,
-        discountAmount,
-        lineTax.gstRate,
-        lineTax.gstRate,
-        lineTax.taxType,
-        lineTax.hsnCode,
-        taxAmount,
-        amount
-      ])
-
-      let itemId = normalizedItem.item_id
-      if (isNaN(parseInt(itemId))) {
-        try {
-          const itemResult = await db.query('SELECT id FROM item_master WHERE item_name = ?', [normalizedItem.item_name])
-          if (itemResult.rows.length > 0) itemId = itemResult.rows[0].id
-        } catch {
-          // ignore
+      // Preserve existing stock lot statuses before deletion
+      const existingLotsResult = await db.query(`
+        SELECT lot_no, qc_status, unloading_status, godown_id, usable_for_production, approval_status, approval_date 
+        FROM stock_lots 
+        WHERE purchase_id = ?
+      `, [purchaseId], activeCompanyId);
+      const preservedStatuses = {};
+      for (const lot of existingLotsResult.rows) {
+        if (lot.lot_no) {
+          preservedStatuses[lot.lot_no.toUpperCase()] = lot;
         }
       }
 
-      await db.run(`
-        INSERT INTO stock_lots (item_id, item_name, lot_no, purchase_id, quantity, remaining_quantity, rate, qc_status, unloading_status, godown_id, godown_name)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'QC_PENDING', 'PENDING_DECISION', ?, ?)
-      `, [itemId, normalizedItem.item_name, lotNo, purchaseId, qty, qty, rate, resolvedGodownId, resolvedGodownName])
+      await db.run('DELETE FROM stock_lots WHERE purchase_id = ?', [purchaseId], activeCompanyId);
+      await db.run('DELETE FROM stock WHERE reference_id = ? AND type = ?', [purchaseId, 'Purchase'], activeCompanyId);
+      await db.run('DELETE FROM purchase_items WHERE purchase_id = ?', [purchaseId], activeCompanyId);
+      await db.run('DELETE FROM purchase_deductions WHERE purchase_id = ?', [purchaseId], activeCompanyId);
 
-      // Re-apply preserved status if this lot number already existed
-      const key = lotNo.toUpperCase();
-      if (preservedStatuses[key]) {
-        const p = preservedStatuses[key];
-        try {
+      for (const item of items) {
+        const normalizedItem = normalizePurchaseItem(item);
+        const qty = normalizedItem.qty;
+        const rate = normalizedItem.rate;
+        const discPercent = normalizedItem.disc_percent;
+        const taxPercent = normalizedItem.tax_percent;
+        const perUnitWeight = normalizedItem.per_unit_weight;
+        const totalWt = Number((normalizedItem.total_weight || (qty * perUnitWeight)).toFixed(3));
+
+        const lineTax = calculateLineTax({
+          qty,
+          rate,
+          discPercent,
+          discAmount: normalizedItem.disc_amount,
+          taxType: normalizedItem.tax_type || (taxPercent === 0 ? 'Nil Rated' : 'Taxable'),
+          taxMode: formData.tax_mode || formData.taxType || formData.tax_type || 'Exclusive',
+          gstRate: taxPercent,
+          hsnCode: normalizedItem.hsn_code
+        });
+        const discountAmount = lineTax.discAmount;
+        const taxAmount = lineTax.totalTax;
+        const amount = lineTax.totalAmount;
+
+        let lotNo = normalizedItem.lot_no;
+        if (!lotNo || lotNo === '') {
+          lotNo = await reserveNextLotNumber(activeCompanyId);
+        } else {
+          await recordLotNumber(lotNo, activeCompanyId);
+        }
+
+        await db.run(`
+          INSERT INTO purchase_items (
+            purchase_id, item_id, item_name, lot_no, per_unit_weight, qty, total_weight, rate,
+            disc_percent, disc_amount, tax_percent, gst_rate, tax_type, hsn_code, tax_amount, amount
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+          purchaseId,
+          normalizedItem.item_id,
+          normalizedItem.item_name,
+          lotNo,
+          perUnitWeight,
+          qty,
+          totalWt,
+          rate,
+          discPercent,
+          discountAmount,
+          lineTax.gstRate,
+          lineTax.gstRate,
+          lineTax.taxType,
+          lineTax.hsnCode,
+          taxAmount,
+          amount
+        ], activeCompanyId);
+
+        let itemId = normalizedItem.item_id;
+        if (isNaN(parseInt(itemId))) {
+          try {
+            const itemResult = await db.query('SELECT id FROM item_master WHERE item_name = ?', [normalizedItem.item_name], activeCompanyId);
+            if (itemResult.rows.length > 0) itemId = itemResult.rows[0].id;
+          } catch {
+            // ignore
+          }
+        }
+
+        await db.run(`
+          INSERT INTO stock_lots (item_id, item_name, lot_no, purchase_id, quantity, remaining_quantity, rate, qc_status, unloading_status, godown_id, godown_name)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 'QC_PENDING', 'PENDING_DECISION', ?, ?)
+        `, [itemId, normalizedItem.item_name, lotNo, purchaseId, qty, qty, rate, resolvedGodownId, resolvedGodownName], activeCompanyId);
+
+        const key = lotNo.toUpperCase();
+        if (preservedStatuses[key]) {
+          const p = preservedStatuses[key];
           await db.run(`
             UPDATE stock_lots SET 
               qc_status = ?, unloading_status = ?, godown_id = ?, 
@@ -2113,67 +2239,63 @@ router.put('/:id', async (req, res) => {
             p.approval_date || null,
             purchaseId,
             lotNo
-          ]);
-        } catch (e) {
-          console.error('Error restoring preserved stock lot status:', e.message);
+          ], activeCompanyId);
         }
+
+        await db.run(`
+          INSERT INTO stock (item_id, item_name, lot_no, qty, weight, rate, amount, date, type, reference_id, godown, godown_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Purchase', ?, ?, ?)
+        `, [itemId, normalizedItem.item_name, lotNo, qty, totalWt, rate, amount, sanitizedDate, purchaseId, resolvedGodownName || 'Main Godown', resolvedGodownId || 1], activeCompanyId);
       }
 
-      await db.run(`
-        INSERT INTO stock (item_id, item_name, lot_no, qty, weight, rate, amount, date, type, reference_id, godown, godown_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Purchase', ?, ?, ?)
-      `, [itemId, normalizedItem.item_name, lotNo, qty, totalWt, rate, amount, sanitizedDate, purchaseId, resolvedGodownName || 'Main Godown', resolvedGodownId || 1])
-    }
+      for (const ded of safeDeductions) {
+        await db.run(`
+          INSERT INTO purchase_deductions (
+            purchase_id, deduction_purchase_id, deduction_name, type, calc_type, value, amount, affect_cost_of_goods, remarks
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+          purchaseId,
+          ded.deduction_id || ded.deduction_purchase_id,
+          ded.deduction_name,
+          ded.type || ded.type?.toUpperCase() || 'LESS',
+          ded.calculation_type || ded.calc_type || 'Fixed',
+          ded.percentage || ded.value || 0,
+          ded.amount || 0,
+          ded.affect_cost_of_goods || 'No',
+          ded.remarks || ''
+        ], activeCompanyId);
+      }
 
-    for (const ded of safeDeductions) {
-      await db.run(`
-        INSERT INTO purchase_deductions (
-          purchase_id, deduction_purchase_id, deduction_name, type, calc_type, value, amount, affect_cost_of_goods, remarks
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, [
-        purchaseId,
-        ded.deduction_id || ded.deduction_purchase_id,
-        ded.deduction_name,
-        ded.type || ded.type?.toUpperCase() || 'LESS',
-        ded.calculation_type || ded.calc_type || 'Fixed',
-        ded.percentage || ded.value || 0,
-        ded.amount || 0,
-        ded.affect_cost_of_goods || 'No',
-        ded.remarks || ''
-      ])
-    }
-
-    try {
-      const purTaxVal = parseFloat(totals?.taxAmount || 0) || 0;
-      const isInterstatePur = String(formData.taxType || formData.tax_type || '').toLowerCase().includes('inter');
-      const cgstPur = parseFloat(totals?.cgstAmount || totals?.cgst_amount) || (isInterstatePur ? 0 : Number((purTaxVal / 2).toFixed(2)));
-      const sgstPur = parseFloat(totals?.sgstAmount || totals?.sgst_amount) || (isInterstatePur ? 0 : Number((purTaxVal - cgstPur).toFixed(2)));
-      const igstPur = parseFloat(totals?.igstAmount || totals?.igst_amount) || (isInterstatePur ? purTaxVal : 0);
-
-      const transportChargesPur = parseFloat(formData.transport_charges || formData.freight_amount || formData.freight || 0);
-      const transporterPur = transporter || formData.transporter || formData.transport || '';
+      const transportChargesPur = transportChargesVal;
+      const transporterPur = resolvedTransporterName || '';
       const transportPayableTypePur = formData.transport_payable_type || 'SEPARATE';
-      const loadmanChargesPur = parseFloat(formData.loadman_charges || formData.unloading_charges || 0);
-      const workerName = formData.loadman_name || formData.worker_name || null;
+      const loadmanChargesPur = loadmanChargesVal;
+      const workerName = resolvedWorkerName || null;
       const loadmanPayableTypePur = formData.loadman_payable_type || 'SEPARATE';
 
-      let existingVoucherNo = null;
-      try {
+      let existingVoucherNo = prevVoucherNo;
+      if (!existingVoucherNo) {
         const invStr = String(formData.invNo || formData.inv_no || '');
         const existingVRes = await db.query(
-          "SELECT voucher_no FROM voucher WHERE (reference_no = ? OR reference_no = ? OR reference_no = ?) AND voucher_type IN ('Purchase', 'PUR') LIMIT 1",
-          [String(purchaseId), `PUR-${purchaseId}`, invStr]
+          `SELECT v.voucher_no
+             FROM voucher v
+            WHERE COALESCE(v.is_reversed, 0) = 0
+              AND (
+                (LOWER(COALESCE(v.source_module, '')) = 'purchase' AND v.source_id = ?)
+                OR (v.reference_no IN (?, ?, ?) AND v.voucher_type IN ('Purchase', 'PUR'))
+                OR v.id IN (SELECT DISTINCT voucher_id FROM ledger_entries WHERE reference_id = ? AND LOWER(COALESCE(reference_type, '')) = 'purchase')
+              )
+            ORDER BY v.id DESC LIMIT 1`,
+          [Number(purchaseId), String(purchaseId), `PUR-${purchaseId}`, invStr, Number(purchaseId)],
+          activeCompanyId
         );
         existingVoucherNo = existingVRes.rows?.[0]?.voucher_no || null;
-        if (!existingVoucherNo) {
-          const pVRes = await db.query('SELECT voucher_no FROM purchases WHERE id = ? LIMIT 1', [purchaseId]);
-          existingVoucherNo = pVRes.rows?.[0]?.voucher_no || null;
-        }
-      } catch (_) {}
+      }
 
-      await deleteLedgerEntries(purchaseId, 'Purchase')
+      // Atomic upsert via AccountingEngine (allowUpdate + preserveVoucherNoOnUpdate — no pre-delete)
       const vRes = await createPurchaseLedgerEntries({
-        supplier: formData.supplier,
+        companyId: activeCompanyId,
+        supplier: resolvedSupplierName,
         date: sanitizedDate,
         invNo: formData.invNo || formData.inv_no || '',
         purchaseId,
@@ -2186,116 +2308,119 @@ router.put('/:id', async (req, res) => {
         discAmount: parseFloat(totals?.discAmount || 0) || 0,
         netAmount: parseFloat(totals?.grandTotal || totals?.netAmount || 0) || 0,
         deductions: safeDeductions,
+        roundOff: parseFloat(totals?.roundOff || totals?.round_off || 0) || 0,
+        mamoolAmount: mamoolAmt,
+        weightCashAmount: wtCashAmt,
+        otherAdditionalCharges: otherAddlAmt,
+        otherDeductions: otherDedAmt,
         transporter: transporterPur,
         transportCharges: transportChargesPur,
         transportPayableType: transportPayableTypePur,
         loadmanCharges: loadmanChargesPur,
         loadmanName: workerName,
-        loadmanWorkerId: formData.loadman_worker_id || null,
+        loadmanWorkerId: rawWorkerId || null,
         loadmanPayableType: loadmanPayableTypePur,
         existingVoucherNo
-      })
+      });
       if (vRes?.voucherNo) {
-        try { await db.run('UPDATE purchases SET voucher_no = ? WHERE id = ?', [vRes.voucherNo, purchaseId]); } catch (_) {}
+        await db.run('UPDATE purchases SET voucher_no = ? WHERE id = ?', [vRes.voucherNo, purchaseId], activeCompanyId);
       }
-    } catch (ledgerError) {
-      console.error('Error updating ledger entries for purchase:', ledgerError)
-    }
 
-    res.json({ success: true, message: 'Purchase updated successfully!' })
+      return { voucherNo: vRes?.voucherNo || existingVoucherNo };
+    });
+
+    res.json({ success: true, message: 'Purchase updated successfully!', voucher_no: txResult?.voucherNo || null })
   } catch (error) {
     console.error('Error updating purchase:', error)
-    res.status(500).json({ message: 'Error updating purchase', error: error.message })
+    const status = error.statusCode || 500;
+    res.status(status).json({ success: false, message: error.statusCode === 404 ? error.message : 'Error updating purchase', error: error.message })
   }
 })
 
 // DELETE purchase
 router.delete('/:id', async (req, res) => {
   try {
-    const purchaseId = req.params.id
+    const activeCompanyId = parseInt(req.companyId || req.headers['x-company-id'] || req.query?.company_id || 1, 10) || 1;
+    const purchaseId = req.params.id;
 
-    const lotCheck = await db.query(`
-      SELECT * FROM stock_lots
-      WHERE purchase_id = ? AND remaining_quantity < quantity
-    `, [purchaseId])
+    await db.forCompany(activeCompanyId).withTransaction(async () => {
+      const lotCheck = await db.query(`
+        SELECT * FROM stock_lots
+        WHERE purchase_id = ? AND remaining_quantity < quantity
+      `, [purchaseId], activeCompanyId);
 
-    if (lotCheck.rows.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Cannot delete purchase - stock from this lot has been used in sales or grinding. Please reverse those transactions first.'
-      })
-    }
-
-    const flourCheck = await db.query(`
-      SELECT fo.id, fo.s_no, fo.date, fo.papad_company
-      FROM flour_out fo
-      JOIN flour_out_items foi ON fo.id = foi.flour_out_id
-      JOIN stock_lots sl ON foi.lot_no = sl.lot_no
-      WHERE sl.purchase_id = ?
-    `, [purchaseId])
-
-    if (flourCheck.rows.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: `Cannot delete purchase - lots have been used in Grind (Flour Out) records. Please delete Grind records first. Reference: ${flourCheck.rows[0]?.s_no || 'Multiple'}`
-      })
-    }
-
-    try {
-      const pRes = await db.query('SELECT * FROM purchases WHERE id = ?', [purchaseId]);
-      if (pRes.rows && pRes.rows.length > 0) {
-        const pRow = pRes.rows[0];
-        const itemsRes = await db.query('SELECT * FROM purchase_items WHERE purchase_id = ?', [purchaseId]);
-        const dedRes = await db.query('SELECT * FROM purchase_deductions WHERE purchase_id = ?', [purchaseId]);
-        const lotsRes = await db.query('SELECT * FROM stock_lots WHERE purchase_id = ?', [purchaseId]);
-        const stockRes = await db.query("SELECT * FROM stock WHERE reference_id = ? AND type = 'Purchase'", [purchaseId]);
-
-        await recycleBinService.saveToRecycleBin({
-          moduleName: 'Purchase',
-          recordId: purchaseId,
-          title: `Purchase #${pRow.inv_no || pRow.s_no || purchaseId} - ${pRow.supplier || 'Supplier'}`,
-          recordData: {
-            tableName: 'purchases',
-            record: pRow,
-            subRecords: [
-              { tableName: 'purchase_items', records: itemsRes.rows || [] },
-              { tableName: 'purchase_deductions', records: dedRes.rows || [] },
-              { tableName: 'stock_lots', records: lotsRes.rows || [] },
-              { tableName: 'stock', records: stockRes.rows || [] }
-            ]
-          },
-          deletedBy: req.user?.username || 'admin'
-        });
+      if (lotCheck.rows.length > 0) {
+        const err = new Error('Cannot delete purchase - stock from this lot has been used in sales or grinding. Please reverse those transactions first.');
+        err.statusCode = 400;
+        throw err;
       }
-    } catch (e) {
-      console.warn('Recycle bin error in purchases:', e.message);
-    }
 
-    await db.run('DELETE FROM stock_lots WHERE purchase_id = ?', [purchaseId])
-    await db.run("DELETE FROM stock WHERE reference_id = ? AND type = 'Purchase'", [purchaseId])
+      const flourCheck = await db.query(`
+        SELECT fo.id, fo.s_no, fo.date, fo.papad_company
+        FROM flour_out fo
+        JOIN flour_out_items foi ON fo.id = foi.flour_out_id
+        JOIN stock_lots sl ON foi.lot_no = sl.lot_no
+        WHERE sl.purchase_id = ?
+      `, [purchaseId], activeCompanyId);
 
-    try {
-      await deleteLedgerEntries(purchaseId)
-    } catch (ledgerError) {
-      console.error('Error deleting purchase ledger entries:', ledgerError)
-    }
+      if (flourCheck.rows.length > 0) {
+        const err = new Error(`Cannot delete purchase - lots have been used in Grind (Flour Out) records. Please delete Grind records first. Reference: ${flourCheck.rows[0]?.s_no || 'Multiple'}`);
+        err.statusCode = 400;
+        throw err;
+      }
 
-    await db.run('DELETE FROM purchase_deductions WHERE purchase_id = ?', [purchaseId])
-    await db.run('DELETE FROM purchase_items WHERE purchase_id = ?', [purchaseId])
-    await db.run('DELETE FROM purchases WHERE id = ?', [purchaseId])
+      try {
+        const pRes = await db.query('SELECT * FROM purchases WHERE id = ?', [purchaseId], activeCompanyId);
+        if (pRes.rows && pRes.rows.length > 0) {
+          const pRow = pRes.rows[0];
+          const itemsRes = await db.query('SELECT * FROM purchase_items WHERE purchase_id = ?', [purchaseId], activeCompanyId);
+          const dedRes = await db.query('SELECT * FROM purchase_deductions WHERE purchase_id = ?', [purchaseId], activeCompanyId);
+          const lotsRes = await db.query('SELECT * FROM stock_lots WHERE purchase_id = ?', [purchaseId], activeCompanyId);
+          const stockRes = await db.query("SELECT * FROM stock WHERE reference_id = ? AND type = 'Purchase'", [purchaseId], activeCompanyId);
+
+          await recycleBinService.saveToRecycleBin({
+            companyId: activeCompanyId,
+            moduleName: 'Purchase',
+            recordId: purchaseId,
+            title: `Purchase #${pRow.inv_no || pRow.s_no || purchaseId} - ${pRow.supplier || 'Supplier'}`,
+            recordData: {
+              tableName: 'purchases',
+              record: pRow,
+              subRecords: [
+                { tableName: 'purchase_items', records: itemsRes.rows || [] },
+                { tableName: 'purchase_deductions', records: dedRes.rows || [] },
+                { tableName: 'stock_lots', records: lotsRes.rows || [] },
+                { tableName: 'stock', records: stockRes.rows || [] }
+              ]
+            },
+            deletedBy: req.user?.username || 'admin'
+          });
+        }
+      } catch (e) {
+        console.warn('Recycle bin error in purchases:', e.message);
+      }
+
+      await db.run('DELETE FROM stock_lots WHERE purchase_id = ?', [purchaseId], activeCompanyId);
+      await db.run("DELETE FROM stock WHERE reference_id = ? AND type = 'Purchase'", [purchaseId], activeCompanyId);
+      await deleteLedgerEntries(purchaseId, 'purchase', activeCompanyId);
+      await db.run('DELETE FROM purchase_deductions WHERE purchase_id = ?', [purchaseId], activeCompanyId);
+      await db.run('DELETE FROM purchase_items WHERE purchase_id = ?', [purchaseId], activeCompanyId);
+      await db.run('DELETE FROM purchases WHERE id = ?', [purchaseId], activeCompanyId);
+    });
 
     res.json({ success: true, message: 'Purchase deleted successfully' })
   } catch (error) {
     console.error('Error deleting purchase:', error)
-    res.status(500).json({ success: false, message: 'Error deleting purchase', error: error.message })
+    const status = error.statusCode || 500;
+    res.status(status).json({ success: false, message: error.statusCode === 400 ? error.message : 'Error deleting purchase', error: error.message })
   }
 })
 
-// PUT /api/purchases/:id/transport-details - Dedicated endpoint to persist transport freight details directly
+// PUT /api/purchases/:id/transport-details - Dedicated endpoint to persist transport freight details directly & update GL
 router.put('/:id/transport-details', async (req, res) => {
   try {
     const purchaseId = req.params.id;
-    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    const activeCompanyId = parseInt(req.companyId || req.headers['x-company-id'] || req.query?.company_id || 1, 10) || 1;
     await ensurePurchasesTableSchema(activeCompanyId);
 
     const {
@@ -2317,9 +2442,7 @@ router.put('/:id/transport-details', async (req, res) => {
       other_additional_charges,
       other_deductions,
       net_transport_amount,
-      transport_payable_type,
-      remarks,
-      transport_remarks
+      transport_payable_type
     } = req.body;
 
     const finalTransporter = transporter_name || transporter || '';
@@ -2341,50 +2464,119 @@ router.put('/:id/transport-details', async (req, res) => {
     const netTransAmt = (net_transport_amount !== undefined && net_transport_amount !== null && !isNaN(parseFloat(net_transport_amount)))
       ? parseFloat(net_transport_amount)
       : calcNetTransAmt;
+    const effectivePayableType = transport_payable_type || 'SEPARATE';
 
-    const result = await db.run(`
-      UPDATE purchases SET
-        transporter = ?,
-        transport = ?,
-        vehicle_no = ?,
-        lorry_no = ?,
-        driver_name = ?,
-        driver = ?,
-        driver_mobile = ?,
-        transport_date = ?,
-        freight_amount = ?,
-        advance_amount = ?,
-        mamool_amount = ?,
-        weight_cash = ?,
-        weight_cash_amount = ?,
-        other_additional_charges = ?,
-        other_deductions = ?,
-        net_transport_amount = ?,
-        transport_charges = ?,
-        transport_payable_type = ?,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `, [
-      finalTransporter,
-      finalTransporter,
-      finalVehicleNo,
-      finalVehicleNo,
-      finalDriverName,
-      finalDriverName,
-      finalDriverMobile,
-      finalTransportDate,
-      freightAmt,
-      advAmt,
-      mamoolAmt,
-      wtCashAmt,
-      wtCashAmt,
-      otherAddlAmt,
-      otherDedAmt,
-      netTransAmt,
-      netTransAmt,
-      transport_payable_type || 'SEPARATE',
-      purchaseId
-    ], activeCompanyId);
+    await db.forCompany(activeCompanyId).withTransaction(async () => {
+      const pRes = await db.query('SELECT * FROM purchases WHERE id = ? LIMIT 1', [purchaseId], activeCompanyId);
+      if (!pRes.rows || pRes.rows.length === 0) {
+        const notFound = new Error('Purchase not found');
+        notFound.statusCode = 404;
+        throw notFound;
+      }
+      const p = pRes.rows[0];
+
+      await db.run(`
+        UPDATE purchases SET
+          transporter = ?,
+          transport = ?,
+          vehicle_no = ?,
+          lorry_no = ?,
+          driver_name = ?,
+          driver = ?,
+          driver_mobile = ?,
+          transport_date = ?,
+          freight_amount = ?,
+          advance_amount = ?,
+          mamool_amount = ?,
+          weight_cash = ?,
+          weight_cash_amount = ?,
+          other_additional_charges = ?,
+          other_deductions = ?,
+          net_transport_amount = ?,
+          transport_charges = ?,
+          transport_payable_type = ?,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `, [
+        finalTransporter,
+        finalTransporter,
+        finalVehicleNo,
+        finalVehicleNo,
+        finalDriverName,
+        finalDriverName,
+        finalDriverMobile,
+        finalTransportDate,
+        freightAmt,
+        advAmt,
+        mamoolAmt,
+        wtCashAmt,
+        wtCashAmt,
+        otherAddlAmt,
+        otherDedAmt,
+        netTransAmt,
+        netTransAmt,
+        effectivePayableType,
+        purchaseId
+      ], activeCompanyId);
+
+      // Re-post Purchase GL voucher so Freight Expense / Transporter Payable updates atomically
+      const dedsRes = await db.query('SELECT * FROM purchase_deductions WHERE purchase_id = ?', [purchaseId], activeCompanyId).catch(() => ({ rows: [] }));
+      const purTaxVal = parseFloat(p.tax_amount || 0) || 0;
+      const isInterstatePur = String(p.tax_type || '').toLowerCase().includes('inter') || parseFloat(p.igst_amount || 0) > 0;
+      const cgstPur = parseFloat(p.cgst_amount || 0) || (isInterstatePur ? 0 : Number((purTaxVal / 2).toFixed(2)));
+      const sgstPur = parseFloat(p.sgst_amount || 0) || (isInterstatePur ? 0 : Number((purTaxVal - cgstPur).toFixed(2)));
+      const igstPur = parseFloat(p.igst_amount || 0) || (isInterstatePur ? purTaxVal : 0);
+
+      let existingTransportVNo = p.voucher_no || null;
+      if (!existingTransportVNo) {
+        const vLookup = await db.query(
+          `SELECT v.voucher_no FROM voucher v
+            WHERE COALESCE(v.is_reversed, 0) = 0
+              AND (
+                (LOWER(COALESCE(v.source_module, '')) = 'purchase' AND v.source_id = ?)
+                OR (v.reference_no IN (?, ?) AND v.voucher_type IN ('Purchase', 'PUR'))
+                OR v.id IN (SELECT DISTINCT voucher_id FROM ledger_entries WHERE reference_id = ? AND LOWER(COALESCE(reference_type, '')) = 'purchase')
+              )
+            ORDER BY v.id DESC LIMIT 1`,
+          [Number(purchaseId), String(purchaseId), `PUR-${purchaseId}`, Number(purchaseId)],
+          activeCompanyId
+        );
+        existingTransportVNo = vLookup.rows?.[0]?.voucher_no || null;
+      }
+
+      const vRes = await createPurchaseLedgerEntries({
+        companyId: activeCompanyId,
+        supplier: p.supplier,
+        date: p.date || finalTransportDate,
+        invNo: p.inv_no || p.id,
+        purchaseId,
+        baseAmount: parseFloat(p.base_amount || p.total_amount || 0) || 0,
+        taxAmount: purTaxVal,
+        cgstAmount: cgstPur,
+        sgstAmount: sgstPur,
+        igstAmount: igstPur,
+        isInterstate: isInterstatePur,
+        discAmount: parseFloat(p.disc_amount || 0) || 0,
+        netAmount: parseFloat(p.grand_total || p.net_amount || 0) || 0,
+        deductions: dedsRes.rows || [],
+        roundOff: parseFloat(p.round_off || 0) || 0,
+        mamoolAmount: mamoolAmt,
+        weightCashAmount: wtCashAmt,
+        otherAdditionalCharges: otherAddlAmt,
+        otherDeductions: otherDedAmt,
+        transporter: finalTransporter,
+        transportCharges: netTransAmt,
+        transportPayableType: effectivePayableType,
+        loadmanCharges: parseFloat(p.loadman_charges || 0) || 0,
+        loadmanName: p.loadman_name || null,
+        loadmanWorkerId: p.loadman_worker_id || null,
+        loadmanPayableType: p.loadman_payable_type || 'SEPARATE',
+        existingVoucherNo: existingTransportVNo
+      });
+      if (vRes?.voucherNo && vRes.voucherNo !== p.voucher_no) {
+        await db.run('UPDATE purchases SET voucher_no = ? WHERE id = ?', [vRes.voucherNo, purchaseId], activeCompanyId);
+      }
+    });
 
     const updated = await findPurchaseRecord(purchaseId, activeCompanyId);
     return res.json({
@@ -2394,7 +2586,8 @@ router.put('/:id/transport-details', async (req, res) => {
     });
   } catch (err) {
     console.error('Error updating transport details:', err);
-    return res.status(500).json({ success: false, message: 'Failed to update transport freight details', error: err.message });
+    const status = err.statusCode || 500;
+    return res.status(status).json({ success: false, message: err.statusCode === 404 ? err.message : 'Failed to update transport freight details', error: err.message });
   }
 });
 

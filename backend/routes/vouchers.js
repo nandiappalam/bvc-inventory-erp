@@ -1,16 +1,48 @@
 const express = require('express');
 const db = require('../config/database');
 const recycleBinService = require('../services/RecycleBinService');
+const AccountingEngine = require('../services/AccountingEngine');
 
 const router = express.Router();
 
-// Prefix map for auto voucher number (common format)
+// Prefix map for auto voucher number (type-specific prefixes per company & FY)
 const PREFIX_MAP = {
-  'Payment': 'VOC',
-  'Receipt': 'VOC',
-  'Contra': 'VOC',
-  'Journal': 'VOC'
+  'Payment': 'PAY',
+  'Receipt': 'REC',
+  'Contra': 'CON',
+  'Journal': 'JNL'
 };
+
+function resolveCompanyId(req) {
+  return parseInt(req.companyId || req.headers['x-company-id'] || req.query?.company_id || req.body?.company_id || 1, 10) || 1;
+}
+
+function stripPartySuffix(name) {
+  return String(name || '')
+    .replace(/\s*\((Supplier|Customer|Papad Co|Papad Company|Flour Mill|Worker|Loadman|Loadmen|Driver|Helper|Labour|Transporter|Bank|Cash|General)\)$/i, '')
+    .trim();
+}
+
+function inferTypeFromEntry(entry, voucherType) {
+  const rawName = String(entry.ledger_name || '');
+  const m = rawName.match(/\((Supplier|Customer|Papad Co|Papad Company|Flour Mill|Worker|Loadman|Loadmen|Driver|Helper|Labour|Transporter|Bank|Cash)\)$/i);
+  if (m) {
+    const tag = m[1].toLowerCase();
+    if (tag.includes('customer')) return 'Customer';
+    if (tag.includes('supplier') || tag.includes('papad') || tag.includes('flour')) return 'Supplier';
+    if (tag.includes('transporter')) return 'Transporter';
+    if (tag.includes('worker') || tag.includes('loadm') || tag.includes('driver') || tag.includes('helper') || tag.includes('labour')) return 'Worker';
+  }
+  const lid = String(entry.ledger_id || '');
+  if (lid.startsWith('CUST_')) return 'Customer';
+  if (lid.startsWith('SUP_') || lid.startsWith('PAP_') || lid.startsWith('FM_')) return 'Supplier';
+  if (lid.startsWith('TM_')) return 'Transporter';
+  if (lid.startsWith('OP_')) return 'Worker';
+  if (entry.ledger_type) return entry.ledger_type;
+  if (voucherType === 'Receipt' && Number(entry.credit || 0) > 0) return 'Customer';
+  if (voucherType === 'Payment' && Number(entry.debit || 0) > 0) return 'Supplier';
+  return null;
+}
 
 // Validate voucher data
 const validateVoucherData = (data) => {
@@ -765,54 +797,79 @@ async function healDatabaseVouchers() {
   }
 }
 
-const { resolveLedgerId } = require('../utils/ledgerHelper');
+const _voucherCompanyInit = new Set();
 
-initTables().catch(console.error);
+if (typeof db.registerCacheInvalidator === 'function') {
+  db.registerCacheInvalidator((cId) => {
+    if (cId === null || cId === undefined) _voucherCompanyInit.clear();
+    else _voucherCompanyInit.delete(parseInt(cId, 10) || 1);
+  });
+}
 
-// GET /vouchers/ledgers - Get standard ledgers + parties
+router.use(async (req, res, next) => {
+  try {
+    const cId = resolveCompanyId(req);
+    req.companyId = cId;
+    if (!_voucherCompanyInit.has(cId)) {
+      await AccountingEngine.ensureAccountingSchema(db.forCompany(cId), { companyId: cId });
+      _voucherCompanyInit.add(cId);
+    }
+  } catch (err) {
+    console.warn('[vouchers] Schema init notice:', err.message);
+  }
+  next();
+});
+
+// GET /vouchers/ledgers - Read-only list of ledgermaster + party accounts for current company
 router.get('/ledgers', async (req, res) => {
   try {
+    const cId = resolveCompanyId(req);
+    const cDb = db.forCompany(cId);
     const combinedLedgers = [];
     const seenNames = new Set();
+    const lmByName = new Map();
 
-    // 1. Fetch ledgermaster
+    // 1. Fetch ledgermaster (read-only)
     try {
-      const ledgers = await db.query(`
+      const ledgers = await cDb.query(`
         SELECT 
           lm.id, 
-          lm.name, 
-          lm.under, 
+          COALESCE(NULLIF(TRIM(lm.ledger_name), ''), lm.name) AS name,
+          COALESCE(NULLIF(TRIM(lm.group_name), ''), lm.under) AS under,
           lm.ledger_type, 
-          COALESCE(lgm.name, lm.under, lm.ledger_type, 'General') AS group_name
+          COALESCE(lg.group_name, NULLIF(TRIM(lm.group_name), ''), lm.under, lm.ledger_type, 'General') AS group_name
         FROM ledgermaster lm
-        LEFT JOIN ledgergroupmaster lgm ON (CAST(lgm.id AS TEXT) = CAST(lm.under AS TEXT) OR LOWER(TRIM(lgm.name)) = LOWER(TRIM(lm.under)))
+        LEFT JOIN ledger_groups lg ON (lm.group_id = lg.id OR LOWER(TRIM(lg.group_name)) = LOWER(TRIM(COALESCE(lm.group_name, lm.under, ''))))
       `, []);
       for (const row of ledgers.rows || []) {
-        if (row.name && !seenNames.has(row.name.toLowerCase())) {
-          seenNames.add(row.name.toLowerCase());
-          combinedLedgers.push({ 
-            id: row.id, 
-            name: row.name, 
-            under: row.under || 'General',
-            group_name: row.group_name || row.under || 'General',
-            ledger_type: row.ledger_type || 'General' 
-          });
+        const clean = String(row.name || '').trim();
+        if (clean) {
+          lmByName.set(clean.toLowerCase(), row.id);
+          if (!seenNames.has(clean.toLowerCase())) {
+            seenNames.add(clean.toLowerCase());
+            combinedLedgers.push({ 
+              id: row.id, 
+              name: clean, 
+              under: row.under || row.group_name || 'General',
+              group_name: row.group_name || row.under || 'General',
+              ledger_type: row.ledger_type || 'General' 
+            });
+          }
         }
       }
     } catch (err) {
-      console.warn('Error fetching standard ledgers:', err);
+      console.warn('Error fetching standard ledgers:', err.message);
     }
 
     // 2. Fetch suppliers
     try {
-      const suppliers = await db.query('SELECT name FROM supplier_master', []);
+      const suppliers = await cDb.query('SELECT id, name FROM supplier_master', []);
       for (const row of suppliers.rows || []) {
-        const name = row.name;
+        const name = String(row.name || '').trim();
         if (name && !seenNames.has(name.toLowerCase())) {
           seenNames.add(name.toLowerCase());
-          const ledgerId = await resolveLedgerId(name, 'Supplier');
           combinedLedgers.push({ 
-            id: ledgerId, 
+            id: lmByName.get(name.toLowerCase()) || `SUP_${row.id}`, 
             name: `${name} (Supplier)`, 
             under: 'Sundry Creditors',
             group_name: 'Sundry Creditors',
@@ -820,20 +877,17 @@ router.get('/ledgers', async (req, res) => {
           });
         }
       }
-    } catch (err) {
-      console.warn('Error fetching suppliers:', err);
-    }
+    } catch (_) {}
 
     // 3. Fetch customers
     try {
-      const customers = await db.query('SELECT name FROM customer_master', []);
+      const customers = await cDb.query('SELECT id, name FROM customer_master', []);
       for (const row of customers.rows || []) {
-        const name = row.name;
+        const name = String(row.name || '').trim();
         if (name && !seenNames.has(name.toLowerCase())) {
           seenNames.add(name.toLowerCase());
-          const ledgerId = await resolveLedgerId(name, 'Customer');
           combinedLedgers.push({ 
-            id: ledgerId, 
+            id: lmByName.get(name.toLowerCase()) || `CUST_${row.id}`, 
             name: `${name} (Customer)`, 
             under: 'Sundry Debtors',
             group_name: 'Sundry Debtors',
@@ -841,20 +895,17 @@ router.get('/ledgers', async (req, res) => {
           });
         }
       }
-    } catch (err) {
-      console.warn('Error fetching customers:', err);
-    }
+    } catch (_) {}
 
     // 4. Fetch papad companies
     try {
-      const papadCompanies = await db.query('SELECT name FROM papad_company_master', []);
+      const papadCompanies = await cDb.query('SELECT id, name FROM papad_company_master', []);
       for (const row of papadCompanies.rows || []) {
-        const name = row.name;
+        const name = String(row.name || '').trim();
         if (name && !seenNames.has(name.toLowerCase())) {
           seenNames.add(name.toLowerCase());
-          const ledgerId = await resolveLedgerId(name, 'Supplier');
           combinedLedgers.push({ 
-            id: ledgerId, 
+            id: lmByName.get(name.toLowerCase()) || `PAP_${row.id}`, 
             name: `${name} (Papad Co)`, 
             under: 'Sundry Creditors',
             group_name: 'Sundry Creditors',
@@ -862,20 +913,17 @@ router.get('/ledgers', async (req, res) => {
           });
         }
       }
-    } catch (err) {
-      console.warn('Error fetching papad companies:', err);
-    }
+    } catch (_) {}
 
     // 5. Fetch flourmills
     try {
-      const flourMills = await db.query('SELECT flourmill FROM flour_mill_master', []);
+      const flourMills = await cDb.query('SELECT id, flourmill FROM flour_mill_master', []);
       for (const row of flourMills.rows || []) {
-        const name = row.flourmill;
+        const name = String(row.flourmill || '').trim();
         if (name && !seenNames.has(name.toLowerCase())) {
           seenNames.add(name.toLowerCase());
-          const ledgerId = await resolveLedgerId(name, 'Supplier');
           combinedLedgers.push({ 
-            id: ledgerId, 
+            id: lmByName.get(name.toLowerCase()) || `FM_${row.id}`, 
             name: `${name} (Flour Mill)`, 
             under: 'Sundry Creditors',
             group_name: 'Sundry Creditors',
@@ -883,25 +931,19 @@ router.get('/ledgers', async (req, res) => {
           });
         }
       }
-    } catch (err) {
-      console.warn('Error fetching flourmills:', err);
-    }
+    } catch (_) {}
 
     // 6. Fetch operational parties (Workers, Loadmen, Drivers, Helpers, Labour)
     try {
-      const companyId = parseInt(req.headers['x-company-id'] || req.companyId || 1, 10) || 1;
-      try {
-        const { ensureOperationalTables } = require('../services/operationalChargeEngine');
-        await ensureOperationalTables(companyId);
-      } catch (_) {}
-      const opParties = await db.all(`SELECT id, name, COALESCE(category, party_category, 'Worker') as cat FROM operational_parties WHERE is_active = 1`).catch(() => []);
+      const { ensureOperationalTables } = require('../services/operationalChargeEngine');
+      await ensureOperationalTables(cId);
+      const opParties = await cDb.all(`SELECT id, name, COALESCE(category, party_category, 'Worker') as cat FROM operational_parties WHERE is_active = 1`).catch(() => []);
       for (const row of opParties || []) {
-        const name = row.name;
+        const name = String(row.name || '').trim();
         if (name && !seenNames.has(name.toLowerCase())) {
           seenNames.add(name.toLowerCase());
-          const ledgerId = await resolveLedgerId(name, 'Worker');
           combinedLedgers.push({ 
-            id: ledgerId, 
+            id: lmByName.get(name.toLowerCase()) || `OP_${row.id}`, 
             name: `${name} (${row.cat || 'Worker'})`, 
             under: 'Current Liabilities',
             group_name: 'Current Liabilities',
@@ -909,34 +951,27 @@ router.get('/ledgers', async (req, res) => {
           });
         }
       }
-    } catch (err) {
-      console.warn('Error fetching operational parties:', err);
-    }
+    } catch (_) {}
 
     // 7. Fetch transporters
     try {
-      const transporters = await db.query('SELECT id, name FROM transport_master', []);
+      const transporters = await cDb.query('SELECT id, name FROM transport_master', []);
       for (const row of transporters.rows || []) {
-        const name = row.name;
+        const name = String(row.name || '').trim();
         if (name && !seenNames.has(name.toLowerCase())) {
           seenNames.add(name.toLowerCase());
-          const ledgerId = await resolveLedgerId(name, 'Transporter');
           combinedLedgers.push({ 
-            id: ledgerId, 
+            id: lmByName.get(name.toLowerCase()) || `TM_${row.id}`, 
             name: `${name} (Transporter)`, 
-            under: 'Current Liabilities',
-            group_name: 'Current Liabilities',
+            under: 'Sundry Creditors',
+            group_name: 'Sundry Creditors',
             ledger_type: 'Transporter' 
           });
         }
       }
-    } catch (err) {
-      console.warn('Error fetching transporters:', err);
-    }
+    } catch (_) {}
 
-    // Sort by name
     combinedLedgers.sort((a, b) => a.name.localeCompare(b.name));
-
     res.json(combinedLedgers);
   } catch (error) {
     console.error('Error fetching combined ledgers:', error);
@@ -954,17 +989,32 @@ function formatVoucherParticulars(v, entries = []) {
   const crEntries = entries.filter(e => Number(e.credit) > 0);
 
   if (vType === 'purchase') {
-    // Primary party is the Supplier (Credit side)
-    const supplierEntry = crEntries.find(e => {
+    // Primary party is the Supplier (Credit side), never a Transporter, Worker, or Tax/Recovery line
+    const isExcludedPurCr = (e) => {
       const name = (e.ledger_name || '').toLowerCase();
       const type = (e.ledger_type || '').toLowerCase();
-      return type === 'supplier' || (!name.includes('discount') && !name.includes('bank') && !name.includes('cash') && !name.includes('tax') && !name.includes('loadman') && !name.includes('freight'));
-    }) || crEntries[0];
+      return ['transporter', 'worker', 'loadman', 'tax', 'income', 'expense'].includes(type)
+        || name.includes('discount')
+        || name.includes('recovery')
+        || name.includes('bank')
+        || name.includes('cash')
+        || name.includes('tax')
+        || name.includes('gst')
+        || name.includes('loadman')
+        || name.includes('freight')
+        || name.includes('transport')
+        || name.includes('round off');
+    };
+    const supplierEntry =
+      crEntries.find(e => (e.ledger_type || '').toLowerCase() === 'supplier')
+      || crEntries.find(e => (e.under || '').toLowerCase().includes('creditor') && !isExcludedPurCr(e))
+      || crEntries.find(e => !isExcludedPurCr(e))
+      || crEntries[0];
 
     primary = supplierEntry ? supplierEntry.ledger_name : (v.reference_no ? `Supplier (${v.reference_no})` : 'Purchase Account');
 
     const otherAccounts = entries
-      .filter(e => e !== supplierEntry)
+      .filter(e => e !== supplierEntry && (!supplierEntry || e.ledger_name !== supplierEntry.ledger_name))
       .map(e => e.ledger_name)
       .filter(Boolean);
     const uniqueOthers = Array.from(new Set(otherAccounts));
@@ -974,15 +1024,26 @@ function formatVoucherParticulars(v, entries = []) {
     secondary = [accountsPart, refPart].filter(Boolean).join(' | ');
 
   } else if (vType === 'sales') {
-    const custEntry = drEntries.find(e => {
+    const isExcludedSalDr = (e) => {
       const name = (e.ledger_name || '').toLowerCase();
       const type = (e.ledger_type || '').toLowerCase();
-      return type === 'customer' || (!name.includes('discount') && !name.includes('bank') && !name.includes('cash') && !name.includes('tax'));
-    }) || drEntries[0];
+      return ['transporter', 'worker', 'loadman', 'tax', 'income', 'expense'].includes(type)
+        || name.includes('discount')
+        || name.includes('bank')
+        || name.includes('cash')
+        || name.includes('tax')
+        || name.includes('gst')
+        || name.includes('round off');
+    };
+    const custEntry =
+      drEntries.find(e => (e.ledger_type || '').toLowerCase() === 'customer')
+      || drEntries.find(e => (e.under || '').toLowerCase().includes('debtor') && !isExcludedSalDr(e))
+      || drEntries.find(e => !isExcludedSalDr(e))
+      || drEntries[0];
 
     primary = custEntry ? custEntry.ledger_name : 'Customer Account';
     const otherAccounts = entries
-      .filter(e => e !== custEntry)
+      .filter(e => e !== custEntry && (!custEntry || e.ledger_name !== custEntry.ledger_name))
       .map(e => e.ledger_name)
       .filter(Boolean);
     const uniqueOthers = Array.from(new Set(otherAccounts));
@@ -1027,6 +1088,9 @@ function formatVoucherParticulars(v, entries = []) {
 // GET /vouchers
 router.get('/', async (req, res) => {
   try {
+    const cId = resolveCompanyId(req);
+    const cDb = db.forCompany(cId);
+
     let query = `
       SELECT v.*, 
       COALESCE(SUM(ve.debit), 0) as total_debit,
@@ -1036,9 +1100,12 @@ router.get('/', async (req, res) => {
       LEFT JOIN voucher_entry ve ON v.id = ve.voucher_id
       LEFT JOIN ledgermaster lm ON ve.ledger_id = lm.id
     `;
-    let params = [];
-    let conditions = [];
-    
+    const params = [];
+    const conditions = [];
+
+    if (req.query.include_reversed !== '1') {
+      conditions.push('COALESCE(v.is_reversed, 0) = 0');
+    }
     if (req.query.from_date) {
       conditions.push('v.date >= ?');
       params.push(req.query.from_date);
@@ -1071,14 +1138,13 @@ router.get('/', async (req, res) => {
     
     query += ' GROUP BY v.id ORDER BY v.date DESC, v.id DESC';
     
-    const result = await db.query(query, params);
+    const result = await cDb.query(query, params);
     const vouchers = result.rows || [];
 
-    // Batch load entries for rich particulars and audit-compliant ledger formatting
     const voucherIds = vouchers.map(v => v.id).filter(Boolean);
     if (voucherIds.length > 0) {
       const placeholders = voucherIds.map(() => '?').join(',');
-      const entriesRes = await db.query(`
+      const entriesRes = await cDb.query(`
         SELECT ve.*, COALESCE(NULLIF(ve.ledger_name, ''), lm.name, 'Party Account') as ledger_name,
                lm.ledger_type, lm.under
         FROM voucher_entry ve
@@ -1102,7 +1168,6 @@ router.get('/', async (req, res) => {
         v.secondary_particular = secondary;
         v.particulars_display = primary + (secondary ? ` (${secondary})` : '');
 
-        // Recalculate debit & credit directly from loaded entries for absolute precision
         if (entList.length > 0) {
           const calcDebit = entList.reduce((sum, e) => sum + (Number(e.debit) || 0), 0);
           const calcCredit = entList.reduce((sum, e) => sum + (Number(e.credit) || 0), 0);
@@ -1128,221 +1193,686 @@ router.get('/', async (req, res) => {
   }
 });
 
-// POST /vouchers/reconcile - Manual or automated trigger to balance any out-of-balance entries
+// POST /vouchers/reconcile - Read-only accounting balance diagnostic (never mutates ledgers)
 router.post('/reconcile', async (req, res) => {
   try {
-    await reconcileUnbalancedVouchers();
-    res.json({ success: true, message: 'All vouchers checked and balanced successfully.' });
+    const cId = resolveCompanyId(req);
+    const cDb = db.forCompany(cId);
+    const resCheck = await cDb.query(`
+      SELECT v.id, v.voucher_no, v.voucher_type, v.date,
+             COALESCE(SUM(ve.debit), 0) AS total_debit,
+             COALESCE(SUM(ve.credit), 0) AS total_credit,
+             ROUND(COALESCE(SUM(ve.debit), 0) - COALESCE(SUM(ve.credit), 0), 2) AS difference
+        FROM voucher v
+        LEFT JOIN voucher_entry ve ON ve.voucher_id = v.id
+       WHERE COALESCE(v.is_reversed, 0) = 0
+       GROUP BY v.id
+      HAVING ABS(COALESCE(SUM(ve.debit), 0) - COALESCE(SUM(ve.credit), 0)) >= 0.01
+    `);
+    const unbalanced = resCheck.rows || [];
+    res.json({
+      success: true,
+      company_id: cId,
+      is_balanced: unbalanced.length === 0,
+      unbalanced_count: unbalanced.length,
+      unbalanced_vouchers: unbalanced,
+      message: unbalanced.length === 0
+        ? 'All active vouchers are balanced.'
+        : `Found ${unbalanced.length} unbalanced voucher(s) requiring correction.`
+    });
   } catch (err) {
     console.error('POST /vouchers/reconcile error:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// Fixed duplicate POST removed
+function mapIncomingVoucherLines(entries = [], voucherType = 'Journal') {
+  return (entries || []).map((entry) => {
+    const rawId = entry.ledger_id ?? entry.ledgerId;
+    const isNumericId = rawId !== undefined && rawId !== null && rawId !== '' && /^\d+$/.test(String(rawId).trim()) && Number(rawId) > 0;
+    const rawName = entry.ledger_name || entry.ledgerName || (!isNumericId && rawId ? String(rawId) : '');
+    const cleanName = stripPartySuffix(rawName);
+    return {
+      ledgerId: isNumericId ? Number(rawId) : null,
+      ledgerName: cleanName || rawName || null,
+      ledgerType: inferTypeFromEntry(entry, voucherType),
+      groupName: entry.group_name || entry.groupName || null,
+      debit: Number(entry.debit || 0),
+      credit: Number(entry.credit || 0),
+      remarks: entry.remarks || '',
+      particulars: entry.particulars || '',
+    };
+  });
+}
 
-// POST /vouchers - Create
+// POST /vouchers - Create atomically via AccountingEngine
 router.post('/', async (req, res) => {
   try {
-    const data = req.body;
+    const cId = resolveCompanyId(req);
+    const cDb = db.forCompany(cId);
+    const data = req.body || {};
 
-    // Pre-resolve any string or non-numeric ledger_id (e.g. TM_1, custom names, etc.)
-    const { resolveLedgerId } = require('../utils/ledgerHelper');
-    const resolvedEntries = [];
-    for (const entry of data.entries || []) {
-      const nextEntry = { ...entry };
-      if (!nextEntry.ledger_id || isNaN(Number(nextEntry.ledger_id)) || Number(nextEntry.ledger_id) <= 0) {
-        const nameToResolve = nextEntry.ledger_name || (typeof nextEntry.ledger_id === 'string' && isNaN(Number(nextEntry.ledger_id)) ? nextEntry.ledger_id : 'General Account');
-        const resolvedId = await resolveLedgerId(nameToResolve, data.voucher_type === 'Receipt' ? 'Customer' : 'Supplier');
-        if (resolvedId) {
-          nextEntry.ledger_id = resolvedId;
-          nextEntry.ledger_name = nameToResolve;
-        } else {
-          nextEntry.ledger_id = 1;
-        }
-      }
-      nextEntry.resolved_ledger_name = await resolveLedgerName(nextEntry, '');
-      resolvedEntries.push(nextEntry);
+    if (!data.voucher_type || !['Payment', 'Receipt', 'Contra', 'Journal'].includes(data.voucher_type)) {
+      return res.status(400).json({ error: 'Invalid voucher_type. Must be Payment, Receipt, Contra, or Journal' });
+    }
+    if (!data.date) {
+      return res.status(400).json({ error: 'Date is required' });
     }
 
-    validateVoucherData({ ...data, entries: resolvedEntries });
+    const mappedLines = mapIncomingVoucherLines(data.entries, data.voucher_type);
+    const postingKey = data.posting_key || `manual:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
 
-    // Auto generate voucher_no if not provided
-    let voucher_no = data.voucher_no;
-    if (!voucher_no) {
-      voucher_no = await generateVoucherNo(data.voucher_type);
-    }
+    const posted = await cDb.withTransaction(async (txConn) => {
+      return AccountingEngine.postVoucher({
+        conn: txConn,
+        companyId: cId,
+        voucherType: data.voucher_type,
+        prefix: PREFIX_MAP[data.voucher_type],
+        existingVoucherNo: data.voucher_no ? String(data.voucher_no).trim() : null,
+        date: data.date,
+        referenceNo: data.reference_no || '',
+        narration: data.narration || '',
+        sourceModule: 'manual_voucher',
+        sourceId: null,
+        postingKey,
+        lines: mappedLines,
+        allowUpdate: false,
+        status: data.status || 'Approved',
+      });
+    });
 
-    const conn = await db.getConnection();
-    let voucherId = null;
-    try {
-      await conn.beginTransaction();
-
-      // Insert voucher master
-      const voucherResult = await conn.run(
-        'INSERT INTO voucher (voucher_type, voucher_no, date, reference_no, narration, status, posted) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [data.voucher_type, voucher_no, data.date, data.reference_no || '', data.narration || '', data.status || 'Approved', data.posted !== undefined ? data.posted : 1]
-      );
-      voucherId = voucherResult.lastInsertRowid || voucherResult.lastID;
-
-      // Insert entries & post to ledger_entries on same transactional connection
-      for (const entry of resolvedEntries) {
-        const entryType = entry.type || (Number(entry.debit) > 0 ? 'Dr' : 'Cr');
-        const ledger_name = entry.resolved_ledger_name;
-
-        await conn.run(
-          'INSERT INTO voucher_entry (voucher_id, type, ledger_id, ledger_name, debit, credit, remarks) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          [voucherId, entryType, entry.ledger_id, ledger_name, entry.debit || 0, entry.credit || 0, entry.remarks || '']
-        );
-
-        const particularsText = (entry.remarks && entry.remarks.trim())
-          ? entry.remarks.trim()
-          : ((data.reference_no && data.reference_no.trim())
-              ? data.reference_no.trim()
-              : (data.narration || ''));
-
-        await conn.run(
-          `INSERT INTO ledger_entries (ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit, particulars, voucher_id) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [entry.ledger_id, ledger_name, data.date, data.voucher_type, voucher_no, entry.debit || 0, entry.credit || 0, particularsText, voucherId]
-        );
-      }
-
-      await conn.commit();
-    } catch (txErr) {
-      try { await conn.rollback(); } catch (_) {}
-      throw txErr;
-    } finally {
-      await conn.release();
-    }
-
-    // Return created with details
-    const created = await db.query(`
-      SELECT v.*, SUM(ve.debit) total_debit, SUM(ve.credit) total_credit 
-      FROM voucher v LEFT JOIN voucher_entry ve ON v.id = ve.voucher_id 
+    const created = await cDb.query(`
+      SELECT v.*, COALESCE(SUM(ve.debit), 0) AS total_debit, COALESCE(SUM(ve.credit), 0) AS total_credit
+      FROM voucher v LEFT JOIN voucher_entry ve ON v.id = ve.voucher_id
       WHERE v.id = ? GROUP BY v.id
-    `, [voucherId]);
-    res.status(201).json(created.rows[0]);
+    `, [posted.voucherId]);
+
+    res.status(201).json(created.rows[0] || posted);
   } catch (err) {
     console.error('POST /vouchers error:', err);
     res.status(400).json({ error: err.message });
   }
 });
 
-// GET /vouchers/:id - Single with entries
+// GET /vouchers/lookup?q=... - Lookup automatic voucher with ALL involved ledger accounts, parties, and payment/settlement history
+router.get('/lookup', async (req, res) => {
+  try {
+    const cId = resolveCompanyId(req);
+    const cDb = db.forCompany(cId);
+    const rawQ = String(req.query.q || req.query.voucher_no || '').trim();
+    if (!rawQ) {
+      return res.status(400).json({ found: false, message: 'Search query is required' });
+    }
+
+    const qLower = rawQ.toLowerCase();
+    const qCompact = qLower.replace(/[-\s]/g, '');
+    const numericOnly = /^\d+$/.test(rawQ) ? String(parseInt(rawQ, 10)) : null;
+
+    // 1. Try matching voucher directly
+    let voucherRow = null;
+    const vCandidates = await cDb.query(`
+      SELECT * FROM voucher
+      WHERE COALESCE(is_reversed, 0) = 0
+        AND (
+          LOWER(TRIM(voucher_no)) = ?
+          OR LOWER(REPLACE(TRIM(voucher_no), '-', '')) = ?
+          OR LOWER(TRIM(COALESCE(reference_no, ''))) = ?
+          OR (source_id IS NOT NULL AND CAST(source_id AS TEXT) = ?)
+        )
+      ORDER BY CASE WHEN voucher_type IN ('Purchase', 'Sales') THEN 0 ELSE 1 END, id DESC
+      LIMIT 5
+    `, [qLower, qCompact, qLower, rawQ]);
+
+    if (vCandidates.rows && vCandidates.rows.length > 0) {
+      voucherRow = vCandidates.rows.find(v => LOWER_EQ(v.voucher_no, rawQ) || LOWER_EQ(String(v.voucher_no || '').replace(/-/g, ''), qCompact)) || vCandidates.rows[0];
+    }
+
+    function LOWER_EQ(a, b) {
+      return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+    }
+
+    // 2. Look up linked purchase or sale if any (or find voucher via purchase/sale)
+    let purchaseRow = null;
+    let saleRow = null;
+
+    try {
+      const pMatchVal = voucherRow && voucherRow.source_module === 'purchase' && voucherRow.source_id
+        ? String(voucherRow.source_id)
+        : rawQ;
+      const pRes = await cDb.query(`
+        SELECT p.*,
+          COALESCE(sm.print_name, sm.name, CAST(p.supplier AS TEXT), '') AS resolved_supplier_name,
+          COALESCE(tm.print_name, tm.name, NULLIF(TRIM(CAST(p.transporter AS TEXT)), ''), '') AS resolved_transporter_name,
+          COALESCE(pm.name, op.name, op.print_name, op.linked_ledger_name, NULLIF(TRIM(CAST(p.loadman_name AS TEXT)), ''), '') AS resolved_loadman_name
+        FROM purchases p
+        LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR LOWER(TRIM(sm.name)) = LOWER(TRIM(CAST(p.supplier AS TEXT))) OR LOWER(TRIM(sm.print_name)) = LOWER(TRIM(CAST(p.supplier AS TEXT))))
+        LEFT JOIN transport_master tm ON (CAST(tm.id AS TEXT) = CAST(p.transporter AS TEXT) OR LOWER(TRIM(tm.name)) = LOWER(TRIM(CAST(p.transporter AS TEXT))))
+        LEFT JOIN person_master pm ON (p.loadman_worker_id IS NOT NULL AND CAST(pm.id AS TEXT) = CAST(p.loadman_worker_id AS TEXT))
+        LEFT JOIN operational_parties op ON ((p.loadman_worker_id IS NOT NULL AND CAST(op.id AS TEXT) = CAST(p.loadman_worker_id AS TEXT)) OR CAST(op.id AS TEXT) = CAST(p.loadman_name AS TEXT))
+        WHERE LOWER(TRIM(COALESCE(p.voucher_no, ''))) = ?
+           OR LOWER(REPLACE(TRIM(COALESCE(p.voucher_no, '')), '-', '')) = ?
+           OR LOWER(TRIM(COALESCE(p.inv_no, ''))) = ?
+           OR CAST(p.id AS TEXT) = ?
+           OR CAST(p.s_no AS TEXT) = ?
+        ORDER BY p.id DESC
+        LIMIT 1
+      `, [qLower, qCompact, qLower, pMatchVal, numericOnly || rawQ]);
+      if (pRes.rows && pRes.rows[0]) {
+        purchaseRow = pRes.rows[0];
+        if (!voucherRow) {
+          const vFromPur = await cDb.query(`
+            SELECT * FROM voucher
+            WHERE COALESCE(is_reversed, 0) = 0
+              AND voucher_type = 'Purchase'
+              AND (
+                (source_module = 'purchase' AND source_id = ?)
+                OR LOWER(TRIM(voucher_no)) = LOWER(TRIM(COALESCE(?, '')))
+                OR CAST(reference_no AS TEXT) = CAST(? AS TEXT)
+              )
+            ORDER BY id DESC LIMIT 1
+          `, [purchaseRow.id, purchaseRow.voucher_no || '', purchaseRow.id]);
+          if (vFromPur.rows && vFromPur.rows[0]) voucherRow = vFromPur.rows[0];
+        }
+      }
+    } catch (_) {}
+
+    if (!purchaseRow) {
+      try {
+        const sMatchVal = voucherRow && voucherRow.source_module === 'sales' && voucherRow.source_id
+          ? String(voucherRow.source_id)
+          : rawQ;
+        const sRes = await cDb.query(`
+          SELECT s.*,
+            COALESCE(cm.print_name, cm.name, CAST(s.customer AS TEXT), '') AS resolved_customer_name
+          FROM sales s
+          LEFT JOIN customer_master cm ON (CAST(cm.id AS TEXT) = CAST(s.customer AS TEXT) OR LOWER(TRIM(cm.name)) = LOWER(TRIM(CAST(s.customer AS TEXT))) OR LOWER(TRIM(cm.print_name)) = LOWER(TRIM(CAST(s.customer AS TEXT))))
+          WHERE LOWER(TRIM(COALESCE(s.voucher_no, ''))) = ?
+             OR LOWER(REPLACE(TRIM(COALESCE(s.voucher_no, '')), '-', '')) = ?
+             OR CAST(s.id AS TEXT) = ?
+             OR CAST(s.s_no AS TEXT) = ?
+          ORDER BY s.id DESC
+          LIMIT 1
+        `, [qLower, qCompact, sMatchVal, numericOnly || rawQ]);
+        if (sRes.rows && sRes.rows[0]) {
+          saleRow = sRes.rows[0];
+          if (!voucherRow) {
+            const vFromSal = await cDb.query(`
+              SELECT * FROM voucher
+              WHERE COALESCE(is_reversed, 0) = 0
+                AND voucher_type = 'Sales'
+                AND (
+                  (source_module = 'sales' AND source_id = ?)
+                  OR LOWER(TRIM(voucher_no)) = LOWER(TRIM(COALESCE(?, '')))
+                  OR CAST(reference_no AS TEXT) = CAST(? AS TEXT)
+                )
+              ORDER BY id DESC LIMIT 1
+            `, [saleRow.id, saleRow.voucher_no || '', saleRow.id]);
+            if (vFromSal.rows && vFromSal.rows[0]) voucherRow = vFromSal.rows[0];
+          }
+        }
+      } catch (_) {}
+    }
+
+    if (!voucherRow && !purchaseRow && !saleRow) {
+      return res.status(404).json({ found: false, message: `No voucher or invoice found matching "${rawQ}"` });
+    }
+
+    // 3. Fetch ALL ledger posting rows for this voucher
+    let entries = [];
+    if (voucherRow) {
+      const entRes = await cDb.query(`
+        SELECT ve.*,
+               COALESCE(NULLIF(ve.ledger_name, ''), lm.ledger_name, lm.name, 'General Ledger') AS ledger_name,
+               COALESCE(lm.ledger_type, '') AS ledger_type,
+               COALESCE(NULLIF(lm.group_name, ''), lm.under, '') AS group_name
+        FROM voucher_entry ve
+        LEFT JOIN ledgermaster lm ON ve.ledger_id = lm.id
+        WHERE ve.voucher_id = ?
+        ORDER BY ve.id ASC
+      `, [voucherRow.id]);
+      entries = entRes.rows || [];
+
+      if (entries.length === 0) {
+        const leRes = await cDb.query(`
+          SELECT le.*,
+                 COALESCE(NULLIF(le.ledger_name, ''), lm.ledger_name, lm.name, 'General Ledger') AS ledger_name,
+                 COALESCE(lm.ledger_type, '') AS ledger_type,
+                 COALESCE(NULLIF(lm.group_name, ''), lm.under, '') AS group_name
+          FROM ledger_entries le
+          LEFT JOIN ledgermaster lm ON le.ledger_id = lm.id
+          WHERE le.voucher_id = ? OR LOWER(TRIM(le.voucher_no)) = LOWER(TRIM(?))
+          ORDER BY le.id ASC
+        `, [voucherRow.id, voucherRow.voucher_no]);
+        entries = (leRes.rows || []).map(r => ({
+          ...r,
+          type: Number(r.debit || 0) > 0 ? 'Dr' : 'Cr',
+          remarks: r.particulars || ''
+        }));
+      }
+    }
+
+    const cleanName = (n) => String(n || '').replace(/\s*\([^)]*\)$/i, '').trim();
+    const classifyEntryRole = (e) => {
+      const lt = String(e.ledger_type || '').toLowerCase();
+      const grp = String(e.group_name || '').toLowerCase();
+      const nm = cleanName(e.ledger_name).toLowerCase();
+      const rem = String(e.remarks || '').toLowerCase();
+
+      if (purchaseRow) {
+        if (purchaseRow.resolved_supplier_name && nm === cleanName(purchaseRow.resolved_supplier_name).toLowerCase()) return 'Supplier';
+        if (purchaseRow.resolved_transporter_name && nm === cleanName(purchaseRow.resolved_transporter_name).toLowerCase()) return 'Transporter';
+        if (purchaseRow.resolved_loadman_name && nm === cleanName(purchaseRow.resolved_loadman_name).toLowerCase()) return 'Loadman';
+      }
+      if (saleRow && saleRow.resolved_customer_name && nm === cleanName(saleRow.resolved_customer_name).toLowerCase()) {
+        return 'Customer';
+      }
+      if (lt === 'supplier') return 'Supplier';
+      if (lt === 'transporter' || rem.includes('transport charges payable')) return 'Transporter';
+      if (lt === 'worker' || lt === 'loadman' || rem.includes('loading/unloading charges payable')) return 'Loadman';
+      if (lt === 'customer') return 'Customer';
+      if (lt === 'tax' || grp.includes('duties') || nm.includes('cgst') || nm.includes('sgst') || nm.includes('igst') || nm.includes('gst')) return 'Tax';
+      if (nm === 'purchase account' || nm.startsWith('purchase ') || lt === 'purchase') return 'Purchase Account';
+      if (nm === 'sales account' || nm.startsWith('sales ') || lt === 'sales') return 'Sales Account';
+      if (nm.includes('transport charges') || nm.includes('loadman charges') || nm.includes('freight') || lt === 'expense' || grp.includes('expense')) return 'Expense';
+      if (nm.includes('recovery') || nm.includes('discount') || nm.includes('deduction')) return 'Adjustment / Recovery';
+      if (lt === 'cash' || lt === 'bank' || nm.includes('cash') || nm.includes('bank')) return 'Cash / Bank';
+      if (grp.includes('creditor')) return 'Supplier';
+      if (grp.includes('debtor')) return 'Customer';
+      return 'Ledger';
+    };
+
+    const annotatedEntries = entries.map(e => ({
+      id: e.id,
+      type: Number(e.debit || 0) > 0 ? 'Dr' : 'Cr',
+      ledger_id: e.ledger_id,
+      ledger_name: cleanName(e.ledger_name),
+      ledger_type: e.ledger_type || '',
+      group_name: e.group_name || '',
+      role: classifyEntryRole(e),
+      debit: Number(e.debit || 0),
+      credit: Number(e.credit || 0),
+      remarks: e.remarks || ''
+    }));
+
+    // 4. Identify reference tokens to find all Payment / Receipt settlement vouchers
+    const refTokens = new Set();
+    const addTok = (v) => {
+      if (v === undefined || v === null) return;
+      const s = String(v).trim().toLowerCase();
+      if (s) {
+        refTokens.add(s);
+        refTokens.add(s.replace(/-/g, ''));
+      }
+    };
+    if (voucherRow) {
+      addTok(voucherRow.voucher_no);
+      addTok(voucherRow.reference_no);
+    }
+    if (purchaseRow) {
+      addTok(purchaseRow.voucher_no);
+      addTok(purchaseRow.inv_no);
+      addTok(purchaseRow.s_no);
+      addTok(purchaseRow.id);
+      addTok(`PUR-${purchaseRow.inv_no}`);
+      addTok(`PUR${purchaseRow.id}`);
+    }
+    if (saleRow) {
+      addTok(saleRow.voucher_no);
+      addTok(saleRow.s_no);
+      addTok(saleRow.id);
+      addTok(`SAL-${saleRow.s_no}`);
+    }
+
+    // 5. Build distinct settleable party obligations from the voucher / transaction
+    const partyMap = new Map();
+    const vTypeLower = String(voucherRow?.voucher_type || (purchaseRow ? 'Purchase' : 'Sales')).toLowerCase();
+    for (const ent of annotatedEntries) {
+      const role = ent.role;
+      const isSettleableRole = ['Supplier', 'Transporter', 'Loadman', 'Customer'].includes(role);
+      if (!isSettleableRole) continue;
+
+      const key = ent.ledger_name.toLowerCase();
+      if (!partyMap.has(key)) {
+        let category = 'general';
+        let settlementType = 'Payable';
+        if (role === 'Supplier') { category = 'purchase'; settlementType = 'Payable'; }
+        else if (role === 'Transporter') { category = 'transport'; settlementType = 'Payable'; }
+        else if (role === 'Loadman') { category = 'loadman'; settlementType = 'Payable'; }
+        else if (role === 'Customer') { category = 'sales'; settlementType = 'Receivable'; }
+
+        partyMap.set(key, {
+          ledger_id: ent.ledger_id,
+          ledger_name: ent.ledger_name,
+          role,
+          category,
+          type: settlementType,
+          voucher_type: role === 'Transporter' ? 'Transport' : role === 'Loadman' ? 'Loadman' : (purchaseRow ? 'Purchase' : 'Sales'),
+          billed_amount: 0,
+          paid_amount: 0,
+          outstanding_amount: 0,
+          remarks: ent.remarks || ''
+        });
+      }
+      const pItem = partyMap.get(key);
+      // For Payable roles: Cr increases payable, Dr decreases (e.g. Purchase Deduction Recovery)
+      // For Receivable roles: Dr increases receivable, Cr decreases
+      if (pItem.type === 'Payable') {
+        pItem.billed_amount = Math.round((pItem.billed_amount + ent.credit - ent.debit) * 100) / 100;
+      } else {
+        pItem.billed_amount = Math.round((pItem.billed_amount + ent.debit - ent.credit) * 100) / 100;
+      }
+      if (!pItem.ledger_id && ent.ledger_id) pItem.ledger_id = ent.ledger_id;
+    }
+
+    // 6. Fetch recorded Payment / Receipt settlement vouchers referencing this voucher or invoice
+    const settlements = [];
+    const settlementVouchersRes = await cDb.query(`
+      SELECT v.*
+      FROM voucher v
+      WHERE COALESCE(v.is_reversed, 0) = 0
+        AND v.voucher_type IN ('Payment', 'Receipt', 'Contra', 'Journal')
+        ${voucherRow ? 'AND v.id != ?' : ''}
+      ORDER BY v.date DESC, v.id DESC
+    `, voucherRow ? [voucherRow.id] : []);
+
+    const candIds = (settlementVouchersRes.rows || []).map(r => r.id);
+    const candEntriesMap = new Map();
+    if (candIds.length > 0) {
+      const ph = candIds.map(() => '?').join(',');
+      const ceRes = await cDb.query(`
+        SELECT ve.*,
+               COALESCE(NULLIF(ve.ledger_name, ''), lm.ledger_name, lm.name, 'General Ledger') AS ledger_name,
+               COALESCE(lm.ledger_type, '') AS ledger_type
+        FROM voucher_entry ve
+        LEFT JOIN ledgermaster lm ON ve.ledger_id = lm.id
+        WHERE ve.voucher_id IN (${ph})
+        ORDER BY ve.id ASC
+      `, candIds);
+      for (const ce of ceRes.rows || []) {
+        if (!candEntriesMap.has(ce.voucher_id)) candEntriesMap.set(ce.voucher_id, []);
+        candEntriesMap.get(ce.voucher_id).push(ce);
+      }
+    }
+
+    const tokenList = Array.from(refTokens).filter(t => t.length >= 2 || /^\d+$/.test(t));
+    const matchesAnyToken = (text) => {
+      if (!text) return false;
+      const lower = String(text).toLowerCase();
+      return tokenList.some(tok => {
+        if (/^\d+$/.test(tok)) {
+          const escaped = tok.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const re = new RegExp(`(?:^|[^0-9a-z])${escaped}(?:$|[^0-9a-z])`, 'i');
+          return re.test(lower);
+        }
+        return lower.includes(tok);
+      });
+    };
+
+    for (const sv of settlementVouchersRes.rows || []) {
+      const sEntries = candEntriesMap.get(sv.id) || [];
+      const refMatch = matchesAnyToken(sv.reference_no) || matchesAnyToken(sv.narration) || sEntries.some(e => matchesAnyToken(e.remarks));
+      if (!refMatch) continue;
+
+      let totalDr = 0;
+      const drParties = [];
+      const crParties = [];
+      for (const se of sEntries) {
+        const nm = cleanName(se.ledger_name);
+        if (Number(se.debit || 0) > 0) {
+          totalDr += Number(se.debit || 0);
+          drParties.push({ ledger_id: se.ledger_id, ledger_name: nm, amount: Number(se.debit || 0), remarks: se.remarks || '' });
+        }
+        if (Number(se.credit || 0) > 0) {
+          crParties.push({ ledger_id: se.ledger_id, ledger_name: nm, amount: Number(se.credit || 0), remarks: se.remarks || '' });
+        }
+      }
+
+      const settledParties = sv.voucher_type === 'Payment' ? drParties : (sv.voucher_type === 'Receipt' ? crParties : drParties);
+      const paymentModes = sv.voucher_type === 'Payment' ? crParties : (sv.voucher_type === 'Receipt' ? drParties : crParties);
+
+      for (const sp of settledParties) {
+        const pObj = partyMap.get(sp.ledger_name.toLowerCase());
+        if (pObj) {
+          pObj.paid_amount = Math.round((pObj.paid_amount + sp.amount) * 100) / 100;
+        }
+      }
+
+      settlements.push({
+        id: sv.id,
+        voucher_no: sv.voucher_no,
+        voucher_type: sv.voucher_type,
+        date: sv.date,
+        reference_no: sv.reference_no || '',
+        narration: sv.narration || '',
+        amount: Math.round(totalDr * 100) / 100,
+        party_names: settledParties.map(p => p.ledger_name).join(', '),
+        account_names: paymentModes.map(p => p.ledger_name).join(', '),
+        entries: sEntries.map(e => ({
+          type: Number(e.debit || 0) > 0 ? 'Dr' : 'Cr',
+          ledger_id: e.ledger_id,
+          ledger_name: cleanName(e.ledger_name),
+          debit: Number(e.debit || 0),
+          credit: Number(e.credit || 0),
+          remarks: e.remarks || ''
+        }))
+      });
+    }
+
+    const parties = Array.from(partyMap.values()).map(p => {
+      const billed = Math.max(0, p.billed_amount);
+      const paid = Math.max(0, p.paid_amount);
+      const outstanding = Math.max(0, Math.round((billed - paid) * 100) / 100);
+      return {
+        ...p,
+        billed_amount: billed,
+        paid_amount: paid,
+        outstanding_amount: outstanding,
+        invoice_no: purchaseRow?.inv_no || purchaseRow?.s_no || voucherRow?.reference_no || voucherRow?.voucher_no || rawQ,
+        voucher_no: voucherRow?.voucher_no || purchaseRow?.voucher_no || saleRow?.voucher_no || rawQ,
+        date: voucherRow?.date || purchaseRow?.date || saleRow?.date || '',
+        amount: billed,
+        paid,
+        balance: outstanding
+      };
+    });
+
+    const totalDebit = Math.round(annotatedEntries.reduce((s, e) => s + e.debit, 0) * 100) / 100;
+    const totalCredit = Math.round(annotatedEntries.reduce((s, e) => s + e.credit, 0) * 100) / 100;
+
+    res.json({
+      found: true,
+      query: rawQ,
+      voucher: voucherRow ? {
+        ...voucherRow,
+        total_debit: totalDebit,
+        total_credit: totalCredit,
+        is_balanced: Math.abs(totalDebit - totalCredit) < 0.01
+      } : null,
+      entries: annotatedEntries,
+      purchase: purchaseRow ? {
+        id: purchaseRow.id,
+        s_no: purchaseRow.s_no,
+        inv_no: purchaseRow.inv_no,
+        voucher_no: purchaseRow.voucher_no || voucherRow?.voucher_no || '',
+        date: purchaseRow.date,
+        supplier: purchaseRow.resolved_supplier_name || purchaseRow.supplier,
+        transporter: purchaseRow.resolved_transporter_name || purchaseRow.transporter || '',
+        vehicle_no: purchaseRow.vehicle_no || purchaseRow.lorry_no || '',
+        driver_name: purchaseRow.driver_name || purchaseRow.driver || '',
+        loadman_name: purchaseRow.resolved_loadman_name || purchaseRow.loadman_name || '',
+        pay_type: purchaseRow.pay_type || 'Credit',
+        tax_amount: Number(purchaseRow.tax_amount || 0),
+        cgst_amount: Number(purchaseRow.cgst_amount || 0),
+        sgst_amount: Number(purchaseRow.sgst_amount || 0),
+        igst_amount: Number(purchaseRow.igst_amount || 0),
+        transport_charges: Number(purchaseRow.net_transport_amount || purchaseRow.transport_charges || purchaseRow.freight_amount || 0),
+        loadman_charges: Number(purchaseRow.loadman_charges || 0),
+        deduction_amount: Number(purchaseRow.deduction_amount || 0),
+        grand_total: Number(purchaseRow.grand_total || 0),
+        transport_payable_type: purchaseRow.transport_payable_type || 'SEPARATE',
+        loadman_payable_type: purchaseRow.loadman_payable_type || 'SEPARATE'
+      } : null,
+      sale: saleRow ? {
+        id: saleRow.id,
+        s_no: saleRow.s_no,
+        voucher_no: saleRow.voucher_no || voucherRow?.voucher_no || '',
+        date: saleRow.date,
+        customer: saleRow.resolved_customer_name || saleRow.customer,
+        grand_total: Number(saleRow.grand_total || saleRow.total_amt || 0)
+      } : null,
+      parties,
+      settlements,
+      searchTokens: Array.from(refTokens)
+    });
+  } catch (err) {
+    console.error('GET /vouchers/lookup error:', err);
+    res.status(500).json({ found: false, error: err.message });
+  }
+});
+
+// GET /vouchers/:id - Single with entries (and linked invoice context if available)
 router.get('/:id', async (req, res) => {
   try {
-    const voucher = await db.query(`
-      SELECT v.*, SUM(ve.debit) total_debit, SUM(ve.credit) total_credit 
-      FROM voucher v LEFT JOIN voucher_entry ve ON v.id = ve.voucher_id 
-      WHERE v.id = ? GROUP BY v.id
-    `, [req.params.id]);
-    
-    if (voucher.rows.length === 0) return res.status(404).json({ error: 'Voucher not found' });
+    const cId = resolveCompanyId(req);
+    const cDb = db.forCompany(cId);
+    const paramVal = String(req.params.id || '').trim();
+    const isNumeric = /^\d+$/.test(paramVal);
 
-    const entries = await db.query(`
-      SELECT ve.*, COALESCE(NULLIF(ve.ledger_name, ''), lm.name, 'General Ledger') as ledger_name 
+    const voucher = await cDb.query(`
+      SELECT v.*, COALESCE(SUM(ve.debit), 0) AS total_debit, COALESCE(SUM(ve.credit), 0) AS total_credit 
+      FROM voucher v LEFT JOIN voucher_entry ve ON v.id = ve.voucher_id 
+      WHERE ${isNumeric ? 'v.id = ?' : 'LOWER(TRIM(v.voucher_no)) = LOWER(TRIM(?))'}
+      GROUP BY v.id
+    `, [isNumeric ? Number(paramVal) : paramVal]);
+    
+    if (!voucher.rows || voucher.rows.length === 0) return res.status(404).json({ error: 'Voucher not found' });
+    const vRow = voucher.rows[0];
+
+    const entriesRes = await cDb.query(`
+      SELECT ve.*,
+             COALESCE(NULLIF(ve.ledger_name, ''), lm.ledger_name, lm.name, 'General Ledger') as ledger_name,
+             COALESCE(lm.ledger_type, '') AS ledger_type,
+             COALESCE(NULLIF(lm.group_name, ''), lm.under, '') AS group_name
       FROM voucher_entry ve 
       LEFT JOIN ledgermaster lm ON ve.ledger_id = lm.id 
       WHERE ve.voucher_id = ?
-    `, [req.params.id]);
+      ORDER BY ve.id ASC
+    `, [vRow.id]);
 
-    res.json({ ...voucher.rows[0], entries: entries.rows });
+    const normalizedEntries = (entriesRes.rows || []).map(e => ({
+      ...e,
+      type: Number(e.debit || 0) > 0 ? 'Dr' : 'Cr',
+      debit: Number(e.debit || 0),
+      credit: Number(e.credit || 0),
+      remarks: e.remarks || ''
+    }));
+
+    // Try resolving linked purchase invoice details for Payment/Debit Note/Purchase slips
+    let linkedPurchase = null;
+    try {
+      const refToken = String(vRow.reference_no || '').trim();
+      const refNumMatch = String(vRow.narration || '').match(/(?:invoice|inv|ref)\s*[:#-]?\s*#?\s*([A-Za-z0-9/-]+)/i);
+      const searchTok = refToken || (refNumMatch ? refNumMatch[1] : '');
+      if (searchTok || (vRow.source_module === 'purchase' && vRow.source_id)) {
+        const pRes = await cDb.query(`
+          SELECT p.id, p.s_no, p.inv_no, p.voucher_no, p.date, p.grand_total,
+                 COALESCE(sm.print_name, sm.name, CAST(p.supplier AS TEXT), '') AS supplier_name
+          FROM purchases p
+          LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR LOWER(TRIM(sm.name)) = LOWER(TRIM(CAST(p.supplier AS TEXT))))
+          WHERE (? != '' AND (LOWER(TRIM(COALESCE(p.inv_no, ''))) = LOWER(TRIM(?)) OR LOWER(TRIM(COALESCE(p.voucher_no, ''))) = LOWER(TRIM(?)) OR CAST(p.s_no AS TEXT) = ?))
+             OR (? IS NOT NULL AND p.id = ?)
+          ORDER BY p.id DESC LIMIT 1
+        `, [searchTok, searchTok, searchTok, searchTok, vRow.source_module === 'purchase' ? vRow.source_id : null, vRow.source_module === 'purchase' ? vRow.source_id : -1]);
+        if (pRes.rows && pRes.rows[0]) {
+          linkedPurchase = pRes.rows[0];
+        }
+      }
+    } catch (_) {}
+
+    res.json({
+      ...vRow,
+      entries: normalizedEntries,
+      linked_purchase: linkedPurchase
+    });
   } catch (err) {
     console.error('GET /vouchers/:id error:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// PUT /vouchers/:id - Update atomically with full validation before mutating
+// PUT /vouchers/:id - Update atomically via AccountingEngine preserving voucher_no
 router.put('/:id', async (req, res) => {
   try {
-    const existingRes = await db.query('SELECT id, voucher_no FROM voucher WHERE id = ? LIMIT 1', [req.params.id]);
-    if (!existingRes.rows || existingRes.rows.length === 0) {
-      return res.status(404).json({ error: 'Voucher not found' });
-    }
-    const existingVoucher = existingRes.rows[0];
+    const cId = resolveCompanyId(req);
+    const cDb = db.forCompany(cId);
+    const data = req.body || {};
 
-    const data = req.body;
-    const { resolveLedgerId } = require('../utils/ledgerHelper');
-    const resolvedEntries = [];
-    for (const entry of data.entries || []) {
-      const nextEntry = { ...entry };
-      if (!nextEntry.ledger_id || isNaN(Number(nextEntry.ledger_id)) || Number(nextEntry.ledger_id) <= 0) {
-        const nameToResolve = nextEntry.ledger_name || (typeof nextEntry.ledger_id === 'string' && isNaN(Number(nextEntry.ledger_id)) ? nextEntry.ledger_id : 'General Account');
-        const resolvedId = await resolveLedgerId(nameToResolve, data.voucher_type === 'Receipt' ? 'Customer' : 'Supplier');
-        if (resolvedId) {
-          nextEntry.ledger_id = resolvedId;
-          nextEntry.ledger_name = nameToResolve;
-        } else {
-          nextEntry.ledger_id = 1;
-        }
+    if (!data.voucher_type || !['Payment', 'Receipt', 'Contra', 'Journal'].includes(data.voucher_type)) {
+      return res.status(400).json({ error: 'Invalid voucher_type. Must be Payment, Receipt, Contra, or Journal' });
+    }
+    if (!data.date) {
+      return res.status(400).json({ error: 'Date is required' });
+    }
+
+    const mappedLines = mapIncomingVoucherLines(data.entries, data.voucher_type);
+
+    const updated = await cDb.withTransaction(async (txConn) => {
+      const existingRes = await txConn.query('SELECT * FROM voucher WHERE id = ? LIMIT 1', [req.params.id]);
+      const existingVoucher = existingRes.rows?.[0];
+      if (!existingVoucher) {
+        const notFoundErr = new Error('Voucher not found');
+        notFoundErr.statusCode = 404;
+        throw notFoundErr;
       }
-      nextEntry.resolved_ledger_name = await resolveLedgerName(nextEntry, '');
-      resolvedEntries.push(nextEntry);
-    }
-
-    // Validate BEFORE deleting any existing entries
-    validateVoucherData({ ...data, entries: resolvedEntries });
-
-    const voucher_no = data.voucher_no || existingVoucher.voucher_no || await generateVoucherNo(data.voucher_type);
-
-    const conn = await db.getConnection();
-    try {
-      await conn.beginTransaction();
-
-      await conn.run('DELETE FROM voucher_entry WHERE voucher_id = ?', [req.params.id]);
-      await conn.run('DELETE FROM ledger_entries WHERE voucher_id = ? OR voucher_no = ?', [req.params.id, existingVoucher.voucher_no]);
-
-      await conn.run(`
-        UPDATE voucher SET voucher_type = ?, voucher_no = ?, date = ?, reference_no = ?, narration = ?, status = ?, posted = ? WHERE id = ?
-      `, [data.voucher_type, voucher_no, data.date, data.reference_no || '', data.narration || '', data.status || 'Approved', data.posted !== undefined ? data.posted : 1, req.params.id]);
-
-      for (const entry of resolvedEntries) {
-        const entryType = entry.type || (Number(entry.debit) > 0 ? 'Dr' : 'Cr');
-        const ledger_name = entry.resolved_ledger_name;
-
-        await conn.run(
-          'INSERT INTO voucher_entry (voucher_id, type, ledger_id, ledger_name, debit, credit, remarks) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          [req.params.id, entryType, entry.ledger_id, ledger_name, entry.debit || 0, entry.credit || 0, entry.remarks || '']
-        );
-
-        const particularsText = (entry.remarks && entry.remarks.trim())
-          ? entry.remarks.trim()
-          : ((data.reference_no && data.reference_no.trim())
-              ? data.reference_no.trim()
-              : (data.narration || ''));
-
-        await conn.run(
-          `INSERT INTO ledger_entries (ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit, particulars, voucher_id) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [entry.ledger_id, ledger_name, data.date, data.voucher_type, voucher_no, entry.debit || 0, entry.credit || 0, particularsText, req.params.id]
-        );
+      if (Number(existingVoucher.is_reversed || 0) === 1 || String(existingVoucher.status || '').toUpperCase() === 'REVERSED') {
+        throw new Error(`Voucher ${existingVoucher.voucher_no} is reversed and cannot be edited.`);
       }
 
-      await conn.commit();
-    } catch (txErr) {
-      try { await conn.rollback(); } catch (_) {}
-      throw txErr;
-    } finally {
-      await conn.release();
-    }
+      const stablePostingKey = existingVoucher.posting_key || `${existingVoucher.source_module || 'manual_voucher'}:${existingVoucher.source_id || existingVoucher.id}`;
+      if (!existingVoucher.posting_key) {
+        await txConn.run('UPDATE voucher SET posting_key = ? WHERE id = ?', [stablePostingKey, existingVoucher.id]);
+      }
 
-    res.json({ message: 'Voucher updated successfully' });
+      return AccountingEngine.postVoucher({
+        conn: txConn,
+        companyId: cId,
+        voucherType: data.voucher_type,
+        prefix: PREFIX_MAP[data.voucher_type],
+        existingVoucherNo: data.voucher_no ? String(data.voucher_no).trim() : existingVoucher.voucher_no,
+        date: data.date,
+        referenceNo: data.reference_no !== undefined ? (data.reference_no || '') : (existingVoucher.reference_no || ''),
+        narration: data.narration !== undefined ? (data.narration || '') : (existingVoucher.narration || ''),
+        sourceModule: existingVoucher.source_module || 'manual_voucher',
+        sourceId: existingVoucher.source_id || null,
+        postingKey: stablePostingKey,
+        lines: mappedLines,
+        allowUpdate: true,
+        preserveVoucherNoOnUpdate: !data.voucher_no || String(data.voucher_no).trim() === existingVoucher.voucher_no,
+        status: data.status || existingVoucher.status || 'Approved',
+      });
+    });
+
+    res.json({ success: true, message: 'Voucher updated successfully', voucher_no: updated.voucherNo, data: updated });
   } catch (err) {
     console.error('PUT /vouchers/:id error:', err);
-    res.status(400).json({ error: err.message });
+    res.status(err.statusCode || 400).json({ error: err.message });
   }
 });
 
-// Preview auto voucher number (for frontend)
+// Preview next auto voucher number non-destructively (does NOT increment counter)
 router.post('/preview-no', async (req, res) => {
   try {
-    const { voucher_type } = req.body;
+    const cId = resolveCompanyId(req);
+    const { voucher_type, date } = req.body || {};
     if (!voucher_type || !PREFIX_MAP[voucher_type]) {
       return res.status(400).json({ error: 'Valid voucher_type required' });
     }
-    const voucher_no = await generateVoucherNo(voucher_type);
+    const voucher_no = await AccountingEngine.previewVoucherNumber({
+      companyId: cId,
+      voucherType: voucher_type,
+      prefix: PREFIX_MAP[voucher_type],
+      date: date || null,
+    });
     res.json({ voucher_no });
   } catch (err) {
     console.error('Preview voucher-no error:', err);
@@ -1350,46 +1880,78 @@ router.post('/preview-no', async (req, res) => {
   }
 });
 
-// DELETE /vouchers/:id
-router.delete('/:id', async (req, res) => {
+// POST /vouchers/:id/reverse - Formal accounting reversal journal entry
+router.post('/:id/reverse', async (req, res) => {
   try {
-    const voucher = await db.query('SELECT * FROM voucher WHERE id = ?', [req.params.id]);
-    if (voucher.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-
-    const vRow = voucher.rows[0];
-    try {
-      const vEntries = await db.query('SELECT * FROM voucher_entry WHERE voucher_id = ?', [req.params.id]);
-      const lEntries = await db.query('SELECT * FROM ledger_entries WHERE voucher_no = ?', [vRow.voucher_no]);
-
-      await recycleBinService.saveToRecycleBin({
-        moduleName: 'Voucher',
-        recordId: req.params.id,
-        title: `Voucher #${vRow.voucher_no || req.params.id} (${vRow.voucher_type || 'General'})`,
-        recordData: {
-          tableName: 'voucher',
-          record: vRow,
-          subRecords: [
-            { tableName: 'voucher_entry', records: vEntries.rows || [] },
-            { tableName: 'ledger_entries', records: lEntries.rows || [] }
-          ]
-        },
-        deletedBy: req.user?.username || 'admin'
-      });
-    } catch (e) {
-      console.warn('Recycle bin save error in vouchers:', e.message);
-    }
-
-    await db.run('DELETE FROM voucher_entry WHERE voucher_id = ?', [req.params.id]);
-    await db.run('DELETE FROM ledger_entries WHERE voucher_no = ?', [vRow.voucher_no]);
-    await db.run('DELETE FROM voucher WHERE id = ?', [req.params.id]);
-    res.json({ message: `Voucher ${vRow.voucher_no} deleted` });
+    const cId = resolveCompanyId(req);
+    const result = await AccountingEngine.reverseVoucher({
+      companyId: cId,
+      voucherId: req.params.id,
+      reason: req.body?.reason || 'Voucher Reversal',
+      date: req.body?.date || null,
+    });
+    res.json({
+      success: true,
+      message: `Voucher ${result.originalVoucherNo} reversed via ${result.reversalVoucherNo}`,
+      ...result,
+    });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('POST /vouchers/:id/reverse error:', err);
+    res.status(400).json({ success: false, error: err.message });
   }
 });
 
-router.healPurchaseAndSalesVouchers = healPurchaseAndSalesVouchers;
-router.reconcilePurchaseTransporterAndLoadmanEntries = reconcilePurchaseTransporterAndLoadmanEntries;
-router.healAllTransactions = healAllTransactions;
+// DELETE /vouchers/:id
+router.delete('/:id', async (req, res) => {
+  try {
+    const cId = resolveCompanyId(req);
+    const cDb = db.forCompany(cId);
+
+    const deletedVoucher = await cDb.withTransaction(async (txConn) => {
+      const voucher = await txConn.query('SELECT * FROM voucher WHERE id = ? LIMIT 1', [req.params.id]);
+      if (!voucher.rows || voucher.rows.length === 0) {
+        const notFoundErr = new Error('Not found');
+        notFoundErr.statusCode = 404;
+        throw notFoundErr;
+      }
+
+      const vRow = voucher.rows[0];
+      try {
+        const vEntries = await txConn.query('SELECT * FROM voucher_entry WHERE voucher_id = ?', [req.params.id]);
+        const lEntries = await txConn.query('SELECT * FROM ledger_entries WHERE voucher_id = ?', [req.params.id]);
+
+        await recycleBinService.saveToRecycleBin({
+          moduleName: 'Voucher',
+          recordId: req.params.id,
+          companyId: cId,
+          title: `Voucher #${vRow.voucher_no || req.params.id} (${vRow.voucher_type || 'General'})`,
+          recordData: {
+            tableName: 'voucher',
+            record: vRow,
+            subRecords: [
+              { tableName: 'voucher_entry', records: vEntries.rows || [] },
+              { tableName: 'ledger_entries', records: lEntries.rows || [] }
+            ]
+          },
+          deletedBy: req.user?.username || 'admin'
+        });
+      } catch (e) {
+        console.warn('Recycle bin save error in vouchers:', e.message);
+      }
+
+      await AccountingEngine.deleteVoucherById({
+        conn: txConn,
+        companyId: cId,
+        voucherId: req.params.id,
+      });
+      return vRow;
+    });
+
+    res.json({ success: true, message: `Voucher ${deletedVoucher.voucher_no} deleted` });
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
 

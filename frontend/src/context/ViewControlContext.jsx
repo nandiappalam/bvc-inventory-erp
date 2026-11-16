@@ -31,7 +31,7 @@ export const ViewControlProvider = ({ children }) => {
         document.documentElement.style.setProperty('--app-zoom-scale', scale.toString());
       }
       if (document.body) {
-        document.body.style.zoom = scale.toString();
+        document.body.style.zoom = '';
       }
       localStorage.setItem('bvc_erp_app_zoom', String(level));
     } catch (e) {

@@ -278,6 +278,21 @@ let masterDbPath = null;
 const companyDbPool = new Map();
 let masterDb = null;
 let pgPool = null;
+const _cacheInvalidators = [];
+
+function registerCacheInvalidator(fn) {
+  if (typeof fn === 'function') {
+    _cacheInvalidators.push(fn);
+  }
+}
+
+function invalidateCompanyCaches(companyId = null) {
+  for (const fn of _cacheInvalidators) {
+    try {
+      fn(companyId);
+    } catch (_) {}
+  }
+}
 
 if (isPostgres) {
   // MODE 2: Render / Cloud - Neon PostgreSQL ONLY
@@ -348,7 +363,7 @@ const TENANT_BUSINESS_TABLES = new Set([
   'purchases', 'purchase_items', 'purchase_orders', 'purchase_order_items', 'purchase_requests', 'purchase_request_items',
   'purchase_returns', 'purchase_return_items', 'purchase_deductions', 'purchase_order_deductions', 'purchase_return_deductions',
   'sales', 'sales_items', 'sales_export_orders', 'sales_export_order_items', 'sales_return', 'sales_return_items',
-  'voucher', 'voucher_entry', 'vouchers', 'ledger_entries', 'ledgermaster', 'ledgergroupmaster', 'ledger_groups', 'ledgers',
+  'voucher', 'voucher_entry', 'voucher_counters', 'vouchers', 'ledger_entries', 'ledgermaster', 'ledgergroupmaster', 'ledger_groups', 'ledgers',
   'stock', 'stock_lots', 'stock_lot', 'stocks', 'stock_adjustments', 'stock_adjustment_items', 'stock_alerts', 'stock_alert_config',
   'grains', 'grain_input_items', 'grain_output_items', 'grain_wastage_items',
   'flour_out', 'flour_out_items', 'flour_out_returns', 'flour_out_return_items',
@@ -1114,19 +1129,8 @@ function getCompanyDbPath(companyId = 1) {
   return path.join(dbDir, `company_${cId}.db`);
 }
 
-function getCompanyDatabaseInstance(companyId = 1) {
-  const cId = parseInt(companyId, 10) || 1;
-  if (companyDbPool.has(cId)) {
-    return companyDbPool.get(cId);
-  }
-
-  const filePath = getCompanyDbPath(cId);
-  const instance = new sqlite3.Database(filePath, (err) => {
-    if (err) {
-      console.error(`❌ Error opening Company ${cId} database at ${filePath}:`, err.message);
-    }
-  });
-
+function applySqliteCompanyMigrations(instance) {
+  if (!instance) return;
   instance.serialize(() => {
     instance.run('PRAGMA foreign_keys = ON');
     instance.run('PRAGMA journal_mode = WAL');
@@ -1138,7 +1142,7 @@ function getCompanyDatabaseInstance(companyId = 1) {
       instance.run(tableSql, () => {});
     }
 
-    // Ensure crucial purchase columns exist on this company database
+    // Ensure crucial columns exist on this company database (always single-quoted defaults for SQLite compatibility)
     const extraCols = [
       'ALTER TABLE purchases ADD COLUMN transporter TEXT',
       'ALTER TABLE purchases ADD COLUMN transport TEXT',
@@ -1155,10 +1159,10 @@ function getCompanyDatabaseInstance(companyId = 1) {
       'ALTER TABLE purchases ADD COLUMN transport_charges REAL DEFAULT 0',
       'ALTER TABLE purchases ADD COLUMN freight_amount REAL DEFAULT 0',
       'ALTER TABLE purchases ADD COLUMN weighment_ref_no TEXT',
-      'ALTER TABLE purchases ADD COLUMN transport_payable_type TEXT DEFAULT "SEPARATE"',
-      'ALTER TABLE purchases ADD COLUMN loadman_payable_type TEXT DEFAULT "SEPARATE"',
+      "ALTER TABLE purchases ADD COLUMN transport_payable_type TEXT DEFAULT 'SEPARATE'",
+      "ALTER TABLE purchases ADD COLUMN loadman_payable_type TEXT DEFAULT 'SEPARATE'",
       'ALTER TABLE purchases ADD COLUMN operator_name TEXT',
-      'ALTER TABLE purchases ADD COLUMN weight_status TEXT DEFAULT "TARE_PENDING"',
+      "ALTER TABLE purchases ADD COLUMN weight_status TEXT DEFAULT 'TARE_PENDING'",
       'ALTER TABLE purchases ADD COLUMN unloading_date TEXT',
       'ALTER TABLE purchases ADD COLUMN unloading_time TEXT',
       'ALTER TABLE purchases ADD COLUMN weighbridge_location TEXT',
@@ -1167,36 +1171,36 @@ function getCompanyDatabaseInstance(companyId = 1) {
       'ALTER TABLE purchase_items ADD COLUMN total_weight REAL DEFAULT 0',
       'ALTER TABLE purchase_items ADD COLUMN disc_amount REAL DEFAULT 0',
       'ALTER TABLE purchase_items ADD COLUMN tax_amount REAL DEFAULT 0',
-      'ALTER TABLE grains ADD COLUMN process_mode TEXT DEFAULT "INSIDE_MILL"',
-      'ALTER TABLE grains ADD COLUMN mill_type TEXT DEFAULT "Inside Mill"',
+      "ALTER TABLE grains ADD COLUMN process_mode TEXT DEFAULT 'INSIDE_MILL'",
+      "ALTER TABLE grains ADD COLUMN mill_type TEXT DEFAULT 'Inside Mill'",
       'ALTER TABLE grains ADD COLUMN external_mill_id INTEGER',
       'ALTER TABLE grains ADD COLUMN external_mill_name TEXT',
       'ALTER TABLE grains ADD COLUMN outpass_id INTEGER',
       'ALTER TABLE grains ADD COLUMN outpass_no TEXT',
       'ALTER TABLE grains ADD COLUMN inpass_id INTEGER',
       'ALTER TABLE grains ADD COLUMN inpass_no TEXT',
-      'ALTER TABLE grains ADD COLUMN status TEXT DEFAULT "Completed"',
+      "ALTER TABLE grains ADD COLUMN status TEXT DEFAULT 'Completed'",
       'ALTER TABLE grains ADD COLUMN processing_charge_per_kg REAL DEFAULT 0',
       'ALTER TABLE grains ADD COLUMN total_processing_charges REAL DEFAULT 0',
       'ALTER TABLE grains ADD COLUMN discrepancy_kg REAL DEFAULT 0',
       'ALTER TABLE grains ADD COLUMN discrepancy_reason TEXT',
       'ALTER TABLE stock_lots ADD COLUMN outside_processing_qty REAL DEFAULT 0',
-      'ALTER TABLE stock_lots ADD COLUMN custody_status TEXT DEFAULT "AVAILABLE"',
+      "ALTER TABLE stock_lots ADD COLUMN custody_status TEXT DEFAULT 'AVAILABLE'",
       'ALTER TABLE purchases ADD COLUMN gross_weight REAL DEFAULT 0',
       'ALTER TABLE purchases ADD COLUMN tare_weight REAL DEFAULT 0',
       'ALTER TABLE purchases ADD COLUMN net_weight REAL DEFAULT 0',
-      'ALTER TABLE purchases ADD COLUMN stock_type TEXT DEFAULT "RM"',
+      "ALTER TABLE purchases ADD COLUMN stock_type TEXT DEFAULT 'RM'",
       'ALTER TABLE purchases ADD COLUMN taxable_amount REAL DEFAULT 0',
       'ALTER TABLE purchases ADD COLUMN exempt_amount REAL DEFAULT 0',
       'ALTER TABLE purchases ADD COLUMN godown_id INTEGER',
       'ALTER TABLE purchases ADD COLUMN voucher_no TEXT',
       'ALTER TABLE purchases ADD COLUMN bill_amt REAL DEFAULT 0',
       'ALTER TABLE purchases ADD COLUMN total_amt REAL DEFAULT 0',
-      'ALTER TABLE purchases ADD COLUMN company_state TEXT DEFAULT "Tamil Nadu"',
-      'ALTER TABLE purchases ADD COLUMN party_state TEXT DEFAULT "Tamil Nadu"',
-      'ALTER TABLE purchases ADD COLUMN company_state_code TEXT DEFAULT "33"',
-      'ALTER TABLE purchases ADD COLUMN party_state_code TEXT DEFAULT "33"',
-      'ALTER TABLE purchases ADD COLUMN tax_mode TEXT DEFAULT "Exclusive"',
+      "ALTER TABLE purchases ADD COLUMN company_state TEXT DEFAULT 'Tamil Nadu'",
+      "ALTER TABLE purchases ADD COLUMN party_state TEXT DEFAULT 'Tamil Nadu'",
+      "ALTER TABLE purchases ADD COLUMN company_state_code TEXT DEFAULT '33'",
+      "ALTER TABLE purchases ADD COLUMN party_state_code TEXT DEFAULT '33'",
+      "ALTER TABLE purchases ADD COLUMN tax_mode TEXT DEFAULT 'Exclusive'",
       'ALTER TABLE purchases ADD COLUMN cgst_amount REAL DEFAULT 0',
       'ALTER TABLE purchases ADD COLUMN sgst_amount REAL DEFAULT 0',
       'ALTER TABLE purchases ADD COLUMN igst_amount REAL DEFAULT 0',
@@ -1211,17 +1215,17 @@ function getCompanyDatabaseInstance(companyId = 1) {
       'ALTER TABLE purchases ADD COLUMN loadman_charges REAL DEFAULT 0',
       'ALTER TABLE purchases ADD COLUMN additional_charges REAL DEFAULT 0',
       'ALTER TABLE godown_master ADD COLUMN capacity REAL DEFAULT 0',
-      'ALTER TABLE godown_master ADD COLUMN capacity_unit TEXT DEFAULT "KG"',
+      "ALTER TABLE godown_master ADD COLUMN capacity_unit TEXT DEFAULT 'KG'",
       'ALTER TABLE godown_master ADD COLUMN temperature_range TEXT',
-      'ALTER TABLE godown_master ADD COLUMN godown_type TEXT DEFAULT "Normal"',
-      'ALTER TABLE godown_master ADD COLUMN storage_location TEXT DEFAULT "Inside Factory"',
+      "ALTER TABLE godown_master ADD COLUMN godown_type TEXT DEFAULT 'Normal'",
+      "ALTER TABLE godown_master ADD COLUMN storage_location TEXT DEFAULT 'Inside Factory'",
       'ALTER TABLE godown_master ADD COLUMN external_company TEXT',
       'ALTER TABLE godown_master ADD COLUMN storage_duration INTEGER DEFAULT 10',
-      'ALTER TABLE godown_master ADD COLUMN duration_unit TEXT DEFAULT "Days"',
+      "ALTER TABLE godown_master ADD COLUMN duration_unit TEXT DEFAULT 'Days'",
       'ALTER TABLE godown_master ADD COLUMN rate_per_kg REAL DEFAULT 0',
       'ALTER TABLE godown_master ADD COLUMN rate_per_ton REAL DEFAULT 0',
-      'ALTER TABLE godown_master ADD COLUMN billing_basis TEXT DEFAULT "Per KG"',
-      'ALTER TABLE godown_master ADD COLUMN billing_method TEXT DEFAULT "Fixed Period"',
+      "ALTER TABLE godown_master ADD COLUMN billing_basis TEXT DEFAULT 'Per KG'",
+      "ALTER TABLE godown_master ADD COLUMN billing_method TEXT DEFAULT 'Fixed Period'",
       'ALTER TABLE godown_master ADD COLUMN min_billable_days INTEGER DEFAULT 10',
       'ALTER TABLE godown_master ADD COLUMN cold_storage_remarks TEXT',
       'ALTER TABLE godown_master ADD COLUMN operator_id INTEGER',
@@ -1231,10 +1235,10 @@ function getCompanyDatabaseInstance(companyId = 1) {
       'ALTER TABLE godown_master ADD COLUMN outward_handling_rate REAL DEFAULT 0',
       'ALTER TABLE godown_master ADD COLUMN insurance_rate REAL DEFAULT 0',
       'ALTER TABLE godown_master ADD COLUMN mamool_rate REAL DEFAULT 0',
-      'ALTER TABLE godown_master ADD COLUMN default_chamber TEXT DEFAULT "Chamber 1"',
+      "ALTER TABLE godown_master ADD COLUMN default_chamber TEXT DEFAULT 'Chamber 1'",
       'ALTER TABLE godown_master ADD COLUMN gst_rate REAL DEFAULT 18',
       'ALTER TABLE godown_master ADD COLUMN is_cold_storage INTEGER DEFAULT 0',
-      'ALTER TABLE godown_master ADD COLUMN slab_calculation_type TEXT DEFAULT "Progressive"',
+      "ALTER TABLE godown_master ADD COLUMN slab_calculation_type TEXT DEFAULT 'Progressive'",
       'ALTER TABLE godown_master ADD COLUMN inward_unloading_rate REAL DEFAULT 0.50',
       'ALTER TABLE godown_master ADD COLUMN outward_loading_rate REAL DEFAULT 0.50',
       'ALTER TABLE godown_master ADD COLUMN storage_rate_per_kg_day REAL DEFAULT 0.20',
@@ -1242,8 +1246,8 @@ function getCompanyDatabaseInstance(companyId = 1) {
       'ALTER TABLE godown_master ADD COLUMN min_billable_days INTEGER DEFAULT 1',
       'ALTER TABLE cold_storage_vouchers ADD COLUMN operator_id INTEGER',
       'ALTER TABLE cold_storage_vouchers ADD COLUMN operator_name TEXT',
-      'ALTER TABLE cold_storage_vouchers ADD COLUMN inward_source_type TEXT DEFAULT "Factory Godown"',
-      'ALTER TABLE cold_storage_vouchers ADD COLUMN outward_dest_type TEXT DEFAULT "Internal Godown"',
+      "ALTER TABLE cold_storage_vouchers ADD COLUMN inward_source_type TEXT DEFAULT 'Factory Godown'",
+      "ALTER TABLE cold_storage_vouchers ADD COLUMN outward_dest_type TEXT DEFAULT 'Internal Godown'",
       'ALTER TABLE cold_storage_vouchers ADD COLUMN customer_id INTEGER',
       'ALTER TABLE cold_storage_vouchers ADD COLUMN customer_name TEXT',
       'ALTER TABLE cold_storage_vouchers ADD COLUMN sales_order_ref TEXT',
@@ -1261,7 +1265,7 @@ function getCompanyDatabaseInstance(companyId = 1) {
       'ALTER TABLE cold_storage_vouchers ADD COLUMN handling_amount REAL DEFAULT 0',
       'ALTER TABLE cold_storage_vouchers ADD COLUMN storage_rate REAL DEFAULT 0',
       'ALTER TABLE cold_storage_vouchers ADD COLUMN storage_basis TEXT',
-      'ALTER TABLE cold_storage_vouchers ADD COLUMN billed_status TEXT DEFAULT "Unbilled"',
+      "ALTER TABLE cold_storage_vouchers ADD COLUMN billed_status TEXT DEFAULT 'Unbilled'",
       'ALTER TABLE cold_storage_vouchers ADD COLUMN bill_id INTEGER',
       'ALTER TABLE cold_storage_vouchers ADD COLUMN purchase_id INTEGER',
       'ALTER TABLE cold_storage_vouchers ADD COLUMN purchase_inv_no TEXT',
@@ -1276,7 +1280,7 @@ function getCompanyDatabaseInstance(companyId = 1) {
       'ALTER TABLE cold_storage_vouchers ADD COLUMN storage_days INTEGER DEFAULT 0',
       'ALTER TABLE cold_storage_vouchers ADD COLUMN storage_charges REAL DEFAULT 0',
       'ALTER TABLE cold_storage_vouchers ADD COLUMN charge_snapshot_json TEXT',
-      'ALTER TABLE cold_storage_vouchers ADD COLUMN status TEXT DEFAULT "Confirmed"',
+      "ALTER TABLE cold_storage_vouchers ADD COLUMN status TEXT DEFAULT 'Confirmed'",
       'ALTER TABLE cold_storage_items ADD COLUMN purchase_id INTEGER',
       'ALTER TABLE cold_storage_items ADD COLUMN purchase_item_id INTEGER',
       'ALTER TABLE cold_storage_items ADD COLUMN inward_voucher_id INTEGER',
@@ -1288,14 +1292,34 @@ function getCompanyDatabaseInstance(companyId = 1) {
       'ALTER TABLE cold_storage_items ADD COLUMN labour_charge REAL DEFAULT 0',
       'ALTER TABLE cold_storage_items ADD COLUMN remaining_quantity REAL',
       'ALTER TABLE cold_storage_items ADD COLUMN remaining_weight REAL',
-      'ALTER TABLE cold_storage_charge_master ADD COLUMN slab_calculation_type TEXT DEFAULT "Progressive"',
+      "ALTER TABLE cold_storage_charge_master ADD COLUMN slab_calculation_type TEXT DEFAULT 'Progressive'",
       'ALTER TABLE cold_storage_charge_master ADD COLUMN free_days INTEGER DEFAULT 0',
       'ALTER TABLE cold_storage_charge_master ADD COLUMN min_days INTEGER DEFAULT 0',
-      'ALTER TABLE cold_storage_charge_master ADD COLUMN min_charge REAL DEFAULT 0'
+      'ALTER TABLE cold_storage_charge_master ADD COLUMN min_charge REAL DEFAULT 0',
+      'ALTER TABLE voucher ADD COLUMN company_id INTEGER NOT NULL DEFAULT 1',
+      "ALTER TABLE voucher ADD COLUMN financial_year TEXT DEFAULT 'DEFAULT'",
+      'ALTER TABLE voucher ADD COLUMN source_module TEXT',
+      'ALTER TABLE voucher ADD COLUMN source_id INTEGER',
+      'ALTER TABLE voucher ADD COLUMN posting_key TEXT',
+      'ALTER TABLE voucher ADD COLUMN is_reversed INTEGER DEFAULT 0',
+      'ALTER TABLE voucher ADD COLUMN reversed_voucher_id INTEGER',
+      'ALTER TABLE voucher ADD COLUMN parent_voucher_id INTEGER',
+      'ALTER TABLE ledger_entries ADD COLUMN company_id INTEGER NOT NULL DEFAULT 1',
+      "ALTER TABLE ledger_entries ADD COLUMN financial_year TEXT DEFAULT 'DEFAULT'",
+      'ALTER TABLE ledger_entries ADD COLUMN voucher_entry_id INTEGER',
+      'ALTER TABLE ledger_entries ADD COLUMN posting_key TEXT',
+      'ALTER TABLE ledger_entries ADD COLUMN counterparty_summary TEXT',
+      'ALTER TABLE ledger_entries ADD COLUMN is_reversed INTEGER DEFAULT 0'
     ];
     for (const sql of extraCols) {
       instance.run(sql, () => {});
     }
+    instance.run(`CREATE INDEX IF NOT EXISTS idx_voucher_source ON voucher(source_module, source_id)`, () => {});
+    instance.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_voucher_posting_key_active ON voucher(posting_key) WHERE posting_key IS NOT NULL AND COALESCE(is_reversed, 0) = 0`, () => {});
+    instance.run(`CREATE INDEX IF NOT EXISTS idx_ledger_entries_voucher ON ledger_entries(voucher_id)`, () => {});
+    instance.run(`CREATE INDEX IF NOT EXISTS idx_ledger_entries_posting_key ON ledger_entries(posting_key)`, () => {});
+    instance.run(`CREATE INDEX IF NOT EXISTS idx_ledger_entries_ledger_date ON ledger_entries(ledger_id, date)`, () => {});
+
     // Ensure cold_storage_charge_master table exists
     instance.run(`
       CREATE TABLE IF NOT EXISTS cold_storage_charge_master (
@@ -1368,6 +1392,39 @@ function getCompanyDatabaseInstance(companyId = 1) {
       WHERE NOT EXISTS (SELECT 1 FROM ledgermaster WHERE LOWER(name) LIKE '%cold storage%rent%' OR id = 201)
     `, () => {});
   });
+}
+
+async function postRestoreSyncCompany(cId) {
+  invalidateCompanyCaches(cId);
+  try {
+    const AccountingEngine = require('../services/AccountingEngine');
+    if (typeof AccountingEngine.invalidateSchemaCache === 'function') {
+      AccountingEngine.invalidateSchemaCache(cId);
+    }
+    const compRunner = module.exports.forCompany(cId);
+    await AccountingEngine.ensureAccountingSchema(compRunner, { companyId: cId, force: true });
+    if (typeof AccountingEngine.syncLegacyPurchaseVouchers === 'function') {
+      await AccountingEngine.syncLegacyPurchaseVouchers(cId);
+    }
+  } catch (syncErr) {
+    console.warn(`[RestoreSync] Post-restore accounting sync notice for company ${cId}:`, syncErr.message);
+  }
+}
+
+function getCompanyDatabaseInstance(companyId = 1) {
+  const cId = parseInt(companyId, 10) || 1;
+  if (companyDbPool.has(cId)) {
+    return companyDbPool.get(cId);
+  }
+
+  const filePath = getCompanyDbPath(cId);
+  const instance = new sqlite3.Database(filePath, (err) => {
+    if (err) {
+      console.error(`❌ Error opening Company ${cId} database at ${filePath}:`, err.message);
+    }
+  });
+
+  applySqliteCompanyMigrations(instance);
 
   companyDbPool.set(cId, instance);
   return instance;
@@ -1955,6 +2012,7 @@ async function restoreDatabase(tempFilePath, companyId = 1) {
         } catch (e) {}
       }
 
+      await postRestoreSyncCompany(cId);
       console.log(`✅ [PostgreSQL] Restored company_${cId} schema from backup file successfully!`);
       return { success: true, message: 'Database restored successfully into PostgreSQL schema.' };
     } finally {
@@ -2005,7 +2063,9 @@ async function restoreDatabase(tempFilePath, companyId = 1) {
       });
       targetDb.close();
       const freshInstance = new sqlite3.Database(targetDbPath);
+      applySqliteCompanyMigrations(freshInstance);
       companyDbPool.set(cId, freshInstance);
+      await postRestoreSyncCompany(cId);
       return { success: true, message: `Database restored successfully from SQL script for company ${cId}.` };
     }
 
@@ -2043,21 +2103,25 @@ async function restoreDatabase(tempFilePath, companyId = 1) {
         throw copyErr;
       }
 
-      // Open, configure WAL and store in pool
-      const restoredDb = new sqlite3.Database(targetDbPath, (err) => {
-        if (err) throw new Error(`Failed to open restored database: ${err.message}`);
-      });
-
-      await new Promise((resolve) => {
-        restoredDb.serialize(() => {
-          restoredDb.run('PRAGMA foreign_keys = ON');
-          restoredDb.run('PRAGMA journal_mode = WAL');
-          restoredDb.run('PRAGMA synchronous = NORMAL');
-          restoredDb.run('PRAGMA busy_timeout = 10000', () => resolve());
+      // Open, configure WAL and store in pool safely
+      const restoredDb = await new Promise((resolve, reject) => {
+        const inst = new sqlite3.Database(targetDbPath, (err) => {
+          if (err) return reject(new Error(`Failed to open restored database: ${err.message}`));
+          inst.serialize(() => {
+            inst.run('PRAGMA foreign_keys = ON');
+            inst.run('PRAGMA journal_mode = WAL');
+            inst.run('PRAGMA synchronous = NORMAL');
+            inst.run('PRAGMA busy_timeout = 10000', (runErr) => {
+              if (runErr) return reject(runErr);
+              resolve(inst);
+            });
+          });
         });
       });
 
+      applySqliteCompanyMigrations(restoredDb);
       companyDbPool.set(cId, restoredDb);
+      await postRestoreSyncCompany(cId);
       console.log(`✅ Company ${cId} database restored successfully from SQLite backup!`);
       return { success: true, message: 'Database restored successfully!' };
     } else {
@@ -2071,8 +2135,11 @@ async function restoreDatabase(tempFilePath, companyId = 1) {
         }
       }
 
-      const targetDb = new sqlite3.Database(targetDbPath, (err) => {
-        if (err) throw new Error(`Failed to open target database: ${err.message}`);
+      const targetDb = await new Promise((resolve, reject) => {
+        const inst = new sqlite3.Database(targetDbPath, (err) => {
+          if (err) return reject(new Error(`Failed to open target database: ${err.message}`));
+          resolve(inst);
+        });
       });
 
       const tablesObj = jsonData.tables || (typeof jsonData === 'object' && !Array.isArray(jsonData) ? jsonData : {});
@@ -2181,7 +2248,9 @@ async function restoreDatabase(tempFilePath, companyId = 1) {
           });
         });
 
+        applySqliteCompanyMigrations(targetDb);
         companyDbPool.set(cId, targetDb);
+        await postRestoreSyncCompany(cId);
         console.log(`✅ Company ${cId} database restored successfully from JSON backup!`);
         return { success: true, message: 'Database restored successfully from JSON backup!' };
       } catch (jsonRestoreErr) {
@@ -2668,27 +2737,80 @@ class PgDbConnection {
   }
 }
 
+const sqliteTxMutex = new Map();
+
+function acquireSqliteTxLock(lockKey) {
+  const key = String(lockKey || 'default');
+  const prev = sqliteTxMutex.get(key) || Promise.resolve();
+  let releaseFn;
+  const next = new Promise((resolve) => {
+    releaseFn = resolve;
+  });
+  const chained = prev.catch(() => {}).then(() => next);
+  sqliteTxMutex.set(key, chained);
+  return prev.catch(() => {}).then(() => {
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      releaseFn();
+      if (sqliteTxMutex.get(key) === chained) {
+        sqliteTxMutex.delete(key);
+      }
+    };
+  });
+}
+
 class SqliteDbConnection {
   constructor(dbInstance, companyId = null) {
     this.db = dbInstance;
     this.companyId = companyId;
+    this._releaseLock = null;
+    this.inTransaction = false;
   }
 
-  beginTransaction() {
+  async beginTransaction() {
+    if (!this._releaseLock) {
+      const lockKey = this.companyId ? `company_${this.companyId}` : 'master';
+      this._releaseLock = await acquireSqliteTxLock(lockKey);
+    }
     return new Promise((resolve, reject) => {
-      this.db.run('BEGIN TRANSACTION', (err) => (err ? reject(err) : resolve()));
+      this.db.run('BEGIN IMMEDIATE', (err) => {
+        if (err) {
+          const rel = this._releaseLock;
+          this._releaseLock = null;
+          if (rel) rel();
+          return reject(err);
+        }
+        this.inTransaction = true;
+        resolve();
+      });
     });
   }
 
   commit() {
     return new Promise((resolve, reject) => {
-      this.db.run('COMMIT', (err) => (err ? reject(err) : resolve()));
+      this.db.run('COMMIT', (err) => {
+        this.inTransaction = false;
+        const rel = this._releaseLock;
+        this._releaseLock = null;
+        if (rel) rel();
+        if (err) return reject(err);
+        resolve();
+      });
     });
   }
 
   rollback() {
     return new Promise((resolve, reject) => {
-      this.db.run('ROLLBACK', (err) => (err ? reject(err) : resolve()));
+      this.db.run('ROLLBACK', (err) => {
+        this.inTransaction = false;
+        const rel = this._releaseLock;
+        this._releaseLock = null;
+        if (rel) rel();
+        if (err) return reject(err);
+        resolve();
+      });
     });
   }
 
@@ -2701,7 +2823,42 @@ class SqliteDbConnection {
   }
 
   release() {
-    // No-op for SQLite
+    if (this._releaseLock) {
+      const rel = this._releaseLock;
+      this._releaseLock = null;
+      rel();
+    }
+  }
+}
+
+async function runWithCompanyTransaction(fn, explicitCompanyId = null) {
+  const store = asyncLocalStorage.getStore();
+  const activeCompanyId = parseInt(explicitCompanyId || (store ? store.companyId : 1), 10) || 1;
+  // If already inside an active transaction for the exact same company in this ALS chain, reuse it
+  if (store && store.txConn && Number(store.companyId) === activeCompanyId) {
+    return await fn(store.txConn);
+  }
+  const conn = isPostgres
+    ? new PgDbConnection(await pgPool.connect(), activeCompanyId, false)
+    : new SqliteDbConnection(getCompanyDatabaseInstance(activeCompanyId), activeCompanyId);
+  try {
+    await conn.beginTransaction();
+    const nextContext = {
+      ...(store || {}),
+      companyId: activeCompanyId,
+      companySchema: `company_${activeCompanyId}`,
+      txConn: conn
+    };
+    const result = await asyncLocalStorage.run(nextContext, async () => await fn(conn));
+    await conn.commit();
+    return result;
+  } catch (err) {
+    try {
+      await conn.rollback();
+    } catch (_) {}
+    throw err;
+  } finally {
+    await conn.release();
   }
 }
 
@@ -2912,7 +3069,9 @@ async function restoreFromJsonData(jsonData, companyId = 1) {
 
     targetDb.close();
     const freshDb = new sqlite3.Database(targetDbPath);
+    applySqliteCompanyMigrations(freshDb);
     companyDbPool.set(targetCompanyId, freshDb);
+    await postRestoreSyncCompany(targetCompanyId);
 
     try {
       const { rebuildStockLedger } = require('../utils/stockRebuilder');
@@ -2945,6 +3104,8 @@ module.exports = {
   companyStorage: asyncLocalStorage,
   getDbPath: (companyId = 1) => getCompanyDbPath(companyId),
   getMasterDbPath: () => masterDbPath,
+  registerCacheInvalidator,
+  invalidateCompanyCaches,
   createCompanyDatabase,
   restoreDatabase,
   restoreFromJsonData,
@@ -2966,6 +3127,10 @@ module.exports = {
     const activeCompanyId = explicitCompanyId || (store ? store.companyId : 1);
     const isMaster = isMasterTableQuery(text);
 
+    if (!isMaster && store && store.txConn && Number(store.companyId) === Number(activeCompanyId)) {
+      return store.txConn.query(text, params);
+    }
+
     if (isPostgres) {
       return executePgQuery(text, params, activeCompanyId, isMaster);
     } else {
@@ -2980,6 +3145,10 @@ module.exports = {
     const activeCompanyId = explicitCompanyId || (store ? store.companyId : 1);
     const isMaster = isMasterTableQuery(text);
 
+    if (!isMaster && store && store.txConn && Number(store.companyId) === Number(activeCompanyId)) {
+      return store.txConn.run(text, params);
+    }
+
     if (isPostgres) {
       return executePgQuery(text, params, activeCompanyId, isMaster);
     } else {
@@ -2993,6 +3162,11 @@ module.exports = {
     const store = asyncLocalStorage.getStore();
     const activeCompanyId = explicitCompanyId || (store ? store.companyId : 1);
     const isMaster = isMasterTableQuery(text);
+
+    if (!isMaster && store && store.txConn && Number(store.companyId) === Number(activeCompanyId)) {
+      const res = await store.txConn.query(text, params);
+      return res.rows || [];
+    }
 
     if (isPostgres) {
       const res = await executePgQuery(text, params, activeCompanyId, isMaster);
@@ -3010,6 +3184,11 @@ module.exports = {
     const activeCompanyId = explicitCompanyId || (store ? store.companyId : 1);
     const isMaster = isMasterTableQuery(text);
 
+    if (!isMaster && store && store.txConn && Number(store.companyId) === Number(activeCompanyId)) {
+      const res = await store.txConn.query(text, params);
+      return (res.rows && res.rows.length > 0) ? res.rows[0] : null;
+    }
+
     if (isPostgres) {
       const res = await executePgQuery(text, params, activeCompanyId, isMaster);
       return (res.rows && res.rows.length > 0) ? res.rows[0] : null;
@@ -3020,19 +3199,34 @@ module.exports = {
     }
   },
 
+  withTransaction: runWithCompanyTransaction,
+
   // Explicit Company DB accessor
   forCompany: (companyId) => {
     const cId = parseInt(companyId, 10) || 1;
+    const isSameTx = () => {
+      const store = asyncLocalStorage.getStore();
+      return (store && store.txConn && Number(store.companyId) === cId) ? store.txConn : null;
+    };
     return {
       query: (text, params = []) => {
+        const tx = isSameTx();
+        if (tx) return tx.query(text, params);
         if (isPostgres) return executePgQuery(text, params, cId, false);
         return queryOnSqlite(getCompanyDatabaseInstance(cId), text, params);
       },
       run: (text, params = []) => {
+        const tx = isSameTx();
+        if (tx) return tx.run(text, params);
         if (isPostgres) return executePgQuery(text, params, cId, false);
         return runOnSqlite(getCompanyDatabaseInstance(cId), text, params);
       },
       all: async (text, params = []) => {
+        const tx = isSameTx();
+        if (tx) {
+          const res = await tx.query(text, params);
+          return res.rows || [];
+        }
         if (isPostgres) {
           const res = await executePgQuery(text, params, cId, false);
           return res.rows || [];
@@ -3041,6 +3235,11 @@ module.exports = {
         return res.rows || [];
       },
       get: async (text, params = []) => {
+        const tx = isSameTx();
+        if (tx) {
+          const res = await tx.query(text, params);
+          return (res.rows && res.rows.length > 0) ? res.rows[0] : null;
+        }
         if (isPostgres) {
           const res = await executePgQuery(text, params, cId, false);
           return (res.rows && res.rows.length > 0) ? res.rows[0] : null;
@@ -3048,6 +3247,7 @@ module.exports = {
         const res = await queryOnSqlite(getCompanyDatabaseInstance(cId), text, params);
         return (res.rows && res.rows.length > 0) ? res.rows[0] : null;
       },
+      withTransaction: (fn) => runWithCompanyTransaction(fn, cId),
       getConnection: async () => {
         if (isPostgres) {
           const client = await pgPool.connect();

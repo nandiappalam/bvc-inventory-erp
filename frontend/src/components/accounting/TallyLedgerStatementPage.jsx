@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../../services/api';
 import PurchaseLedgerDetailsModal from '../purchase/PurchaseLedgerDetailsModal';
+import VoucherSlipModal from '../../modules/vouchers/VoucherSlipModal';
 
 const TallyLedgerStatementPage = () => {
   const navigate = useNavigate();
@@ -25,6 +26,7 @@ const TallyLedgerStatementPage = () => {
   // Voucher details modal state
   const [activeVoucherId, setActiveVoucherId] = useState(null);
   const [voucherModalOpen, setVoucherModalOpen] = useState(false);
+  const [selectedVoucherSlip, setSelectedVoucherSlip] = useState(null);
 
   useEffect(() => {
     loadLedgersMaster();
@@ -316,6 +318,25 @@ const TallyLedgerStatementPage = () => {
                       };
                       const badge = getBadge(r.voucher_type);
 
+                      const tLower = String(r.voucher_type || '').toLowerCase();
+                      const vNoUp = String(r.voucher_no || '').toUpperCase();
+                      const isPur = tLower.includes('purchase') || vNoUp.startsWith('PUR') || tLower.includes('debit note');
+                      const handleRowDetails = () => {
+                        if (isPur) {
+                          setActiveVoucherId(r.purchase_id || r.reference_id || r.voucher_no);
+                          setVoucherModalOpen(true);
+                        } else {
+                          setSelectedVoucherSlip({
+                            voucherId: r.voucher_id || null,
+                            voucherNo: r.voucher_no,
+                            voucherType: r.voucher_type,
+                            rowData: r
+                          });
+                        }
+                      };
+                      const invBadge = r.inv_no || r.invoice_no;
+                      const noteSubtext = r.subtext || (r.narration ? `Note: ${r.narration}` : '');
+
                       return (
                         <tr 
                           key={idx}
@@ -325,10 +346,7 @@ const TallyLedgerStatementPage = () => {
                           <td style={{ padding: '6px 12px', color: '#334155', fontWeight: '600' }}>{r.date}</td>
                           <td style={{ padding: '6px 12px' }}>
                             <button
-                              onClick={() => {
-                                setActiveVoucherId(r.voucher_id || r.voucher_no);
-                                setVoucherModalOpen(true);
-                              }}
+                              onClick={handleRowDetails}
                               style={{ background: '#eff6ff', border: '1px solid #bfdbfe', color: '#1d4ed8', fontWeight: '700', fontFamily: 'monospace', cursor: 'pointer', padding: '2px 6px', borderRadius: '4px', fontSize: '11px' }}
                             >
                               {r.voucher_no}
@@ -340,8 +358,15 @@ const TallyLedgerStatementPage = () => {
                             </span>
                           </td>
                           <td style={{ padding: '6px 12px', color: '#0f172a', fontWeight: '600' }}>
-                            {r.particulars}
-                            {r.narration && <span style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: 'normal', marginTop: '2px' }}>Note: {r.narration}</span>}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                              {invBadge && (
+                                <span style={{ fontSize: '11px', fontWeight: '800', padding: '1px 7px', borderRadius: '4px', backgroundColor: '#dbeafe', color: '#1e40af', border: '1px solid #93c5fd', fontFamily: 'monospace' }}>
+                                  Inv #{invBadge}
+                                </span>
+                              )}
+                              <span>{r.particulars}</span>
+                            </div>
+                            {noteSubtext && <span style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: 'normal', marginTop: '2px' }}>{noteSubtext}</span>}
                           </td>
                           <td style={{ padding: '6px 12px', textAlign: 'right', fontWeight: '700', color: '#047857' }}>
                             {r.debit > 0 ? `₹${r.debit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}
@@ -355,10 +380,7 @@ const TallyLedgerStatementPage = () => {
                           </td>
                           <td style={{ padding: '6px 12px', textAlign: 'center' }}>
                             <button
-                              onClick={() => {
-                                setActiveVoucherId(r.voucher_id || r.voucher_no);
-                                setVoucherModalOpen(true);
-                              }}
+                              onClick={handleRowDetails}
                               style={{ padding: '4px 10px', backgroundColor: '#e2e8f0', color: '#1e293b', border: 'none', borderRadius: '4px', fontSize: '11px', fontWeight: '700', cursor: 'pointer' }}
                             >
                               View Details
@@ -405,6 +427,18 @@ const TallyLedgerStatementPage = () => {
           isOpen={voucherModalOpen}
           onClose={() => setVoucherModalOpen(false)}
           purchaseId={activeVoucherId}
+        />
+      )}
+
+      {/* Payment / Receipt / Journal / Contra Voucher Slip Modal */}
+      {selectedVoucherSlip && (
+        <VoucherSlipModal
+          isOpen={Boolean(selectedVoucherSlip)}
+          onClose={() => setSelectedVoucherSlip(null)}
+          voucherId={selectedVoucherSlip.voucherId}
+          voucherNo={selectedVoucherSlip.voucherNo}
+          voucherType={selectedVoucherSlip.voucherType}
+          rowData={selectedVoucherSlip.rowData}
         />
       )}
     </div>

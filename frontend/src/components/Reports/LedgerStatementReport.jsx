@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import api from '../../utils/api.js'
 import { printHtml } from '../../utils/printHelper.js'
 import PurchaseLedgerDetailsModal from '../purchase/PurchaseLedgerDetailsModal'
+import VoucherSlipModal from '../../modules/vouchers/VoucherSlipModal'
 import './ReportPage.css'
 
 /**
@@ -21,6 +22,7 @@ const LedgerStatementReport = () => {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [selectedPurchaseModal, setSelectedPurchaseModal] = useState(null)
+  const [selectedVoucherSlip, setSelectedVoucherSlip] = useState(null)
 
   // Set default dates (current financial year starting April 1st)
   useEffect(() => {
@@ -175,10 +177,13 @@ const LedgerStatementReport = () => {
       if (fromDate) params.from_date = fromDate
       if (toDate) params.to_date = toDate
       if (selectedType) params.type = selectedType
+      const typeNorm = String(selectedType || '').trim().toLowerCase()
       if (selectedLedgerId) {
-        params.loadman_id = selectedLedgerId
-        params.ledger_id = selectedLedgerId
-        params.id = selectedLedgerId
+        if (['loadman', 'loadmen', 'worker'].includes(typeNorm)) {
+          params.loadman_id = selectedLedgerId
+        } else if (['', 'general', 'asset', 'liability', 'income', 'expense', 'bank', 'cash', 'tax', 'creditor', 'debtor', 'party'].includes(typeNorm)) {
+          params.ledger_id = selectedLedgerId
+        }
       }
       
       const result = await api.get('/reports/ledger/' + encodeURIComponent(selectedLedger), { params })
@@ -210,17 +215,36 @@ const LedgerStatementReport = () => {
     : ''
 
   const handlePrint = () => {
-    const rowsHtml = safeTransactions.map((row, idx) => `
+    const openingVal = parseFloat(reportData?.openingBalance || 0);
+    const openingRowHtml = `
+      <tr style="background-color: #f1f5f9; font-weight: 600;">
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center;">${fromDate || '-'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1;">Opening</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1;">-</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1;">Opening Balance b/f</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right;">${openingVal > 0 ? openingVal.toFixed(2) : '-'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right;">${openingVal < 0 ? Math.abs(openingVal).toFixed(2) : '-'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; font-weight: bold;">${Math.abs(openingVal).toFixed(2)} ${openingVal >= 0 ? 'Dr' : 'Cr'}</td>
+      </tr>
+    `;
+
+    const rowsHtml = safeTransactions.map((row, idx) => {
+      const subLine = row.subtext || (row.narration || row.remarks ? `Note: ${row.narration || row.remarks}` : '');
+      return `
       <tr style="background-color: ${idx % 2 === 0 ? '#ffffff' : '#f8fafc'};">
-        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center;">${row.date ? new Date(row.date).toLocaleDateString() : '-'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center;">${row.date ? new Date(row.date).toLocaleDateString('en-GB') : '-'}</td>
         <td style="padding: 6px 8px; border: 1px solid #cbd5e1;">${row.voucher_type || '-'}</td>
         <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: bold; color: #1f4fb2;">${row.voucher_no || '-'}</td>
-        <td style="padding: 6px 8px; border: 1px solid #cbd5e1;">${row.particulars || '-'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1;">
+          <div style="font-weight: 700; color: #0f172a;">${row.particulars || '-'}</div>
+          ${subLine ? `<div style="font-size: 10px; color: #64748b; margin-top: 2px;">${subLine}</div>` : ''}
+        </td>
         <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; color: ${parseFloat(row.debit) > 0 ? '#059669' : 'inherit'};">${parseFloat(row.debit || 0) > 0 ? parseFloat(row.debit).toFixed(2) : '-'}</td>
         <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; color: ${parseFloat(row.credit) > 0 ? '#d97706' : 'inherit'};">${parseFloat(row.credit || 0) > 0 ? parseFloat(row.credit).toFixed(2) : '-'}</td>
         <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; font-weight: bold;">${Math.abs(parseFloat(row.balance || 0)).toFixed(2)} ${row.balance_type || 'Dr'}</td>
       </tr>
-    `).join('');
+    `;
+    }).join('');
 
     const html = `
       <div style="font-family: Arial, sans-serif; color: #0f172a; padding: 12px;">
@@ -251,9 +275,16 @@ const LedgerStatementReport = () => {
             </tr>
           </thead>
           <tbody>
+            ${openingRowHtml}
             ${rowsHtml || '<tr><td colspan="7" style="text-align:center; padding: 14px;">No transactions recorded</td></tr>'}
           </tbody>
           <tfoot>
+            <tr style="background-color: #f8fafc; font-weight: bold;">
+              <td colspan="4" style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right;">Period Total:</td>
+              <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; color: #059669;">₹ ${Number(periodDebitCalculated || 0).toFixed(2)}</td>
+              <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; color: #d97706;">₹ ${Number(periodCreditCalculated || 0).toFixed(2)}</td>
+              <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right;">-</td>
+            </tr>
             <tr style="background-color: #e2e8f0; font-weight: bold;">
               <td colspan="6" style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right;">Closing Balance:</td>
               <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; color: #1f4fb2;">₹ ${Math.abs(parseFloat(calculatedClosingBalance || 0)).toFixed(2)} ${calculatedClosingBalance >= 0 ? 'Dr' : 'Cr'}</td>
@@ -270,74 +301,16 @@ const LedgerStatementReport = () => {
     const raw = reportData?.transactions || [];
     if (!raw.length) return [];
 
-    const deduped = [];
-    const seenMap = new Map();
+    // Canonical transactions from backend ledger_entries; sort chronologically and calculate running balance
+    const sorted = [...raw].sort((a, b) => {
+      const da = new Date(a.date || 0).getTime() || 0;
+      const db = new Date(b.date || 0).getTime() || 0;
+      if (da !== db) return da - db;
+      return (Number(a.id) || 0) - (Number(b.id) || 0);
+    });
 
-    const extractPurchaseRef = (t) => {
-      const p = String(t.particulars || '');
-      const v = String(t.voucher_no || '');
-      const ref = String(t.reference_id || '');
-
-      // 1. "Auto-recorded from Purchase #111" or "Purchase #111"
-      const pMatch = p.match(/(?:from\s+purchase|purchase)\s*#\s*([A-Za-z0-9\-_]+)/i);
-      if (pMatch && pMatch[1]) {
-        return pMatch[1].toLowerCase().replace(/^pur-?0*/i, '');
-      }
-
-      // 2. "Loading charges payable for #111" or "Freight charges payable for #111"
-      const chargeMatch = p.match(/(?:loading|unloading|freight|transport).*?#([A-Za-z0-9\-_]+)/i);
-      if (chargeMatch && chargeMatch[1] && !/^opc-/i.test(chargeMatch[1])) {
-        return chargeMatch[1].toLowerCase().replace(/^pur-?0*/i, '');
-      }
-
-      // 3. Purchase Unloading or Purchase Freight voucher type
-      if (t.voucher_type === 'Purchase Unloading' || t.voucher_type === 'Purchase Freight') {
-        const rawStr = (v || ref).toLowerCase().replace(/^pur-?0*/i, '');
-        if (rawStr) return rawStr;
-      }
-
-      // 4. Voucher no starting with PUR
-      if (/^pur/i.test(v)) {
-        return v.toLowerCase().replace(/^pur-?0*/i, '');
-      }
-
-      // 5. Reference ID if reference type is purchase
-      if (String(t.reference_type || '').toLowerCase() === 'purchase' && ref) {
-        return ref.toLowerCase().replace(/^pur-?0*/i, '');
-      }
-
-      return null;
-    };
-
-    const getVoucherPriority = (t) => {
-      if (t.voucher_type === 'Purchase') return 3;
-      if (t.voucher_type === 'Journal') return 2;
-      return 1;
-    };
-
-    for (const t of raw) {
-      const pRef = extractPurchaseRef(t);
-      const cr = Number(parseFloat(t.credit || 0).toFixed(2));
-      const dr = Number(parseFloat(t.debit || 0).toFixed(2));
-
-      if (pRef && (cr > 0 || dr > 0)) {
-        const key = `pur_${pRef}_${cr}_${dr}`;
-        if (seenMap.has(key)) {
-          const existingIdx = seenMap.get(key);
-          const existingT = deduped[existingIdx];
-          if (getVoucherPriority(t) > getVoucherPriority(existingT)) {
-            deduped[existingIdx] = t;
-          }
-          continue;
-        }
-        seenMap.set(key, deduped.length);
-      }
-      deduped.push(t);
-    }
-
-    // Recalculate running balance dynamically
     let running = parseFloat(reportData?.openingBalance || 0);
-    return deduped.map(t => {
+    return sorted.map(t => {
       const d = parseFloat(t.debit || 0);
       const c = parseFloat(t.credit || 0);
       running += (d - c);
@@ -524,16 +497,28 @@ const LedgerStatementReport = () => {
                 <>
                   {safeTransactions.map((row, index) => {
                     const typeLower = String(row.voucher_type || '').toLowerCase();
+                    const vNoUpper = String(row.voucher_no || '').toUpperCase();
                     const isClickable = row.voucher_no && row.voucher_no !== '-';
-                    
+                    const isPurchaseType =
+                      typeLower.includes('purchase') ||
+                      vNoUpper.startsWith('PUR') ||
+                      row.voucher_type === 'Purchase Unloading' ||
+                      typeLower.includes('debit note');
+                    const isPaymentType = typeLower.includes('payment') || vNoUpper.startsWith('PAY');
+
                     const handleVoucherClick = () => {
                       if (!isClickable) return;
-                      if (typeLower.includes('purchase') || String(row.voucher_no || '').startsWith('PUR') || row.voucher_type === 'Purchase Unloading' || typeLower.includes('debit note')) {
-                        setSelectedPurchaseModal(row.reference_id || row.voucher_no);
+                      if (isPurchaseType) {
+                        setSelectedPurchaseModal(row.purchase_id || row.reference_id || row.voucher_no);
                       } else if (typeLower.includes('sales')) {
                         navigate(`/entry/sales-display?search=${encodeURIComponent(row.voucher_no)}`);
                       } else {
-                        navigate(`/entry/voucher-display?search=${encodeURIComponent(row.voucher_no)}`);
+                        setSelectedVoucherSlip({
+                          voucherId: row.voucher_id || null,
+                          voucherNo: row.voucher_no,
+                          voucherType: row.voucher_type,
+                          rowData: row
+                        });
                       }
                     };
 
@@ -553,6 +538,8 @@ const LedgerStatementReport = () => {
                     const debitVal = parseFloat(row.debit || 0);
                     const creditVal = parseFloat(row.credit || 0);
                     const balVal = parseFloat(row.balance || 0);
+                    const invBadge = row.inv_no || row.invoice_no;
+                    const noteSubtext = row.subtext || (row.narration || row.remarks ? `Note: ${row.narration || row.remarks}` : '');
 
                     return (
                       <tr key={index} style={{ backgroundColor: index % 2 === 0 ? '#ffffff' : '#f8fafc' }}>
@@ -567,17 +554,33 @@ const LedgerStatementReport = () => {
                           <button 
                             className={isClickable ? 'clickable-voucher' : ''}
                             onClick={handleVoucherClick}
-                            title="Click to view full voucher & transaction details"
+                            title={isPaymentType ? 'Click to view Payment Voucher Slip' : 'Click to view full voucher & transaction details'}
                             style={{ background: isClickable ? '#eff6ff' : 'none', border: isClickable ? '1px solid #bfdbfe' : 'none', cursor: isClickable ? 'pointer' : 'default' }}
                           >
                             {row.voucher_no || '-'}
                           </button>
                         </td>
                         <td className="particulars-cell">
-                          {row.particulars || '-'}
-                          {(row.narration || row.remarks) && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            {invBadge && (
+                              <span style={{
+                                fontSize: '11px',
+                                fontWeight: '800',
+                                padding: '1px 7px',
+                                borderRadius: '4px',
+                                backgroundColor: isPaymentType ? '#f5f3ff' : '#dbeafe',
+                                color: isPaymentType ? '#6d28d9' : '#1e40af',
+                                border: `1px solid ${isPaymentType ? '#ddd6fe' : '#93c5fd'}`,
+                                fontFamily: 'monospace'
+                              }}>
+                                Inv #{invBadge}
+                              </span>
+                            )}
+                            <span style={{ fontWeight: '700', color: '#0f172a' }}>{row.particulars || '-'}</span>
+                          </div>
+                          {noteSubtext && (
                             <span className="particulars-subtext">
-                              Note: {row.narration || row.remarks}
+                              {noteSubtext}
                             </span>
                           )}
                         </td>
@@ -592,8 +595,8 @@ const LedgerStatementReport = () => {
                         <td style={{ textAlign: 'center' }}>
                           <button
                             onClick={handleVoucherClick}
-                            style={{ padding: '4px 10px', backgroundColor: '#e2e8f0', color: '#1e293b', border: 'none', borderRadius: '4px', fontSize: '11px', fontWeight: '700', cursor: 'pointer' }}
-                            title="Open voucher & journal details"
+                            style={{ padding: '4px 10px', backgroundColor: isPaymentType ? '#ede9fe' : '#e2e8f0', color: isPaymentType ? '#5b21b6' : '#1e293b', border: isPaymentType ? '1px solid #ddd6fe' : 'none', borderRadius: '4px', fontSize: '11px', fontWeight: '700', cursor: 'pointer' }}
+                            title={isPaymentType ? 'Open Payment Voucher Slip' : 'Open voucher & journal details'}
                           >
                             View Details
                           </button>
@@ -628,7 +631,7 @@ const LedgerStatementReport = () => {
         <div className="empty-state">
           <div className="empty-icon">📊</div>
           <h3>Select an account to view statement</h3>
-          <p>Choose a ledger from the dropdown above and click Search.</p>
+          <p></p>
         </div>
       )}
 
@@ -638,6 +641,18 @@ const LedgerStatementReport = () => {
           isOpen={Boolean(selectedPurchaseModal)}
           onClose={() => setSelectedPurchaseModal(null)}
           purchaseId={selectedPurchaseModal}
+        />
+      )}
+
+      {/* In-page Voucher Slip Modal for Payment, Receipt, Contra & Journal */}
+      {selectedVoucherSlip && (
+        <VoucherSlipModal
+          isOpen={Boolean(selectedVoucherSlip)}
+          onClose={() => setSelectedVoucherSlip(null)}
+          voucherId={selectedVoucherSlip.voucherId}
+          voucherNo={selectedVoucherSlip.voucherNo}
+          voucherType={selectedVoucherSlip.voucherType}
+          rowData={selectedVoucherSlip.rowData}
         />
       )}
     </div>
