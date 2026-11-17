@@ -19,15 +19,7 @@ router.use(async (req, res, next) => {
   next();
 });
 
-// Initialize cold storage tables on startup
-const initTables = async () => {
-  try {
-    await ensureColdStorageSchema(1);
-  } catch (err) {
-    console.error('Error initializing cold storage tables:', err.message);
-  }
-};
-initTables();
+// Initialization handled lazily per-request in router.use above
 
 // Ensure all cold storage transfers reflect in the stock table for reports and ledgers
 const syncColdStorageStock = async (dbInstance = db, companyId = 1) => {
@@ -111,15 +103,12 @@ const syncColdStorageStock = async (dbInstance = db, companyId = 1) => {
       }
     }
 
-    await rebuildStockLedger();
+    await rebuildStockLedger(cId);
   } catch (err) {
     console.warn('Notice in syncColdStorageStock:', err.message);
   }
 };
-// Initial sync
-setTimeout(() => {
-  syncColdStorageStock().catch(e => console.warn('Init sync cold storage stock error:', e.message));
-}, 1000);
+// Startup sync removed to prevent cross-company write on require(); triggered per-request instead.
 
 // Helper: Get next voucher number
 const getNextVoucherNo = async (type) => {
@@ -1901,160 +1890,195 @@ router.post('/bills', async (req, res) => {
 router.post('/bills/:id/approve', async (req, res) => {
   try {
     const { id } = req.params;
-    const billRes = await db.query('SELECT * FROM cold_storage_bills WHERE id = ?', [id]);
-    if (!billRes.rows || billRes.rows.length === 0) {
-      return res.status(404).json({ success: false, message: 'Bill not found' });
-    }
-    const bill = billRes.rows[0];
-    if (bill.status === 'Approved') {
-      return res.status(400).json({ success: false, message: 'Bill is already approved' });
-    }
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    const AccountingEngine = require('../services/AccountingEngine');
 
-    const { resolveLedgerId } = require('../utils/ledgerHelper');
-
-    // 1. Resolve Operator Supplier Ledger
-    let operatorLedgerId = await resolveLedgerId(bill.operator_name, 'Supplier');
-    if (!operatorLedgerId) {
-      operatorLedgerId = 202; // Fallback
-    }
-
-    // 2. Resolve Expense Ledger "Cold Storage Rent & Handling Charges"
-    let expenseLedgerId = 201;
-    try {
-      const expRow = await db.query("SELECT id FROM ledgermaster WHERE LOWER(name) LIKE '%cold storage%' LIMIT 1");
-      if (expRow.rows && expRow.rows.length > 0) {
-        expenseLedgerId = expRow.rows[0].id;
+    const result = await db.forCompany(activeCompanyId).withTransaction(async () => {
+      const billRes = await db.query('SELECT * FROM cold_storage_bills WHERE id = ?', [id], activeCompanyId);
+      if (!billRes.rows || billRes.rows.length === 0) {
+        const err = new Error('Bill not found');
+        err.statusCode = 404;
+        throw err;
       }
-    } catch (_) {}
-
-    // 3. Resolve Input GST Ledgers
-    let cgstInputId = 8;
-    let sgstInputId = 9;
-    let igstInputId = 10;
-    try {
-      const cRow = await db.query("SELECT id FROM ledgermaster WHERE LOWER(name) = 'cgst input' LIMIT 1");
-      if (cRow.rows && cRow.rows.length > 0) cgstInputId = cRow.rows[0].id;
-      const sRow = await db.query("SELECT id FROM ledgermaster WHERE LOWER(name) = 'sgst input' LIMIT 1");
-      if (sRow.rows && sRow.rows.length > 0) sgstInputId = sRow.rows[0].id;
-      const iRow = await db.query("SELECT id FROM ledgermaster WHERE LOWER(name) = 'igst input' LIMIT 1");
-      if (iRow.rows && iRow.rows.length > 0) igstInputId = iRow.rows[0].id;
-    } catch (_) {}
-
-    const grandTotal = parseFloat(bill.grand_total || bill.operator_invoice_amount || 0);
-    const taxableAmt = parseFloat(bill.taxable_amount || 0);
-    const cgstAmt = parseFloat(bill.cgst_amount || 0);
-    const sgstAmt = parseFloat(bill.sgst_amount || 0);
-    const igstAmt = parseFloat(bill.igst_amount || 0);
-
-    // Generate Journal Voucher No: VOC...
-    const existingVocRes = await db.query("SELECT voucher_no FROM voucher WHERE voucher_no LIKE 'VOC%' ORDER BY id DESC");
-    let maxVocNum = 0;
-    for (const row of existingVocRes.rows || []) {
-      const match = String(row.voucher_no || '').trim().match(/^VOC-?(\d+)$/i);
-      if (match) {
-        const parsed = parseInt(match[1], 10);
-        if (!Number.isNaN(parsed) && parsed > maxVocNum) maxVocNum = parsed;
+      const bill = billRes.rows[0];
+      if (bill.status === 'Approved') {
+        const err = new Error('Bill is already approved');
+        err.statusCode = 400;
+        throw err;
       }
-    }
-    let vNum = maxVocNum + 1;
-    let voucherNo = '';
-    while (true) {
-      const candidate = `VOC${String(vNum).padStart(3, '0')}`;
-      const dup = await db.query('SELECT id FROM voucher WHERE voucher_no = ? LIMIT 1', [candidate]);
-      if (!dup.rows || dup.rows.length === 0) {
-        voucherNo = candidate;
-        break;
+
+      const operatorLedger = await AccountingEngine.resolveOrCreateLedger({
+        companyId: activeCompanyId,
+        name: bill.operator_name || 'Cold Storage Operator',
+        ledgerType: 'Supplier'
+      });
+      const expenseLedger = await AccountingEngine.resolveOrCreateLedger({
+        companyId: activeCompanyId,
+        name: 'Cold Storage Rent & Handling Charges',
+        ledgerType: 'Expense',
+        groupName: 'Direct Expenses'
+      });
+
+      const toPaise = AccountingEngine.toPaise;
+      const fromPaise = AccountingEngine.fromPaise;
+
+      const cgstPaise = toPaise(bill.cgst_amount || 0);
+      const sgstPaise = toPaise(bill.sgst_amount || 0);
+      const igstPaise = toPaise(bill.igst_amount || 0);
+      let taxablePaise = toPaise(bill.taxable_amount || 0);
+      let grandTotalPaise = toPaise(bill.grand_total || bill.operator_invoice_amount || 0);
+
+      if (taxablePaise === 0 && grandTotalPaise > 0) {
+        taxablePaise = Math.max(0, grandTotalPaise - cgstPaise - sgstPaise - igstPaise);
       }
-      vNum++;
-    }
-    const vDate = bill.bill_date || new Date().toISOString().split('T')[0];
-    const narration = `Cold Storage Charges for ${bill.cold_storage_name} (Inv #${bill.operator_invoice_no || bill.bill_no}) from ${bill.operator_name}`;
+      if (grandTotalPaise === 0) {
+        grandTotalPaise = taxablePaise + cgstPaise + sgstPaise + igstPaise;
+      }
+      if (grandTotalPaise <= 0) {
+        const err = new Error('Bill total amount must be greater than zero to approve.');
+        err.statusCode = 400;
+        throw err;
+      }
 
-    // Insert into voucher
-    const vInsert = await db.run(`
-      INSERT INTO voucher (voucher_no, voucher_type, date, reference_no, narration, status, posted)
-      VALUES (?, 'Journal', ?, ?, ?, 'Approved', 1)
-    `, [voucherNo, vDate, bill.bill_no, narration]);
-    const voucherId = vInsert.lastID || vInsert.lastInsertRowid;
+      const vDate = bill.bill_date || new Date().toISOString().split('T')[0];
+      const narration = `Cold Storage Charges for ${bill.cold_storage_name} (Inv #${bill.operator_invoice_no || bill.bill_no}) from ${bill.operator_name}`;
+      const lines = [];
 
-    // Entries:
-    // DR Cold Storage Expense (taxable amount)
-    await db.run(`
-      INSERT INTO voucher_entry (voucher_id, type, ledger_id, ledger_name, debit, credit, remarks)
-      VALUES (?, 'Dr', ?, 'Cold Storage Rent & Handling Charges', ?, 0, ?)
-    `, [voucherId, expenseLedgerId, taxableAmt, `Storage Rent & Handling (${bill.bill_no})`]);
+      if (taxablePaise > 0) {
+        lines.push({
+          ledgerId: expenseLedger.id,
+          ledgerName: expenseLedger.name,
+          ledgerType: 'Expense',
+          debit: fromPaise(taxablePaise),
+          credit: 0,
+          remarks: `Storage Rent & Handling (${bill.bill_no})`,
+          referenceId: Number(id),
+          referenceType: 'cold_storage_bill',
+          transactionId: Number(id),
+          transactionType: 'cold_storage_bill'
+        });
+      }
+      if (cgstPaise > 0) {
+        lines.push({
+          ledgerName: 'Input CGST',
+          ledgerType: 'Tax',
+          debit: fromPaise(cgstPaise),
+          credit: 0,
+          remarks: `CGST Input for Cold Storage (${bill.bill_no})`,
+          referenceId: Number(id),
+          referenceType: 'cold_storage_bill',
+          transactionId: Number(id),
+          transactionType: 'cold_storage_bill'
+        });
+      }
+      if (sgstPaise > 0) {
+        lines.push({
+          ledgerName: 'Input SGST',
+          ledgerType: 'Tax',
+          debit: fromPaise(sgstPaise),
+          credit: 0,
+          remarks: `SGST Input for Cold Storage (${bill.bill_no})`,
+          referenceId: Number(id),
+          referenceType: 'cold_storage_bill',
+          transactionId: Number(id),
+          transactionType: 'cold_storage_bill'
+        });
+      }
+      if (igstPaise > 0) {
+        lines.push({
+          ledgerName: 'Input IGST',
+          ledgerType: 'Tax',
+          debit: fromPaise(igstPaise),
+          credit: 0,
+          remarks: `IGST Input for Cold Storage (${bill.bill_no})`,
+          referenceId: Number(id),
+          referenceType: 'cold_storage_bill',
+          transactionId: Number(id),
+          transactionType: 'cold_storage_bill'
+        });
+      }
 
-    await db.run(`
-      INSERT INTO ledger_entries (ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit, particulars, voucher_id)
-      VALUES (?, 'Cold Storage Rent & Handling Charges', ?, 'Journal', ?, ?, 0, ?, ?)
-    `, [expenseLedgerId, vDate, voucherNo, taxableAmt, narration, voucherId]);
+      const drSumPaise = taxablePaise + cgstPaise + sgstPaise + igstPaise;
+      const diffPaise = grandTotalPaise - drSumPaise;
+      if (diffPaise > 0) {
+        lines.push({
+          ledgerName: 'Round Off',
+          ledgerType: 'Expense',
+          debit: fromPaise(diffPaise),
+          credit: 0,
+          remarks: `Round off on Cold Storage Bill ${bill.bill_no}`,
+          referenceId: Number(id),
+          referenceType: 'cold_storage_bill',
+          transactionId: Number(id),
+          transactionType: 'cold_storage_bill'
+        });
+      } else if (diffPaise < 0) {
+        lines.push({
+          ledgerName: 'Round Off',
+          ledgerType: 'Income',
+          debit: 0,
+          credit: fromPaise(-diffPaise),
+          remarks: `Round off on Cold Storage Bill ${bill.bill_no}`,
+          referenceId: Number(id),
+          referenceType: 'cold_storage_bill',
+          transactionId: Number(id),
+          transactionType: 'cold_storage_bill'
+        });
+      }
 
-    // DR CGST Input & SGST Input (if any)
-    if (cgstAmt > 0) {
+      lines.push({
+        ledgerId: operatorLedger.id,
+        ledgerName: operatorLedger.name,
+        ledgerType: 'Supplier',
+        debit: 0,
+        credit: fromPaise(grandTotalPaise),
+        remarks: `Payable for Cold Storage Bill ${bill.bill_no}`,
+        referenceId: Number(id),
+        referenceType: 'cold_storage_bill',
+        transactionId: Number(id),
+        transactionType: 'cold_storage_bill'
+      });
+
+      const vRes = await AccountingEngine.postVoucher({
+        companyId: activeCompanyId,
+        voucherType: 'Cold Storage Bill',
+        prefix: 'CSB',
+        date: vDate,
+        referenceNo: bill.bill_no || String(id),
+        narration,
+        sourceModule: 'cold_storage_bill',
+        sourceId: Number(id),
+        postingKey: `cold_storage_bill:${id}`,
+        lines,
+        allowUpdate: false
+      });
+
       await db.run(`
-        INSERT INTO voucher_entry (voucher_id, type, ledger_id, ledger_name, debit, credit, remarks)
-        VALUES (?, 'Dr', ?, 'CGST Input', ?, 0, 'CGST Input for Cold Storage')
-      `, [voucherId, cgstInputId, cgstAmt]);
-      await db.run(`
-        INSERT INTO ledger_entries (ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit, particulars, voucher_id)
-        VALUES (?, 'CGST Input', ?, 'Journal', ?, ?, 0, 'CGST Input for Cold Storage', ?)
-      `, [cgstInputId, vDate, voucherNo, cgstAmt, voucherId]);
-    }
-    if (sgstAmt > 0) {
-      await db.run(`
-        INSERT INTO voucher_entry (voucher_id, type, ledger_id, ledger_name, debit, credit, remarks)
-        VALUES (?, 'Dr', ?, 'SGST Input', ?, 0, 'SGST Input for Cold Storage')
-      `, [voucherId, sgstInputId, sgstAmt]);
-      await db.run(`
-        INSERT INTO ledger_entries (ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit, particulars, voucher_id)
-        VALUES (?, 'SGST Input', ?, 'Journal', ?, ?, 0, 'SGST Input for Cold Storage', ?)
-      `, [sgstInputId, vDate, voucherNo, sgstAmt, voucherId]);
-    }
-    if (igstAmt > 0) {
-      await db.run(`
-        INSERT INTO voucher_entry (voucher_id, type, ledger_id, ledger_name, debit, credit, remarks)
-        VALUES (?, 'Dr', ?, 'IGST Input', ?, 0, 'IGST Input for Cold Storage')
-      `, [voucherId, igstInputId, igstAmt]);
-      await db.run(`
-        INSERT INTO ledger_entries (ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit, particulars, voucher_id)
-        VALUES (?, 'IGST Input', ?, 'Journal', ?, ?, 0, 'IGST Input for Cold Storage', ?)
-      `, [igstInputId, vDate, voucherNo, igstAmt, voucherId]);
-    }
+        UPDATE cold_storage_bills 
+        SET status = 'Approved', voucher_id = ?, voucher_no = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `, [vRes.voucherId, vRes.voucherNo, id], activeCompanyId);
 
-    // CR Operator Supplier Ledger (grand total)
-    await db.run(`
-      INSERT INTO voucher_entry (voucher_id, type, ledger_id, ledger_name, debit, credit, remarks)
-      VALUES (?, 'Cr', ?, ?, 0, ?, ?)
-    `, [voucherId, operatorLedgerId, bill.operator_name, grandTotal, `Payable for Cold Storage Bill ${bill.bill_no}`]);
-
-    await db.run(`
-      INSERT INTO ledger_entries (ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit, particulars, voucher_id)
-      VALUES (?, ?, ?, 'Journal', ?, 0, ?, ?, ?)
-    `, [operatorLedgerId, bill.operator_name, vDate, voucherNo, grandTotal, narration, voucherId]);
-
-    // Update bill
-    await db.run(`
-      UPDATE cold_storage_bills 
-      SET status = 'Approved', voucher_id = ?, voucher_no = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `, [voucherId, voucherNo, id]);
+      return { billNo: bill.bill_no, voucherId: vRes.voucherId, voucherNo: vRes.voucherNo };
+    });
 
     res.json({
       success: true,
-      message: `Bill #${bill.bill_no} approved and Accounts Voucher ${voucherNo} posted successfully!`,
-      voucher_id: voucherId,
-      voucher_no: voucherNo
+      message: `Bill #${result.billNo} approved and Accounts Voucher ${result.voucherNo} posted successfully!`,
+      voucher_id: result.voucherId,
+      voucher_no: result.voucherNo
     });
   } catch (err) {
     console.error('Error approving cold storage bill:', err);
-    res.status(500).json({ success: false, message: 'Approval error: ' + err.message });
+    res.status(err.statusCode || 500).json({ success: false, message: 'Approval error: ' + err.message });
   }
 });
 
 // GET /bills - List all cold storage operator bills
 router.get('/bills', async (req, res) => {
   try {
-    await syncGodownTransfersToColdStorage();
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    await syncGodownTransfersToColdStorage(activeCompanyId);
     const { cold_storage_id, operator_id, status } = req.query;
     let query = 'SELECT * FROM cold_storage_bills WHERE 1=1';
     const params = [];
@@ -2071,7 +2095,7 @@ router.get('/bills', async (req, res) => {
       params.push(status);
     }
     query += ' ORDER BY id DESC';
-    const result = await db.query(query, params);
+    const result = await db.query(query, params, activeCompanyId);
     res.json({ success: true, data: result.rows || [] });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -2081,8 +2105,9 @@ router.get('/bills', async (req, res) => {
 // GET /bills/:id - Fetch single bill details
 router.get('/bills/:id', async (req, res) => {
   try {
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
     const { id } = req.params;
-    const result = await db.query('SELECT * FROM cold_storage_bills WHERE id = ? OR bill_no = ?', [id, id]);
+    const result = await db.query('SELECT * FROM cold_storage_bills WHERE id = ? OR bill_no = ?', [id, id], activeCompanyId);
     if (!result.rows || result.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Bill not found' });
     }

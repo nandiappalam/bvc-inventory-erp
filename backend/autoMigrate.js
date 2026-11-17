@@ -223,10 +223,27 @@ module.exports = async function autoMigrate() {
             -- purchase_returns and items
             BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchase_returns" ADD COLUMN IF NOT EXISTS "return_inv_no" TEXT'; EXCEPTION WHEN OTHERS THEN END;
             BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."purchase_return_items" ADD COLUMN IF NOT EXISTS "lot_no" TEXT'; EXCEPTION WHEN OTHERS THEN END;
+
+            -- voucher & ledger_entries & voucher_counters
+            BEGIN EXECUTE 'CREATE TABLE IF NOT EXISTS "' || sch || '"."voucher_counters" (id SERIAL PRIMARY KEY, company_id INTEGER NOT NULL DEFAULT 1, financial_year TEXT NOT NULL DEFAULT ''DEFAULT'', voucher_type TEXT NOT NULL, prefix TEXT NOT NULL, last_number INTEGER NOT NULL DEFAULT 0, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE(company_id, financial_year, voucher_type))'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."voucher" ADD COLUMN IF NOT EXISTS "company_id" INTEGER NOT NULL DEFAULT 1'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."voucher" ADD COLUMN IF NOT EXISTS "financial_year" TEXT DEFAULT ''DEFAULT'''; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."voucher" ADD COLUMN IF NOT EXISTS "source_module" TEXT'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."voucher" ADD COLUMN IF NOT EXISTS "source_id" INTEGER'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."voucher" ADD COLUMN IF NOT EXISTS "posting_key" TEXT'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."voucher" ADD COLUMN IF NOT EXISTS "is_reversed" INTEGER DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."voucher" ADD COLUMN IF NOT EXISTS "reversed_voucher_id" INTEGER'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."voucher" ADD COLUMN IF NOT EXISTS "parent_voucher_id" INTEGER'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."ledger_entries" ADD COLUMN IF NOT EXISTS "company_id" INTEGER NOT NULL DEFAULT 1'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."ledger_entries" ADD COLUMN IF NOT EXISTS "financial_year" TEXT DEFAULT ''DEFAULT'''; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."ledger_entries" ADD COLUMN IF NOT EXISTS "voucher_entry_id" INTEGER'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."ledger_entries" ADD COLUMN IF NOT EXISTS "posting_key" TEXT'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."ledger_entries" ADD COLUMN IF NOT EXISTS "counterparty_summary" TEXT'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."ledger_entries" ADD COLUMN IF NOT EXISTS "is_reversed" INTEGER DEFAULT 0'; EXCEPTION WHEN OTHERS THEN END;
           END LOOP;
         END $$;
       `);
-      console.log('✅ [Postgres] Multi-tenant schemas successfully migrated for cold storage, godown_master, purchases, purchase_items, qc_inspections, and stock_lots.');
+      console.log('✅ [Postgres] Multi-tenant schemas successfully migrated for cold storage, godown_master, purchases, purchase_items, qc_inspections, voucher_counters, and stock_lots.');
     } catch (pgMigrateErr) {
       console.log('Notice running multi-tenant schema migration in autoMigrate:', pgMigrateErr.message);
     }
@@ -2032,6 +2049,43 @@ module.exports = async function autoMigrate() {
 
   // Sync Item Transfers Stock
   await syncItemTransfersStock();
+
+  // Ensure Accounting Audit Columns & voucher_counters
+  try {
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS voucher_counters (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL DEFAULT 1,
+        financial_year TEXT NOT NULL DEFAULT 'DEFAULT',
+        voucher_type TEXT NOT NULL,
+        prefix TEXT NOT NULL,
+        last_number INTEGER NOT NULL DEFAULT 0,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(company_id, financial_year, voucher_type)
+      )
+    `);
+    await safeAddColumn('voucher', 'company_id', 'INTEGER NOT NULL DEFAULT 1');
+    await safeAddColumn('voucher', 'financial_year', "TEXT DEFAULT 'DEFAULT'");
+    await safeAddColumn('voucher', 'source_module', 'TEXT');
+    await safeAddColumn('voucher', 'source_id', 'INTEGER');
+    await safeAddColumn('voucher', 'posting_key', 'TEXT');
+    await safeAddColumn('voucher', 'is_reversed', 'INTEGER DEFAULT 0');
+    await safeAddColumn('voucher', 'reversed_voucher_id', 'INTEGER');
+    await safeAddColumn('voucher', 'parent_voucher_id', 'INTEGER');
+    await safeAddColumn('ledger_entries', 'company_id', 'INTEGER NOT NULL DEFAULT 1');
+    await safeAddColumn('ledger_entries', 'financial_year', "TEXT DEFAULT 'DEFAULT'");
+    await safeAddColumn('ledger_entries', 'voucher_entry_id', 'INTEGER');
+    await safeAddColumn('ledger_entries', 'posting_key', 'TEXT');
+    await safeAddColumn('ledger_entries', 'counterparty_summary', 'TEXT');
+    await safeAddColumn('ledger_entries', 'is_reversed', 'INTEGER DEFAULT 0');
+    await db.run(`CREATE INDEX IF NOT EXISTS idx_voucher_source ON voucher(source_module, source_id)`).catch(() => {});
+    await db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_voucher_posting_key_active ON voucher(posting_key) WHERE posting_key IS NOT NULL AND COALESCE(is_reversed, 0) = 0`).catch(() => {});
+    await db.run(`CREATE INDEX IF NOT EXISTS idx_ledger_entries_voucher ON ledger_entries(voucher_id)`).catch(() => {});
+    await db.run(`CREATE INDEX IF NOT EXISTS idx_ledger_entries_posting_key ON ledger_entries(posting_key)`).catch(() => {});
+    await db.run(`CREATE INDEX IF NOT EXISTS idx_ledger_entries_ledger_date ON ledger_entries(ledger_id, date)`).catch(() => {});
+  } catch (accErr) {
+    console.warn('Notice ensuring accounting audit columns in autoMigrate:', accErr.message);
+  }
 
   // Ensure Factory Operational Charges, Payments & Parties Tables
   try {

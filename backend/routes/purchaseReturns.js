@@ -2,10 +2,14 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
 const { createPurchaseReturnVoucherChain, deletePurchaseReturnVoucherChain } = require('../utils/ledgerHelper');
-const rebuildStockLedger = require('../utils/stockRebuilder');
+const { rebuildStockLedger } = require('../utils/stockRebuilder');
+
+const getCompanyId = (req) => req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+const _prSchemaEnsured = new Set();
 
 // Helper function to ensure purchase_return schema, columns, and deductions exist
-async function ensureReturnSchema() {
+async function ensureReturnSchema(companyId = 1) {
+  if (_prSchemaEnsured.has(companyId)) return;
   try {
     await db.run(`
       CREATE TABLE IF NOT EXISTS purchase_return_deductions (
@@ -18,7 +22,7 @@ async function ensureReturnSchema() {
         percentage REAL DEFAULT 0,
         amount REAL DEFAULT 0
       )
-    `);
+    `, [], companyId);
   } catch (e) {}
 
   // Safe migrations for purchase_returns table
@@ -34,7 +38,7 @@ async function ensureReturnSchema() {
     "ALTER TABLE purchase_returns ADD COLUMN approval_status TEXT DEFAULT 'APPROVED'"
   ];
   for (const sql of returnCols) {
-    try { await db.run(sql); } catch (e) {}
+    try { await db.run(sql, [], companyId); } catch (e) {}
   }
 
   // Safe migrations for purchase_return_items table
@@ -53,15 +57,21 @@ async function ensureReturnSchema() {
     "ALTER TABLE purchase_return_items ADD COLUMN source TEXT DEFAULT 'MANUAL'"
   ];
   for (const sql of itemCols) {
-    try { await db.run(sql); } catch (e) {}
+    try { await db.run(sql, [], companyId); } catch (e) {}
   }
+  _prSchemaEnsured.add(companyId);
 }
-ensureReturnSchema();
+
+router.use(async (req, _res, next) => {
+  await ensureReturnSchema(getCompanyId(req));
+  next();
+});
 
 // GET all purchase returns
 router.get(['/', '/list'], async (req, res) => {
   try {
-    await ensureReturnSchema();
+    const activeCompanyId = getCompanyId(req);
+    await ensureReturnSchema(activeCompanyId);
     const result = await db.query(`
       SELECT 
         pr.*,
@@ -763,8 +773,9 @@ async function validateReturnQuantities(items, purchaseId, excludeReturnId = nul
 // POST create new purchase return
 router.post('/', async (req, res) => {
   try {
-    await ensureReturnSchema();
-    const { formData, items, totals, deductions } = req.body;
+    const activeCompanyId = getCompanyId(req);
+    await ensureReturnSchema(activeCompanyId);
+    const { formData = {}, items = [], totals = {}, deductions } = req.body;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ success: false, message: 'At least one item must be included in the purchase return.' });
@@ -772,106 +783,104 @@ router.post('/', async (req, res) => {
 
     const purchaseId = formData.purchaseId || formData.purchase_id || null;
 
-    // 1. Strict Over-Return Validation
-    const validation = await validateReturnQuantities(items, purchaseId);
-    if (!validation.valid) {
-      return res.status(400).json({ success: false, message: validation.error });
-    }
+    const txResult = await db.forCompany(activeCompanyId).withTransaction(async () => {
+      const validation = await validateReturnQuantities(items, purchaseId);
+      if (!validation.valid) {
+        const err = new Error(validation.error);
+        err.statusCode = 400;
+        throw err;
+      }
 
-    const auto_wages = parseFloat(totals?.deductions?.autoWages ?? totals?.auto_wages) || 0;
-    const vat_percent = parseFloat(totals?.deductions?.vatPercent ?? totals?.vat_percent) || 0;
-    const vat = parseFloat(totals?.deductions?.vat ?? totals?.vat) || 0;
+      const auto_wages = parseFloat(totals?.deductions?.autoWages ?? totals?.auto_wages) || 0;
+      const vat_percent = parseFloat(totals?.deductions?.vatPercent ?? totals?.vat_percent) || 0;
+      const vat = parseFloat(totals?.deductions?.vat ?? totals?.vat) || 0;
+      const returnSource = formData.returnMethod === 'QC_IQR' ? 'QC_REJECTION' : (formData.source || 'MANUAL');
+      const cleanDate = sanitizeDate(formData.date) || new Date().toISOString().slice(0, 10);
 
-    const returnSource = formData.returnMethod === 'QC_IQR' ? 'QC_REJECTION' : (formData.source || 'MANUAL');
-
-    // 2. Insert into purchase_returns with full genealogy
-    const purchaseReturnResult = await db.run(`
-      INSERT INTO purchase_returns (
-        s_no, date, return_inv_no, supplier, pay_type, inv_date, type, address,
-        tax_type, godown, remarks, total_qty, total_weight, total_amount,
-        base_amount, disc_amount, tax_amount, net_amount, auto_wages,
-        vat_percent, vat, grand_total, source, purchase_id, purchase_inv_no,
-        po_no, iqr_no, qc_no, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
-      formData.sNo ?? formData.s_no, 
-      formData.date, 
-      formData.returnInvNo ?? formData.return_inv_no, 
-      formData.supplier, 
-      formData.payType ?? formData.pay_type ?? 'Credit',
-      formData.invDate ?? formData.inv_date, 
-      formData.type ?? 'Urad', 
-      formData.address ?? '', 
-      formData.taxType ?? formData.tax_type ?? 'Exclusive', 
-      formData.godown ?? 'Main Godown',
-      formData.remarks ?? '', 
-      totals.totalQty ?? totals.total_qty ?? 0, 
-      totals.totalWeight ?? totals.total_weight ?? 0, 
-      totals.totalAmount ?? totals.total_amount ?? 0,
-      totals.baseAmount ?? totals.base_amount ?? 0, 
-      totals.discAmount ?? totals.disc_amount ?? 0, 
-      totals.taxAmount ?? totals.tax_amount ?? 0, 
-      totals.netAmount ?? totals.net_amount ?? 0,
-      auto_wages, 
-      vat_percent, 
-      vat, 
-      totals.grandTotal ?? totals.grand_total ?? 0,
-      returnSource,
-      purchaseId ? String(purchaseId) : null,
-      formData.purchaseInvNo || formData.returnInvNo || null,
-      formData.poNo || null,
-      formData.iqrNo || null,
-      formData.qcNo || null,
-      'POSTED'
-    ]);
-
-    const purchaseReturnId = purchaseReturnResult.lastID || purchaseReturnResult.lastInsertRowid || purchaseReturnResult.rows?.[0]?.id;
-
-    // 3. Insert purchase return items and update inventory & genealogy
-    for (const item of items) {
-      const lot_no = item.lot_no ?? item.lotNo ?? '';
-      const item_name = item.item_name ?? item.itemName ?? '';
-      const item_id = item.item_id ?? null;
-      const weight = parseFloat(item.weight) || 0;
-      const qty = parseFloat(item.qty) || 0;
-      const total_wt = parseFloat(item.total_wt ?? item.totalWt ?? item.total_weight) || (weight * qty);
-      const rate = parseFloat(item.rate) || 0;
-      const disc_percent = parseFloat(item.disc_percent ?? item.disc ?? item.discountPercent) || 0;
-      const tax_percent = parseFloat(item.tax_percent ?? item.tax ?? item.taxPercent) || 0;
-      const amount = parseFloat(item.amount) || 0;
-
-      const purchased_qty = parseFloat(item.purchased_qty) || qty;
-      const accepted_qty = parseFloat(item.accepted_qty) || 0;
-      const rejected_qty = parseFloat(item.rejected_qty) || 0;
-      const previously_returned = parseFloat(item.previously_returned_qty) || 0;
-      const available_qty = parseFloat(item.available_return_qty ?? item.available_qty) || Math.max(0, purchased_qty - previously_returned);
-      const reason = item.reason || item.return_reason || formData.remarks || 'Returned to supplier';
-      const itemPurchaseId = item.purchase_id || purchaseId || null;
-
-      await db.run(`
-        INSERT INTO purchase_return_items (
-          purchase_return_id, lot_no, item_name, item_id, weight, qty, total_wt, rate, disc_percent, tax_percent, amount,
-          purchase_id, purchased_qty, accepted_qty, rejected_qty, previously_returned_qty, available_qty,
-          iqr_no, qc_no, reason, source
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      const purchaseReturnResult = await db.run(`
+        INSERT INTO purchase_returns (
+          s_no, date, return_inv_no, supplier, pay_type, inv_date, type, address,
+          tax_type, godown, remarks, total_qty, total_weight, total_amount,
+          base_amount, disc_amount, tax_amount, net_amount, auto_wages,
+          vat_percent, vat, grand_total, source, purchase_id, purchase_inv_no,
+          po_no, iqr_no, qc_no, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
-        purchaseReturnId, lot_no, item_name, item_id, weight, qty, total_wt,
-        rate, disc_percent, tax_percent, amount,
-        itemPurchaseId, purchased_qty, accepted_qty, rejected_qty, previously_returned, available_qty,
-        item.iqr_no || formData.iqrNo || null,
-        item.qc_no || formData.qcNo || null,
-        reason,
-        returnSource
-      ]);
+        formData.sNo ?? formData.s_no,
+        cleanDate,
+        formData.returnInvNo ?? formData.return_inv_no,
+        formData.supplier,
+        formData.payType ?? formData.pay_type ?? 'Credit',
+        sanitizeDate(formData.invDate ?? formData.inv_date),
+        formData.type ?? 'Urad',
+        formData.address ?? '',
+        formData.taxType ?? formData.tax_type ?? 'Exclusive',
+        formData.godown ?? 'Main Godown',
+        formData.remarks ?? '',
+        totals.totalQty ?? totals.total_qty ?? 0,
+        totals.totalWeight ?? totals.total_weight ?? 0,
+        totals.totalAmount ?? totals.total_amount ?? 0,
+        totals.baseAmount ?? totals.base_amount ?? 0,
+        totals.discAmount ?? totals.disc_amount ?? 0,
+        totals.taxAmount ?? totals.tax_amount ?? 0,
+        totals.netAmount ?? totals.net_amount ?? 0,
+        auto_wages,
+        vat_percent,
+        vat,
+        totals.grandTotal ?? totals.grand_total ?? 0,
+        returnSource,
+        purchaseId ? String(purchaseId) : null,
+        formData.purchaseInvNo || formData.returnInvNo || null,
+        formData.poNo || null,
+        formData.iqrNo || null,
+        formData.qcNo || null,
+        'POSTED'
+      ], activeCompanyId);
 
-      // 4. Create Stock Transaction for the return
-      try {
+      const purchaseReturnId = purchaseReturnResult.lastID || purchaseReturnResult.lastInsertRowid || purchaseReturnResult.rows?.[0]?.id;
+
+      for (const item of items) {
+        const lot_no = item.lot_no ?? item.lotNo ?? '';
+        const item_name = item.item_name ?? item.itemName ?? '';
+        const item_id = item.item_id ?? null;
+        const weight = parseFloat(item.weight) || 0;
+        const qty = parseFloat(item.qty) || 0;
+        const total_wt = parseFloat(item.total_wt ?? item.totalWt ?? item.total_weight) || (weight * qty);
+        const rate = parseFloat(item.rate) || 0;
+        const disc_percent = parseFloat(item.disc_percent ?? item.disc ?? item.discountPercent) || 0;
+        const tax_percent = parseFloat(item.tax_percent ?? item.tax ?? item.taxPercent) || 0;
+        const amount = parseFloat(item.amount) || 0;
+
+        const purchased_qty = parseFloat(item.purchased_qty) || qty;
+        const accepted_qty = parseFloat(item.accepted_qty) || 0;
+        const rejected_qty = parseFloat(item.rejected_qty) || 0;
+        const previously_returned = parseFloat(item.previously_returned_qty) || 0;
+        const available_qty = parseFloat(item.available_return_qty ?? item.available_qty) || Math.max(0, purchased_qty - previously_returned);
+        const reason = item.reason || item.return_reason || formData.remarks || 'Returned to supplier';
+        const itemPurchaseId = item.purchase_id || purchaseId || null;
+
+        await db.run(`
+          INSERT INTO purchase_return_items (
+            purchase_return_id, lot_no, item_name, item_id, weight, qty, total_wt, rate, disc_percent, tax_percent, amount,
+            purchase_id, purchased_qty, accepted_qty, rejected_qty, previously_returned_qty, available_qty,
+            iqr_no, qc_no, reason, source
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+          purchaseReturnId, lot_no, item_name, item_id, weight, qty, total_wt,
+          rate, disc_percent, tax_percent, amount,
+          itemPurchaseId, purchased_qty, accepted_qty, rejected_qty, previously_returned, available_qty,
+          item.iqr_no || formData.iqrNo || null,
+          item.qc_no || formData.qcNo || null,
+          reason,
+          returnSource
+        ], activeCompanyId);
+
         await db.run(`
           INSERT INTO stock (
             date, item_id, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, status
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Purchase Return', ?, ?, 'Active')
         `, [
-          formData.date,
+          cleanDate,
           item_id,
           item_name,
           lot_no,
@@ -881,41 +890,29 @@ router.post('/', async (req, res) => {
           -Math.abs(amount),
           purchaseReturnId,
           formData.godown || 'Main Godown'
-        ]);
-      } catch (stkErr) {
-        console.warn('Note: Could not insert stock record for return:', stkErr.message);
-      }
+        ], activeCompanyId).catch(() => {});
 
-      // 5. Update stock_lots: reduce remaining_quantity and update lot status
-      if (lot_no) {
-        try {
-          const sLotRes = await db.query('SELECT remaining_quantity, quantity FROM stock_lots WHERE lot_no = ? LIMIT 1', [lot_no]);
+        if (lot_no) {
+          const sLotRes = await db.query('SELECT remaining_quantity FROM stock_lots WHERE lot_no = ? LIMIT 1', [lot_no], activeCompanyId);
           if (sLotRes.rows && sLotRes.rows.length > 0) {
             const currentRem = parseFloat(sLotRes.rows[0].remaining_quantity) || 0;
             const newRem = Math.max(0, currentRem - qty);
             const isFullReturn = newRem <= 0.001;
-
             await db.run(`
               UPDATE stock_lots 
               SET remaining_quantity = ?, 
                   unloading_status = CASE WHEN ? THEN 'RETURNED' ELSE unloading_status END,
                   qc_status = CASE WHEN ? THEN 'RETURNED' ELSE qc_status END
               WHERE lot_no = ?
-            `, [newRem, isFullReturn, isFullReturn, lot_no]);
+            `, [newRem, isFullReturn ? 1 : 0, isFullReturn ? 1 : 0, lot_no], activeCompanyId);
           }
-
-          await db.run(`UPDATE vehicle_movements SET status = 'RETURNED', operation_type = 'RETURN', gate_out_time = datetime('now', 'localtime') WHERE UPPER(lot_no) = UPPER(?)`, [lot_no]);
-        } catch (e) {
-          console.error('Error auto-syncing return status on purchase return insert:', e);
+          await db.run(`UPDATE vehicle_movements SET status = 'RETURNED', operation_type = 'RETURN', gate_out_time = datetime('now', 'localtime') WHERE UPPER(lot_no) = UPPER(?)`, [lot_no], activeCompanyId).catch(() => {});
         }
       }
-    }
 
-    // 6. Insert purchase return deductions if present
-    const dedList = deductions || req.body.selectedDeductions || [];
-    if (Array.isArray(dedList)) {
-      for (const d of dedList) {
-        try {
+      const dedList = deductions || req.body.selectedDeductions || [];
+      if (Array.isArray(dedList)) {
+        for (const d of dedList) {
           await db.run(`
             INSERT INTO purchase_return_deductions (
               purchase_return_id, deduction_id, deduction_name, type, calculation_type, percentage, amount
@@ -928,15 +925,10 @@ router.post('/', async (req, res) => {
             d.calculation_type || d.calc_type || 'Percentage',
             parseFloat(d.percent ?? d.percentage ?? 0) || 0,
             parseFloat(d.amount) || 0
-          ]);
-        } catch (e) {
-          console.error('Error inserting purchase_return_deduction:', e);
+          ], activeCompanyId);
         }
       }
-    }
 
-    // 7. Auto-create Debit Note / Purchase Return voucher in Financial Ledger
-    try {
       const return_inv_no = formData.returnInvNo || formData.return_inv_no || `PR-${purchaseReturnId}`;
       const s_no = formData.sNo || formData.s_no || purchaseReturnId;
       const base_amount = parseFloat(totals?.baseAmount ?? totals?.base_amount ?? totals?.totalAmount ?? 0);
@@ -945,26 +937,30 @@ router.post('/', async (req, res) => {
       const net_amount = parseFloat(totals?.netAmount ?? totals?.net_amount ?? totals?.grandTotal ?? 0);
       const grand_total = parseFloat(totals?.grandTotal ?? totals?.grand_total ?? totals?.netAmount ?? 0);
 
-      await createPurchaseReturnVoucherChain({
+      const vRes = await createPurchaseReturnVoucherChain({
+        companyId: activeCompanyId,
         supplier: formData.supplier,
-        date: formData.date,
+        date: cleanDate,
         returnInvNo: return_inv_no,
         sNo: s_no,
-        purchaseReturnId: purchaseReturnId,
+        purchaseReturnId,
         baseAmount: base_amount,
         taxAmount: tax_amount,
         discAmount: disc_amount,
         netAmount: net_amount,
         grandTotal: grand_total,
+        autoWages: auto_wages,
+        vat,
+        deductions: Array.isArray(dedList) ? dedList : [],
+        isInterstate: String(formData.taxType || formData.tax_type || '').toLowerCase().includes('inter'),
         narration: formData.remarks || `Purchase Return #${return_inv_no}`
       });
-    } catch (ledgerErr) {
-      console.error('Error generating purchase return ledger voucher:', ledgerErr);
-    }
 
-    // 8. Rebuild stock ledger to synchronize stock tables immediately
+      return { purchaseReturnId, voucherNo: vRes?.voucherNo || null };
+    });
+
     try {
-      await rebuildStockLedger();
+      await rebuildStockLedger(activeCompanyId);
     } catch (rbErr) {
       console.warn('Notice rebuilding stock ledger on purchase return save:', rbErr.message);
     }
@@ -972,11 +968,12 @@ router.post('/', async (req, res) => {
     res.status(201).json({
       success: true,
       message: 'Purchase return saved successfully!',
-      id: purchaseReturnId
+      id: txResult.purchaseReturnId,
+      voucher_no: txResult.voucherNo
     });
   } catch (error) {
     console.error('Error saving purchase return:', error);
-    res.status(500).json({ success: false, message: 'Error saving purchase return: ' + error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: 'Error saving purchase return: ' + error.message });
   }
 });
 
@@ -994,8 +991,9 @@ function sanitizeDate(val) {
 // PUT update purchase return
 router.put('/:id', async (req, res) => {
   try {
-    await ensureReturnSchema();
-    const { formData, items, totals } = req.body;
+    const activeCompanyId = getCompanyId(req);
+    await ensureReturnSchema(activeCompanyId);
+    const { formData = {}, items = [], totals = {} } = req.body;
     const purchaseReturnId = req.params.id;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -1004,112 +1002,127 @@ router.put('/:id', async (req, res) => {
 
     const purchaseId = formData.purchaseId || formData.purchase_id || null;
 
-    // Strict Over-Return Validation
-    const validation = await validateReturnQuantities(items, purchaseId, purchaseReturnId);
-    if (!validation.valid) {
-      return res.status(400).json({ success: false, message: validation.error });
-    }
+    const vRes = await db.forCompany(activeCompanyId).withTransaction(async () => {
+      const existingRes = await db.query('SELECT id FROM purchase_returns WHERE id = ?', [purchaseReturnId], activeCompanyId);
+      if (!existingRes.rows || existingRes.rows.length === 0) {
+        const err = new Error('Purchase return not found');
+        err.statusCode = 404;
+        throw err;
+      }
 
-    const auto_wages = parseFloat(totals?.deductions?.autoWages ?? totals?.auto_wages) || 0;
-    const vat_percent = parseFloat(totals?.deductions?.vatPercent ?? totals?.vat_percent) || 0;
-    const vat = parseFloat(totals?.deductions?.vat ?? totals?.vat) || 0;
+      const validation = await validateReturnQuantities(items, purchaseId, purchaseReturnId);
+      if (!validation.valid) {
+        const err = new Error(validation.error);
+        err.statusCode = 400;
+        throw err;
+      }
 
-    const returnSource = formData.returnMethod === 'QC_IQR' ? 'QC_REJECTION' : (formData.source || 'MANUAL');
+      // Restore previous lot quantities before deleting old return items
+      const oldItemsRes = await db.query('SELECT lot_no, qty FROM purchase_return_items WHERE purchase_return_id = ?', [purchaseReturnId], activeCompanyId);
+      for (const oldItem of oldItemsRes.rows || []) {
+        const oldQty = parseFloat(oldItem.qty) || 0;
+        if (oldItem.lot_no && oldQty > 0) {
+          await db.run(
+            "UPDATE stock_lots SET remaining_quantity = remaining_quantity + ?, unloading_status = 'UNLOADED', qc_status = 'APPROVED' WHERE lot_no = ?",
+            [oldQty, oldItem.lot_no],
+            activeCompanyId
+          );
+        }
+      }
 
-    const cleanDate = sanitizeDate(formData.date) || new Date().toISOString().slice(0, 10);
-    const cleanInvDate = sanitizeDate(formData.invDate || formData.inv_date);
-
-    // Update purchase return
-    await db.run(`
-      UPDATE purchase_returns SET
-        s_no = ?, date = ?, return_inv_no = ?, supplier = ?, pay_type = ?,
-        inv_date = ?, type = ?, address = ?, tax_type = ?, godown = ?,
-        remarks = ?, total_qty = ?, total_weight = ?, total_amount = ?,
-        base_amount = ?, disc_amount = ?, tax_amount = ?, net_amount = ?,
-        auto_wages = ?, vat_percent = ?, vat = ?, grand_total = ?,
-        source = ?, purchase_id = ?, purchase_inv_no = ?, po_no = ?,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `, [
-      formData.sNo ?? formData.s_no, 
-      cleanDate, 
-      formData.returnInvNo ?? formData.return_inv_no, 
-      formData.supplier, 
-      formData.payType ?? formData.pay_type ?? 'Credit',
-      cleanInvDate, 
-      formData.type ?? 'Urad', 
-      formData.address ?? '', 
-      formData.taxType ?? formData.tax_type ?? 'Exclusive', 
-      formData.godown ?? 'Main Godown',
-      formData.remarks ?? '', 
-      totals.totalQty ?? totals.total_qty ?? 0, 
-      totals.totalWeight ?? totals.total_weight ?? 0, 
-      totals.totalAmount ?? totals.total_amount ?? 0,
-      totals.baseAmount ?? totals.base_amount ?? 0, 
-      totals.discAmount ?? totals.disc_amount ?? 0, 
-      totals.taxAmount ?? totals.tax_amount ?? 0, 
-      totals.netAmount ?? totals.net_amount ?? 0,
-      auto_wages, 
-      vat_percent, 
-      vat,
-      totals.grandTotal ?? totals.grand_total ?? 0, 
-      returnSource,
-      purchaseId ? String(purchaseId) : null,
-      formData.purchaseInvNo || formData.returnInvNo || null,
-      formData.poNo || null,
-      purchaseReturnId
-    ]);
-
-    // Delete existing items & deductions & reverse stock
-    await db.run('DELETE FROM purchase_return_items WHERE purchase_return_id = ?', [purchaseReturnId]);
-    await db.run('DELETE FROM purchase_return_deductions WHERE purchase_return_id = ?', [purchaseReturnId]);
-    await db.run("DELETE FROM stock WHERE reference_id = ? AND type = 'Purchase Return'", [purchaseReturnId]);
-
-    // Insert updated items
-    for (const item of items) {
-      const lot_no = item.lot_no ?? item.lotNo ?? '';
-      const item_name = item.item_name ?? item.itemName ?? '';
-      const item_id = item.item_id ?? null;
-      const weight = parseFloat(item.weight) || 0;
-      const qty = parseFloat(item.qty) || 0;
-      const total_wt = parseFloat(item.total_wt ?? item.totalWt ?? item.total_weight) || (weight * qty);
-      const rate = parseFloat(item.rate) || 0;
-      const disc_percent = parseFloat(item.disc_percent ?? item.disc ?? item.discountPercent) || 0;
-      const tax_percent = parseFloat(item.tax_percent ?? item.tax ?? item.taxPercent) || 0;
-      const amount = parseFloat(item.amount) || 0;
-
-      const purchased_qty = parseFloat(item.purchased_qty) || qty;
-      const accepted_qty = parseFloat(item.accepted_qty) || 0;
-      const rejected_qty = parseFloat(item.rejected_qty) || 0;
-      const previously_returned = parseFloat(item.previously_returned_qty) || 0;
-      const available_qty = parseFloat(item.available_return_qty ?? item.available_qty) || Math.max(0, purchased_qty - previously_returned);
-      const reason = item.reason || item.return_reason || formData.remarks || 'Returned to supplier';
-      const itemPurchaseId = item.purchase_id || purchaseId || null;
+      const auto_wages = parseFloat(totals?.deductions?.autoWages ?? totals?.auto_wages) || 0;
+      const vat_percent = parseFloat(totals?.deductions?.vatPercent ?? totals?.vat_percent) || 0;
+      const vat = parseFloat(totals?.deductions?.vat ?? totals?.vat) || 0;
+      const returnSource = formData.returnMethod === 'QC_IQR' ? 'QC_REJECTION' : (formData.source || 'MANUAL');
+      const cleanDate = sanitizeDate(formData.date) || new Date().toISOString().slice(0, 10);
+      const cleanInvDate = sanitizeDate(formData.invDate || formData.inv_date);
 
       await db.run(`
-        INSERT INTO purchase_return_items (
-          purchase_return_id, lot_no, item_name, item_id, weight, qty, total_wt, rate, disc_percent, tax_percent, amount,
-          purchase_id, purchased_qty, accepted_qty, rejected_qty, previously_returned_qty, available_qty,
-          iqr_no, qc_no, reason, source
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        UPDATE purchase_returns SET
+          s_no = ?, date = ?, return_inv_no = ?, supplier = ?, pay_type = ?,
+          inv_date = ?, type = ?, address = ?, tax_type = ?, godown = ?,
+          remarks = ?, total_qty = ?, total_weight = ?, total_amount = ?,
+          base_amount = ?, disc_amount = ?, tax_amount = ?, net_amount = ?,
+          auto_wages = ?, vat_percent = ?, vat = ?, grand_total = ?,
+          source = ?, purchase_id = ?, purchase_inv_no = ?, po_no = ?,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
       `, [
-        purchaseReturnId, lot_no, item_name, item_id, weight, qty, total_wt,
-        rate, disc_percent, tax_percent, amount,
-        itemPurchaseId, purchased_qty, accepted_qty, rejected_qty, previously_returned, available_qty,
-        item.iqr_no || formData.iqrNo || null,
-        item.qc_no || formData.qcNo || null,
-        reason,
-        returnSource
-      ]);
+        formData.sNo ?? formData.s_no,
+        cleanDate,
+        formData.returnInvNo ?? formData.return_inv_no,
+        formData.supplier,
+        formData.payType ?? formData.pay_type ?? 'Credit',
+        cleanInvDate,
+        formData.type ?? 'Urad',
+        formData.address ?? '',
+        formData.taxType ?? formData.tax_type ?? 'Exclusive',
+        formData.godown ?? 'Main Godown',
+        formData.remarks ?? '',
+        totals.totalQty ?? totals.total_qty ?? 0,
+        totals.totalWeight ?? totals.total_weight ?? 0,
+        totals.totalAmount ?? totals.total_amount ?? 0,
+        totals.baseAmount ?? totals.base_amount ?? 0,
+        totals.discAmount ?? totals.disc_amount ?? 0,
+        totals.taxAmount ?? totals.tax_amount ?? 0,
+        totals.netAmount ?? totals.net_amount ?? 0,
+        auto_wages,
+        vat_percent,
+        vat,
+        totals.grandTotal ?? totals.grand_total ?? 0,
+        returnSource,
+        purchaseId ? String(purchaseId) : null,
+        formData.purchaseInvNo || formData.returnInvNo || null,
+        formData.poNo || null,
+        purchaseReturnId
+      ], activeCompanyId);
 
-      // Re-create stock record
-      try {
+      await db.run('DELETE FROM purchase_return_items WHERE purchase_return_id = ?', [purchaseReturnId], activeCompanyId);
+      await db.run('DELETE FROM purchase_return_deductions WHERE purchase_return_id = ?', [purchaseReturnId], activeCompanyId);
+      await db.run("DELETE FROM stock WHERE reference_id = ? AND type = 'Purchase Return'", [purchaseReturnId], activeCompanyId);
+
+      for (const item of items) {
+        const lot_no = item.lot_no ?? item.lotNo ?? '';
+        const item_name = item.item_name ?? item.itemName ?? '';
+        const item_id = item.item_id ?? null;
+        const weight = parseFloat(item.weight) || 0;
+        const qty = parseFloat(item.qty) || 0;
+        const total_wt = parseFloat(item.total_wt ?? item.totalWt ?? item.total_weight) || (weight * qty);
+        const rate = parseFloat(item.rate) || 0;
+        const disc_percent = parseFloat(item.disc_percent ?? item.disc ?? item.discountPercent) || 0;
+        const tax_percent = parseFloat(item.tax_percent ?? item.tax ?? item.taxPercent) || 0;
+        const amount = parseFloat(item.amount) || 0;
+
+        const purchased_qty = parseFloat(item.purchased_qty) || qty;
+        const accepted_qty = parseFloat(item.accepted_qty) || 0;
+        const rejected_qty = parseFloat(item.rejected_qty) || 0;
+        const previously_returned = parseFloat(item.previously_returned_qty) || 0;
+        const available_qty = parseFloat(item.available_return_qty ?? item.available_qty) || Math.max(0, purchased_qty - previously_returned);
+        const reason = item.reason || item.return_reason || formData.remarks || 'Returned to supplier';
+        const itemPurchaseId = item.purchase_id || purchaseId || null;
+
+        await db.run(`
+          INSERT INTO purchase_return_items (
+            purchase_return_id, lot_no, item_name, item_id, weight, qty, total_wt, rate, disc_percent, tax_percent, amount,
+            purchase_id, purchased_qty, accepted_qty, rejected_qty, previously_returned_qty, available_qty,
+            iqr_no, qc_no, reason, source
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+          purchaseReturnId, lot_no, item_name, item_id, weight, qty, total_wt,
+          rate, disc_percent, tax_percent, amount,
+          itemPurchaseId, purchased_qty, accepted_qty, rejected_qty, previously_returned, available_qty,
+          item.iqr_no || formData.iqrNo || null,
+          item.qc_no || formData.qcNo || null,
+          reason,
+          returnSource
+        ], activeCompanyId);
+
         await db.run(`
           INSERT INTO stock (
             date, item_id, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, status
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Purchase Return', ?, ?, 'Active')
         `, [
-          formData.date,
+          cleanDate,
           item_id,
           item_name,
           lot_no,
@@ -1119,22 +1132,28 @@ router.put('/:id', async (req, res) => {
           -Math.abs(amount),
           purchaseReturnId,
           formData.godown || 'Main Godown'
-        ]);
-      } catch (stkErr) {}
+        ], activeCompanyId).catch(() => {});
 
-      // Re-sync lot status
-      if (lot_no) {
-        try {
-          await db.run(`UPDATE stock_lots SET unloading_status = 'RETURNED', qc_status = 'REJECTED' WHERE lot_no = ?`, [lot_no]);
-        } catch (e) {}
+        if (lot_no) {
+          const sLotRes = await db.query('SELECT remaining_quantity FROM stock_lots WHERE lot_no = ? LIMIT 1', [lot_no], activeCompanyId);
+          if (sLotRes.rows && sLotRes.rows.length > 0) {
+            const currentRem = parseFloat(sLotRes.rows[0].remaining_quantity) || 0;
+            const newRem = Math.max(0, currentRem - qty);
+            const isFullReturn = newRem <= 0.001;
+            await db.run(`
+              UPDATE stock_lots 
+              SET remaining_quantity = ?, 
+                  unloading_status = CASE WHEN ? THEN 'RETURNED' ELSE unloading_status END,
+                  qc_status = CASE WHEN ? THEN 'RETURNED' ELSE qc_status END
+              WHERE lot_no = ?
+            `, [newRem, isFullReturn ? 1 : 0, isFullReturn ? 1 : 0, lot_no], activeCompanyId);
+          }
+        }
       }
-    }
 
-    // Re-insert purchase return deductions if present
-    const dedList = req.body.deductions || req.body.selectedDeductions || [];
-    if (Array.isArray(dedList)) {
-      for (const d of dedList) {
-        try {
+      const dedList = req.body.deductions || req.body.selectedDeductions || [];
+      if (Array.isArray(dedList)) {
+        for (const d of dedList) {
           await db.run(`
             INSERT INTO purchase_return_deductions (
               purchase_return_id, deduction_id, deduction_name, type, calculation_type, percentage, amount
@@ -1147,75 +1166,86 @@ router.put('/:id', async (req, res) => {
             d.calculation_type || d.calc_type || 'Percentage',
             parseFloat(d.percent ?? d.percentage ?? 0) || 0,
             parseFloat(d.amount) || 0
-          ]);
-        } catch (e) {
-          console.error('Error re-inserting purchase_return_deduction:', e);
+          ], activeCompanyId);
         }
       }
-    }
 
-    // Re-create Debit Note / Purchase Return voucher in Financial Ledger
-    try {
-      await createPurchaseReturnVoucherChain({
+      return createPurchaseReturnVoucherChain({
+        companyId: activeCompanyId,
         supplier: formData.supplier,
-        date: formData.date,
+        date: cleanDate,
         returnInvNo: formData.returnInvNo || formData.return_inv_no || formData.sNo,
         sNo: formData.sNo || formData.s_no,
-        purchaseReturnId: purchaseReturnId,
+        purchaseReturnId,
         baseAmount: parseFloat(totals?.baseAmount ?? totals?.base_amount ?? totals?.totalAmount ?? 0),
         taxAmount: parseFloat(totals?.taxAmount ?? totals?.tax_amount ?? totals?.vat ?? 0),
         discAmount: parseFloat(totals?.discAmount ?? totals?.disc_amount ?? 0),
         netAmount: parseFloat(totals?.netAmount ?? totals?.net_amount ?? totals?.grandTotal ?? 0),
         grandTotal: parseFloat(totals?.grandTotal ?? totals?.grand_total ?? totals?.netAmount ?? 0),
+        autoWages: auto_wages,
+        vat,
+        deductions: Array.isArray(dedList) ? dedList : [],
+        isInterstate: String(formData.taxType || formData.tax_type || '').toLowerCase().includes('inter'),
         narration: formData.remarks || `Purchase Return #${formData.returnInvNo || purchaseReturnId}`
       });
-    } catch (ledgerErr) {
-      console.error('Error updating purchase return ledger voucher:', ledgerErr);
-    }
+    });
 
-    // Re-sync complete stock ledger
     try {
-      await rebuildStockLedger();
+      await rebuildStockLedger(activeCompanyId);
     } catch (rbErr) {
       console.warn('Notice rebuilding stock ledger on purchase return update:', rbErr.message);
     }
 
-    res.json({ success: true, message: 'Purchase return updated successfully!' });
+    res.json({ success: true, message: 'Purchase return updated successfully!', voucher_no: vRes?.voucherNo || null });
   } catch (error) {
     console.error('Error updating purchase return:', error);
-    res.status(500).json({ success: false, message: 'Error updating purchase return: ' + error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: 'Error updating purchase return: ' + error.message });
   }
 });
 
 // DELETE purchase return
 router.delete('/:id', async (req, res) => {
   try {
+    const activeCompanyId = getCompanyId(req);
     const returnId = req.params.id;
+
+    await db.forCompany(activeCompanyId).withTransaction(async () => {
+      const existingRes = await db.query('SELECT id FROM purchase_returns WHERE id = ?', [returnId], activeCompanyId);
+      if (!existingRes.rows || existingRes.rows.length === 0) {
+        const err = new Error('Purchase return not found');
+        err.statusCode = 404;
+        throw err;
+      }
+
+      const oldItemsRes = await db.query('SELECT lot_no, qty FROM purchase_return_items WHERE purchase_return_id = ?', [returnId], activeCompanyId);
+      for (const oldItem of oldItemsRes.rows || []) {
+        const oldQty = parseFloat(oldItem.qty) || 0;
+        if (oldItem.lot_no && oldQty > 0) {
+          await db.run(
+            "UPDATE stock_lots SET remaining_quantity = remaining_quantity + ?, unloading_status = 'UNLOADED', qc_status = 'APPROVED' WHERE lot_no = ?",
+            [oldQty, oldItem.lot_no],
+            activeCompanyId
+          );
+        }
+      }
+
+      await deletePurchaseReturnVoucherChain(returnId, activeCompanyId);
+      await db.run("DELETE FROM stock WHERE reference_id = ? AND type = 'Purchase Return'", [returnId], activeCompanyId);
+      await db.run('DELETE FROM purchase_return_items WHERE purchase_return_id = ?', [returnId], activeCompanyId);
+      await db.run('DELETE FROM purchase_return_deductions WHERE purchase_return_id = ?', [returnId], activeCompanyId);
+      await db.run('DELETE FROM purchase_returns WHERE id = ?', [returnId], activeCompanyId);
+    });
+
     try {
-      await deletePurchaseReturnVoucherChain(returnId);
-    } catch (ledgerErr) {
-      console.error('Error deleting purchase return ledger voucher:', ledgerErr);
-    }
-    await db.run("DELETE FROM stock WHERE reference_id = ? AND type = 'Purchase Return'", [returnId]);
-    await db.run('DELETE FROM purchase_return_items WHERE purchase_return_id = ?', [returnId]);
-    await db.run('DELETE FROM purchase_return_deductions WHERE purchase_return_id = ?', [returnId]);
-    const result = await db.run('DELETE FROM purchase_returns WHERE id = ?', [returnId]);
-    
-    // Re-sync complete stock ledger
-    try {
-      await rebuildStockLedger();
+      await rebuildStockLedger(activeCompanyId);
     } catch (rbErr) {
       console.warn('Notice rebuilding stock ledger on purchase return delete:', rbErr.message);
     }
 
-    if (result.changes > 0) {
-      res.json({ success: true, message: 'Purchase return deleted successfully' });
-    } else {
-      res.status(404).json({ success: false, message: 'Purchase return not found' });
-    }
+    res.json({ success: true, message: 'Purchase return deleted successfully' });
   } catch (error) {
     console.error('Error deleting purchase return:', error);
-    res.status(500).json({ success: false, message: 'Error deleting purchase return: ' + error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: 'Error deleting purchase return: ' + error.message });
   }
 });
 

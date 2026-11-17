@@ -4,10 +4,14 @@ const db = require('../config/database');
 const { syncGodownTransfersToColdStorage } = require('../services/coldStorageTransferSync');
 const { rebuildStockLedger } = require('../utils/stockRebuilder');
 
-// Ensure godown_transfers table exists
-const initTable = async () => {
+// Ensure godown_transfers table exists per company
+const initializedCompanies = new Set();
+const initTable = async (companyId = 1) => {
+  const cId = parseInt(companyId, 10) || 1;
+  if (initializedCompanies.has(cId)) return;
   try {
-    await db.run(`
+    const cDb = db.forCompany(cId);
+    await cDb.run(`
       CREATE TABLE IF NOT EXISTS godown_transfers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         s_no TEXT,
@@ -51,19 +55,29 @@ const initTable = async () => {
       'ALTER TABLE godown_transfers ADD COLUMN loadman_rate_per_qty REAL DEFAULT 0'
     ];
     for (const sql of cols) {
-      try { await db.run(sql); } catch (_) {}
+      try { await cDb.run(sql); } catch (_) {}
     }
+    initializedCompanies.add(cId);
   } catch (err) {
-    console.error('Error creating godown_transfers table:', err.message);
+    console.error(`Error creating godown_transfers table for company ${cId}:`, err.message);
   }
 };
-initTable();
+
+router.use(async (req, res, next) => {
+  try {
+    const cId = parseInt(req.companyId || req.headers['x-company-id'] || req.query?.company_id || 1, 10) || 1;
+    req.companyId = cId;
+    await initTable(cId);
+  } catch (_) {}
+  next();
+});
 
 // GET next sequential transfer number starting from TRF-1
 router.get('/next-sno', async (req, res) => {
+  const cDb = db.forCompany(req.companyId || 1);
   try {
-    const res1 = await db.query('SELECT s_no FROM godown_transfers');
-    const res2 = await db.query('SELECT transfer_no FROM item_transfers');
+    const res1 = await cDb.query('SELECT s_no FROM godown_transfers');
+    const res2 = await cDb.query('SELECT transfer_no FROM item_transfers');
     
     let maxNum = 0;
     (res1.rows || []).forEach(r => {
@@ -87,7 +101,8 @@ router.get('/next-sno', async (req, res) => {
 // GET all godown transfer records
 router.get('/', async (req, res) => {
   try {
-    const result = await db.query('SELECT * FROM godown_transfers ORDER BY id DESC');
+    const cDb = db.forCompany(req.companyId || 1);
+    const result = await cDb.query('SELECT * FROM godown_transfers ORDER BY id DESC');
     res.json(result.rows || []);
   } catch (err) {
     console.error('Error fetching godown transfers:', err);
@@ -98,15 +113,17 @@ router.get('/', async (req, res) => {
 // GET items available in a specific godown
 router.get('/godown-items/:godownId', async (req, res) => {
   try {
+    const activeCompanyId = req.companyId || 1;
+    const cDb = db.forCompany(activeCompanyId);
     const godownId = req.params.godownId;
 
     try {
-      await rebuildStockLedger();
+      await rebuildStockLedger(activeCompanyId);
     } catch (rErr) {
       console.warn('Notice rebuilding stock ledger in godown-items:', rErr.message);
     }
 
-    const godownResult = await db.query(
+    const godownResult = await cDb.query(
       'SELECT id, godown_name FROM godown_master WHERE CAST(id AS TEXT) = ? OR LOWER(godown_name) = LOWER(?) LIMIT 1',
       [godownId, godownId]
     );
@@ -196,22 +213,24 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ message: 'From Godown and To Godown cannot be the same.' });
     }
 
-    let sourceGodownResult = await db.query(
+    const activeCompanyId = req.companyId || 1;
+    const cDb = db.forCompany(activeCompanyId);
+
+    let sourceGodownResult = await cDb.query(
       'SELECT id, godown_name FROM godown_master WHERE CAST(id AS TEXT) = ? OR LOWER(TRIM(godown_name)) = LOWER(TRIM(?)) LIMIT 1',
       [String(from_godown_id), String(from_godown_name || from_godown_id)]
     );
-    let destinationGodownResult = await db.query(
+    let destinationGodownResult = await cDb.query(
       'SELECT id, godown_name FROM godown_master WHERE CAST(id AS TEXT) = ? OR LOWER(TRIM(godown_name)) = LOWER(TRIM(?)) LIMIT 1',
       [String(to_godown_id), String(to_godown_name || to_godown_id)]
     );
     let sourceGodown = sourceGodownResult.rows[0];
     let destinationGodown = destinationGodownResult.rows[0];
 
-    // If source or destination godown is not in godown_master yet (manual / custom factory unit entry), auto-create or synthesize:
     if (!sourceGodown && (from_godown_name || from_godown_id)) {
       const gName = from_godown_name || from_godown_id;
       try {
-        const ins = await db.run('INSERT INTO godown_master (godown_name, area, godown_type, status) VALUES (?, ?, ?, ?)', [gName, 'Factory Campus', 'Internal Factory Unit', 'Active']);
+        const ins = await cDb.run('INSERT INTO godown_master (godown_name, area, godown_type, status) VALUES (?, ?, ?, ?)', [gName, 'Factory Campus', 'Internal Factory Unit', 'Active']);
         sourceGodown = { id: ins.lastID || ins.insertId || 1, godown_name: gName };
       } catch (e) {
         sourceGodown = { id: 1, godown_name: gName };
@@ -221,7 +240,7 @@ router.post('/', async (req, res) => {
     if (!destinationGodown && (to_godown_name || to_godown_id)) {
       const gName = to_godown_name || to_godown_id;
       try {
-        const ins = await db.run('INSERT INTO godown_master (godown_name, area, godown_type, status) VALUES (?, ?, ?, ?)', [gName, 'Factory Campus', 'Internal Factory Unit', 'Active']);
+        const ins = await cDb.run('INSERT INTO godown_master (godown_name, area, godown_type, status) VALUES (?, ?, ?, ?)', [gName, 'Factory Campus', 'Internal Factory Unit', 'Active']);
         destinationGodown = { id: ins.lastID || ins.insertId || 2, godown_name: gName };
       } catch (e) {
         destinationGodown = { id: 2, godown_name: gName };
@@ -232,31 +251,10 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ message: 'Select valid source and destination godowns.' });
     }
 
-    let sourceLots = await db.query(`
-      SELECT id, remaining_quantity
-      FROM stock_lots
-      WHERE LOWER(TRIM(item_name)) = LOWER(TRIM(?))
-        AND LOWER(TRIM(lot_no)) = LOWER(TRIM(?))
-        AND COALESCE(remaining_quantity, 0) > 0
-        AND (
-          CAST(godown_id AS TEXT) = ?
-          OR LOWER(TRIM(COALESCE(godown_name, ''))) = LOWER(TRIM(?))
-          OR LOWER(TRIM(COALESCE(godown_name, ''))) = LOWER(TRIM(?))
-          OR (? = '1' AND godown_id IS NULL AND (godown_name IS NULL OR TRIM(godown_name) = ''))
-        )
-      ORDER BY id
-    `, [item_name, lot_no, String(sourceGodown.id), sourceGodown.godown_name, from_godown_name || '', String(sourceGodown.id)]);
-    const sourceAvailable = sourceLots.rows.reduce((sum, row) => sum + (Number(row.remaining_quantity) || 0), 0);
-    if (transferQty > sourceAvailable) {
-      return res.status(400).json({
-        message: `Insufficient stock for ${item_name} (Lot ${lot_no}) in ${sourceGodown.godown_name}. Available: ${sourceAvailable}, requested: ${transferQty}.`
-      });
-    }
-
     let finalSNo = s_no;
     if (!finalSNo || finalSNo.startsWith('TRF-')) {
       try {
-        const checkRes = await db.query('SELECT s_no FROM godown_transfers');
+        const checkRes = await cDb.query('SELECT s_no FROM godown_transfers');
         let maxNum = 0;
         (checkRes.rows || []).forEach(r => {
           const val = String(r.s_no || '').replace(/\D/g, '');
@@ -269,11 +267,8 @@ router.post('/', async (req, res) => {
       }
     }
 
-    const transaction = await db.getConnection();
-    let transferId;
-    try {
-      await transaction.beginTransaction();
-      sourceLots = await transaction.query(`
+    const transferId = await cDb.withTransaction(async (transaction) => {
+      const sourceLots = await transaction.query(`
         SELECT id, remaining_quantity
         FROM stock_lots
         WHERE LOWER(TRIM(item_name)) = LOWER(TRIM(?))
@@ -344,7 +339,7 @@ router.post('/', async (req, res) => {
         movement_method,
         supervisor_name
       ]);
-      transferId = result.lastID;
+      let newTransferId = result.lastID || result.lastInsertRowid;
 
       await transaction.run(`
         INSERT INTO stock (date, item_name, lot_no, type, qty, weight, godown, godown_id, remarks)
@@ -428,18 +423,12 @@ router.post('/', async (req, res) => {
           destinationGodown.godown_name
         ]);
       }
-      await transaction.commit();
-    } catch (transactionError) {
-      await transaction.rollback();
-      throw transactionError;
-    } finally {
-      transaction.release();
-    }
+      return newTransferId;
+    });
 
-    // Create linked operational charges if provided in request
+    // Create linked operational charges only if explicitly provided in request (stock transfers never create GL entries otherwise)
     const chargesCreated = [];
     if (Array.isArray(req.body.operational_charges) && req.body.operational_charges.length > 0) {
-      const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
       const engine = require('../services/operationalChargeEngine');
       for (const ch of req.body.operational_charges) {
         try {
@@ -465,11 +454,10 @@ router.post('/', async (req, res) => {
       }
     }
 
-    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
     let coldStorageSyncWarning;
     try {
       await syncGodownTransfersToColdStorage(activeCompanyId);
-      await rebuildStockLedger();
+      await rebuildStockLedger(activeCompanyId);
     } catch (syncError) {
       coldStorageSyncWarning = syncError.message;
       console.error('Godown transfer saved, but cold-storage voucher sync failed:', syncError);
@@ -521,21 +509,11 @@ router.post('/', async (req, res) => {
   }
 });
 
-// DELETE godown transfer
-router.delete('/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    await db.run('DELETE FROM godown_transfers WHERE id = ?', [id]);
-    res.json({ message: 'Godown transfer deleted successfully' });
-  } catch (err) {
-    console.error('Error deleting godown transfer:', err);
-    res.status(500).json({ message: 'Error deleting godown transfer', error: err.message });
-  }
-});
-
-// PUT update existing godown transfer
+// PUT update existing godown transfer (atomic)
 router.put('/:id', async (req, res) => {
   try {
+    const activeCompanyId = req.companyId || 1;
+    const cDb = db.forCompany(activeCompanyId);
     const { id } = req.params;
     const {
       vehicle_no,
@@ -552,7 +530,7 @@ router.put('/:id', async (req, res) => {
       weight
     } = req.body;
 
-    const existing = await db.query('SELECT * FROM godown_transfers WHERE id = ?', [id]);
+    const existing = await cDb.query('SELECT * FROM godown_transfers WHERE id = ?', [id]);
     if (!existing.rows || existing.rows.length === 0) {
       return res.status(404).json({ message: 'Godown transfer record not found' });
     }
@@ -571,76 +549,38 @@ router.put('/:id', async (req, res) => {
     const qtyVal = qty !== undefined ? parseFloat(qty) : (existing.rows[0].qty || 0);
     const weightVal = weight !== undefined ? parseFloat(weight) : (existing.rows[0].weight || 0);
 
-    await db.run(`
-      UPDATE godown_transfers SET
-        vehicle_no = ?,
-        driver_name = ?,
-        driver_phone = ?,
-        transporter_name = ?,
-        loadman_name = ?,
-        loadman_charges = ?,
-        handling_amount = ?,
-        storage_rate = ?,
-        insurance_charges = ?,
-        remarks = ?,
-        qty = ?,
-        weight = ?
-      WHERE id = ?
-    `, [
-      vehicleNoVal,
-      driverNameVal,
-      driverPhoneVal,
-      transporterNameVal,
-      loadmanNameVal,
-      loadmanChargesVal,
-      handlingAmountVal,
-      storageRateVal,
-      insuranceChargesVal,
-      remarksVal,
-      qtyVal,
-      weightVal,
-      id
-    ]);
-
-    // Also update corresponding item_transfers record
-    const trfNo = existing.rows[0].s_no;
-    if (trfNo) {
-      await db.run(`
-        UPDATE item_transfers SET
-          vehicle_no = ?,
-          driver_name = ?,
-          driver_phone = ?,
-          transporter_name = ?,
-          loadman_name = ?,
-          loadman_charges = ?,
-          handling_amount = ?,
-          storage_rate = ?,
-          insurance_charges = ?,
-          remarks = ?,
-          transfer_qty = ?,
-          weight = ?
-        WHERE transfer_no = ?
+    await cDb.withTransaction(async (txConn) => {
+      await txConn.run(`
+        UPDATE godown_transfers SET
+          vehicle_no = ?, driver_name = ?, driver_phone = ?, transporter_name = ?,
+          loadman_name = ?, loadman_charges = ?, handling_amount = ?, storage_rate = ?,
+          insurance_charges = ?, remarks = ?, qty = ?, weight = ?
+        WHERE id = ?
       `, [
-        vehicleNoVal,
-        driverNameVal,
-        driverPhoneVal,
-        transporterNameVal,
-        loadmanNameVal,
-        loadmanChargesVal,
-        handlingAmountVal,
-        storageRateVal,
-        insuranceChargesVal,
-        remarksVal,
-        qtyVal,
-        qtyVal > 0 ? (weightVal / qtyVal) : weightVal,
-        trfNo
+        vehicleNoVal, driverNameVal, driverPhoneVal, transporterNameVal,
+        loadmanNameVal, loadmanChargesVal, handlingAmountVal, storageRateVal,
+        insuranceChargesVal, remarksVal, qtyVal, weightVal, id
       ]);
-    }
 
-    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+      const trfNo = existing.rows[0].s_no;
+      if (trfNo) {
+        await txConn.run(`
+          UPDATE item_transfers SET
+            vehicle_no = ?, driver_name = ?, driver_phone = ?, transporter_name = ?,
+            loadman_name = ?, loadman_charges = ?, handling_amount = ?, storage_rate = ?,
+            insurance_charges = ?, remarks = ?, transfer_qty = ?, weight = ?
+          WHERE transfer_no = ?
+        `, [
+          vehicleNoVal, driverNameVal, driverPhoneVal, transporterNameVal,
+          loadmanNameVal, loadmanChargesVal, handlingAmountVal, storageRateVal,
+          insuranceChargesVal, remarksVal, qtyVal, qtyVal > 0 ? (weightVal / qtyVal) : weightVal, trfNo
+        ]);
+      }
+    });
+
     try {
       await syncGodownTransfersToColdStorage(activeCompanyId);
-      await rebuildStockLedger();
+      await rebuildStockLedger(activeCompanyId);
     } catch (syncErr) {
       console.warn('Sync notice after transfer update:', syncErr.message);
     }
@@ -655,7 +595,7 @@ router.put('/:id', async (req, res) => {
 // GET operational charges for a godown transfer
 router.get('/:id/charges', async (req, res) => {
   try {
-    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    const activeCompanyId = req.companyId || 1;
     const engine = require('../services/operationalChargeEngine');
     const result = await engine.getOperationalTraceability(activeCompanyId, {
       sourceModule: 'GODOWN_TRANSFER',
@@ -667,26 +607,32 @@ router.get('/:id/charges', async (req, res) => {
   }
 });
 
-// DELETE godown transfer
+// DELETE godown transfer (atomic)
 router.delete('/:id', async (req, res) => {
   try {
+    const activeCompanyId = req.companyId || 1;
+    const cDb = db.forCompany(activeCompanyId);
     const id = req.params.id;
-    const existing = await db.query('SELECT * FROM godown_transfers WHERE id = ?', [id]);
-    if (!existing.rows || existing.rows.length === 0) {
-      return res.status(404).json({ message: 'Godown transfer record not found' });
-    }
 
-    const sNo = existing.rows[0].s_no;
-    await db.run('DELETE FROM godown_transfers WHERE id = ?', [id]);
-    if (sNo) {
-      await db.run('DELETE FROM item_transfers WHERE transfer_no = ?', [sNo]);
-    }
+    await cDb.withTransaction(async (txConn) => {
+      const existing = await txConn.query('SELECT * FROM godown_transfers WHERE id = ?', [id]);
+      if (!existing.rows || existing.rows.length === 0) {
+        const err = new Error('Godown transfer record not found');
+        err.statusCode = 404;
+        throw err;
+      }
+      const sNo = existing.rows[0].s_no;
+      await txConn.run('DELETE FROM godown_transfers WHERE id = ?', [id]);
+      if (sNo) {
+        await txConn.run('DELETE FROM item_transfers WHERE transfer_no = ?', [sNo]);
+      }
+    });
 
-    await rebuildStockLedger();
+    await rebuildStockLedger(activeCompanyId);
     res.json({ success: true, message: 'Godown transfer deleted successfully' });
   } catch (err) {
     console.error('Error deleting godown transfer:', err);
-    res.status(500).json({ message: 'Error deleting godown transfer', error: err.message });
+    res.status(err.statusCode || 500).json({ message: err.message || 'Error deleting godown transfer', error: err.message });
   }
 });
 

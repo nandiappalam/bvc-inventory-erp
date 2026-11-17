@@ -9,6 +9,7 @@ const {
 } = require('../services/operationalChargeEngine');
 
 const { generateNumber } = require('../services/operationalChargeEngine');
+const AccountingEngine = require('../services/AccountingEngine');
 
 // Schema routing in database.js already handles tenant isolation; never prefix table names with c{companyId}_
 function getPrefix() {
@@ -119,7 +120,7 @@ router.get('/parties', async (req, res) => {
     // Also include transporters from transport_master if not already present
     const seenNames = new Set(parties.map(p => (p.name || '').toLowerCase().trim()));
     try {
-      const tmRows = await db.query('SELECT * FROM transport_master', []);
+      const tmRows = await db.forCompany(req.companyId).query('SELECT * FROM transport_master', []);
       for (const t of tmRows.rows || []) {
         const tName = (t.name || '').trim();
         if (tName && !seenNames.has(tName.toLowerCase())) {
@@ -450,15 +451,60 @@ router.delete('/rates/:id', async (req, res) => {
 
 router.delete('/payments/:id', async (req, res) => {
   try {
-    const pfx = getPrefix(req.companyId);
+    const cId = parseInt(req.companyId || req.headers['x-company-id'] || 1, 10) || 1;
+    const pfx = getPrefix(cId);
     const { id } = req.params;
-    try {
-      await db.run(`DELETE FROM ${pfx}operational_payment_allocations WHERE payment_id = ?`, [id]);
-    } catch (_) {}
-    await db.run(`DELETE FROM ${pfx}operational_payments WHERE id = ?`, [id]);
-    res.json({ success: true, message: 'Payment record deleted successfully' });
+    const cDb = db.forCompany(cId);
+
+    await cDb.withTransaction(async (txConn) => {
+      const pay = await cDb.get(`SELECT * FROM ${pfx}operational_payments WHERE id = ?`, [id]);
+      if (!pay) {
+        const err = new Error('Payment record not found');
+        err.statusCode = 404;
+        throw err;
+      }
+
+      const allocs = await cDb.all(
+        `SELECT * FROM ${pfx}operational_payment_allocations WHERE payment_id = ?`,
+        [id]
+      );
+
+      for (const alloc of allocs || []) {
+        const allocAmt = Number(alloc.allocated_amount || 0);
+        if (alloc.charge_id && allocAmt > 0) {
+          const ch = await cDb.get(`SELECT * FROM ${pfx}operational_charges WHERE id = ?`, [alloc.charge_id]);
+          if (ch) {
+            const finalAmt = Number(ch.final_amount ?? ch.total_amount ?? ch.amount ?? 0);
+            const newPaid = Math.max(0, AccountingEngine.round2(Number(ch.paid_amount || 0) - allocAmt));
+            const newBal = Math.max(0, AccountingEngine.round2(finalAmt - newPaid));
+            const newStatus = newPaid <= 0.005 ? 'UNPAID' : (newBal <= 0.005 ? 'PAID' : 'PARTIAL');
+            await cDb.run(
+              `UPDATE ${pfx}operational_charges SET paid_amount = ?, balance_amount = ?, payment_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+              [newPaid, newBal, newStatus, alloc.charge_id]
+            );
+          }
+        }
+      }
+
+      await cDb.run(`DELETE FROM ${pfx}operational_payment_allocations WHERE payment_id = ?`, [id]);
+      await cDb.run(`DELETE FROM ${pfx}operational_payments WHERE id = ?`, [id]);
+
+      if (pay.voucher_id) {
+        await AccountingEngine.deleteVoucherById({ conn: txConn, companyId: cId, voucherId: pay.voucher_id });
+      } else {
+        await AccountingEngine.deleteVoucherBySource({
+          conn: txConn,
+          companyId: cId,
+          sourceModule: 'operational_payment',
+          sourceId: Number(id),
+          referenceNo: pay.payment_no || String(id),
+        });
+      }
+    });
+
+    res.json({ success: true, message: 'Payment record deleted, charge balances restored, and accounting voucher removed successfully' });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    res.status(err.statusCode || 500).json({ success: false, error: err.message });
   }
 });
 

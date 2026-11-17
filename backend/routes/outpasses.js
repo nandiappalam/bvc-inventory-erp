@@ -256,85 +256,103 @@ router.post('/', async (req, res) => {
     const processingRate = parseFloat(formData.processing_rate_kg || formData.processingRateKg) || 0;
     const estimatedCharges = Number((totalWeight * processingRate).toFixed(2));
 
-    const insRes = await db.run(`
-      INSERT INTO outpasses (
-        outpass_no, date, purpose, item_type, reference_type, reference_id, reference_no,
-        party_type, party_id, party_name, from_location, from_godown_id, from_godown_name,
-        destination, vehicle_no, driver_name, driver_phone, transporter, expected_return_date,
-        status, total_qty, total_weight, returned_qty, returned_weight,
-        processing_rate_kg, estimated_charges, remarks, created_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?)
-    `, [
-      outpassNo,
-      formData.date || new Date().toISOString().slice(0, 10),
-      formData.purpose || 'Outside Processing',
-      formData.item_type || 'RM',
-      formData.reference_type || 'Grind',
-      formData.reference_id || null,
-      formData.reference_no || '',
-      formData.party_type || 'Flour Mill',
-      formData.party_id || null,
-      formData.party_name || formData.partyName || formData.flour_mill || '',
-      formData.from_location || 'Inside Factory',
-      fromGodownId,
-      godownsById.get(fromGodownId).godown_name,
-      formData.destination || formData.party_name || '',
-      formData.vehicle_no || '',
-      formData.driver_name || '',
-      formData.driver_phone || '',
-      formData.transporter || '',
-      formData.expected_return_date || '',
-      'OUTPASSED',
-      totalQty,
-      totalWeight,
-      processingRate,
-      estimatedCharges,
-      formData.remarks || '',
-      formData.created_by || 'Admin'
-    ], activeCompanyId);
+    const txRes = await db.forCompany(activeCompanyId).withTransaction(async () => {
+      // Validate available stock in stock_lots for lot-tracked items
+      for (const it of activeItems) {
+        const lotNo = String(it.lot_no || it.lotNo || '').trim();
+        const qty = parseFloat(it.qty) || 0;
+        if (lotNo && qty > 0) {
+          const lotCheck = await db.query(
+            `SELECT id, remaining_quantity FROM stock_lots WHERE UPPER(TRIM(lot_no)) = UPPER(TRIM(?)) LIMIT 1`,
+            [lotNo],
+            activeCompanyId
+          );
+          if (lotCheck.rows && lotCheck.rows.length > 0) {
+            const avail = Number(lotCheck.rows[0].remaining_quantity || 0);
+            if (qty > avail + 1e-6) {
+              const err = new Error(`Insufficient stock in lot ${lotNo} (available: ${avail}, requested: ${qty})`);
+              err.statusCode = 400;
+              throw err;
+            }
+          }
+        }
+      }
 
-    const outpassId = insRes.lastID || insRes.lastInsertRowid;
-
-    // Insert outpass items and update stock custody
-    for (const it of activeItems) {
-      const itemName = it.item_name || it.itemName;
-      const lotNo = it.lot_no || it.lotNo || '';
-      const qty = parseFloat(it.qty) || 0;
-      const unitWt = parseFloat(it.weight) || (qty > 0 ? (parseFloat(it.total_weight) || 0) / qty : 50);
-      const totWt = parseFloat(it.total_weight || it.totalWeight) || (qty * unitWt);
-      const uom = it.uom || 'KG';
-      const rate = parseFloat(it.rate) || 0;
-      const amt = parseFloat(it.amount) || (qty * rate);
-      const godownId = Number(it.godown_id || it.godownId || fromGodownId);
-      const godownName = godownsById.get(godownId).godown_name;
-
-      await db.run(`
-        INSERT INTO outpass_items (
-          outpass_id, outpass_no, item_id, item_name, lot_no, godown_id, godown_name,
-          qty, weight, total_weight, uom, rate, amount, returned_qty, returned_weight,
-          status, reason, remarks
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'OUTSIDE_PROCESSING', ?, ?)
+      const insRes = await db.run(`
+        INSERT INTO outpasses (
+          outpass_no, date, purpose, item_type, reference_type, reference_id, reference_no,
+          party_type, party_id, party_name, from_location, from_godown_id, from_godown_name,
+          destination, vehicle_no, driver_name, driver_phone, transporter, expected_return_date,
+          status, total_qty, total_weight, returned_qty, returned_weight,
+          processing_rate_kg, estimated_charges, remarks, created_by
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?)
       `, [
-        outpassId,
         outpassNo,
-        it.item_id || it.itemId || null,
-        itemName,
-        lotNo,
-        godownId,
-        godownName,
-        qty,
-        unitWt,
-        totWt,
-        uom,
-        rate,
-        amt,
-        it.reason || formData.purpose || 'Outside Processing',
-        it.remarks || ''
+        formData.date || new Date().toISOString().slice(0, 10),
+        formData.purpose || 'Outside Processing',
+        formData.item_type || 'RM',
+        formData.reference_type || 'Grind',
+        formData.reference_id || null,
+        formData.reference_no || '',
+        formData.party_type || 'Flour Mill',
+        formData.party_id || null,
+        formData.party_name || formData.partyName || formData.flour_mill || '',
+        formData.from_location || 'Inside Factory',
+        fromGodownId,
+        godownsById.get(fromGodownId).godown_name,
+        formData.destination || formData.party_name || '',
+        formData.vehicle_no || '',
+        formData.driver_name || '',
+        formData.driver_phone || '',
+        formData.transporter || '',
+        formData.expected_return_date || '',
+        'OUTPASSED',
+        totalQty,
+        totalWeight,
+        processingRate,
+        estimatedCharges,
+        formData.remarks || '',
+        formData.created_by || 'Admin'
       ], activeCompanyId);
 
-      // Stock Movement: Move from Available factory stock to Outside Processing
-      // Deduct from factory stock ledger so it is not consumed, but not available in factory
-      try {
+      const createdOutpassId = insRes.lastID || insRes.lastInsertRowid;
+
+      for (const it of activeItems) {
+        const itemName = it.item_name || it.itemName;
+        const lotNo = it.lot_no || it.lotNo || '';
+        const qty = parseFloat(it.qty) || 0;
+        const unitWt = parseFloat(it.weight) || (qty > 0 ? (parseFloat(it.total_weight) || 0) / qty : 50);
+        const totWt = parseFloat(it.total_weight || it.totalWeight) || (qty * unitWt);
+        const uom = it.uom || 'KG';
+        const rate = parseFloat(it.rate) || 0;
+        const amt = parseFloat(it.amount) || (qty * rate);
+        const godownId = Number(it.godown_id || it.godownId || fromGodownId);
+        const godownName = godownsById.get(godownId).godown_name;
+
+        await db.run(`
+          INSERT INTO outpass_items (
+            outpass_id, outpass_no, item_id, item_name, lot_no, godown_id, godown_name,
+            qty, weight, total_weight, uom, rate, amount, returned_qty, returned_weight,
+            status, reason, remarks
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'OUTSIDE_PROCESSING', ?, ?)
+        `, [
+          createdOutpassId,
+          outpassNo,
+          it.item_id || it.itemId || null,
+          itemName,
+          lotNo,
+          godownId,
+          godownName,
+          qty,
+          unitWt,
+          totWt,
+          uom,
+          rate,
+          amt,
+          it.reason || formData.purpose || 'Outside Processing',
+          it.remarks || ''
+        ], activeCompanyId);
+
         await db.run(`
           INSERT INTO stock (item_id, item_name, lot_no, qty, weight, rate, amount, date, type, reference_id, godown, godown_id, remarks)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Outpass Issue', ?, ?, ?, ?)
@@ -347,13 +365,12 @@ router.post('/', async (req, res) => {
           rate,
           -amt,
           formData.date || new Date().toISOString().slice(0, 10),
-          outpassId,
+          createdOutpassId,
           godownName,
           godownId,
           `Outpass #${outpassNo} to ${formData.party_name || 'Outside Mill'} (${formData.purpose || 'Outside Processing'})`
         ], activeCompanyId);
 
-        // Update stock_lots: move from available to outside_processing_qty
         if (lotNo) {
           await db.run(`
             UPDATE stock_lots
@@ -363,32 +380,33 @@ router.post('/', async (req, res) => {
             WHERE UPPER(TRIM(lot_no)) = UPPER(TRIM(?))
           `, [qty, qty, lotNo], activeCompanyId);
         }
-      } catch (stkErr) {
-        console.warn('Error adjusting stock for outpass:', stkErr.message);
       }
-    }
 
-    // Link with Grind / Grains if applicable
-    if (formData.reference_type === 'Grind' && formData.reference_id) {
-      try {
-        await db.run(`
-          UPDATE grains SET
-            outpass_id = ?,
-            outpass_no = ?,
-            process_mode = 'OUTSIDE_MILL',
-            mill_type = 'Outside Mill',
-            external_mill_name = ?,
-            status = 'Outpassed',
-            updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `, [outpassId, outpassNo, formData.party_name || 'External Mill', formData.reference_id], activeCompanyId);
-      } catch (gErr) {
-        console.warn('Error updating linked grind from outpass:', gErr.message);
+      if (formData.reference_type === 'Grind' && formData.reference_id) {
+        try {
+          await db.run(`
+            UPDATE grains SET
+              outpass_id = ?,
+              outpass_no = ?,
+              process_mode = 'OUTSIDE_MILL',
+              mill_type = 'Outside Mill',
+              external_mill_name = ?,
+              status = 'Outpassed',
+              updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+          `, [createdOutpassId, outpassNo, formData.party_name || 'External Mill', formData.reference_id], activeCompanyId);
+        } catch (gErr) {
+          console.warn('Error updating linked grind from outpass:', gErr.message);
+        }
       }
-    }
+
+      return { outpassId: createdOutpassId };
+    });
+
+    const outpassId = txRes.outpassId;
 
     try {
-      await rebuildStockLedger();
+      await rebuildStockLedger(activeCompanyId);
     } catch (e) {}
 
     // Create linked operational charges if provided in request
@@ -460,7 +478,7 @@ router.post('/', async (req, res) => {
     });
   } catch (err) {
     console.error('Error creating outpass:', err);
-    res.status(500).json({ success: false, message: err.message });
+    res.status(err.statusCode || 500).json({ success: false, message: err.message });
   }
 });
 
@@ -509,54 +527,51 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// DELETE cancel outpass (reverses stock)
+// DELETE cancel outpass (reverses stock atomically)
 router.delete('/:id', async (req, res) => {
   try {
     const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
     const { id } = req.params;
 
-    // Check if any inpass is already received against this outpass
-    const checkInpass = await db.query(`SELECT id, inpass_no FROM inpasses WHERE outpass_id = ?`, [id], activeCompanyId);
-    if (checkInpass.rows && checkInpass.rows.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: `Cannot delete Outpass because Inpass ${checkInpass.rows[0].inpass_no} has already been received against it.`
-      });
-    }
-
-    // Fetch outpass items to restore stock
-    const itemsRes = await db.query(`SELECT * FROM outpass_items WHERE outpass_id = ?`, [id], activeCompanyId);
-    for (const it of (itemsRes.rows || [])) {
-      if (it.lot_no) {
-        await db.run(`
-          UPDATE stock_lots
-          SET remaining_quantity = remaining_quantity + ?,
-              outside_processing_qty = MAX(0, COALESCE(outside_processing_qty, 0) - ?),
-              custody_status = 'AVAILABLE'
-          WHERE UPPER(TRIM(lot_no)) = UPPER(TRIM(?))
-        `, [it.qty, it.qty, it.lot_no], activeCompanyId);
+    await db.forCompany(activeCompanyId).withTransaction(async () => {
+      const checkInpass = await db.query(`SELECT id, inpass_no FROM inpasses WHERE outpass_id = ?`, [id], activeCompanyId);
+      if (checkInpass.rows && checkInpass.rows.length > 0) {
+        const err = new Error(`Cannot delete Outpass because Inpass ${checkInpass.rows[0].inpass_no} has already been received against it.`);
+        err.statusCode = 400;
+        throw err;
       }
-    }
 
-    // Delete stock movements
-    await db.run(`DELETE FROM stock WHERE type = 'Outpass Issue' AND reference_id = ?`, [id], activeCompanyId);
+      const itemsRes = await db.query(`SELECT * FROM outpass_items WHERE outpass_id = ?`, [id], activeCompanyId);
+      for (const it of (itemsRes.rows || [])) {
+        if (it.lot_no) {
+          await db.run(`
+            UPDATE stock_lots
+            SET remaining_quantity = remaining_quantity + ?,
+                outside_processing_qty = MAX(0, COALESCE(outside_processing_qty, 0) - ?),
+                custody_status = 'AVAILABLE'
+            WHERE UPPER(TRIM(lot_no)) = UPPER(TRIM(?))
+          `, [it.qty, it.qty, it.lot_no], activeCompanyId);
+        }
+      }
 
-    // Unlink grind if any
-    await db.run(`
-      UPDATE grains SET outpass_id = NULL, outpass_no = NULL, status = 'Draft'
-      WHERE outpass_id = ?
-    `, [id], activeCompanyId);
+      await db.run(`DELETE FROM stock WHERE type = 'Outpass Issue' AND reference_id = ?`, [id], activeCompanyId);
 
-    await db.run(`DELETE FROM outpass_items WHERE outpass_id = ?`, [id], activeCompanyId);
-    await db.run(`DELETE FROM outpasses WHERE id = ?`, [id], activeCompanyId);
+      await db.run(`
+        UPDATE grains SET outpass_id = NULL, outpass_no = NULL, status = 'Draft'
+        WHERE outpass_id = ?
+      `, [id], activeCompanyId);
+
+      await db.run(`DELETE FROM outpass_items WHERE outpass_id = ?`, [id], activeCompanyId);
+      await db.run(`DELETE FROM outpasses WHERE id = ?`, [id], activeCompanyId);
+    });
 
     try {
-      await rebuildStockLedger();
+      await rebuildStockLedger(activeCompanyId);
     } catch (e) {}
 
     res.json({ success: true, message: 'Outpass deleted and stock restored successfully' });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(err.statusCode || 500).json({ success: false, message: err.message });
   }
 });
 

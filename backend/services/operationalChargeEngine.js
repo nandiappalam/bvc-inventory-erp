@@ -1,5 +1,5 @@
 const db = require('../config/database');
-const VoucherService = require('./VoucherService');
+const AccountingEngine = require('./AccountingEngine');
 const { emitTransactionEvent } = require('./transactionNotificationEngine');
 
 /**
@@ -446,62 +446,36 @@ async function generateNumber(companyId, type) {
 /**
  * Find or create ledgers for accounting integration
  */
-async function resolveOperationalLedgers(companyId = 1) {
-  const pfx = getPrefix(companyId);
-  let expenseLedger = null;
-  let payableLedger = null;
-  let cashLedger = null;
+async function resolveOperationalLedgers(companyId = 1, partyName = null, partyCategory = 'LOADMAN', paymentMode = 'CASH') {
+  const cId = AccountingEngine.getActiveCompanyId(companyId);
+  const cDb = db.forCompany(cId);
 
-  try {
-    // 1. Expense Ledger: Loading & Unloading Charges / Direct Expenses
-    expenseLedger = await db.get(
-      `SELECT id, name FROM ${pfx}ledgermaster WHERE UPPER(name) LIKE '%LOADING%' OR UPPER(name) LIKE '%OPERATIONAL CHARGES%' OR UPPER(name) LIKE '%DIRECT EXPENSES%' OR UPPER(name) LIKE '%WAGES%' LIMIT 1`
-    );
-    if (!expenseLedger || !expenseLedger.id) {
-      try {
-        const insExp = await db.run(
-          `INSERT INTO ${pfx}ledgermaster (name, printname, under, ledger_type, openingbalance, status)
-           VALUES ('Loading & Operational Charges', 'LOADING & OPERATIONAL CHARGES', 'Direct Expenses', 'Expense', 0, 'Active')`
-        );
-        const expId = insExp.lastInsertRowid || insExp.lastID;
-        if (expId) {
-          expenseLedger = { id: expId, name: 'Loading & Operational Charges' };
-        }
-      } catch (_) {}
-      if (!expenseLedger || !expenseLedger.id) {
-        const found = await db.get(`SELECT id, name FROM ${pfx}ledgermaster WHERE LOWER(TRIM(name)) = 'loading & operational charges' LIMIT 1`);
-        if (found) expenseLedger = found;
-      }
-    }
+  const expenseLedger = await AccountingEngine.resolveOrCreateLedger({
+    companyId: cId,
+    name: 'Loading & Operational Charges',
+    groupName: 'Direct Expenses',
+    ledgerType: 'Expense',
+  });
 
-    // 2. Payable Ledger: Operational Charges Payable / Current Liabilities
-    payableLedger = await db.get(
-      `SELECT id, name FROM ${pfx}ledgermaster WHERE UPPER(name) LIKE '%OPERATIONAL CHARGES PAYABLE%' OR UPPER(name) LIKE '%LABOUR CHARGES PAYABLE%' OR (UPPER(name) LIKE '%OPERATIONAL%' AND UPPER(under) LIKE '%LIABILIT%') LIMIT 1`
-    );
-    if (!payableLedger || !payableLedger.id) {
-      try {
-        const insPay = await db.run(
-          `INSERT INTO ${pfx}ledgermaster (name, printname, under, ledger_type, openingbalance, status)
-           VALUES ('Operational Charges Payable', 'OPERATIONAL CHARGES PAYABLE', 'Current Liabilities', 'Liability', 0, 'Active')`
-        );
-        const payId = insPay.lastInsertRowid || insPay.lastID;
-        if (payId) {
-          payableLedger = { id: payId, name: 'Operational Charges Payable' };
-        }
-      } catch (_) {}
-      if (!payableLedger || !payableLedger.id) {
-        const found = await db.get(`SELECT id, name FROM ${pfx}ledgermaster WHERE LOWER(TRIM(name)) = 'operational charges payable' LIMIT 1`);
-        if (found) payableLedger = found;
-      }
-    }
+  const cleanPartyName = String(partyName || '').trim() || 'Operational Charges Payable';
+  const isTransport = String(partyCategory || '').toUpperCase().includes('TRANSPORT');
+  const payableLedger = await AccountingEngine.resolveOrCreateLedger({
+    companyId: cId,
+    name: cleanPartyName,
+    ledgerType: isTransport ? 'Transporter' : 'Worker',
+  });
 
-    // 3. Cash Ledger: Cash in Hand
-    cashLedger = await db.get(
-      `SELECT id, name FROM ${pfx}ledgermaster WHERE UPPER(name) LIKE '%CASH%' LIMIT 1`
-    );
-  } catch (err) {
-    console.warn('[operationalChargeEngine] resolveOperationalLedgers:', err.message);
-  }
+  const modeLower = String(paymentMode || 'CASH').toLowerCase();
+  const isBank = modeLower.includes('bank') || modeLower.includes('neft') || modeLower.includes('rtgs') || modeLower.includes('upi') || modeLower.includes('cheque');
+  const cashLedger = await AccountingEngine.resolveOrCreateLedger({
+    companyId: cId,
+    name: isBank ? 'Bank Account' : 'Cash in Hand',
+    groupName: isBank ? 'Bank Accounts' : 'Cash-in-hand',
+    ledgerType: 'Asset',
+  });
+
+  // Verify ledger IDs exist inside this company schema
+  await cDb.query(`SELECT id FROM ledgermaster WHERE id = ? LIMIT 1`, [expenseLedger.id]).catch(() => {});
 
   return { expenseLedger, payableLedger, cashLedger };
 }
@@ -510,19 +484,20 @@ async function resolveOperationalLedgers(companyId = 1) {
  * Create an Operational Charge record from any module (Purchase, Sales, Inpass, Outpass, Godown Transfer, Vehicle Movement)
  */
 async function recordOperationalCharge(params = {}) {
-  const companyId = params.companyId || params.company_id || 1;
+  const companyId = AccountingEngine.getActiveCompanyId(params.companyId || params.company_id);
+  const cDb = db.forCompany(companyId);
   await ensureOperationalTables(companyId);
   const pfx = getPrefix(companyId);
 
   const sourceModule = params.sourceModule || params.source_module || 'General';
   const sourceTransactionNo = params.sourceTransactionNo || params.source_transaction_no || null;
   const sourceTransactionId = params.sourceTransactionId || params.source_transaction_id || null;
-  const date = params.date || new Date().toISOString().split('T')[0];
+  const date = AccountingEngine.normalizeDateIso(params.date || new Date().toISOString().split('T')[0]);
   const operationType = params.operationType || params.operation_type || params.charge_type || 'LOADING';
   const chargeCategory = params.chargeCategory || params.charge_category || params.party_category || 'LABOUR';
   let partyId = params.partyId || params.party_id || null;
   let partyName = params.partyName || params.party_name || null;
-  let partyCategory = params.partyCategory || params.party_category || 'LOADMEN';
+  let partyCategory = params.partyCategory || params.party_category || 'LOADMAN';
   const rateBasis = params.rateBasis || params.rate_basis || params.calculation_basis || 'PER_BAG';
   const ratePerUnit = Number(params.ratePerUnit ?? params.rate_per_unit ?? params.rate ?? 0);
   const quantity = Number(params.quantity ?? 0);
@@ -537,159 +512,178 @@ async function recordOperationalCharge(params = {}) {
   const createdBy = params.createdBy || params.created_by || params.paid_by || 'System User';
   const autoPostToAccounts = params.autoPostToAccounts !== false;
 
-  // If partyId is provided but partyName is not, query party
-  if (partyId && !partyName) {
-    const party = await db.get(`SELECT name, category FROM ${pfx}operational_parties WHERE id = ?`, [partyId]);
-    if (party) {
-      partyName = party.name;
-      partyCategory = party.category;
+  const resultObj = await cDb.withTransaction(async () => {
+    if (partyId && !partyName) {
+      const party = await cDb.get(`SELECT name, category FROM ${pfx}operational_parties WHERE id = ?`, [partyId]);
+      if (party) {
+        partyName = party.name;
+        partyCategory = party.category || partyCategory;
+      }
     }
-  }
 
-  if (!partyId && partyName) {
-    const existingParty = await db.get(`SELECT id, category FROM ${pfx}operational_parties WHERE name = ?`, [partyName]);
-    if (existingParty) {
-      partyId = existingParty.id;
-      partyCategory = existingParty.category || partyCategory;
+    if (!partyId && partyName) {
+      const existingParty = await cDb.get(`SELECT id, category FROM ${pfx}operational_parties WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))`, [partyName]);
+      if (existingParty) {
+        partyId = existingParty.id;
+        partyCategory = existingParty.category || partyCategory;
+      }
     }
-  }
 
-  // Calculate base & final amount
-  const explicitAmount = params.amount !== undefined && params.amount !== '' ? Number(params.amount) : null;
-  const baseAmount = (explicitAmount !== null && !isNaN(explicitAmount) && explicitAmount > 0)
-    ? explicitAmount
-    : (ratePerUnit * quantity);
-  const finalAmount = Math.max(0, baseAmount + adjustmentAmount);
-  const chargeNo = params.charge_no || params.chargeNo || await generateNumber(companyId, 'CHARGE');
-  const chargeDate = date;
+    const resolvedPartyName = (partyName && String(partyName).trim()) ? String(partyName).trim() : 'General Labour Pool';
 
-  // Resolve ledgers
-  const { expenseLedger, payableLedger } = await resolveOperationalLedgers(companyId);
+    const explicitAmount = params.amount !== undefined && params.amount !== '' ? Number(params.amount) : null;
+    const baseAmount = (explicitAmount !== null && !isNaN(explicitAmount) && explicitAmount > 0)
+      ? AccountingEngine.round2(explicitAmount)
+      : AccountingEngine.round2(ratePerUnit * quantity);
+    const finalAmount = AccountingEngine.round2(Math.max(0, baseAmount + adjustmentAmount));
+    const chargeNo = params.charge_no || params.chargeNo || await generateNumber(companyId, 'CHARGE');
+    const chargeDate = date;
 
-  let accrualVoucherId = null;
-  let accrualVoucherNo = null;
-  let isPosted = 0;
+    const { expenseLedger, payableLedger } = await resolveOperationalLedgers(companyId, resolvedPartyName, partyCategory);
 
-  // For Purchases, createPurchaseVoucherChain already includes loadman/unloading charges authoritatively in the Purchase voucher (e.g. PUR00018).
-  // Auto-posting an additional Journal voucher for Purchase would cause double booking and potential duplicate vouchers.
-  const isPurchaseSource = String(sourceModule || '').toLowerCase().includes('purchase');
+    const insertSql = `
+      INSERT INTO ${pfx}operational_charges (
+        charge_no, date, charge_date, source_module, source_transaction_no, source_transaction_id,
+        operation_type, charge_type, charge_category, party_id, party_name, party_category,
+        rate_basis, calculation_basis, rate_per_unit, rate, quantity, uom, calculated_amount, adjustment_amount,
+        final_amount, amount, total_amount, paid_amount, balance_amount, payment_status, status, approval_status,
+        is_posted_to_accounts, accrual_voucher_id, accrual_voucher_no,
+        expense_ledger_id, payable_ledger_id, from_location, to_location,
+        vehicle_no, driver_name, notes, remarks, created_by
+      ) VALUES (
+        ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?, ?, ?, ?,
+        ?, ?, ?,
+        ?, ?, ?, ?,
+        ?, ?, ?, ?, ?
+      )
+    `;
 
-  // Auto-post Accrual Journal/Payment Voucher to Accounting if enabled and finalAmount > 0
-  if (autoPostToAccounts && !isPurchaseSource && finalAmount > 0 && expenseLedger?.id && payableLedger?.id) {
-    try {
-      const voucherRes = await VoucherService.createVoucher({
+    const chargeParams = [
+      chargeNo, chargeDate, chargeDate, sourceModule, sourceTransactionNo || null, sourceTransactionId || null,
+      operationType, operationType, chargeCategory, partyId || 1, resolvedPartyName, partyCategory,
+      rateBasis, rateBasis, ratePerUnit, ratePerUnit, quantity, uom, baseAmount, adjustmentAmount,
+      finalAmount, finalAmount, finalAmount, 0.00, finalAmount, 'UNPAID', 'UNPAID', 'APPROVED',
+      0, null, null,
+      expenseLedger.id, payableLedger.id,
+      fromLocation, toLocation, vehicleNo, driverName, notes, notes, createdBy
+    ];
+
+    const res = await cDb.run(insertSql, chargeParams);
+    const chargeId = res.lastID || res.lastInsertRowid;
+
+    if (Array.isArray(lines) && lines.length > 0) {
+      let lineIdx = 1;
+      for (const l of lines) {
+        const lineAmt = Number(l.line_amount ?? l.lineAmount ?? l.amount ?? 0);
+        const bagCount = Number(l.bag_count ?? l.bagCount ?? 0);
+        const weightKg = Number(l.weight_kg ?? l.weightKg ?? 0);
+        const unitRate = Number(l.unit_rate ?? l.unitRate ?? ratePerUnit);
+        await cDb.run(
+          `INSERT INTO ${pfx}operational_charge_lines (charge_id, line_no, item_name, lot_no, bag_count, weight_kg, unit_rate, line_amount, remarks)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            chargeId, lineIdx++, l.item_name || l.party_name || l.worker_role || 'Worker', l.lot_no || '',
+            bagCount, weightKg, unitRate, lineAmt, l.remarks || l.worker_role || ''
+          ]
+        );
+      }
+    }
+
+    let accrualVoucherId = null;
+    let accrualVoucherNo = null;
+    let isPosted = 0;
+
+    // For Purchases, createPurchaseVoucherChain already includes loadman/unloading charges authoritatively in PUR voucher.
+    const isPurchaseSource = String(sourceModule || '').toLowerCase().includes('purchase');
+
+    if (autoPostToAccounts && !isPurchaseSource && finalAmount > 0) {
+      const voucherRes = await AccountingEngine.postVoucher({
         companyId,
-        voucher_type: 'Journal',
-        voucher_date: chargeDate,
-        reference_no: chargeNo,
-        narration: `Accrual of ${operationType} charge for ${sourceModule} ${sourceTransactionNo || ''} - Party: ${partyName || 'Labour Team'}`,
-        entries: [
+        voucherType: 'Operational Charge',
+        prefix: 'OPC',
+        date: chargeDate,
+        referenceNo: chargeNo,
+        narration: `Accrual of ${operationType} charge for ${sourceModule} ${sourceTransactionNo || ''} - Party: ${resolvedPartyName}`,
+        sourceModule: 'operational_charge',
+        sourceId: Number(chargeId),
+        postingKey: `operational_charge:${chargeId}`,
+        lines: [
           {
-            ledger_id: expenseLedger.id,
-            ledger_name: expenseLedger.name,
+            ledgerId: expenseLedger.id,
+            ledgerName: expenseLedger.name,
             debit: finalAmount,
             credit: 0,
-            remarks: `${operationType} expense (${quantity} ${uom} @ ₹${ratePerUnit})`
+            remarks: `${operationType} expense (${quantity} ${uom} @ ₹${ratePerUnit})`,
+            referenceId: chargeId,
+            referenceType: 'operational_charge',
+            transactionId: chargeId,
+            transactionType: 'operational_charge',
           },
           {
-            ledger_id: payableLedger.id,
-            ledger_name: payableLedger.name,
+            ledgerId: payableLedger.id,
+            ledgerName: payableLedger.name,
             debit: 0,
             credit: finalAmount,
-            remarks: `Payable to ${partyName || 'Party'} for ${chargeNo}`
+            remarks: `Payable to ${resolvedPartyName} for ${chargeNo}`,
+            referenceId: chargeId,
+            referenceType: 'operational_charge',
+            transactionId: chargeId,
+            transactionType: 'operational_charge',
           }
         ],
-        created_by: createdBy
+        allowUpdate: true,
+        preserveVoucherNoOnUpdate: true,
       });
 
-      if (voucherRes && (voucherRes.id || voucherRes.voucher_id || voucherRes.voucher_no)) {
-        accrualVoucherId = voucherRes.id || voucherRes.voucher_id;
-        accrualVoucherNo = voucherRes.voucher_no || voucherRes.voucherNo;
-        isPosted = 1;
-      }
-    } catch (accErr) {
-      console.warn('[operationalChargeEngine] Accounting journal accrual warning:', accErr.message);
-    }
-  }
+      accrualVoucherId = voucherRes.voucherId;
+      accrualVoucherNo = voucherRes.voucherNo;
+      isPosted = 1;
 
-  // Insert into operational_charges
-  const insertSql = `
-    INSERT INTO ${pfx}operational_charges (
-      charge_no, date, charge_date, source_module, source_transaction_no, source_transaction_id,
-      operation_type, charge_type, charge_category, party_id, party_name, party_category,
-      rate_basis, calculation_basis, rate_per_unit, rate, quantity, uom, calculated_amount, adjustment_amount,
-      final_amount, amount, total_amount, paid_amount, balance_amount, payment_status, status, approval_status,
-      is_posted_to_accounts, accrual_voucher_id, accrual_voucher_no,
-      expense_ledger_id, payable_ledger_id, from_location, to_location,
-      vehicle_no, driver_name, notes, remarks, created_by
-    ) VALUES (
-      ?, ?, ?, ?, ?, ?,
-      ?, ?, ?, ?, ?, ?,
-      ?, ?, ?, ?, ?, ?, ?, ?,
-      ?, ?, ?, ?, ?, ?, ?, ?,
-      ?, ?, ?,
-      ?, ?, ?, ?,
-      ?, ?, ?, ?, ?
-    )
-  `;
-
-  const chargeParams = [
-    chargeNo, chargeDate, chargeDate, sourceModule, sourceTransactionNo || null, sourceTransactionId || null,
-    operationType, operationType, chargeCategory, partyId || 1, partyName || 'General Labour Pool', partyCategory,
-    rateBasis, rateBasis, ratePerUnit, ratePerUnit, quantity, uom, baseAmount, adjustmentAmount,
-    finalAmount, finalAmount, finalAmount, 0.00, finalAmount, 'UNPAID', 'UNPAID', 'APPROVED',
-    isPosted, accrualVoucherId, accrualVoucherNo,
-    expenseLedger ? expenseLedger.id : null, payableLedger ? payableLedger.id : null,
-    fromLocation, toLocation, vehicleNo, driverName, notes, notes, createdBy
-  ];
-
-  const res = await db.run(insertSql, chargeParams);
-  const chargeId = res.lastID;
-
-  // Insert line items if present
-  if (Array.isArray(lines) && lines.length > 0) {
-    let lineIdx = 1;
-    for (const l of lines) {
-      const lineAmt = Number(l.line_amount ?? l.lineAmount ?? l.amount ?? 0);
-      const bagCount = Number(l.bag_count ?? l.bagCount ?? 0);
-      const weightKg = Number(l.weight_kg ?? l.weightKg ?? 0);
-      const unitRate = Number(l.unit_rate ?? l.unitRate ?? ratePerUnit);
-      await db.run(
-        `INSERT INTO ${pfx}operational_charge_lines (charge_id, line_no, item_name, lot_no, bag_count, weight_kg, unit_rate, line_amount, remarks)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          chargeId, lineIdx++, l.item_name || l.party_name || l.worker_role || 'Worker', l.lot_no || '',
-          bagCount, weightKg, unitRate, lineAmt, l.remarks || l.worker_role || ''
-        ]
+      await cDb.run(
+        `UPDATE ${pfx}operational_charges SET is_posted_to_accounts = 1, accrual_voucher_id = ?, accrual_voucher_no = ? WHERE id = ?`,
+        [accrualVoucherId, accrualVoucherNo, chargeId]
       );
     }
-  }
 
-  // Audit Log
-  await logOperationalAudit(companyId, 'CHARGE', chargeId, chargeNo, 'CREATED', createdBy, {
-    sourceModule, sourceTransactionNo, finalAmount, partyName, operationType
+    await logOperationalAudit(companyId, 'CHARGE', chargeId, chargeNo, 'CREATED', createdBy, {
+      sourceModule, sourceTransactionNo, finalAmount, partyName: resolvedPartyName, operationType
+    });
+
+    return {
+      id: chargeId,
+      charge_no: chargeNo,
+      final_amount: finalAmount,
+      balance_amount: finalAmount,
+      accrual_voucher_id: accrualVoucherId,
+      accrual_voucher_no: accrualVoucherNo,
+      is_posted_to_accounts: isPosted,
+      partyName: resolvedPartyName,
+      partyCategory,
+    };
   });
 
-  // Emit Notification Event
   try {
     let notifEvent = 'LOADING_CHARGE_CREATED';
     if (operationType === 'UNLOADING') notifEvent = 'UNLOADING_CHARGE_CREATED';
     else if (operationType === 'GODOWN_TRANSFER' || sourceModule === 'GodownTransfer') notifEvent = 'TRANSFER_CHARGE_CREATED';
     else if (chargeCategory === 'DRIVER_BATTA') notifEvent = 'DRIVER_CHARGE_CREATED';
 
-    emitTransactionEvent(companyId, notifEvent, chargeNo, chargeId, {
-      charge_no: chargeNo,
+    emitTransactionEvent(companyId, notifEvent, resultObj.charge_no, resultObj.id, {
+      charge_no: resultObj.charge_no,
       source_module: sourceModule,
       source_transaction_no: sourceTransactionNo || '',
       operation_type: operationType,
-      party_name: partyName || 'Labour Pool',
-      party_category: partyCategory,
+      party_name: resultObj.partyName,
+      party_category: resultObj.partyCategory,
       rate_basis: rateBasis,
       rate_per_unit: ratePerUnit,
       quantity,
       uom,
-      final_amount: finalAmount,
-      balance_amount: finalAmount,
+      final_amount: resultObj.final_amount,
+      balance_amount: resultObj.balance_amount,
       vehicle_no: vehicleNo || '',
       driver_name: driverName || '',
       from_location: fromLocation || '',
@@ -701,12 +695,12 @@ async function recordOperationalCharge(params = {}) {
   }
 
   return {
-    id: chargeId,
-    charge_no: chargeNo,
-    final_amount: finalAmount,
-    balance_amount: finalAmount,
-    accrual_voucher_no: accrualVoucherNo,
-    is_posted_to_accounts: isPosted
+    id: resultObj.id,
+    charge_no: resultObj.charge_no,
+    final_amount: resultObj.final_amount,
+    balance_amount: resultObj.balance_amount,
+    accrual_voucher_no: resultObj.accrual_voucher_no,
+    is_posted_to_accounts: resultObj.is_posted_to_accounts
   };
 }
 
@@ -714,15 +708,17 @@ async function recordOperationalCharge(params = {}) {
  * Record a payment against an operational party and allocate against pending charges
  */
 async function recordOperationalPayment(params = {}) {
-  const companyId = params.companyId || params.company_id || 1;
+  const companyId = AccountingEngine.getActiveCompanyId(params.companyId || params.company_id);
+  const cDb = db.forCompany(companyId);
   await ensureOperationalTables(companyId);
   const pfx = getPrefix(companyId);
 
   let partyId = params.partyId || params.party_id;
   let partyName = params.partyName || params.party_name;
-  const paymentDate = params.paymentDate || params.payment_date || params.date || new Date().toISOString().split('T')[0];
+  let partyCategory = params.party_category || params.category || 'LOADMAN';
+  const paymentDate = AccountingEngine.normalizeDateIso(params.paymentDate || params.payment_date || params.date || new Date().toISOString().split('T')[0]);
   const paymentMode = params.paymentMode || params.payment_mode || params.payment_method || 'CASH';
-  const paidAmount = Number(params.paidAmount ?? params.paid_amount ?? params.amount ?? 0);
+  const paidAmount = AccountingEngine.round2(Number(params.paidAmount ?? params.paid_amount ?? params.amount ?? 0));
   const referenceNo = params.referenceNo || params.reference_no || '';
   const paidFromLedgerId = params.paidFromLedgerId || params.paid_from_ledger_id;
   const rawAllocations = params.allocations || [];
@@ -730,21 +726,28 @@ async function recordOperationalPayment(params = {}) {
   const createdBy = params.createdBy || params.created_by || params.paid_by || 'Cashier';
   const autoPostToAccounts = params.autoPostToAccounts !== false;
 
-  if (partyId && !partyName) {
-    const party = await db.get(`SELECT name FROM ${pfx}operational_parties WHERE id = ?`, [partyId]);
-    if (party) partyName = party.name;
+  if (paidAmount <= 0) {
+    throw new Error('Payment amount must be greater than 0');
   }
 
-  if (!partyId && partyName && String(partyName).trim()) {
-    const cleanName = String(partyName).trim();
-    let party = await db.get(`SELECT id, name FROM ${pfx}operational_parties WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))`, [cleanName]);
-    if (party) {
-      partyId = party.id;
-      partyName = party.name;
-    } else {
-      // Auto-create in master operational_parties so it permanently displays in Master table!
-      try {
-        const existingCodes = await db.all(`SELECT party_code FROM ${pfx}operational_parties WHERE party_code LIKE 'OPP-%'`);
+  const resultObj = await cDb.withTransaction(async () => {
+    if (partyId && !partyName) {
+      const party = await cDb.get(`SELECT name, category FROM ${pfx}operational_parties WHERE id = ?`, [partyId]);
+      if (party) {
+        partyName = party.name;
+        partyCategory = party.category || partyCategory;
+      }
+    }
+
+    if (!partyId && partyName && String(partyName).trim()) {
+      const cleanName = String(partyName).trim();
+      const party = await cDb.get(`SELECT id, name, category FROM ${pfx}operational_parties WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))`, [cleanName]);
+      if (party) {
+        partyId = party.id;
+        partyName = party.name;
+        partyCategory = party.category || partyCategory;
+      } else {
+        const existingCodes = await cDb.all(`SELECT party_code FROM ${pfx}operational_parties WHERE party_code LIKE 'OPP-%'`);
         let maxPartyNum = 0;
         for (const r of existingCodes || []) {
           const m = String(r.party_code || '').trim().match(/^OPP-(\d+)$/i);
@@ -759,172 +762,161 @@ async function recordOperationalPayment(params = {}) {
         let pCode = '';
         while (true) {
           const candidate = `OPP-${String(nextPartyNum).padStart(4, '0')}`;
-          const dup = await db.get(`SELECT id FROM ${pfx}operational_parties WHERE party_code = ? LIMIT 1`, [candidate]);
+          const dup = await cDb.get(`SELECT id FROM ${pfx}operational_parties WHERE party_code = ? LIMIT 1`, [candidate]);
           if (!dup) {
             pCode = candidate;
             break;
           }
           nextPartyNum++;
         }
-        const pCat = params.party_category || params.category || 'LOADMAN';
         const pMode = paymentMode || 'CASH';
-        const pIns = await db.run(
+        const pIns = await cDb.run(
           `INSERT INTO ${pfx}operational_parties (party_code, name, category, party_category, default_payment_mode, payment_mode, is_active) VALUES (?, ?, ?, ?, ?, ?, 1)`,
-          [pCode, cleanName, pCat, pCat, pMode, pMode]
+          [pCode, cleanName, partyCategory, partyCategory, pMode, pMode]
         );
-        partyId = pIns.lastID;
+        partyId = pIns.lastID || pIns.lastInsertRowid;
         partyName = cleanName;
-      } catch (pErr) {
-        console.warn('[recordOperationalPayment] Could not insert operational party:', pErr.message);
       }
     }
-  }
 
-  if (!partyId && !partyName) {
-    partyId = 1;
-    partyName = 'General Labour Pool';
-  }
-
-  if (paidAmount <= 0) {
-    throw new Error('Payment amount must be greater than 0');
-  }
-
-  const paymentNo = await generateNumber(companyId, 'PAYMENT');
-  const payDate = paymentDate;
-
-  const { payableLedger, cashLedger } = await resolveOperationalLedgers(companyId);
-  const fromLedgerId = paidFromLedgerId || (cashLedger ? cashLedger.id : null);
-
-  let paymentVoucherId = null;
-  let paymentVoucherNo = null;
-  let debitLedgerId = payableLedger ? payableLedger.id : null;
-  let debitLedgerName = payableLedger ? payableLedger.name : 'Operational Charges Payable';
-
-  // Prefer the specific worker/party ledger so Voucher & Ledger Statement share a balanced PAY voucher
-  try {
-    const { resolveLedgerId } = require('../utils/ledgerHelper');
-    const resolvedPartyName = partyName || 'General Labour Pool';
-    const resolvedPartyLedgerId = await resolveLedgerId(resolvedPartyName, 'Worker');
-    if (resolvedPartyLedgerId) {
-      debitLedgerId = resolvedPartyLedgerId;
-      debitLedgerName = resolvedPartyName;
+    if (!partyId && !partyName) {
+      partyId = 1;
+      partyName = 'General Labour Pool';
     }
-  } catch (e) {
-    console.warn('[recordOperationalPayment] Worker ledger resolve fallback:', e.message);
-  }
 
-  // Post Payment Voucher to Accounts: Debit Worker/Party (or Operational Charges Payable), Credit Cash / Bank
-  if (autoPostToAccounts && debitLedgerId && fromLedgerId) {
-    try {
-      let fromLedgerName = 'Cash in Hand';
-      try {
-        const fl = await db.get(`SELECT name FROM ${pfx}ledgermaster WHERE id = ?`, [fromLedgerId]);
-        if (fl) fromLedgerName = fl.name;
-      } catch (e) {}
+    const paymentNo = await generateNumber(companyId, 'PAYMENT');
+    const payDate = paymentDate;
 
-      const voucherRes = await VoucherService.createVoucher({
+    const { payableLedger, cashLedger } = await resolveOperationalLedgers(companyId, partyName, partyCategory, paymentMode);
+    let fromLedger = cashLedger;
+    if (paidFromLedgerId) {
+      fromLedger = await AccountingEngine.resolveOrCreateLedger({ companyId, ledgerId: paidFromLedgerId });
+    }
+
+    const payIns = await cDb.run(
+      `INSERT INTO ${pfx}operational_payments (
+        payment_no, payment_date, party_id, party_name, party_category, payment_mode, payment_method, paid_amount,
+        reference_no, voucher_id, voucher_no, paid_from_ledger_id, payable_ledger_id,
+        notes, remarks, created_by, paid_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        paymentNo, payDate, partyId || 1, partyName, partyCategory, paymentMode, paymentMode, paidAmount,
+        referenceNo, null, null, fromLedger.id, payableLedger.id,
+        notes, notes, createdBy, createdBy
+      ]
+    );
+    const paymentId = payIns.lastID || payIns.lastInsertRowid;
+
+    let paymentVoucherId = null;
+    let paymentVoucherNo = null;
+
+    if (autoPostToAccounts) {
+      const voucherRes = await AccountingEngine.postVoucher({
         companyId,
-        voucher_type: 'Payment',
-        voucher_date: payDate,
-        reference_no: paymentNo,
-        narration: `Operational Labour/Transport Payment to ${partyName || 'Party'} - Ref: ${referenceNo || paymentNo}`,
-        entries: [
+        voucherType: 'Payment',
+        prefix: 'PAY',
+        date: payDate,
+        referenceNo: paymentNo,
+        narration: `Operational Payment to ${partyName} - Ref: ${referenceNo || paymentNo}`,
+        sourceModule: 'operational_payment',
+        sourceId: Number(paymentId),
+        postingKey: `operational_payment:${paymentId}`,
+        lines: [
           {
-            ledger_id: debitLedgerId,
-            ledger_name: debitLedgerName,
+            ledgerId: payableLedger.id,
+            ledgerName: payableLedger.name,
             debit: paidAmount,
             credit: 0,
-            remarks: `Clearing operational dues for ${partyName || debitLedgerName} (${paymentNo})`
+            remarks: `Clearing operational dues for ${partyName} (${paymentNo})`,
+            referenceId: paymentId,
+            referenceType: 'operational_payment',
+            transactionId: paymentId,
+            transactionType: 'operational_payment',
           },
           {
-            ledger_id: fromLedgerId,
-            ledger_name: fromLedgerName,
+            ledgerId: fromLedger.id,
+            ledgerName: fromLedger.name,
             debit: 0,
             credit: paidAmount,
-            remarks: `Paid via ${paymentMode}`
+            remarks: `Paid via ${paymentMode}`,
+            referenceId: paymentId,
+            referenceType: 'operational_payment',
+            transactionId: paymentId,
+            transactionType: 'operational_payment',
           }
         ],
-        created_by: createdBy
+        allowUpdate: true,
+        preserveVoucherNoOnUpdate: true,
       });
 
-      if (voucherRes && (voucherRes.id || voucherRes.voucher_id || voucherRes.voucher_no)) {
-        paymentVoucherId = voucherRes.id || voucherRes.voucher_id;
-        paymentVoucherNo = voucherRes.voucher_no || voucherRes.voucherNo;
-      }
-    } catch (accErr) {
-      console.warn('[operationalChargeEngine] Payment voucher creation warning:', accErr.message);
+      paymentVoucherId = voucherRes.voucherId;
+      paymentVoucherNo = voucherRes.voucherNo;
+
+      await cDb.run(
+        `UPDATE ${pfx}operational_payments SET voucher_id = ?, voucher_no = ? WHERE id = ?`,
+        [paymentVoucherId, paymentVoucherNo, paymentId]
+      );
     }
-  }
 
-  // Insert operational_payments
-  const payIns = await db.run(
-    `INSERT INTO ${pfx}operational_payments (
-      payment_no, payment_date, party_id, party_name, party_category, payment_mode, payment_method, paid_amount,
-      reference_no, voucher_id, voucher_no, paid_from_ledger_id, payable_ledger_id,
-      notes, remarks, created_by, paid_by
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      paymentNo, payDate, partyId || 1, partyName || 'General Labour Pool', 'LOADMEN', paymentMode, paymentMode, paidAmount,
-      referenceNo, paymentVoucherId, paymentVoucherNo, fromLedgerId, debitLedgerId || (payableLedger ? payableLedger.id : null),
-      notes, notes, createdBy, createdBy
-    ]
-  );
-  const paymentId = payIns.lastID;
+    const allocations = (Array.isArray(rawAllocations) ? rawAllocations : []).map(a => ({
+      charge_id: a.charge_id || a.chargeId,
+      amount: Number(a.amount ?? a.allocated_amount ?? a.allocatedAmount ?? 0)
+    }));
 
-  // Normalize Allocations
-  const allocations = (Array.isArray(rawAllocations) ? rawAllocations : []).map(a => ({
-    charge_id: a.charge_id || a.chargeId,
-    amount: Number(a.amount ?? a.allocated_amount ?? a.allocatedAmount ?? 0)
-  }));
+    let remainingToAllocate = paidAmount;
 
-  // Process Allocations
-  let remainingToAllocate = paidAmount;
-
-  // If specific allocations provided, honor them
-  if (allocations.length > 0) {
-    for (const alloc of allocations) {
-      const allocAmt = Math.min(Number(alloc.amount || 0), remainingToAllocate);
-      if (allocAmt > 0 && alloc.charge_id) {
-        await applyChargeAllocation(companyId, paymentId, alloc.charge_id, allocAmt);
-        remainingToAllocate -= allocAmt;
+    if (allocations.length > 0) {
+      for (const alloc of allocations) {
+        const allocAmt = Math.min(Number(alloc.amount || 0), remainingToAllocate);
+        if (allocAmt > 0 && alloc.charge_id) {
+          await applyChargeAllocation(companyId, paymentId, alloc.charge_id, allocAmt);
+          remainingToAllocate = AccountingEngine.round2(remainingToAllocate - allocAmt);
+        }
       }
     }
-  }
 
-  // If remaining balance exists and no specific allocation, FIFO allocate to oldest unpaid charges for this party
-  if (remainingToAllocate > 0) {
-    const pendingCharges = await db.all(
-      `SELECT id, balance_amount FROM ${pfx}operational_charges
-       WHERE party_id = ? AND balance_amount > 0 AND approval_status = 'APPROVED'
-       ORDER BY date ASC, id ASC`,
-      [partyId || 1]
-    );
+    if (remainingToAllocate > 0) {
+      const pendingCharges = await cDb.all(
+        `SELECT id, balance_amount FROM ${pfx}operational_charges
+         WHERE party_id = ? AND balance_amount > 0 AND approval_status = 'APPROVED'
+         ORDER BY date ASC, id ASC`,
+        [partyId || 1]
+      );
 
-    for (const charge of (pendingCharges || [])) {
-      if (remainingToAllocate <= 0) break;
-      const canPay = Math.min(Number(charge.balance_amount), remainingToAllocate);
-      if (canPay > 0) {
-        await applyChargeAllocation(companyId, paymentId, charge.id, canPay);
-        remainingToAllocate -= canPay;
+      for (const charge of (pendingCharges || [])) {
+        if (remainingToAllocate <= 0) break;
+        const canPay = Math.min(Number(charge.balance_amount), remainingToAllocate);
+        if (canPay > 0) {
+          await applyChargeAllocation(companyId, paymentId, charge.id, canPay);
+          remainingToAllocate = AccountingEngine.round2(remainingToAllocate - canPay);
+        }
       }
     }
-  }
 
-  // Audit Log
-  await logOperationalAudit(companyId, 'PAYMENT', paymentId, paymentNo, 'COMPLETED', createdBy, {
-    partyName, paidAmount, paymentMode, voucherNo: paymentVoucherNo
+    await logOperationalAudit(companyId, 'PAYMENT', paymentId, paymentNo, 'COMPLETED', createdBy, {
+      partyName, paidAmount, paymentMode, voucherNo: paymentVoucherNo
+    });
+
+    return {
+      id: paymentId,
+      payment_no: paymentNo,
+      paid_amount: paidAmount,
+      voucher_no: paymentVoucherNo,
+      remaining_unallocated: remainingToAllocate,
+      partyName,
+      payDate,
+    };
   });
 
-  // Emit Notification Event
   try {
-    emitTransactionEvent(companyId, 'OPERATIONAL_PAYMENT_COMPLETED', paymentNo, paymentId, {
-      payment_no: paymentNo,
-      party_name: partyName,
-      paid_amount: paidAmount,
+    emitTransactionEvent(companyId, 'OPERATIONAL_PAYMENT_COMPLETED', resultObj.payment_no, resultObj.id, {
+      payment_no: resultObj.payment_no,
+      party_name: resultObj.partyName,
+      paid_amount: resultObj.paid_amount,
       payment_mode: paymentMode,
-      reference_no: referenceNo || paymentNo,
-      voucher_no: paymentVoucherNo || '',
-      date: payDate,
+      reference_no: referenceNo || resultObj.payment_no,
+      voucher_no: resultObj.voucher_no || '',
+      date: resultObj.payDate,
       status: 'PAID'
     }, createdBy);
   } catch (notifErr) {
@@ -932,11 +924,11 @@ async function recordOperationalPayment(params = {}) {
   }
 
   return {
-    id: paymentId,
-    payment_no: paymentNo,
-    paid_amount: paidAmount,
-    voucher_no: paymentVoucherNo,
-    remaining_unallocated: remainingToAllocate
+    id: resultObj.id,
+    payment_no: resultObj.payment_no,
+    paid_amount: resultObj.paid_amount,
+    voucher_no: resultObj.voucher_no,
+    remaining_unallocated: resultObj.remaining_unallocated
   };
 }
 

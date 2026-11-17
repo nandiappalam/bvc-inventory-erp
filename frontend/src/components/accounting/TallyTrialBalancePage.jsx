@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../services/api';
+import { printHtml } from '../../utils/printHelper';
 
 const TallyTrialBalancePage = () => {
   const navigate = useNavigate();
@@ -25,6 +26,60 @@ const TallyTrialBalancePage = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handlePrint = () => {
+    if (!tbData) return;
+    const escapeHtml = (str) => String(str ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    const rows = Array.isArray(tbData.rows) ? tbData.rows : [];
+    const rowsHtml = rows.map((row, idx) => `
+      <tr style="background-color: ${idx % 2 === 0 ? '#ffffff' : '#f8fafc'};">
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: center;">${idx + 1}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; font-weight: 700;">${escapeHtml(row.ledger_name || row.name || '-')}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1;">${escapeHtml(row.group_name || 'General')}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1;">${escapeHtml(row.account_nature || 'Expense')}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; color: #047857; font-weight: 700;">${Number(row.debit_amount || 0) > 0 ? `₹${Number(row.debit_amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}</td>
+        <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right; color: #b45309; font-weight: 700;">${Number(row.credit_amount || 0) > 0 ? `₹${Number(row.credit_amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}</td>
+      </tr>
+    `).join('');
+
+    const html = `
+      <div style="font-family: Arial, sans-serif; color: #0f172a; padding: 14px;">
+        <div style="border-bottom: 2px solid #1e1b4b; padding-bottom: 8px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: flex-end;">
+          <div>
+            <h2 style="margin: 0; color: #1e1b4b; font-size: 18px;">DOUBLE-ENTRY TRIAL BALANCE STATEMENT</h2>
+            <div style="font-size: 11px; color: #64748b; margin-top: 3px;">Printed on: ${new Date().toLocaleString()}</div>
+          </div>
+          <div style="font-weight: 700; font-size: 12px; color: ${tbData.is_balanced ? '#047857' : '#b91c1c'};">
+            ${tbData.is_balanced ? '✓ Reconciled (Dr = Cr)' : '⚠ Out of Balance'}
+          </div>
+        </div>
+        <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+          <thead>
+            <tr style="background-color: #1e1b4b; color: #ffffff;">
+              <th style="padding: 6px 8px; border: 1px solid #1e1b4b; text-align: center; width: 45px;">S.No</th>
+              <th style="padding: 6px 8px; border: 1px solid #1e1b4b; text-align: left;">Ledger Account Name</th>
+              <th style="padding: 6px 8px; border: 1px solid #1e1b4b; text-align: left;">Parent Group</th>
+              <th style="padding: 6px 8px; border: 1px solid #1e1b4b; text-align: left;">Nature</th>
+              <th style="padding: 6px 8px; border: 1px solid #1e1b4b; text-align: right;">Debit (Dr)</th>
+              <th style="padding: 6px 8px; border: 1px solid #1e1b4b; text-align: right;">Credit (Cr)</th>
+            </tr>
+          </thead>
+          <tbody>${rowsHtml}</tbody>
+          <tfoot>
+            <tr style="background-color: #e2e8f0; font-weight: 800;">
+              <td colspan="4" style="padding: 7px 8px; border: 1px solid #cbd5e1; text-align: right;">Grand Total:</td>
+              <td style="padding: 7px 8px; border: 1px solid #cbd5e1; text-align: right; color: #047857;">₹${Number(tbData.grand_debit || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+              <td style="padding: 7px 8px; border: 1px solid #cbd5e1; text-align: right; color: #b45309;">₹${Number(tbData.grand_credit || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    `;
+    printHtml(html, 'Double_Entry_Trial_Balance');
   };
 
   return (
@@ -64,6 +119,13 @@ const TallyTrialBalancePage = () => {
           >
             <span>📊</span>
             <span>Dashboard</span>
+          </button>
+          <button
+            onClick={handlePrint}
+            disabled={!tbData}
+            style={{ padding: '8px 14px', backgroundColor: '#2563eb', color: '#ffffff', fontWeight: '700', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.25)', fontSize: '12px', cursor: 'pointer' }}
+          >
+            🖨️ Print
           </button>
           <button
             onClick={fetchTrialBalance}

@@ -28,8 +28,8 @@ export default defineConfig({
         target: 'http://127.0.0.1:3001',
         changeOrigin: true,
         secure: false,
-        timeout: 60000,
-        proxyTimeout: 60000,
+        timeout: 120000,
+        proxyTimeout: 120000,
         configure: (proxy, _options) => {
           proxy.on('error', (err, _req, res) => {
             if (res && typeof res.writeHead === 'function' && !res.headersSent) {
@@ -38,7 +38,7 @@ export default defineConfig({
               });
               res.end(JSON.stringify({ 
                 success: false, 
-                error: 'Backend server starting up or connection refused: ' + err.message,
+                error: 'Backend API communication error: ' + err.message,
                 code: 'BACKEND_UNAVAILABLE'
               }));
             }

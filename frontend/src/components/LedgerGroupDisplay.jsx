@@ -48,6 +48,37 @@ function formatCurrency(val) {
   });
 }
 
+function toPaise(val) {
+  return Math.round((Number(val) || 0) * 100);
+}
+
+function fromPaise(paise) {
+  return Math.round(paise) / 100;
+}
+
+function summarizeLedgers(ledgers = []) {
+  let openPaise = 0;
+  let debitPaise = 0;
+  let creditPaise = 0;
+  let closePaise = 0;
+
+  ledgers.forEach((l) => {
+    const oVal = toPaise(l.opening_balance || 0);
+    openPaise += (l.opening_balance_type || 'Dr') === 'Cr' ? -oVal : oVal;
+    debitPaise += toPaise(l.total_debit ?? l.debit_total ?? 0);
+    creditPaise += toPaise(l.total_credit ?? l.credit_total ?? 0);
+    const cVal = toPaise(l.closing_balance || 0);
+    closePaise += (l.closing_balance_type || 'Dr') === 'Cr' ? -cVal : cVal;
+  });
+
+  return {
+    openingSigned: fromPaise(openPaise),
+    debit: fromPaise(debitPaise),
+    credit: fromPaise(creditPaise),
+    closingSigned: fromPaise(closePaise)
+  };
+}
+
 function getNatureDefaults(nature) {
   switch (nature) {
     case 'Asset':
@@ -66,6 +97,7 @@ const LedgerGroupDisplay = () => {
   const navigate = useNavigate();
 
   const [groups, setGroups] = useState([]);
+  const [groupTotals, setGroupTotals] = useState(null);
   const [loading, setLoading] = useState(true);
   const [errorBanner, setErrorBanner] = useState('');
   const [statusNotice, setStatusNotice] = useState('');
@@ -97,7 +129,9 @@ const LedgerGroupDisplay = () => {
       let list = [];
       if (res && res.success && Array.isArray(res.data)) {
         list = res.data;
+        setGroupTotals(res.totals || null);
       } else {
+        setGroupTotals(null);
         const masterRes = await api('/masters/ledger_groups');
         const fallback = masterRes?.data || masterRes || [];
         list = Array.isArray(fallback) ? fallback : [];
@@ -134,15 +168,16 @@ const LedgerGroupDisplay = () => {
 
   const stats = useMemo(() => {
     let totalLedgers = 0;
-    let totalDebit = 0;
-    let totalCredit = 0;
+    let directDebitSum = 0;
+    let directCreditSum = 0;
     const natureCounts = { Asset: 0, Liability: 0, Expense: 0, Income: 0 };
 
     groups.forEach((g) => {
       const count = g.ledger_count ?? (g.ledgers ? g.ledgers.length : 0);
       totalLedgers += count;
-      totalDebit += Number(g.group_debit || 0);
-      totalCredit += Number(g.group_credit || 0);
+      // Use direct_debit/direct_credit when provided so rolled-up parent groups don't double-count child groups
+      directDebitSum += Number(g.direct_debit ?? g.group_debit ?? 0);
+      directCreditSum += Number(g.direct_credit ?? g.group_credit ?? 0);
 
       const nature = NATURE_ORDER.includes(g.account_nature) ? g.account_nature : 'Expense';
       natureCounts[nature] += 1;
@@ -151,11 +186,11 @@ const LedgerGroupDisplay = () => {
     return {
       totalGroups: groups.length,
       totalLedgers,
-      totalDebit,
-      totalCredit,
+      totalDebit: groupTotals?.total_debit !== undefined ? Number(groupTotals.total_debit) : directDebitSum,
+      totalCredit: groupTotals?.total_credit !== undefined ? Number(groupTotals.total_credit) : directCreditSum,
       natureCounts
     };
-  }, [groups]);
+  }, [groups, groupTotals]);
 
   const filteredGroups = useMemo(() => {
     const term = searchTerm.toLowerCase().trim();
@@ -222,6 +257,84 @@ const LedgerGroupDisplay = () => {
         (l.code || l.alias_name || '').toLowerCase().includes(term)
     );
   }, [selectedGroup, searchTerm]);
+
+  const visibleLedgerTotals = useMemo(
+    () => summarizeLedgers(visibleLedgers),
+    [visibleLedgers]
+  );
+
+  const matrixTotals = useMemo(() => {
+    const allById = new Map();
+    const allByName = new Map();
+    groups.forEach((g) => {
+      if (g.id != null) allById.set(Number(g.id), g);
+      const norm = String(g.group_name || g.name || '').trim().toLowerCase();
+      if (norm && !allByName.has(norm)) allByName.set(norm, g);
+    });
+
+    const visibleSet = new Set(filteredGroups);
+    const findNearestVisibleAncestor = (node) => {
+      const visited = new Set([node]);
+      let cur = node;
+      while (cur) {
+        let parent = null;
+        if (cur.parent_group_id != null && allById.has(Number(cur.parent_group_id))) {
+          parent = allById.get(Number(cur.parent_group_id));
+        } else if (cur.parent_group_name) {
+          parent = allByName.get(String(cur.parent_group_name).trim().toLowerCase()) || null;
+        }
+        if (!parent || visited.has(parent)) return null;
+        if (visibleSet.has(parent)) return parent;
+        visited.add(parent);
+        cur = parent;
+      }
+      return null;
+    };
+
+    const visibleChildrenMap = new Map();
+    filteredGroups.forEach((g) => {
+      const ancestor = findNearestVisibleAncestor(g);
+      if (ancestor) {
+        const list = visibleChildrenMap.get(ancestor) || [];
+        list.push(g);
+        visibleChildrenMap.set(ancestor, list);
+      }
+    });
+
+    let ledgersCount = 0;
+    let debitPaise = 0;
+    let creditPaise = 0;
+    let closingPaise = 0;
+
+    filteredGroups.forEach((g) => {
+      ledgersCount += (g.ledgers || []).length;
+      const visibleChildren = visibleChildrenMap.get(g) || [];
+      let childDrPaise = 0;
+      let childCrPaise = 0;
+      let childClosePaise = 0;
+
+      visibleChildren.forEach((c) => {
+        childDrPaise += toPaise(c.group_debit || 0);
+        childCrPaise += toPaise(c.group_credit || 0);
+        const cClose = toPaise(c.closing_balance || 0);
+        childClosePaise += (c.closing_balance_type || 'Dr') === 'Cr' ? -cClose : cClose;
+      });
+
+      const gClose = toPaise(g.closing_balance || 0);
+      const gCloseSigned = (g.closing_balance_type || 'Dr') === 'Cr' ? -gClose : gClose;
+
+      debitPaise += toPaise(g.group_debit || 0) - childDrPaise;
+      creditPaise += toPaise(g.group_credit || 0) - childCrPaise;
+      closingPaise += gCloseSigned - childClosePaise;
+    });
+
+    return {
+      ledgersCount,
+      totalDebit: fromPaise(debitPaise),
+      totalCredit: fromPaise(creditPaise),
+      netClosing: fromPaise(closingPaise)
+    };
+  }, [groups, filteredGroups]);
 
   const openCreateModal = () => {
     const presetNature = selectedNature !== 'ALL' ? selectedNature : 'Expense';
@@ -355,13 +468,14 @@ const LedgerGroupDisplay = () => {
     let rowsHtml = '';
     filteredGroups.forEach((g, gIdx) => {
       const ledgers = g.ledgers || [];
+      const groupSubTotals = summarizeLedgers(ledgers);
       rowsHtml += `
         <tr style="background-color: #f8fafc; font-weight: 600;">
           <td style="padding: 8px; border: 1px solid #cbd5e1;">${gIdx + 1}</td>
           <td style="padding: 8px; border: 1px solid #cbd5e1; font-size: 13px;" colspan="2">${g.group_name || g.name}</td>
           <td style="padding: 8px; border: 1px solid #cbd5e1;">${g.parent_group_name || 'Primary'}</td>
-          <td style="padding: 8px; border: 1px solid #cbd5e1;">${g.account_nature || 'Expense'} (${g.normal_balance || 'Dr'})</td>
-          <td style="padding: 8px; border: 1px solid #cbd5e1;">${g.financial_statement || 'Profit & Loss'}</td>
+          <td style="padding: 8px; border: 1px solid #cbd5e1;">${g.account_nature || 'Expense'} (${g.normal_balance || 'Dr'}) · Dr: ₹${formatCurrency(g.group_debit || 0)} | Cr: ₹${formatCurrency(g.group_credit || 0)}</td>
+          <td style="padding: 8px; border: 1px solid #cbd5e1;">${g.financial_statement || 'Profit & Loss'} · ₹${formatCurrency(g.closing_balance || 0)} ${g.closing_balance_type || 'Dr'}</td>
           <td style="padding: 8px; border: 1px solid #cbd5e1; text-align: right;">${ledgers.length}</td>
         </tr>
       `;
@@ -379,6 +493,14 @@ const LedgerGroupDisplay = () => {
             </tr>
           `;
         });
+        rowsHtml += `
+          <tr style="background-color: #eef4ff; font-weight: 700; font-size: 12px;">
+            <td style="padding: 6px 8px; border: 1px solid #cbd5e1;" colspan="4" align="right">${g.group_name || g.name} Ledger Total:</td>
+            <td style="padding: 6px 8px; border: 1px solid #cbd5e1;">Dr: ₹${formatCurrency(groupSubTotals.debit)} | Cr: ₹${formatCurrency(groupSubTotals.credit)}</td>
+            <td style="padding: 6px 8px; border: 1px solid #cbd5e1;">Net Closing: ₹${formatCurrency(Math.abs(groupSubTotals.closingSigned))} ${groupSubTotals.closingSigned < 0 ? 'Cr' : 'Dr'}</td>
+            <td style="padding: 6px 8px; border: 1px solid #cbd5e1; text-align: right;">${ledgers.length}</td>
+          </tr>
+        `;
       } else {
         rowsHtml += `
           <tr>
@@ -394,7 +516,7 @@ const LedgerGroupDisplay = () => {
         <div style="border-bottom: 2px solid #1f4fb2; padding-bottom: 10px; margin-bottom: 16px;">
           <h2 style="color: #1f4fb2; margin: 0; font-size: 18px;">Ledger Group Master & Chart of Accounts</h2>
           <div style="font-size: 12px; color: #475569; margin-top: 4px;">
-            Groups: ${stats.totalGroups} · Ledgers: ${stats.totalLedgers} · Total Dr: ₹${formatCurrency(stats.totalDebit)} · Total Cr: ₹${formatCurrency(stats.totalCredit)} · Printed: ${new Date().toLocaleString()}
+            Groups: ${filteredGroups.length} · Ledgers: ${matrixTotals.ledgersCount} · Total Dr: ₹${formatCurrency(matrixTotals.totalDebit)} · Total Cr: ₹${formatCurrency(matrixTotals.totalCredit)} · Printed: ${new Date().toLocaleString()}
           </div>
         </div>
         <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
@@ -411,6 +533,14 @@ const LedgerGroupDisplay = () => {
           <tbody>
             ${rowsHtml}
           </tbody>
+          <tfoot>
+            <tr style="background-color: #dbe7fb; color: #0f172a; font-weight: 700;">
+              <td style="padding: 8px; border: 1px solid #93b4e8; text-align: right;" colspan="4">Grand Total (${filteredGroups.length} Groups):</td>
+              <td style="padding: 8px; border: 1px solid #93b4e8;">Dr: ₹${formatCurrency(matrixTotals.totalDebit)} | Cr: ₹${formatCurrency(matrixTotals.totalCredit)}</td>
+              <td style="padding: 8px; border: 1px solid #93b4e8;">Net Closing: ₹${formatCurrency(Math.abs(matrixTotals.netClosing))} ${matrixTotals.netClosing < 0 ? 'Cr' : 'Dr'}</td>
+              <td style="padding: 8px; border: 1px solid #93b4e8; text-align: right;">${matrixTotals.ledgersCount}</td>
+            </tr>
+          </tfoot>
         </table>
       </div>
     `;
@@ -453,6 +583,39 @@ const LedgerGroupDisplay = () => {
           'Status': l.status || 'Active'
         });
       });
+
+      if (ledgers.length > 0) {
+        const groupSubTotals = summarizeLedgers(ledgers);
+        exportData.push({
+          'S.No': '',
+          'Record Type': 'GROUP SUBTOTAL',
+          'Group / Ledger Name': `Total for ${g.group_name || g.name}`,
+          'Parent Group / Code': '',
+          'Account Nature': '',
+          'Normal Balance': '',
+          'Financial Statement': '',
+          'Ledgers Count': ledgers.length,
+          'Total Debit': groupSubTotals.debit,
+          'Total Credit': groupSubTotals.credit,
+          'Closing Balance': `${formatCurrency(Math.abs(groupSubTotals.closingSigned))} ${groupSubTotals.closingSigned < 0 ? 'Cr' : 'Dr'}`,
+          'Status': ''
+        });
+      }
+    });
+
+    exportData.push({
+      'S.No': '',
+      'Record Type': 'GRAND TOTAL',
+      'Group / Ledger Name': `All Shown Groups (${filteredGroups.length})`,
+      'Parent Group / Code': '',
+      'Account Nature': '',
+      'Normal Balance': '',
+      'Financial Statement': '',
+      'Ledgers Count': matrixTotals.ledgersCount,
+      'Total Debit': matrixTotals.totalDebit,
+      'Total Credit': matrixTotals.totalCredit,
+      'Closing Balance': `${formatCurrency(Math.abs(matrixTotals.netClosing))} ${matrixTotals.netClosing < 0 ? 'Cr' : 'Dr'}`,
+      'Status': ''
     });
 
     exportToExcel(exportData, 'Ledger_Groups_Master_List');
@@ -851,6 +1014,39 @@ const LedgerGroupDisplay = () => {
                                     );
                                   })}
                                 </tbody>
+                                <tfoot>
+                                  {(() => {
+                                    const subTotals = summarizeLedgers(ledgers);
+                                    const isSubOpenCr = subTotals.openingSigned < 0;
+                                    const isSubCloseCr = subTotals.closingSigned < 0;
+                                    return (
+                                      <tr>
+                                        <td colSpan={3} className="lgd-td-right">
+                                          Total ({ledgers.length} {ledgers.length === 1 ? 'Ledger' : 'Ledgers'})
+                                        </td>
+                                        <td className="lgd-td-right lgd-td-mono">
+                                          ₹{formatCurrency(Math.abs(subTotals.openingSigned))}{' '}
+                                          <span className={isSubOpenCr ? 'lgd-bal-cr' : 'lgd-bal-dr'}>
+                                            {isSubOpenCr ? 'Cr' : 'Dr'}
+                                          </span>
+                                        </td>
+                                        <td className="lgd-td-right lgd-td-mono">
+                                          ₹{formatCurrency(subTotals.debit)}
+                                        </td>
+                                        <td className="lgd-td-right lgd-td-mono">
+                                          ₹{formatCurrency(subTotals.credit)}
+                                        </td>
+                                        <td className="lgd-td-right lgd-td-mono">
+                                          ₹{formatCurrency(Math.abs(subTotals.closingSigned))}{' '}
+                                          <span className={isSubCloseCr ? 'lgd-bal-cr' : 'lgd-bal-dr'}>
+                                            {isSubCloseCr ? 'Cr' : 'Dr'}
+                                          </span>
+                                        </td>
+                                        <td colSpan={2}></td>
+                                      </tr>
+                                    );
+                                  })()}
+                                </tfoot>
                               </table>
                             )}
                           </td>
@@ -860,6 +1056,27 @@ const LedgerGroupDisplay = () => {
                   );
                 })}
               </tbody>
+              <tfoot>
+                <tr>
+                  <td colSpan={7} className="lgd-td-right">
+                    Total ({filteredGroups.length} {filteredGroups.length === 1 ? 'Group' : 'Groups'})
+                  </td>
+                  <td className="lgd-td-right lgd-td-strong">{matrixTotals.ledgersCount}</td>
+                  <td className="lgd-td-right lgd-td-mono lgd-td-strong">
+                    ₹{formatCurrency(matrixTotals.totalDebit)}
+                  </td>
+                  <td className="lgd-td-right lgd-td-mono lgd-td-strong">
+                    ₹{formatCurrency(matrixTotals.totalCredit)}
+                  </td>
+                  <td className="lgd-td-right lgd-td-mono lgd-td-strong">
+                    ₹{formatCurrency(Math.abs(matrixTotals.netClosing))}{' '}
+                    <span className={matrixTotals.netClosing < 0 ? 'lgd-bal-cr' : 'lgd-bal-dr'}>
+                      {matrixTotals.netClosing < 0 ? 'Cr' : 'Dr'}
+                    </span>
+                  </td>
+                  <td></td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         </div>
@@ -1103,6 +1320,32 @@ const LedgerGroupDisplay = () => {
                           );
                         })}
                       </tbody>
+                      <tfoot>
+                        <tr>
+                          <td colSpan={3} className="lgd-td-right">
+                            Total ({visibleLedgers.length} {visibleLedgers.length === 1 ? 'Ledger' : 'Ledgers'})
+                          </td>
+                          <td className="lgd-td-right lgd-td-mono">
+                            ₹{formatCurrency(Math.abs(visibleLedgerTotals.openingSigned))}{' '}
+                            <span className={visibleLedgerTotals.openingSigned < 0 ? 'lgd-bal-cr' : 'lgd-bal-dr'}>
+                              {visibleLedgerTotals.openingSigned < 0 ? 'Cr' : 'Dr'}
+                            </span>
+                          </td>
+                          <td className="lgd-td-right lgd-td-mono lgd-td-strong">
+                            ₹{formatCurrency(visibleLedgerTotals.debit)}
+                          </td>
+                          <td className="lgd-td-right lgd-td-mono lgd-td-strong">
+                            ₹{formatCurrency(visibleLedgerTotals.credit)}
+                          </td>
+                          <td className="lgd-td-right lgd-td-mono lgd-td-strong">
+                            ₹{formatCurrency(Math.abs(visibleLedgerTotals.closingSigned))}{' '}
+                            <span className={visibleLedgerTotals.closingSigned < 0 ? 'lgd-bal-cr' : 'lgd-bal-dr'}>
+                              {visibleLedgerTotals.closingSigned < 0 ? 'Cr' : 'Dr'}
+                            </span>
+                          </td>
+                          <td colSpan={2}></td>
+                        </tr>
+                      </tfoot>
                     </table>
                   )}
                 </div>

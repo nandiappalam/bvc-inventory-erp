@@ -234,7 +234,10 @@ const DatabaseUtility = () => {
         } else {
           const text = await response.text();
           const isHtml = text.trim().toLowerCase().startsWith('<!doctype') || text.trim().toLowerCase().startsWith('<html');
-          throw new Error(isHtml ? `Server returned HTML response (Status ${response.status}). Please check API backend server status.` : text);
+          if (isHtml) {
+            throw new Error(`The API backend server is starting up or temporarily unavailable (Status ${response.status}). Please try again in a moment.`);
+          }
+          throw new Error(text.slice(0, 150) || `JSON restore failed with HTTP status ${response.status}`);
         }
 
         if (response.ok && data.success) {
@@ -272,7 +275,10 @@ const DatabaseUtility = () => {
       } else {
         const responseText = await response.text();
         const isHtml = responseText.trim().toLowerCase().startsWith('<!doctype') || responseText.trim().toLowerCase().startsWith('<html');
-        throw new Error(isHtml ? `Server returned HTML response (Status ${response.status}). Please check API backend server status.` : responseText.slice(0, 100));
+        if (isHtml) {
+          throw new Error(`The API backend server is starting up or temporarily unavailable (Status ${response.status}). Please try again in a moment.`);
+        }
+        throw new Error(responseText.slice(0, 150) || `Database restore failed with HTTP status ${response.status}`);
       }
 
       if (response.ok && data.success) {

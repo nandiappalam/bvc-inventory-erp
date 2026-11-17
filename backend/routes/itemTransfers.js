@@ -4,10 +4,14 @@ const db = require('../config/database');
 const { rebuildStockLedger } = require('../utils/stockRebuilder');
 const { syncGodownTransfersToColdStorage } = require('../services/coldStorageTransferSync');
 
-// Initialize item_transfers table
-const initTable = async () => {
+// Initialize item_transfers tables per company
+const initializedCompanies = new Set();
+const initTable = async (companyId = 1) => {
+  const cId = parseInt(companyId, 10) || 1;
+  if (initializedCompanies.has(cId)) return;
   try {
-    await db.run(`
+    const cDb = db.forCompany(cId);
+    await cDb.run(`
       CREATE TABLE IF NOT EXISTS item_transfers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         transfer_no TEXT,
@@ -32,8 +36,7 @@ const initTable = async () => {
       )
     `);
 
-    // Ensure godown_transfers exists for backwards compatibility
-    await db.run(`
+    await cDb.run(`
       CREATE TABLE IF NOT EXISTS godown_transfers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         s_no TEXT,
@@ -66,20 +69,30 @@ const initTable = async () => {
     ];
     for (const t of ['item_transfers', 'godown_transfers']) {
       for (const col of cols) {
-        try { await db.run(`ALTER TABLE ${t} ADD COLUMN ${col}`); } catch (_) {}
+        try { await cDb.run(`ALTER TABLE ${t} ADD COLUMN ${col}`); } catch (_) {}
       }
     }
+    initializedCompanies.add(cId);
   } catch (err) {
-    console.error('Error initializing item_transfers tables:', err.message);
+    console.error(`Error initializing item_transfers tables for company ${cId}:`, err.message);
   }
 };
-initTable();
+
+router.use(async (req, res, next) => {
+  try {
+    const cId = parseInt(req.companyId || req.headers['x-company-id'] || req.query?.company_id || 1, 10) || 1;
+    req.companyId = cId;
+    await initTable(cId);
+  } catch (_) {}
+  next();
+});
 
 // GET next sequential transfer number starting from TRF-1
-const getNextTransferNo = async () => {
+const getNextTransferNo = async (companyId = 1) => {
+  const cDb = db.forCompany(companyId);
   try {
-    const res1 = await db.query('SELECT transfer_no FROM item_transfers');
-    const res2 = await db.query('SELECT s_no FROM godown_transfers');
+    const res1 = await cDb.query('SELECT transfer_no FROM item_transfers');
+    const res2 = await cDb.query('SELECT s_no FROM godown_transfers');
     
     let maxNum = 0;
     (res1.rows || []).forEach(r => {
@@ -101,18 +114,19 @@ const getNextTransferNo = async () => {
 };
 
 router.get('/next-sno', async (req, res) => {
-  const nextVal = await getNextTransferNo();
+  const nextVal = await getNextTransferNo(req.companyId || 1);
   res.json({ next_s_no: nextVal, next_transfer_no: nextVal });
 });
 
 router.get('/next-transfer-no', async (req, res) => {
-  const nextVal = await getNextTransferNo();
+  const nextVal = await getNextTransferNo(req.companyId || 1);
   res.json({ next_s_no: nextVal, next_transfer_no: nextVal });
 });
 
 // GET list of item transfers with optional filters
 router.get('/', async (req, res) => {
   try {
+    const cDb = db.forCompany(req.companyId || 1);
     const { dateFrom, dateTo, from_date, to_date, fromGodown, from_godown_id, toGodown, to_godown_id, item, lotNo, lot_no } = req.query;
 
     let query = `SELECT * FROM item_transfers WHERE 1=1`;
@@ -155,7 +169,7 @@ router.get('/', async (req, res) => {
 
     query += ` ORDER BY id DESC`;
 
-    const result = await db.query(query, params);
+    const result = await cDb.query(query, params);
     res.json(result.rows || []);
   } catch (err) {
     console.error('Error fetching item transfers:', err);
@@ -166,11 +180,11 @@ router.get('/', async (req, res) => {
 // GET items available in a specific godown
 router.get('/godown-items/:godownId', async (req, res) => {
   try {
+    const cDb = db.forCompany(req.companyId || 1);
     const godownId = req.params.godownId;
 
-    // Fetch godown details from master
     let godownName = '';
-    const gRes = await db.query('SELECT * FROM godown_master WHERE id = ? OR LOWER(godown_name) = LOWER(?)', [godownId, godownId]);
+    const gRes = await cDb.query('SELECT * FROM godown_master WHERE id = ? OR LOWER(godown_name) = LOWER(?)', [godownId, godownId]);
     if (gRes.rows && gRes.rows.length > 0) {
       godownName = gRes.rows[0].godown_name;
     }
@@ -416,90 +430,104 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ message: 'At least one valid Item is required to transfer' });
     }
 
-    const trfNo = transfer_no || s_no || (await getNextTransferNo());
+    const activeCompanyId = req.companyId || 1;
+    const cDb = db.forCompany(activeCompanyId);
+
+    const trfNo = transfer_no || s_no || (await getNextTransferNo(activeCompanyId));
     const trfDate = date || transfer_date || new Date().toISOString().split('T')[0];
 
-    // Fetch godown names if not provided
     let fGodownName = from_godown_name;
     let tGodownName = to_godown_name;
 
     if (!fGodownName) {
-      const fgRes = await db.query('SELECT godown_name FROM godown_master WHERE id = ?', [from_godown_id]);
+      const fgRes = await cDb.query('SELECT godown_name FROM godown_master WHERE id = ?', [from_godown_id]);
       if (fgRes.rows && fgRes.rows.length > 0) fGodownName = fgRes.rows[0].godown_name;
     }
     if (!tGodownName) {
-      const tgRes = await db.query('SELECT godown_name FROM godown_master WHERE id = ?', [to_godown_id]);
+      const tgRes = await cDb.query('SELECT godown_name FROM godown_master WHERE id = ?', [to_godown_id]);
       if (tgRes.rows && tgRes.rows.length > 0) tGodownName = tgRes.rows[0].godown_name;
     }
 
-    const createdIds = [];
+    const createdIds = await cDb.withTransaction(async (txConn) => {
+      const ids = [];
 
-    for (const itm of itemsToProcess) {
-      const trfQty = parseFloat(itm.transfer_qty || itm.qty) || 0;
-      if (trfQty <= 0) continue;
+      for (const itm of itemsToProcess) {
+        const trfQty = parseFloat(itm.transfer_qty || itm.qty) || 0;
+        if (trfQty <= 0) continue;
 
-      const trfWt = parseFloat(itm.weight) || 1;
-      const trfRate = parseFloat(itm.rate) || 0;
-      const trfAmount = trfQty * trfRate;
-      const availQty = parseFloat(itm.available_qty) || 0;
-      const itmName = itm.item_name;
-      const lotNo = itm.lot_no || 'LOT-MAIN';
-      const itemRemarks = itm.remarks || remarks || '';
+        const trfWt = parseFloat(itm.weight) || 1;
+        const trfRate = parseFloat(itm.rate) || 0;
+        const trfAmount = trfQty * trfRate;
+        const availQty = parseFloat(itm.available_qty) || 0;
+        const itmName = itm.item_name;
+        const lotNo = itm.lot_no || 'LOT-MAIN';
+        const itemRemarks = itm.remarks || remarks || '';
 
-      const trfVehicle = req.body.vehicle_no || req.body.lorry_no || itm.vehicle_no || '';
-      const trfDriver = req.body.driver_name || req.body.driver || itm.driver_name || '';
-      const trfDriverPhone = req.body.driver_phone || itm.driver_phone || '';
-      const trfTransporter = req.body.transporter_name || req.body.transporter || itm.transporter_name || '';
-      const trfLoadman = req.body.loadman_name || req.body.worker_name || itm.loadman_name || '';
-      const trfLoadmanCharges = parseFloat(req.body.loadman_charges || itm.loadman_charges || 0);
-      const trfHandlingAmount = parseFloat(req.body.handling_amount !== undefined ? req.body.handling_amount : (req.body.handling_charges !== undefined ? req.body.handling_charges : (itm.handling_amount || trfLoadmanCharges || 0)));
-      const trfStorageRate = parseFloat(req.body.storage_rate || itm.storage_rate || 0);
-      const trfInsuranceCharges = parseFloat(req.body.insurance_charges || itm.insurance_charges || 0);
+        const srcCheck = await txConn.query(`
+          SELECT COALESCE(SUM(remaining_quantity), 0) AS avail
+          FROM stock_lots
+          WHERE LOWER(TRIM(item_name)) = LOWER(TRIM(?))
+            AND LOWER(TRIM(lot_no)) = LOWER(TRIM(?))
+            AND (CAST(godown_id AS TEXT) = ? OR LOWER(TRIM(COALESCE(godown_name, ''))) = LOWER(TRIM(?)) OR godown_id IS NULL)
+        `, [itmName, lotNo, String(from_godown_id), fGodownName || '']);
+        const liveAvail = Number(srcCheck.rows?.[0]?.avail || 0);
+        if (liveAvail > 0 && trfQty > liveAvail) {
+          const stockErr = new Error(`Insufficient stock for ${itmName} (Lot ${lotNo}): available ${liveAvail}, requested ${trfQty}`);
+          stockErr.statusCode = 400;
+          throw stockErr;
+        }
 
-      // Insert into item_transfers
-      const result = await db.run(`
-        INSERT INTO item_transfers (
-          transfer_no, date, from_godown_id, from_godown_name, to_godown_id, to_godown_name,
-          item_id, item_code, item_name, lot_no, weight, unit, available_qty, transfer_qty,
-          rate, amount, vehicle_no, driver_name, driver_phone, transporter_name,
-          loadman_name, loadman_charges, handling_amount, storage_rate, insurance_charges,
-          remarks, created_by
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, [
-        trfNo,
-        trfDate,
-        from_godown_id,
-        fGodownName || 'Main Godown',
-        to_godown_id,
-        tGodownName || 'Destination Godown',
-        itm.item_id || 1,
-        itm.item_code || '',
-        itmName,
-        lotNo,
-        trfWt,
-        itm.unit || 'kg',
-        availQty,
-        trfQty,
-        trfRate,
-        trfAmount,
-        trfVehicle,
-        trfDriver,
-        trfDriverPhone,
-        trfTransporter,
-        trfLoadman,
-        trfLoadmanCharges,
-        trfHandlingAmount,
-        trfStorageRate,
-        trfInsuranceCharges,
-        itemRemarks,
-        created_by || 'Admin'
-      ]);
+        const trfVehicle = req.body.vehicle_no || req.body.lorry_no || itm.vehicle_no || '';
+        const trfDriver = req.body.driver_name || req.body.driver || itm.driver_name || '';
+        const trfDriverPhone = req.body.driver_phone || itm.driver_phone || '';
+        const trfTransporter = req.body.transporter_name || req.body.transporter || itm.transporter_name || '';
+        const trfLoadman = req.body.loadman_name || req.body.worker_name || itm.loadman_name || '';
+        const trfLoadmanCharges = parseFloat(req.body.loadman_charges || itm.loadman_charges || 0);
+        const trfHandlingAmount = parseFloat(req.body.handling_amount !== undefined ? req.body.handling_amount : (req.body.handling_charges !== undefined ? req.body.handling_charges : (itm.handling_amount || trfLoadmanCharges || 0)));
+        const trfStorageRate = parseFloat(req.body.storage_rate || itm.storage_rate || 0);
+        const trfInsuranceCharges = parseFloat(req.body.insurance_charges || itm.insurance_charges || 0);
 
-      createdIds.push(result.lastID);
+        const result = await txConn.run(`
+          INSERT INTO item_transfers (
+            transfer_no, date, from_godown_id, from_godown_name, to_godown_id, to_godown_name,
+            item_id, item_code, item_name, lot_no, weight, unit, available_qty, transfer_qty,
+            rate, amount, vehicle_no, driver_name, driver_phone, transporter_name,
+            loadman_name, loadman_charges, handling_amount, storage_rate, insurance_charges,
+            remarks, created_by
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+          trfNo,
+          trfDate,
+          from_godown_id,
+          fGodownName || 'Main Godown',
+          to_godown_id,
+          tGodownName || 'Destination Godown',
+          itm.item_id || null,
+          itm.item_code || '',
+          itmName,
+          lotNo,
+          trfWt,
+          itm.unit || 'kg',
+          availQty,
+          trfQty,
+          trfRate,
+          trfAmount,
+          trfVehicle,
+          trfDriver,
+          trfDriverPhone,
+          trfTransporter,
+          trfLoadman,
+          trfLoadmanCharges,
+          trfHandlingAmount,
+          trfStorageRate,
+          trfInsuranceCharges,
+          itemRemarks,
+          created_by || 'Admin'
+        ]);
 
-      // Insert into godown_transfers for legacy compatibility & Cold Storage Sync
-      try {
-        await db.run(`
+        ids.push(result.lastID || result.lastInsertRowid);
+
+        await txConn.run(`
           INSERT INTO godown_transfers (
             s_no, transfer_date, from_godown_id, from_godown_name, to_godown_id, to_godown_name,
             item_name, lot_no, qty, weight, vehicle_no, driver_name, driver_phone,
@@ -510,73 +538,47 @@ router.post('/', async (req, res) => {
           itmName, lotNo, trfQty, trfWt * trfQty, trfVehicle, trfDriver, trfDriverPhone,
           trfTransporter, trfLoadman, trfLoadmanCharges, trfHandlingAmount, trfStorageRate, trfInsuranceCharges, itemRemarks
         ]);
-      } catch (gErr) {
-        console.warn('Legacy godown_transfers insert warning:', gErr.message);
-      }
 
-      // Update Stock Ledger (Outward & Inward)
-      try {
         const totWt = trfWt * trfQty;
 
-        // 1. Outward entry from source godown
-        await db.run(`
+        await txConn.run(`
           INSERT INTO stock (date, item_id, item_name, lot_no, type, qty, weight, rate, godown, godown_id, remarks)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
-          trfDate,
-          itm.item_id || null,
-          itmName,
-          lotNo,
-          'Item Transfer Out',
-          -Math.abs(trfQty),
-          -Math.abs(totWt),
-          trfRate,
-          fGodownName,
-          from_godown_id,
+          trfDate, itm.item_id || null, itmName, lotNo, 'Item Transfer Out',
+          -Math.abs(trfQty), -Math.abs(totWt), trfRate, fGodownName, from_godown_id,
           `[${trfNo}] Transferred to ${tGodownName}. ${itemRemarks}`
         ]);
 
-        // 2. Inward entry to destination godown
-        await db.run(`
+        await txConn.run(`
           INSERT INTO stock (date, item_id, item_name, lot_no, type, qty, weight, rate, godown, godown_id, remarks)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
-          trfDate,
-          itm.item_id || null,
-          itmName,
-          lotNo,
-          'Item Transfer In',
-          Math.abs(trfQty),
-          Math.abs(totWt),
-          trfRate,
-          tGodownName,
-          to_godown_id,
+          trfDate, itm.item_id || null, itmName, lotNo, 'Item Transfer In',
+          Math.abs(trfQty), Math.abs(totWt), trfRate, tGodownName, to_godown_id,
           `[${trfNo}] Transferred from ${fGodownName}. ${itemRemarks}`
         ]);
 
-        // 3. Update stock_lots
         if (lotNo) {
-          // Reduce from source
-          await db.run(`
+          await txConn.run(`
             UPDATE stock_lots
             SET remaining_quantity = MAX(0, remaining_quantity - ?)
             WHERE LOWER(item_name) = LOWER(?) AND LOWER(lot_no) = LOWER(?) AND (godown_id = ? OR godown_id = CAST(? AS INTEGER) OR godown_id IS NULL)
           `, [trfQty, itmName, lotNo, from_godown_id, from_godown_id]);
 
-          // Increase or create in destination
-          const destLotCheck = await db.query(`
+          const destLotCheck = await txConn.query(`
             SELECT id FROM stock_lots
             WHERE LOWER(item_name) = LOWER(?) AND LOWER(lot_no) = LOWER(?) AND (godown_id = ? OR godown_id = CAST(? AS INTEGER))
           `, [itmName, lotNo, to_godown_id, to_godown_id]);
 
           if (destLotCheck.rows && destLotCheck.rows.length > 0) {
-            await db.run(`
+            await txConn.run(`
               UPDATE stock_lots
               SET remaining_quantity = remaining_quantity + ?
               WHERE id = ?
             `, [trfQty, destLotCheck.rows[0].id]);
           } else {
-            const srcLotRes = await db.query(`
+            const srcLotRes = await txConn.query(`
               SELECT item_id, purchase_id, qc_status, usable_for_production, approval_status, unloading_status
               FROM stock_lots
               WHERE LOWER(item_name) = LOWER(?) AND LOWER(lot_no) = LOWER(?)
@@ -584,18 +586,13 @@ router.post('/', async (req, res) => {
             `, [itmName, lotNo]);
             const sInfo = (srcLotRes.rows && srcLotRes.rows[0]) ? srcLotRes.rows[0] : {};
 
-            await db.run(`
+            await txConn.run(`
               INSERT INTO stock_lots (item_id, item_name, lot_no, purchase_id, godown_id, quantity, remaining_quantity, rate, qc_status, usable_for_production, approval_status, unloading_status)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `, [
               sInfo.item_id || itm.item_id || null,
-              itmName,
-              lotNo,
-              sInfo.purchase_id || null,
-              to_godown_id,
-              0,
-              trfQty,
-              trfRate,
+              itmName, lotNo, sInfo.purchase_id || null, to_godown_id,
+              0, trfQty, trfRate,
               sInfo.qc_status || 'ACCEPTED',
               sInfo.usable_for_production !== undefined ? sInfo.usable_for_production : 1,
               sInfo.approval_status || 'APPROVED',
@@ -603,14 +600,12 @@ router.post('/', async (req, res) => {
             ]);
           }
         }
-      } catch (sErr) {
-        console.error('Error updating stock audit for transfer:', sErr.message);
       }
-    }
+      return ids;
+    });
 
-    await rebuildStockLedger();
+    await rebuildStockLedger(activeCompanyId);
 
-    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
     let coldStorageSyncWarning;
     try {
       await syncGodownTransfersToColdStorage(activeCompanyId);
@@ -631,116 +626,74 @@ router.post('/', async (req, res) => {
     });
   } catch (err) {
     console.error('Error creating item transfer:', err);
-    res.status(500).json({ message: 'Error creating item transfer', error: err.message });
+    res.status(err.statusCode || 500).json({ message: err.message || 'Error creating item transfer', error: err.message });
   }
 });
 
-// PUT update item transfer
+// PUT update item transfer (atomic)
 router.put('/:id', async (req, res) => {
   try {
+    const activeCompanyId = req.companyId || 1;
+    const cDb = db.forCompany(activeCompanyId);
     const { id } = req.params;
-    const existingRes = await db.query('SELECT * FROM item_transfers WHERE id = ?', [id]);
-    const existing = existingRes.rows?.[0];
-    if (!existing) {
-      return res.status(404).json({ message: 'Item transfer record not found' });
-    }
 
     const {
-      vehicle_no,
-      driver_name,
-      driver_phone,
-      transporter_name,
-      loadman_name,
-      loadman_charges,
-      handling_amount,
-      storage_rate,
-      insurance_charges,
-      remarks,
-      transfer_qty,
-      qty,
-      weight
+      vehicle_no, driver_name, driver_phone, transporter_name, loadman_name,
+      loadman_charges, handling_amount, storage_rate, insurance_charges, remarks,
+      transfer_qty, qty, weight
     } = req.body;
 
-    const vehicleNoVal = vehicle_no !== undefined ? vehicle_no : (existing.vehicle_no || '');
-    const driverNameVal = driver_name !== undefined ? driver_name : (existing.driver_name || '');
-    const driverPhoneVal = driver_phone !== undefined ? driver_phone : (existing.driver_phone || '');
-    const transporterNameVal = transporter_name !== undefined ? transporter_name : (existing.transporter_name || '');
-    const loadmanNameVal = loadman_name !== undefined ? loadman_name : (existing.loadman_name || '');
-    const loadmanChargesVal = parseFloat(loadman_charges !== undefined ? loadman_charges : (existing.loadman_charges || 0));
-    const handlingAmountVal = parseFloat(handling_amount !== undefined ? handling_amount : (req.body.handling_charges !== undefined ? req.body.handling_charges : (existing.handling_amount !== undefined ? existing.handling_amount : loadmanChargesVal)));
-    const storageRateVal = parseFloat(storage_rate !== undefined ? storage_rate : (existing.storage_rate || 0));
-    const insuranceChargesVal = parseFloat(insurance_charges !== undefined ? insurance_charges : (existing.insurance_charges || 0));
-    const remarksVal = remarks !== undefined ? remarks : (existing.remarks || '');
-    const qtyVal = parseFloat(transfer_qty !== undefined ? transfer_qty : (qty !== undefined ? qty : (existing.transfer_qty || 0)));
-    const weightVal = parseFloat(weight !== undefined ? weight : (existing.weight || 0));
+    await cDb.withTransaction(async (txConn) => {
+      const existingRes = await txConn.query('SELECT * FROM item_transfers WHERE id = ?', [id]);
+      const existing = existingRes.rows?.[0];
+      if (!existing) {
+        const err = new Error('Item transfer record not found');
+        err.statusCode = 404;
+        throw err;
+      }
 
-    await db.run(`
-      UPDATE item_transfers SET
-        vehicle_no = ?,
-        driver_name = ?,
-        driver_phone = ?,
-        transporter_name = ?,
-        loadman_name = ?,
-        loadman_charges = ?,
-        handling_amount = ?,
-        storage_rate = ?,
-        insurance_charges = ?,
-        remarks = ?,
-        transfer_qty = ?,
-        weight = ?
-      WHERE id = ?
-    `, [
-      vehicleNoVal,
-      driverNameVal,
-      driverPhoneVal,
-      transporterNameVal,
-      loadmanNameVal,
-      loadmanChargesVal,
-      handlingAmountVal,
-      storageRateVal,
-      insuranceChargesVal,
-      remarksVal,
-      qtyVal,
-      weightVal,
-      id
-    ]);
+      const vehicleNoVal = vehicle_no !== undefined ? vehicle_no : (existing.vehicle_no || '');
+      const driverNameVal = driver_name !== undefined ? driver_name : (existing.driver_name || '');
+      const driverPhoneVal = driver_phone !== undefined ? driver_phone : (existing.driver_phone || '');
+      const transporterNameVal = transporter_name !== undefined ? transporter_name : (existing.transporter_name || '');
+      const loadmanNameVal = loadman_name !== undefined ? loadman_name : (existing.loadman_name || '');
+      const loadmanChargesVal = parseFloat(loadman_charges !== undefined ? loadman_charges : (existing.loadman_charges || 0));
+      const handlingAmountVal = parseFloat(handling_amount !== undefined ? handling_amount : (req.body.handling_charges !== undefined ? req.body.handling_charges : (existing.handling_amount !== undefined ? existing.handling_amount : loadmanChargesVal)));
+      const storageRateVal = parseFloat(storage_rate !== undefined ? storage_rate : (existing.storage_rate || 0));
+      const insuranceChargesVal = parseFloat(insurance_charges !== undefined ? insurance_charges : (existing.insurance_charges || 0));
+      const remarksVal = remarks !== undefined ? remarks : (existing.remarks || '');
+      const qtyVal = parseFloat(transfer_qty !== undefined ? transfer_qty : (qty !== undefined ? qty : (existing.transfer_qty || 0)));
+      const weightVal = parseFloat(weight !== undefined ? weight : (existing.weight || 0));
 
-    // Also update corresponding godown_transfers record
-    const trfNo = existing.transfer_no;
-    if (trfNo) {
-      await db.run(`
-        UPDATE godown_transfers SET
-          vehicle_no = ?,
-          driver_name = ?,
-          driver_phone = ?,
-          transporter_name = ?,
-          loadman_name = ?,
-          loadman_charges = ?,
-          handling_amount = ?,
-          storage_rate = ?,
-          insurance_charges = ?,
-          remarks = ?,
-          qty = ?,
-          weight = ?
-        WHERE s_no = ?
+      await txConn.run(`
+        UPDATE item_transfers SET
+          vehicle_no = ?, driver_name = ?, driver_phone = ?, transporter_name = ?,
+          loadman_name = ?, loadman_charges = ?, handling_amount = ?, storage_rate = ?,
+          insurance_charges = ?, remarks = ?, transfer_qty = ?, weight = ?
+        WHERE id = ?
       `, [
-        vehicleNoVal,
-        driverNameVal,
-        driverPhoneVal,
-        transporterNameVal,
-        loadmanNameVal,
-        loadmanChargesVal,
-        handlingAmountVal,
-        storageRateVal,
-        insuranceChargesVal,
-        remarksVal,
-        qtyVal,
-        weightVal * (qtyVal || 1),
-        trfNo
+        vehicleNoVal, driverNameVal, driverPhoneVal, transporterNameVal,
+        loadmanNameVal, loadmanChargesVal, handlingAmountVal, storageRateVal,
+        insuranceChargesVal, remarksVal, qtyVal, weightVal, id
       ]);
-    }
 
-    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+      const trfNo = existing.transfer_no;
+      if (trfNo) {
+        await txConn.run(`
+          UPDATE godown_transfers SET
+            vehicle_no = ?, driver_name = ?, driver_phone = ?, transporter_name = ?,
+            loadman_name = ?, loadman_charges = ?, handling_amount = ?, storage_rate = ?,
+            insurance_charges = ?, remarks = ?, qty = ?, weight = ?
+          WHERE s_no = ?
+        `, [
+          vehicleNoVal, driverNameVal, driverPhoneVal, transporterNameVal,
+          loadmanNameVal, loadmanChargesVal, handlingAmountVal, storageRateVal,
+          insuranceChargesVal, remarksVal, qtyVal, weightVal * (qtyVal || 1), trfNo
+        ]);
+      }
+    });
+
+    await rebuildStockLedger(activeCompanyId);
     try {
       await syncGodownTransfersToColdStorage(activeCompanyId);
     } catch (syncErr) {
@@ -750,55 +703,58 @@ router.put('/:id', async (req, res) => {
     res.json({ success: true, message: 'Item transfer updated successfully' });
   } catch (err) {
     console.error('Error updating item transfer:', err);
-    res.status(500).json({ message: 'Error updating item transfer', error: err.message });
+    res.status(err.statusCode || 500).json({ message: err.message || 'Error updating item transfer', error: err.message });
   }
 });
 
-// DELETE item transfer
+// DELETE item transfer (atomic)
 router.delete('/:id', async (req, res) => {
   try {
+    const activeCompanyId = req.companyId || 1;
+    const cDb = db.forCompany(activeCompanyId);
     const { id } = req.params;
-    const trfRes = await db.query('SELECT * FROM item_transfers WHERE id = ?', [id]);
-    const trf = trfRes.rows?.[0];
-    if (!trf) {
-      return res.status(404).json({ message: 'Item transfer record not found' });
-    }
 
-    const transferVoucherRemarks = `Auto-created from Godown Transfer ${trf.transfer_no} (ID ${id})`;
-    const voucherResult = await db.query(
-      'SELECT id FROM cold_storage_vouchers WHERE remarks = ?',
-      [transferVoucherRemarks]
-    );
-    for (const voucher of voucherResult.rows || []) {
-      await db.run('DELETE FROM cold_storage_items WHERE voucher_id = ?', [voucher.id]);
-      await db.run('DELETE FROM cold_storage_vouchers WHERE id = ?', [voucher.id]);
-    }
+    const deletedTrf = await cDb.withTransaction(async (txConn) => {
+      const trfRes = await txConn.query('SELECT * FROM item_transfers WHERE id = ?', [id]);
+      const trf = trfRes.rows?.[0];
+      if (!trf) {
+        const err = new Error('Item transfer record not found');
+        err.statusCode = 404;
+        throw err;
+      }
 
-    await db.run('DELETE FROM item_transfers WHERE id = ?', [id]);
-    await db.run(`
-      DELETE FROM godown_transfers
-      WHERE s_no = ?
-        AND COALESCE(transfer_date, '') = COALESCE(?, '')
-        AND LOWER(TRIM(COALESCE(item_name, ''))) = LOWER(TRIM(COALESCE(?, '')))
-        AND LOWER(TRIM(COALESCE(lot_no, ''))) = LOWER(TRIM(COALESCE(?, '')))
-        AND COALESCE(from_godown_id, 0) = COALESCE(?, 0)
-        AND COALESCE(to_godown_id, 0) = COALESCE(?, 0)
-        AND COALESCE(qty, 0) = COALESCE(?, 0)
-    `, [
-      trf.transfer_no,
-      trf.date,
-      trf.item_name,
-      trf.lot_no,
-      trf.from_godown_id,
-      trf.to_godown_id,
-      trf.transfer_qty
-    ]);
-    await rebuildStockLedger();
+      const transferVoucherRemarks = `Auto-created from Godown Transfer ${trf.transfer_no} (ID ${id})`;
+      const voucherResult = await txConn.query(
+        'SELECT id FROM cold_storage_vouchers WHERE remarks = ?',
+        [transferVoucherRemarks]
+      );
+      for (const voucher of voucherResult.rows || []) {
+        await txConn.run('DELETE FROM cold_storage_items WHERE voucher_id = ?', [voucher.id]);
+        await txConn.run('DELETE FROM cold_storage_vouchers WHERE id = ?', [voucher.id]);
+      }
 
-    res.json({ success: true, message: `Item transfer ${trf.transfer_no} deleted and stock rebuilt successfully` });
+      await txConn.run('DELETE FROM item_transfers WHERE id = ?', [id]);
+      await txConn.run(`
+        DELETE FROM godown_transfers
+        WHERE s_no = ?
+          AND COALESCE(transfer_date, '') = COALESCE(?, '')
+          AND LOWER(TRIM(COALESCE(item_name, ''))) = LOWER(TRIM(COALESCE(?, '')))
+          AND LOWER(TRIM(COALESCE(lot_no, ''))) = LOWER(TRIM(COALESCE(?, '')))
+          AND COALESCE(from_godown_id, 0) = COALESCE(?, 0)
+          AND COALESCE(to_godown_id, 0) = COALESCE(?, 0)
+          AND COALESCE(qty, 0) = COALESCE(?, 0)
+      `, [
+        trf.transfer_no, trf.date, trf.item_name, trf.lot_no,
+        trf.from_godown_id, trf.to_godown_id, trf.transfer_qty
+      ]);
+      return trf;
+    });
+
+    await rebuildStockLedger(activeCompanyId);
+    res.json({ success: true, message: `Item transfer ${deletedTrf.transfer_no} deleted and stock rebuilt successfully` });
   } catch (err) {
     console.error('Error deleting item transfer:', err);
-    res.status(500).json({ message: 'Error deleting item transfer', error: err.message });
+    res.status(err.statusCode || 500).json({ message: err.message || 'Error deleting item transfer', error: err.message });
   }
 });
 

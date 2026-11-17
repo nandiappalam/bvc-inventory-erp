@@ -182,13 +182,8 @@ const ensureCompanyDefaultUsers = async (companyId) => {
           );
           userId = res ? (res.lastID || res.lastInsertRowid) : null;
         } catch (_) {
-          const globalUser = await masterDb.query(
-            `SELECT id FROM users WHERE LOWER(TRIM(username)) = LOWER(TRIM(?)) ORDER BY id ASC LIMIT 1`,
-            [uname]
-          );
-          if (globalUser.rows && globalUser.rows.length > 0) {
-            userId = globalUser.rows[0].id;
-          }
+          // Do not link another company's user on constraint conflicts
+          userId = null;
         }
       }
 
@@ -297,10 +292,17 @@ router.post('/login', async (req, res) => {
 
     let userCandidate = null;
 
-    const userQuery = await masterDb.query(
-      `SELECT * FROM users WHERE LOWER(TRIM(username)) = LOWER(TRIM(?))`,
-      [trimmedUsername]
-    );
+    const userQuery = companyIdNum
+      ? await masterDb.query(
+          `SELECT u.* FROM users u
+            WHERE LOWER(TRIM(u.username)) = LOWER(TRIM(?))
+              AND (u.company_id = ? OR EXISTS (SELECT 1 FROM user_company_access a WHERE a.user_id = u.id AND a.company_id = ?))`,
+          [trimmedUsername, companyIdNum, companyIdNum]
+        )
+      : await masterDb.query(
+          `SELECT * FROM users WHERE LOWER(TRIM(username)) = LOWER(TRIM(?))`,
+          [trimmedUsername]
+        );
 
     const candidates = userQuery.rows || [];
 
@@ -322,7 +324,7 @@ router.post('/login', async (req, res) => {
       }
     }
 
-    // Auto-resync default admin/staff credentials for existing companies if password hash was outdated
+    // Auto-resync default admin/staff credentials for the target company only if password hash was outdated
     const lowerUname = trimmedUsername.toLowerCase();
     const lowerPwd = trimmedPassword.toLowerCase();
     const isDefaultAdmin = lowerUname === 'admin' && ['admin123', 'admin', 'admin@123', '123456', 'password'].includes(lowerPwd);
@@ -340,8 +342,8 @@ router.post('/login', async (req, res) => {
       } else if (companyIdNum) {
         await ensureCompanyDefaultUsers(companyIdNum);
         const recheck = await masterDb.query(
-          `SELECT * FROM users WHERE LOWER(TRIM(username)) = LOWER(TRIM(?)) LIMIT 1`,
-          [trimmedUsername]
+          `SELECT * FROM users WHERE LOWER(TRIM(username)) = LOWER(TRIM(?)) AND company_id = ? LIMIT 1`,
+          [trimmedUsername, companyIdNum]
         );
         if (recheck.rows && recheck.rows.length > 0) {
           userCandidate = recheck.rows[0];
@@ -363,15 +365,6 @@ router.post('/login', async (req, res) => {
     }
 
     const activeCompanyId = companyIdNum || userCandidate.company_id || 1;
-
-    const isUserAdmin = (userCandidate.role && ['admin', 'manager', 'superadmin'].includes(userCandidate.role.toLowerCase())) ||
-                        ['admin', 'staff'].includes(trimmedUsername.toLowerCase());
-    if (isUserAdmin && activeCompanyId) {
-      await masterDb.run(
-        `INSERT INTO user_company_access (user_id, company_id) VALUES (?, ?)`,
-        [userCandidate.id, activeCompanyId]
-      ).catch(() => {});
-    }
 
     if (!(await hasCompanyAccess(userCandidate.id, activeCompanyId))) {
       return res.status(401).json({ message: 'Invalid username or password for this company' });

@@ -11,6 +11,11 @@ const TallyGroupLedgerStatementPage = () => {
 
   useEffect(() => {
     fetchGroupStatement();
+    const handleCompanyChange = () => {
+      fetchGroupStatement();
+    };
+    window.addEventListener('erp_company_changed', handleCompanyChange);
+    return () => window.removeEventListener('erp_company_changed', handleCompanyChange);
   }, []);
 
   const fetchGroupStatement = async () => {
@@ -18,17 +23,21 @@ const TallyGroupLedgerStatementPage = () => {
     setError('');
     try {
       const res = await api('/accounting/group-statement');
-      const data = res?.data || res || [];
-      setTreeData(data);
-      // Expand groups by default if they contain ledgers
+      const rawData = res?.data || res?.groups || res;
+      const data = Array.isArray(rawData) ? rawData : (rawData?.groups || rawData?.data || []);
+      const list = Array.isArray(data) ? data : [];
+      setTreeData(list);
+      // Expand groups by default if they contain ledgers or non-zero Debit/Credit activity
       const exp = {};
-      if (Array.isArray(data)) {
-        data.forEach(g => {
-          if (g.ledgers && g.ledgers.length > 0) {
-            exp[g.id || g.group_name] = true;
-          }
-        });
-      }
+      list.forEach(g => {
+        if (
+          (g.ledgers && g.ledgers.length > 0) ||
+          Number(g.group_debit ?? g.debit_total ?? 0) > 0 ||
+          Number(g.group_credit ?? g.credit_total ?? 0) > 0
+        ) {
+          exp[g.id || g.group_name] = true;
+        }
+      });
       setExpandedGroups(exp);
     } catch (err) {
       console.error('Error fetching group-statement:', err);
@@ -100,7 +109,7 @@ const TallyGroupLedgerStatementPage = () => {
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {treeData.map((group) => {
+          {Array.isArray(treeData) && treeData.map((group) => {
             const isExpanded = Boolean(expandedGroups[group.id || group.group_name]);
             const ledgerCount = group.ledgers ? group.ledgers.length : 0;
 
@@ -145,14 +154,32 @@ const TallyGroupLedgerStatementPage = () => {
                     </div>
                   </div>
 
-                  <div style={{ textAlign: 'right' }}>
-                    <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '600', textTransform: 'uppercase', display: 'block' }}>
-                      Group Closing Balance
-                    </span>
-                    <span style={{ fontSize: '16px', fontWeight: '800', color: '#1e3a8a' }}>
-                      ₹{Number(group.closing_balance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}{' '}
-                      <span style={{ fontSize: '12px', color: '#2563eb' }}>({group.closing_balance_type || 'Dr'})</span>
-                    </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '24px', textAlign: 'right', flexWrap: 'wrap' }}>
+                    <div>
+                      <span style={{ fontSize: '10px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', display: 'block' }}>
+                        Group Debit (Dr)
+                      </span>
+                      <span style={{ fontSize: '14px', fontWeight: '800', color: '#047857' }}>
+                        ₹{Number(group.group_debit ?? group.debit_total ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: '10px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', display: 'block' }}>
+                        Group Credit (Cr)
+                      </span>
+                      <span style={{ fontSize: '14px', fontWeight: '800', color: '#b45309' }}>
+                        ₹{Number(group.group_credit ?? group.credit_total ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                    <div style={{ minWidth: '150px' }}>
+                      <span style={{ fontSize: '10px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', display: 'block' }}>
+                        Group Closing Balance
+                      </span>
+                      <span style={{ fontSize: '16px', fontWeight: '800', color: '#1e3a8a' }}>
+                        ₹{Number(group.closing_balance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}{' '}
+                        <span style={{ fontSize: '12px', color: '#2563eb' }}>({group.closing_balance_type || 'Dr'})</span>
+                      </span>
+                    </div>
                   </div>
                 </div>
 
@@ -188,10 +215,10 @@ const TallyGroupLedgerStatementPage = () => {
                                 ₹{Number(l.opening_balance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })} ({l.opening_balance_type || 'Dr'})
                               </td>
                               <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', color: '#047857' }}>
-                                {Number(l.debit_total || 0) > 0 ? `₹${Number(l.debit_total).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}
+                                {Number(l.debit_total ?? l.total_debit ?? 0) > 0 ? `₹${Number(l.debit_total ?? l.total_debit ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}
                               </td>
                               <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', color: '#b45309' }}>
-                                {Number(l.credit_total || 0) > 0 ? `₹${Number(l.credit_total).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}
+                                {Number(l.credit_total ?? l.total_credit ?? 0) > 0 ? `₹${Number(l.credit_total ?? l.total_credit ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}
                               </td>
                               <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '800', color: '#1e3a8a' }}>
                                 ₹{Number(l.closing_balance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}{' '}

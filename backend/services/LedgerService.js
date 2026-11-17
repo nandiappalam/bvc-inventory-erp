@@ -1,121 +1,21 @@
 const db = require('../config/database');
-
-async function getTableColumns(tableName) {
-  try {
-    const result = await db.query(`PRAGMA table_info(${tableName})`);
-    return new Set((result.rows || []).map((row) => row.name));
-  } catch (error) {
-    return new Set();
-  }
-}
+const AccountingEngine = require('./AccountingEngine');
 
 async function ensureLedgerTables() {
-  try {
-    await db.run(`
-      CREATE TABLE IF NOT EXISTS ledgermaster (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT UNIQUE NOT NULL
-      )
-    `);
-  } catch (error) {
-    console.warn('Ledger master table setup skipped:', error.message);
-  }
-
-  try {
-    await db.run(`
-      CREATE TABLE IF NOT EXISTS ledger_entries (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        ledger_id INTEGER,
-        ledger_name TEXT NOT NULL,
-        date DATE NOT NULL,
-        voucher_type TEXT NOT NULL,
-        voucher_no TEXT,
-        debit REAL DEFAULT 0,
-        credit REAL DEFAULT 0,
-        reference_id INTEGER,
-        reference_type TEXT,
-        particulars TEXT,
-        voucher_id INTEGER,
-        transaction_id INTEGER,
-        transaction_type TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (ledger_id) REFERENCES ledgermaster(id)
-      )
-    `);
-  } catch (error) {
-    console.warn('Ledger entries table setup skipped:', error.message);
-  }
-
-  try {
-    const columns = await getTableColumns('ledger_entries');
-    if (!columns.has('reference_type')) {
-      await db.run('ALTER TABLE ledger_entries ADD COLUMN reference_type TEXT');
-    }
-    if (!columns.has('voucher_id')) {
-      await db.run('ALTER TABLE ledger_entries ADD COLUMN voucher_id INTEGER');
-    }
-    if (!columns.has('transaction_id')) {
-      await db.run('ALTER TABLE ledger_entries ADD COLUMN transaction_id INTEGER');
-    }
-    if (!columns.has('transaction_type')) {
-      await db.run('ALTER TABLE ledger_entries ADD COLUMN transaction_type TEXT');
-    }
-  } catch (error) {
-    console.warn('Ledger entries column migration skipped:', error.message);
-  }
+  const cId = AccountingEngine.getActiveCompanyId();
+  await AccountingEngine.ensureAccountingSchema(db.forCompany(cId));
 }
 
-async function resolveLedgerId(ledgerName) {
-  if (!ledgerName || typeof ledgerName !== 'string' || !ledgerName.trim()) return 1;
-  const cleanName = ledgerName.trim();
-
-  try {
-    await ensureLedgerTables();
-    const existing = await db.query(
-      'SELECT id FROM ledgermaster WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1',
-      [cleanName]
-    );
-    if (existing.rows && existing.rows.length > 0 && existing.rows[0].id) {
-      return existing.rows[0].id;
-    }
-
-    let underVal = 'Current Liabilities';
-    let typeVal = 'Liability';
-    const lower = cleanName.toLowerCase();
-    if (lower.includes('expense') || lower.includes('charges') || lower.includes('wages') || lower.includes('freight') || lower.includes('loading')) {
-      underVal = 'Direct Expenses';
-      typeVal = 'Expense';
-    } else if (lower.includes('bank') || lower.includes('cash')) {
-      underVal = lower.includes('bank') ? 'Bank Accounts' : 'Cash-in-hand';
-      typeVal = 'Asset';
-    } else if (lower.includes('purchase')) {
-      underVal = 'Purchase Accounts';
-      typeVal = 'Expense';
-    } else if (lower.includes('sales')) {
-      underVal = 'Sales Accounts';
-      typeVal = 'Income';
-    }
-
-    try {
-      const insertResult = await db.run(
-        'INSERT INTO ledgermaster (name, printname, under, ledger_type, status) VALUES (?, ?, ?, ?, ?)',
-        [cleanName, cleanName.toUpperCase(), underVal, typeVal, 'Active']
-      );
-      const insertedId = insertResult.lastInsertRowid || insertResult.lastID;
-      if (insertedId) return insertedId;
-    } catch (insertErr) {
-      // Fall through to query if already exists or constraint violation
-    }
-
-    const fallback = await db.query(
-      'SELECT id FROM ledgermaster WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1',
-      [cleanName]
-    );
-    return fallback.rows?.[0]?.id || 1;
-  } catch (error) {
-    console.warn('Ledger lookup skipped:', error.message);
-    return 1;
+async function resolveLedgerId(ledgerName, ledgerType = null, companyId = null) {
+  if (!ledgerName || typeof ledgerName !== 'string' || !ledgerName.trim()) {
+    throw new Error('Ledger name is required to resolve ledger ID.');
   }
+  const resolved = await AccountingEngine.resolveOrCreateLedger({
+    companyId: companyId || AccountingEngine.getActiveCompanyId(),
+    name: ledgerName.trim(),
+    ledgerType,
+  });
+  return resolved.id;
 }
 
 async function createEntry({
@@ -131,27 +31,34 @@ async function createEntry({
   voucherId = null,
   transactionId = null,
   transactionType = null,
+  companyId = null,
 }) {
+  const cId = AccountingEngine.getActiveCompanyId(companyId);
   await ensureLedgerTables();
-  const safeLedgerName = ledgerName || 'General Ledger';
-  const ledgerId = await resolveLedgerId(safeLedgerName);
+  const safeLedgerName = String(ledgerName || '').trim();
+  if (!safeLedgerName) {
+    throw new Error('Ledger name is required for createEntry.');
+  }
+  const ledgerId = await resolveLedgerId(safeLedgerName, null, cId);
 
-  await db.run(`
+  await db.forCompany(cId).run(`
     INSERT INTO ledger_entries (
-      ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit,
-      reference_id, reference_type, particulars, voucher_id, transaction_id, transaction_type
+      company_id, ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit,
+      reference_id, reference_type, particulars, counterparty_summary, voucher_id, transaction_id, transaction_type
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, [
+    cId,
     ledgerId,
     safeLedgerName,
-    date || new Date().toISOString().slice(0, 10),
+    AccountingEngine.normalizeDateIso(date),
     voucherType || 'General',
     voucherNo || '',
-    debit || 0,
-    credit || 0,
+    AccountingEngine.round2(debit || 0),
+    AccountingEngine.round2(credit || 0),
     referenceId,
     referenceType,
+    particulars,
     particulars,
     voucherId,
     transactionId,
@@ -161,29 +68,37 @@ async function createEntry({
   return true;
 }
 
-async function deleteEntriesByReference(referenceId, referenceType = null) {
+async function deleteEntriesByReference(referenceId, referenceType = null, companyId = null) {
+  const cId = AccountingEngine.getActiveCompanyId(companyId);
   await ensureLedgerTables();
-  if (referenceType) {
-    await db.run('DELETE FROM ledger_entries WHERE reference_id = ? AND reference_type = ?', [referenceId, referenceType]);
-  } else {
-    await db.run('DELETE FROM ledger_entries WHERE reference_id = ?', [referenceId]);
+  if (!referenceType) {
+    throw new Error('deleteEntriesByReference requires an explicit referenceType for module isolation.');
   }
+  await db.forCompany(cId).run(
+    `DELETE FROM ledger_entries WHERE reference_id = ? AND LOWER(COALESCE(reference_type, '')) = LOWER(?)`,
+    [referenceId, String(referenceType).trim()]
+  );
   return true;
 }
 
-async function getEntriesByReference(referenceId, referenceType = null) {
+async function getEntriesByReference(referenceId, referenceType = null, companyId = null) {
+  const cId = AccountingEngine.getActiveCompanyId(companyId);
   await ensureLedgerTables();
   if (referenceType) {
-    const result = await db.query('SELECT * FROM ledger_entries WHERE reference_id = ? AND reference_type = ? ORDER BY id ASC', [referenceId, referenceType]);
+    const result = await db.forCompany(cId).query(
+      'SELECT * FROM ledger_entries WHERE reference_id = ? AND LOWER(COALESCE(reference_type, \'\')) = LOWER(?) ORDER BY id ASC',
+      [referenceId, String(referenceType).trim()]
+    );
     return result.rows;
   }
-  const result = await db.query('SELECT * FROM ledger_entries WHERE reference_id = ? ORDER BY id ASC', [referenceId]);
+  const result = await db.forCompany(cId).query('SELECT * FROM ledger_entries WHERE reference_id = ? ORDER BY id ASC', [referenceId]);
   return result.rows;
 }
 
-async function getEntriesByVoucher(voucherId) {
+async function getEntriesByVoucher(voucherId, companyId = null) {
+  const cId = AccountingEngine.getActiveCompanyId(companyId);
   await ensureLedgerTables();
-  const result = await db.query('SELECT * FROM ledger_entries WHERE voucher_id = ? ORDER BY id ASC', [voucherId]);
+  const result = await db.forCompany(cId).query('SELECT * FROM ledger_entries WHERE voucher_id = ? ORDER BY id ASC', [voucherId]);
   return result.rows;
 }
 

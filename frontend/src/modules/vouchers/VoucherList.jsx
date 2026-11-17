@@ -9,6 +9,7 @@ import voucherAPI from './voucherService.js';
 import { useConfirm } from '../../context/ConfirmContext.jsx';
 import { safeArray } from '../../utils/safeArray.js';
 import { printElement } from '../../utils/printHelper.js';
+import './VoucherList.css';
 
 // Icons
 import VisibilityIcon from '@mui/icons-material/Visibility';
@@ -20,8 +21,14 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import CancelIcon from '@mui/icons-material/Cancel';
 import ClearIcon from '@mui/icons-material/Clear';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import FirstPageIcon from '@mui/icons-material/FirstPage';
+import LastPageIcon from '@mui/icons-material/LastPage';
+import NavigateNextIcon from '@mui/icons-material/NavigateNext';
+import NavigateBeforeIcon from '@mui/icons-material/NavigateBefore';
+import SearchIcon from '@mui/icons-material/Search';
 
-const VOUCHER_TYPES = ['Payment', 'Receipt', 'Contra', 'Journal'];
+const VOUCHER_TYPES = ['Payment', 'Receipt', 'Contra', 'Journal', 'Purchase', 'Sales'];
 const STATUSES = ['Draft', 'Submitted', 'Approved', 'Locked', 'Cancelled'];
 
 const VoucherList = () => {
@@ -58,6 +65,13 @@ const VoucherList = () => {
     status: '',
     search: ''
   });
+
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [page, setPage] = useState(0);
+
+  useEffect(() => {
+    setPage(0);
+  }, [filters]);
 
   // Sync URL search params
   useEffect(() => {
@@ -286,392 +300,505 @@ const VoucherList = () => {
   const totalCreditSum = vouchers.reduce((sum, v) => sum + parseFloat(v.total_credit || 0), 0);
   const difference = totalDebitSum - totalCreditSum;
 
+  const effectiveRowsPerPage = rowsPerPage === 'All' ? vouchers.length : Number(rowsPerPage || 10);
+  const totalPages = rowsPerPage === 'All' || vouchers.length === 0 ? 1 : Math.max(1, Math.ceil(vouchers.length / effectiveRowsPerPage));
+  const safePage = Math.min(page, Math.max(0, totalPages - 1));
+  const paginatedVouchers = rowsPerPage === 'All'
+    ? vouchers
+    : vouchers.slice(safePage * effectiveRowsPerPage, (safePage + 1) * effectiveRowsPerPage);
+
+  const startRecord = vouchers.length === 0 ? 0 : safePage * effectiveRowsPerPage + 1;
+  const endRecord = rowsPerPage === 'All' ? vouchers.length : Math.min((safePage + 1) * effectiveRowsPerPage, vouchers.length);
+
   return (
-    <Box sx={{ p: '20px', bgcolor: '#f0f6ff', minHeight: '100vh', fontFamily: "'Segoe UI', 'Tahoma', Arial, sans-serif" }} id="voucher-register-container">
+    <Box className="voucher-display-container" id="voucher-register-container">
       {/* Enterprise Title Bar - Standard Blue & White Theme */}
-      <Box className="screen-title" sx={{
-        background: 'linear-gradient(135deg, #1f4fb2 0%, #2a5ea0 100%)',
-        color: '#ffffff',
-        p: '12px 20px',
-        fontSize: '20px',
-        fontWeight: 'bold',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        borderRadius: '4px 4px 0 0',
-        mb: '15px',
-        boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
-      }}>
+      <Box className="voucher-header-bar">
         <Button
           onClick={() => navigate(-1)}
-          sx={{
-            background: '#ffffff',
-            border: '1px solid #ccc',
-            borderRadius: '4px',
-            padding: '4px 12px',
-            fontSize: '13px',
-            fontWeight: 'bold',
-            color: '#333',
-            textTransform: 'none',
-            minWidth: 'auto',
-            '&:hover': { background: '#f8fafc' }
-          }}
+          className="voucher-header-btn"
+          sx={{ minWidth: 'auto' }}
         >
           ← Back
         </Button>
-        <Typography variant="h6" sx={{ fontWeight: 'bold', color: '#fff', fontSize: '20px', textAlign: 'center', flex: 1, textTransform: 'uppercase' }}>
-          VOUCHER DISPLAY
+        <Typography variant="h6" className="voucher-header-title">
+          VOUCHER DISPLAY & AUDIT REGISTER
         </Typography>
         <Box sx={{ display: 'flex', gap: 1 }}>
           <Button
+            onClick={() => loadVouchers()}
+            className="voucher-header-btn"
+            startIcon={<RefreshIcon fontSize="small" />}
+            size="small"
+          >
+            Refresh
+          </Button>
+          <Button
             onClick={handleReconcile}
             disabled={reconciling}
-            sx={{
-              background: '#ffffff',
-              color: '#15803d',
-              fontWeight: 'bold',
-              fontSize: '13px',
-              px: 2,
-              py: '6px',
-              borderRadius: '4px',
-              textTransform: 'none',
-              '&:hover': { background: '#f0fdf4' }
-            }}
+            className="voucher-header-btn-green"
+            size="small"
           >
-            {reconciling ? 'Reconciling...' : '⚡ Reconcile Registers'}
+            {reconciling ? 'Reconciling...' : '⚡ Reconcile'}
           </Button>
           <Button
             component={Link}
             to="/entry/voucher-create"
-            sx={{
-              background: '#ffffff',
-              color: '#1f4fb2',
-              fontWeight: 'bold',
-              fontSize: '13px',
-              px: 2,
-              py: '6px',
-              borderRadius: '4px',
-              textTransform: 'none',
-              '&:hover': { background: '#f8fafc' }
-            }}
+            className="voucher-header-btn"
+            size="small"
           >
             + New Voucher
           </Button>
         </Box>
       </Box>
 
-      {/* Filters Panel */}
-      <Paper elevation={1} sx={{ p: 2, mb: 2, bgcolor: '#e9eef7', border: '1px solid #9fb6dd', borderRadius: '4px' }}>
-        <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
-          <TextField
-            label="From Date"
-            type="date"
-            InputLabelProps={{ shrink: true }}
-            value={filters.from_date}
-            onChange={(e) => handleFilterChange('from_date', e.target.value)}
-            size="small"
-            sx={{ width: 140 }}
-          />
-          <TextField
-            label="To Date"
-            type="date"
-            InputLabelProps={{ shrink: true }}
-            value={filters.to_date}
-            onChange={(e) => handleFilterChange('to_date', e.target.value)}
-            size="small"
-            sx={{ width: 140 }}
-          />
-          <Select
-            value={filters.voucher_type}
-            onChange={(e) => handleFilterChange('voucher_type', e.target.value)}
-            displayEmpty
-            size="small"
-            sx={{ width: 130 }}
-          >
-            <MenuItem value="">[All Voucher Types]</MenuItem>
-            {VOUCHER_TYPES.map(type => (
-              <MenuItem key={type} value={type}>{type}</MenuItem>
-            ))}
-          </Select>
-          <Select
-            value={filters.ledger_id}
-            onChange={(e) => handleFilterChange('ledger_id', e.target.value)}
-            displayEmpty
-            size="small"
-            sx={{ width: 180 }}
-          >
-            <MenuItem value="">[All Ledgers]</MenuItem>
-            {ledgers.map(l => (
-              <MenuItem key={l.id} value={l.id}>{l.name}</MenuItem>
-            ))}
-          </Select>
-          <Select
-            value={filters.status}
-            onChange={(e) => handleFilterChange('status', e.target.value)}
-            displayEmpty
-            size="small"
-            sx={{ width: 140 }}
-          >
-            <MenuItem value="">[All Statuses]</MenuItem>
-            {STATUSES.map(s => (
-              <MenuItem key={s} value={s}>{s}</MenuItem>
-            ))}
-          </Select>
-          <TextField
-            label="Search (No / Narration / Ref)"
-            value={filters.search}
-            onChange={(e) => handleFilterChange('search', e.target.value)}
-            size="small"
-            placeholder="Search..."
-            sx={{ flexGrow: 1, minWidth: 200 }}
-          />
-          <Button
-            variant="outlined"
-            onClick={handleClearFilters}
-            startIcon={<ClearIcon />}
-            size="medium"
-            color="inherit"
-          >
-            Clear
-          </Button>
+      {/* Financial KPI Summary Banner */}
+      <Box className="voucher-kpi-bar">
+        <Box className="voucher-kpi-item">
+          <span className="voucher-kpi-label">Total Vouchers</span>
+          <span className="voucher-kpi-value">{totalCount} Entries</span>
         </Box>
-      </Paper>
+        <Box className="voucher-kpi-item">
+          <span className="voucher-kpi-label">Period Total Debit</span>
+          <span className="voucher-kpi-value" style={{ color: '#fca5a5' }}>
+            ₹{totalDebitSum.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+          </span>
+        </Box>
+        <Box className="voucher-kpi-item">
+          <span className="voucher-kpi-label">Period Total Credit</span>
+          <span className="voucher-kpi-value" style={{ color: '#86efac' }}>
+            ₹{totalCreditSum.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+          </span>
+        </Box>
+        <Box className="voucher-kpi-item">
+          <span className="voucher-kpi-label">Audit / Register Status</span>
+          <span className={`voucher-kpi-value ${Math.abs(difference) < 0.01 ? 'voucher-kpi-status-ok' : 'voucher-kpi-status-warn'}`}>
+            {Math.abs(difference) < 0.01 ? 'Balanced ✔ (₹0.00)' : `Unbalanced ❌ (₹${Math.abs(difference).toLocaleString('en-IN', { minimumFractionDigits: 2 })})`}
+          </span>
+        </Box>
+        <Box className="voucher-kpi-item">
+          <span className="voucher-kpi-label">Active View Density</span>
+          <span className="voucher-kpi-value">
+            {rowsPerPage === 'All' ? 'All Rows' : `Max ${rowsPerPage} Rows / Page`}
+          </span>
+        </Box>
+      </Box>
 
-      {/* Main Voucher Grid */}
-      <Paper elevation={2} sx={{ borderRadius: 1, overflow: 'hidden' }}>
+      {/* Filters Panel */}
+      <Box className="voucher-filter-card">
+        <Box className="voucher-filter-row">
+          <Box className="voucher-filter-group">
+            <span className="voucher-filter-label">From Date</span>
+            <TextField
+              type="date"
+              InputLabelProps={{ shrink: true }}
+              value={filters.from_date}
+              onChange={(e) => handleFilterChange('from_date', e.target.value)}
+              size="small"
+              sx={{ width: 140, bgcolor: '#ffffff' }}
+            />
+          </Box>
+
+          <Box className="voucher-filter-group">
+            <span className="voucher-filter-label">To Date</span>
+            <TextField
+              type="date"
+              InputLabelProps={{ shrink: true }}
+              value={filters.to_date}
+              onChange={(e) => handleFilterChange('to_date', e.target.value)}
+              size="small"
+              sx={{ width: 140, bgcolor: '#ffffff' }}
+            />
+          </Box>
+
+          <Box className="voucher-filter-group">
+            <span className="voucher-filter-label">Voucher Type</span>
+            <Select
+              value={filters.voucher_type}
+              onChange={(e) => handleFilterChange('voucher_type', e.target.value)}
+              displayEmpty
+              size="small"
+              sx={{ width: 145, bgcolor: '#ffffff' }}
+            >
+              <MenuItem value="">[All Types]</MenuItem>
+              {VOUCHER_TYPES.map(type => (
+                <MenuItem key={type} value={type}>{type}</MenuItem>
+              ))}
+            </Select>
+          </Box>
+
+          <Box className="voucher-filter-group">
+            <span className="voucher-filter-label">Ledger Account</span>
+            <Select
+              value={filters.ledger_id}
+              onChange={(e) => handleFilterChange('ledger_id', e.target.value)}
+              displayEmpty
+              size="small"
+              sx={{ width: 190, bgcolor: '#ffffff' }}
+            >
+              <MenuItem value="">[All Ledgers]</MenuItem>
+              {ledgers.map(l => (
+                <MenuItem key={l.id} value={l.id}>{l.name}</MenuItem>
+              ))}
+            </Select>
+          </Box>
+
+          <Box className="voucher-filter-group">
+            <span className="voucher-filter-label">Status</span>
+            <Select
+              value={filters.status}
+              onChange={(e) => handleFilterChange('status', e.target.value)}
+              displayEmpty
+              size="small"
+              sx={{ width: 135, bgcolor: '#ffffff' }}
+            >
+              <MenuItem value="">[All Statuses]</MenuItem>
+              {STATUSES.map(s => (
+                <MenuItem key={s} value={s}>{s}</MenuItem>
+              ))}
+            </Select>
+          </Box>
+
+          <Box className="voucher-filter-group" sx={{ flexGrow: 1, minWidth: 200 }}>
+            <span className="voucher-filter-label">Search (No / Particulars / Ref)</span>
+            <TextField
+              value={filters.search}
+              onChange={(e) => handleFilterChange('search', e.target.value)}
+              size="small"
+              placeholder="Search by Voucher No, Account, Narration..."
+              sx={{ bgcolor: '#ffffff' }}
+              InputProps={{
+                startAdornment: <SearchIcon fontSize="small" sx={{ color: '#94a3b8', mr: 0.5 }} />
+              }}
+            />
+          </Box>
+
+          <Box sx={{ display: 'flex', gap: 1, alignSelf: 'flex-end', pb: '2px' }}>
+            <Button
+              variant="outlined"
+              onClick={handleClearFilters}
+              startIcon={<ClearIcon />}
+              size="medium"
+              sx={{
+                bgcolor: '#ffffff',
+                color: '#475569',
+                borderColor: '#cbd5e1',
+                textTransform: 'none',
+                fontWeight: 700,
+                height: 38,
+                '&:hover': { bgcolor: '#f1f5f9', borderColor: '#94a3b8' }
+              }}
+            >
+              Clear
+            </Button>
+          </Box>
+        </Box>
+      </Box>
+
+      {/* Main Voucher Grid Card */}
+      <Box className="voucher-table-card">
         {loading ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', py: 8, flexDirection: 'column', gap: 2 }}>
-            <CircularProgress color="success" />
-            <Typography variant="body2" color="text.secondary">Fetching accounting records...</Typography>
+            <CircularProgress sx={{ color: '#1f4fb2' }} />
+            <Typography variant="body2" sx={{ color: '#64748b', fontWeight: 600 }}>Fetching accounting records...</Typography>
           </Box>
         ) : vouchers.length === 0 ? (
           <Box sx={{ py: 8, textAlign: 'center' }}>
-            <Typography variant="subtitle1" color="text.secondary" gutterBottom>
+            <Typography variant="subtitle1" sx={{ color: '#64748b', fontWeight: 600 }} gutterBottom>
               No vouchers match the active filters or register criteria.
             </Typography>
-            <Button component={Link} to="/entry/voucher-create" variant="contained" color="success" sx={{ mt: 1 }}>
-              Record First Voucher
+            <Button component={Link} to="/entry/voucher-create" variant="contained" sx={{ mt: 1, bgcolor: '#1f4fb2', textTransform: 'none', fontWeight: 700 }}>
+              + Record First Voucher
             </Button>
           </Box>
         ) : (
-          <TableContainer sx={{ maxHeight: 'calc(100vh - 340px)', minHeight: '300px', overflowY: 'auto' }}>
-            <Table size="small" stickyHeader sx={{ minWidth: 900 }}>
-              <TableHead>
-                <TableRow sx={{ '& th': { bgcolor: '#1f4fb2', color: '#fff', fontWeight: 'bold', border: '1px solid #9fb6dd' } }}>
-                  <TableCell style={{ width: 60, color: '#fff' }}>No.</TableCell>
-                  <TableCell style={{ width: 120, color: '#fff' }}>Voucher No</TableCell>
-                  <TableCell style={{ width: 110, color: '#fff' }}>Date</TableCell>
-                  <TableCell style={{ width: 110, color: '#fff' }}>Type</TableCell>
-                  <TableCell style={{ color: '#fff' }}>Particulars (Ledger Account)</TableCell>
-                  <TableCell align="right" style={{ width: 120, color: '#fff' }}>Debit</TableCell>
-                  <TableCell align="right" style={{ width: 120, color: '#fff' }}>Credit</TableCell>
-                  <TableCell style={{ width: 110, color: '#fff' }}>Status</TableCell>
-                  <TableCell style={{ width: 90, color: '#fff' }}>Posted</TableCell>
-                  <TableCell align="center" style={{ width: 230, color: '#fff' }}>Actions</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {vouchers.map((voucher, index) => {
-                  let statusColor = 'primary';
-                  if (voucher.status === 'Draft') statusColor = 'default';
-                  else if (voucher.status === 'Approved' || voucher.status === 'Submitted') statusColor = 'success';
-                  else if (voucher.status === 'Cancelled') statusColor = 'error';
-                  else if (voucher.status === 'Locked') statusColor = 'warning';
+          <Box>
+            {/* Top Pagination & Density Toolbar */}
+            <Box className="voucher-pagination-toolbar">
+              <Box className="voucher-pagination-info">
+                <span>Showing <strong>{startRecord}</strong> to <strong>{endRecord}</strong> of <strong>{totalCount}</strong> vouchers</span>
+                <span style={{ color: '#94a3b8' }}>•</span>
+                <span style={{ color: '#64748b', fontSize: '12px' }}>Maximum 10 rows per page</span>
+              </Box>
 
-                  return (
-                    <TableRow key={voucher.id} hover sx={{ '&:nth-of-type(even)': { bgcolor: '#fcfdfe' } }}>
-                      <TableCell>{index + 1}</TableCell>
-                      <TableCell>
-                        <Typography
-                          onClick={() => openDisplay(voucher.id)}
-                          sx={{
-                            fontWeight: 'bold',
-                            color: '#1b5e20',
-                            cursor: 'pointer',
-                            textDecoration: 'underline',
-                            '&:hover': { color: '#0d3c13' }
-                          }}
-                        >
-                          {voucher.voucher_no}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>{voucher.date}</TableCell>
-                      <TableCell>
-                        <Chip
-                          label={voucher.voucher_type}
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                <Box className="voucher-density-selector">
+                  <span>Display Rows:</span>
+                  <Select
+                    value={rowsPerPage}
+                    onChange={(e) => {
+                      setRowsPerPage(e.target.value);
+                      setPage(0);
+                    }}
+                    size="small"
+                    sx={{ bgcolor: '#ffffff', height: 30, fontSize: '0.85rem', fontWeight: 700 }}
+                  >
+                    <MenuItem value={10}>10 (Standard)</MenuItem>
+                    <MenuItem value={25}>25</MenuItem>
+                    <MenuItem value={50}>50</MenuItem>
+                    <MenuItem value={100}>100</MenuItem>
+                    <MenuItem value="All">All</MenuItem>
+                  </Select>
+                </Box>
+
+                {rowsPerPage !== 'All' && totalPages > 1 && (
+                  <Box className="voucher-page-nav">
+                    <Tooltip title="First Page">
+                      <span>
+                        <IconButton
                           size="small"
-                          sx={{
-                            fontWeight: 'bold',
-                            fontSize: '0.75rem',
-                            bgcolor: voucher.voucher_type === 'Payment' ? '#ffebee' :
-                                     voucher.voucher_type === 'Receipt' ? '#e8f5e9' :
-                                     voucher.voucher_type === 'Contra' ? '#e3f2fd' : '#f3e5f5',
-                            color: voucher.voucher_type === 'Payment' ? '#c62828' :
-                                   voucher.voucher_type === 'Receipt' ? '#2e7d32' :
-                                   voucher.voucher_type === 'Contra' ? '#1565c0' : '#6a1b9a',
-                            border: '1px solid currentColor'
-                          }}
-                        />
-                      </TableCell>
-                      <TableCell sx={{ maxWidth: 360 }}>
-                        <Tooltip title={voucher.particulars_display || voucher.ledger_names || 'N/A'}>
-                          <Box sx={{ display: 'flex', flexDirection: 'column' }}>
-                            <Typography
-                              variant="body2"
-                              sx={{
-                                fontWeight: 700,
-                                color: '#1e293b',
-                                lineHeight: 1.3,
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap'
-                              }}
-                            >
-                              {voucher.primary_particular || voucher.ledger_names || 'General Ledger'}
-                            </Typography>
-                            {(voucher.secondary_particular || voucher.narration) && (
+                          disabled={safePage === 0}
+                          onClick={() => setPage(0)}
+                          className="voucher-page-btn"
+                        >
+                          <FirstPageIcon fontSize="small" />
+                        </IconButton>
+                      </span>
+                    </Tooltip>
+                    <Tooltip title="Previous Page">
+                      <span>
+                        <IconButton
+                          size="small"
+                          disabled={safePage === 0}
+                          onClick={() => setPage(prev => Math.max(0, prev - 1))}
+                          className="voucher-page-btn"
+                        >
+                          <NavigateBeforeIcon fontSize="small" />
+                        </IconButton>
+                      </span>
+                    </Tooltip>
+
+                    <Typography variant="body2" sx={{ fontWeight: 800, px: 1, color: '#1e293b', fontSize: '12px' }}>
+                      Page {safePage + 1} of {totalPages}
+                    </Typography>
+
+                    <Tooltip title="Next Page">
+                      <span>
+                        <IconButton
+                          size="small"
+                          disabled={safePage >= totalPages - 1}
+                          onClick={() => setPage(prev => Math.min(totalPages - 1, prev + 1))}
+                          className="voucher-page-btn"
+                        >
+                          <NavigateNextIcon fontSize="small" />
+                        </IconButton>
+                      </span>
+                    </Tooltip>
+                    <Tooltip title="Last Page">
+                      <span>
+                        <IconButton
+                          size="small"
+                          disabled={safePage >= totalPages - 1}
+                          onClick={() => setPage(totalPages - 1)}
+                          className="voucher-page-btn"
+                        >
+                          <LastPageIcon fontSize="small" />
+                        </IconButton>
+                      </span>
+                    </Tooltip>
+                  </Box>
+                )}
+              </Box>
+            </Box>
+
+            {/* Table Area: Displays up to 10 rows seamlessly */}
+            <Box className="voucher-table-container">
+              <table className="voucher-enterprise-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: 45, textAlign: 'center' }}>#</th>
+                    <th style={{ width: 105 }}>Date</th>
+                    <th style={{ width: 100 }}>Type</th>
+                    <th style={{ width: 115 }}>Voucher No</th>
+                    <th>Particulars & Transaction Details</th>
+                    <th style={{ width: 130, textAlign: 'right' }}>Debit (₹)</th>
+                    <th style={{ width: 130, textAlign: 'right' }}>Credit (₹)</th>
+                    <th style={{ width: 100, textAlign: 'center' }}>Status</th>
+                    <th style={{ width: 75, textAlign: 'center' }}>Posted</th>
+                    <th style={{ width: 220, textAlign: 'center' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedVouchers.map((voucher, index) => {
+                    const absoluteIndex = rowsPerPage === 'All' ? index + 1 : safePage * effectiveRowsPerPage + index + 1;
+                    const vType = voucher.voucher_type || 'Journal';
+
+                    return (
+                      <tr key={voucher.id}>
+                        <td className="voucher-row-num">{absoluteIndex}</td>
+                        <td className="voucher-row-date">{voucher.date}</td>
+                        <td>
+                          <span className={`voucher-type-badge voucher-type-${vType}`}>
+                            {vType}
+                          </span>
+                        </td>
+                        <td>
+                          <span
+                            className="voucher-row-no-link"
+                            onClick={() => openDisplay(voucher.id)}
+                            title="Click to view full double-entry postings"
+                          >
+                            {voucher.voucher_no}
+                          </span>
+                        </td>
+                        <td style={{ maxWidth: 380 }}>
+                          <Tooltip title={voucher.particulars_display || voucher.ledger_names || 'N/A'}>
+                            <Box sx={{ display: 'flex', flexDirection: 'column' }}>
                               <Typography
-                                variant="caption"
+                                variant="body2"
                                 sx={{
-                                  color: '#64748b',
-                                  fontSize: '0.75rem',
-                                  lineHeight: 1.2,
-                                  mt: 0.2,
+                                  fontWeight: 700,
+                                  color: '#0f172a',
+                                  lineHeight: 1.3,
                                   overflow: 'hidden',
                                   textOverflow: 'ellipsis',
-                                  whiteSpace: 'nowrap'
+                                  whiteSpace: 'nowrap',
+                                  fontSize: '13px'
                                 }}
                               >
-                                {voucher.secondary_particular || voucher.narration}
+                                {voucher.primary_particular || voucher.ledger_names || 'General Ledger'}
                               </Typography>
-                            )}
-                          </Box>
-                        </Tooltip>
-                      </TableCell>
-                      <TableCell align="right" sx={{ fontWeight: 'bold' }}>
-                        ₹{parseFloat(voucher.total_debit || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                      </TableCell>
-                      <TableCell align="right" sx={{ fontWeight: 'bold' }}>
-                        ₹{parseFloat(voucher.total_credit || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                      </TableCell>
-                      <TableCell>
-                        <Chip
-                          label={voucher.status || 'Approved'}
-                          size="small"
-                          color={statusColor}
-                          variant="outlined"
-                          sx={{ fontWeight: 'bold', fontSize: '0.7rem' }}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        {voucher.posted !== 0 ? (
-                          <Chip label="Yes" size="small" color="success" sx={{ fontSize: '0.7rem', height: 20 }} />
-                        ) : (
-                          <Chip label="No" size="small" color="default" sx={{ fontSize: '0.7rem', height: 20 }} />
-                        )}
-                      </TableCell>
-                      <TableCell align="center">
-                        <Box sx={{ display: 'flex', justifyContent: 'center', gap: 0.5 }}>
-                          <Tooltip title="View (Tally Style)">
-                            <IconButton size="small" color="success" onClick={() => openDisplay(voucher.id)}>
-                              <VisibilityIcon fontSize="small" />
-                            </IconButton>
+                              {(voucher.secondary_particular || voucher.narration) && (
+                                <Typography
+                                  variant="caption"
+                                  sx={{
+                                    color: '#64748b',
+                                    fontSize: '0.75rem',
+                                    lineHeight: 1.2,
+                                    mt: 0.2,
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap'
+                                  }}
+                                >
+                                  {voucher.secondary_particular || voucher.narration}
+                                </Typography>
+                              )}
+                            </Box>
                           </Tooltip>
-                          <Tooltip title="Create Settlement Voucher for this Voucher No">
-                            <IconButton
-                              size="small"
-                              sx={{ color: '#0284c7' }}
-                              onClick={() => {
-                                const isPurchase = voucher.voucher_type === 'Purchase' || voucher.voucher_type === 'Payment' || String(voucher.voucher_no).toUpperCase().startsWith('PUR');
-                                navigate('/entry/voucher-create', {
-                                  state: {
-                                    prefillBill: {
-                                      invoice_no: voucher.voucher_no,
-                                      ledger_name: voucher.ledger_names,
-                                      type: isPurchase ? 'Payable' : 'Receivable',
-                                      voucher_type: isPurchase ? 'Purchase' : 'Sales',
-                                      balance: voucher.total_debit || voucher.total_credit,
-                                      amount: voucher.total_debit || voucher.total_credit
+                        </td>
+                        <td className="voucher-amount-debit">
+                          {parseFloat(voucher.total_debit || 0) > 0 ? (
+                            `₹${parseFloat(voucher.total_debit).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+                          ) : (
+                            <span style={{ color: '#94a3b8' }}>-</span>
+                          )}
+                        </td>
+                        <td className="voucher-amount-credit">
+                          {parseFloat(voucher.total_credit || 0) > 0 ? (
+                            `₹${parseFloat(voucher.total_credit).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+                          ) : (
+                            <span style={{ color: '#94a3b8' }}>-</span>
+                          )}
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          <span className={`voucher-status-chip voucher-status-${voucher.status || 'Approved'}`}>
+                            {voucher.status || 'Approved'}
+                          </span>
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          {voucher.posted !== 0 ? (
+                            <span style={{ color: '#16a34a', fontWeight: 800, fontSize: '12px' }}>Yes</span>
+                          ) : (
+                            <span style={{ color: '#94a3b8', fontWeight: 600, fontSize: '12px' }}>No</span>
+                          )}
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          <Box className="voucher-actions-group">
+                            <Tooltip title="View (Tally Style Details)">
+                              <IconButton size="small" sx={{ color: '#1b5e20' }} className="voucher-action-icon-btn" onClick={() => openDisplay(voucher.id)}>
+                                <VisibilityIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Create Settlement Voucher for this Bill">
+                              <IconButton
+                                size="small"
+                                sx={{ color: '#0284c7' }}
+                                className="voucher-action-icon-btn"
+                                onClick={() => {
+                                  const isPurchase = voucher.voucher_type === 'Purchase' || voucher.voucher_type === 'Payment' || String(voucher.voucher_no).toUpperCase().startsWith('PUR');
+                                  navigate('/entry/voucher-create', {
+                                    state: {
+                                      prefillBill: {
+                                        invoice_no: voucher.voucher_no,
+                                        ledger_name: voucher.ledger_names,
+                                        type: isPurchase ? 'Payable' : 'Receivable',
+                                        voucher_type: isPurchase ? 'Purchase' : 'Sales',
+                                        balance: voucher.total_debit || voucher.total_credit,
+                                        amount: voucher.total_debit || voucher.total_credit
+                                      }
                                     }
-                                  }
-                                });
-                              }}
-                            >
-                              <ReceiptLongIcon fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title="Edit">
-                            <IconButton size="small" color="primary" onClick={() => navigate(`/entry/voucher-create/${voucher.id}`)}>
-                              <EditIcon fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title="Print">
-                            <IconButton size="small" color="inherit" onClick={() => handlePrint(voucher.voucher_no)}>
-                              <PrintIcon fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title="PDF">
-                            <IconButton size="small" color="info" onClick={() => handleDownloadPDF(voucher)}>
-                              <PictureAsPdfIcon fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title="Duplicate">
-                            <IconButton size="small" color="secondary" onClick={() => handleDuplicateVoucher(voucher.id)}>
-                              <ContentCopyIcon fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title="Cancel">
-                            <IconButton size="small" color="warning" onClick={() => handleCancelVoucher(voucher)}>
-                              <CancelIcon fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title="Delete">
-                            <IconButton size="small" color="error" onClick={() => deleteVoucher(voucher.id)}>
-                              <DeleteIcon fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                        </Box>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        )}
+                                  });
+                                }}
+                              >
+                                <ReceiptLongIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Edit Voucher">
+                              <IconButton size="small" color="primary" className="voucher-action-icon-btn" onClick={() => navigate(`/entry/voucher-create/${voucher.id}`)}>
+                                <EditIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Print Voucher">
+                              <IconButton size="small" color="inherit" className="voucher-action-icon-btn" onClick={() => handlePrint(voucher.voucher_no)}>
+                                <PrintIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Export PDF">
+                              <IconButton size="small" sx={{ color: '#0284c7' }} className="voucher-action-icon-btn" onClick={() => handleDownloadPDF(voucher)}>
+                                <PictureAsPdfIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Duplicate Voucher">
+                              <IconButton size="small" color="secondary" className="voucher-action-icon-btn" onClick={() => handleDuplicateVoucher(voucher.id)}>
+                                <ContentCopyIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Cancel Voucher">
+                              <IconButton size="small" sx={{ color: '#d97706' }} className="voucher-action-icon-btn" onClick={() => handleCancelVoucher(voucher)}>
+                                <CancelIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Delete Voucher">
+                              <IconButton size="small" color="error" className="voucher-action-icon-btn" onClick={() => deleteVoucher(voucher.id)}>
+                                <DeleteIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          </Box>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </Box>
 
-        {/* Bottom Professional Summaries */}
-        {!loading && vouchers.length > 0 && (
-          <Box sx={{ p: 2, bgcolor: '#1a2332', color: '#fff', borderTop: '2px solid #2e7d32' }}>
-            <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 2, textAlign: 'center' }}>
-              <Box>
-                <Typography variant="caption" display="block" color="grey.400">TOTAL VOUCHERS</Typography>
-                <Typography variant="h6" sx={{ fontWeight: 'bold', color: '#a5d6a7' }}>{totalCount}</Typography>
+            {/* Bottom Period Total & Closing Balance Banner - Matching ERP screenshot format */}
+            <Box className="voucher-totals-banner">
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <span className="voucher-totals-label">PERIOD TOTAL & REGISTER BALANCE:</span>
               </Box>
-              <Box>
-                <Typography variant="caption" display="block" color="grey.400">TOTAL DEBIT</Typography>
-                <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
-                  ₹{totalDebitSum.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                </Typography>
-              </Box>
-              <Box>
-                <Typography variant="caption" display="block" color="grey.400">TOTAL CREDIT</Typography>
-                <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
-                  ₹{totalCreditSum.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                </Typography>
-              </Box>
-              <Box>
-                <Typography variant="caption" display="block" color="grey.400">DIFFERENCE</Typography>
-                <Typography
-                  variant="h6"
-                  sx={{
-                    fontWeight: 900,
-                    color: Math.abs(difference) < 0.01 ? '#81c784' : '#e57373'
-                  }}
-                >
-                  ₹{difference.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                  {Math.abs(difference) < 0.01 ? ' (Balanced ✔)' : ' (Unbalanced ❌)'}
-                </Typography>
+
+              <Box className="voucher-totals-figures">
+                <Box className="voucher-total-block">
+                  <span className="voucher-total-caption">Total Debit:</span>
+                  <span className="voucher-total-num-debit">
+                    ₹{totalDebitSum.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                  </span>
+                </Box>
+                <Box className="voucher-total-block">
+                  <span className="voucher-total-caption">Total Credit:</span>
+                  <span className="voucher-total-num-credit">
+                    ₹{totalCreditSum.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                  </span>
+                </Box>
+                <Box className="voucher-total-block">
+                  <span className="voucher-total-caption">Difference:</span>
+                  <span className={`voucher-total-status-badge ${Math.abs(difference) < 0.01 ? 'voucher-total-balanced' : 'voucher-total-unbalanced'}`}>
+                    ₹{difference.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                    {Math.abs(difference) < 0.01 ? ' (Balanced ✔)' : ' (Unbalanced ❌)'}
+                  </span>
+                </Box>
                 {Math.abs(difference) > 0.01 && (
                   <Button
                     size="small"
@@ -679,7 +806,6 @@ const VoucherList = () => {
                     onClick={handleReconcile}
                     disabled={reconciling}
                     sx={{
-                      mt: 0.5,
                       fontSize: '0.75rem',
                       py: 0.3,
                       px: 1.5,
@@ -690,14 +816,61 @@ const VoucherList = () => {
                       '&:hover': { bgcolor: '#d97706' }
                     }}
                   >
-                    {reconciling ? 'Balancing...' : '⚡ Reconcile Registers'}
+                    {reconciling ? 'Balancing...' : '⚡ Balance Now'}
                   </Button>
                 )}
               </Box>
             </Box>
+
+            {/* Bottom Pagination Bar */}
+            <Box className="voucher-pagination-toolbar" sx={{ borderTop: '1px solid #e2e8f0', borderBottom: 'none' }}>
+              <Box className="voucher-pagination-info">
+                <span>Showing <strong>{startRecord}</strong> to <strong>{endRecord}</strong> of <strong>{totalCount}</strong> vouchers</span>
+              </Box>
+
+              {rowsPerPage !== 'All' && totalPages > 1 && (
+                <Box className="voucher-page-nav">
+                  <Button
+                    size="small"
+                    disabled={safePage === 0}
+                    onClick={() => setPage(0)}
+                    className="voucher-page-btn"
+                  >
+                    First
+                  </Button>
+                  <Button
+                    size="small"
+                    disabled={safePage === 0}
+                    onClick={() => setPage(prev => Math.max(0, prev - 1))}
+                    className="voucher-page-btn"
+                  >
+                    Previous
+                  </Button>
+                  <Typography variant="body2" sx={{ fontWeight: 800, px: 1, color: '#1e293b', fontSize: '12px' }}>
+                    Page {safePage + 1} of {totalPages}
+                  </Typography>
+                  <Button
+                    size="small"
+                    disabled={safePage >= totalPages - 1}
+                    onClick={() => setPage(prev => Math.min(totalPages - 1, prev + 1))}
+                    className="voucher-page-btn"
+                  >
+                    Next
+                  </Button>
+                  <Button
+                    size="small"
+                    disabled={safePage >= totalPages - 1}
+                    onClick={() => setPage(totalPages - 1)}
+                    className="voucher-page-btn"
+                  >
+                    Last
+                  </Button>
+                </Box>
+              )}
+            </Box>
           </Box>
         )}
-      </Paper>
+      </Box>
 
       {/* Professional Blue & White Voucher Display Dialog */}
       <Dialog

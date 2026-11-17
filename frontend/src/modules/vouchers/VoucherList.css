@@ -1,0 +1,494 @@
+/* ==========================================================================
+   VOUCHER DISPLAY & AUDIT REGISTER - PROFESSIONAL ENTERPRISE STYLES
+   Blue & White Theme matching ERP standard information architecture
+   ========================================================================== */
+
+.voucher-display-container {
+  padding: 16px 20px;
+  background-color: #f0f6ff;
+  min-height: 100vh;
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+  color: #1e293b;
+}
+
+/* --- Header Title Bar --- */
+.voucher-header-bar {
+  background: linear-gradient(135deg, #1f4fb2 0%, #153e90 100%);
+  color: #ffffff;
+  padding: 12px 20px;
+  border-radius: 6px 6px 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: 0 2px 6px rgba(15, 39, 86, 0.2);
+  margin-bottom: 0;
+}
+
+.voucher-header-title {
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: #ffffff;
+  text-align: center;
+  flex: 1;
+}
+
+.voucher-header-btn {
+  background: #ffffff !important;
+  color: #1f4fb2 !important;
+  font-weight: 700 !important;
+  font-size: 13px !important;
+  text-transform: none !important;
+  padding: 5px 14px !important;
+  border-radius: 4px !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1) !important;
+  transition: all 0.15s ease-in-out !important;
+}
+
+.voucher-header-btn:hover {
+  background: #f8fafc !important;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15) !important;
+}
+
+.voucher-header-btn-green {
+  background: #ffffff !important;
+  color: #15803d !important;
+  font-weight: 700 !important;
+  font-size: 13px !important;
+  text-transform: none !important;
+  padding: 5px 14px !important;
+  border-radius: 4px !important;
+  transition: all 0.15s ease-in-out !important;
+}
+
+.voucher-header-btn-green:hover {
+  background: #f0fdf4 !important;
+}
+
+/* --- Quick Financial KPI Summary Banner --- */
+.voucher-kpi-bar {
+  background: #0f2756;
+  color: #ffffff;
+  padding: 10px 20px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  border-bottom: 2px solid #2563eb;
+  margin-bottom: 14px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+}
+
+.voucher-kpi-item {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 12px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  border-left: 3px solid #60a5fa;
+}
+
+.voucher-kpi-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #93c5fd;
+  letter-spacing: 0.5px;
+}
+
+.voucher-kpi-value {
+  font-size: 16px;
+  font-weight: 800;
+  color: #ffffff;
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px;
+}
+
+.voucher-kpi-status-ok {
+  color: #86efac !important;
+}
+
+.voucher-kpi-status-warn {
+  color: #fca5a5 !important;
+}
+
+/* --- Filter & Search Section --- */
+.voucher-filter-card {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 14px 18px;
+  margin-bottom: 14px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.voucher-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.voucher-filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.voucher-filter-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+/* --- Table Card & Pagination Toolbar --- */
+.voucher-table-card {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+  overflow: hidden;
+}
+
+.voucher-pagination-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 16px;
+  background-color: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.voucher-pagination-info {
+  font-size: 13px;
+  font-weight: 700;
+  color: #334155;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.voucher-density-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.voucher-page-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.voucher-page-btn {
+  background: #ffffff !important;
+  color: #334155 !important;
+  border: 1px solid #cbd5e1 !important;
+  font-weight: 700 !important;
+  font-size: 12px !important;
+  text-transform: none !important;
+  padding: 3px 10px !important;
+  min-width: 32px !important;
+  height: 30px !important;
+  border-radius: 4px !important;
+}
+
+.voucher-page-btn:hover:not(:disabled) {
+  background: #eff6ff !important;
+  border-color: #93c5fd !important;
+  color: #1d4ed8 !important;
+}
+
+.voucher-page-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.voucher-page-btn-active {
+  background: #1f4fb2 !important;
+  color: #ffffff !important;
+  border-color: #1f4fb2 !important;
+}
+
+/* --- Main Table Styles --- */
+.voucher-table-container {
+  overflow-x: auto;
+  overflow-y: visible;
+  /* Accommodates maximum 10 rows cleanly without internal clipping */
+  min-height: 420px;
+}
+
+.voucher-enterprise-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+}
+
+.voucher-enterprise-table thead th {
+  background: #1f4fb2;
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 10px 12px;
+  text-align: left;
+  border-right: 1px solid #3b6cd4;
+  border-bottom: 2px solid #163d8c;
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.voucher-enterprise-table thead th:last-child {
+  border-right: none;
+}
+
+.voucher-enterprise-table tbody tr {
+  height: 40px;
+  transition: background-color 0.12s ease;
+}
+
+.voucher-enterprise-table tbody tr:nth-child(even) {
+  background-color: #fcfdfe;
+}
+
+.voucher-enterprise-table tbody tr:hover {
+  background-color: #f0f7ff !important;
+}
+
+.voucher-enterprise-table tbody td {
+  padding: 7px 12px;
+  border-bottom: 1px solid #e2e8f0;
+  color: #1e293b;
+  vertical-align: middle;
+}
+
+/* Row elements styling */
+.voucher-row-num {
+  font-weight: 700;
+  color: #64748b;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  width: 45px;
+}
+
+.voucher-row-no-link {
+  font-weight: 800;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: #1b5e20;
+  cursor: pointer;
+  text-decoration: underline;
+  transition: color 0.12s;
+}
+
+.voucher-row-no-link:hover {
+  color: #0d3c13;
+}
+
+.voucher-row-date {
+  font-weight: 600;
+  color: #334155;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.voucher-type-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.voucher-type-Payment {
+  background-color: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #fca5a5;
+}
+
+.voucher-type-Receipt {
+  background-color: #dcfce7;
+  color: #15803d;
+  border: 1px solid #86efac;
+}
+
+.voucher-type-Contra {
+  background-color: #e0f2fe;
+  color: #0369a1;
+  border: 1px solid #7dd3fc;
+}
+
+.voucher-type-Journal {
+  background-color: #f3e8ff;
+  color: #7e22ce;
+  border: 1px solid #d8b4fe;
+}
+
+.voucher-type-Purchase {
+  background-color: #ede9fe;
+  color: #5b21b6;
+  border: 1px solid #c4b5fd;
+}
+
+.voucher-type-Sales {
+  background-color: #ffedd5;
+  color: #c2410c;
+  border: 1px solid #fed7aa;
+}
+
+.voucher-amount-debit {
+  font-weight: 800;
+  color: #b91c1c;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.voucher-amount-credit {
+  font-weight: 800;
+  color: #15803d;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Status Indicator */
+.voucher-status-chip {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.voucher-status-Approved, .voucher-status-Submitted {
+  background: #f0fdf4;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+
+.voucher-status-Draft {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+}
+
+.voucher-status-Locked {
+  background: #fffbeb;
+  color: #b45309;
+  border: 1px solid #fde68a;
+}
+
+.voucher-status-Cancelled {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+/* --- Period Totals & Closing Balance Strip --- */
+.voucher-totals-banner {
+  background: #0f172a;
+  color: #ffffff;
+  padding: 12px 20px;
+  border-top: 2px solid #2563eb;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+}
+
+.voucher-totals-label {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.voucher-totals-figures {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.voucher-total-block {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.voucher-total-caption {
+  font-size: 11px;
+  color: #94a3b8;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.voucher-total-num-debit {
+  font-size: 16px;
+  font-weight: 800;
+  color: #f87171;
+  font-variant-numeric: tabular-nums;
+}
+
+.voucher-total-num-credit {
+  font-size: 16px;
+  font-weight: 800;
+  color: #4ade80;
+  font-variant-numeric: tabular-nums;
+}
+
+.voucher-total-status-badge {
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.voucher-total-balanced {
+  background: #14532d;
+  color: #86efac;
+  border: 1px solid #22c55e;
+}
+
+.voucher-total-unbalanced {
+  background: #7f1d1d;
+  color: #fca5a5;
+  border: 1px solid #ef4444;
+}
+
+/* Actions Column Buttons */
+.voucher-actions-group {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+.voucher-action-icon-btn {
+  padding: 4px !important;
+  border-radius: 4px !important;
+  transition: background-color 0.1s ease !important;
+}
+
+.voucher-action-icon-btn:hover {
+  background-color: rgba(31, 79, 178, 0.1) !important;
+}

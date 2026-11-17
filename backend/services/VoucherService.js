@@ -1,222 +1,65 @@
 const db = require('../config/database');
-const { createEntry, deleteEntriesByReference, getEntriesByVoucher, resolveLedgerId } = require('./LedgerService');
-
-async function getTableColumns(tableName) {
-  try {
-    const result = await db.query(`PRAGMA table_info(${tableName})`);
-    return new Set((result.rows || []).map((row) => row.name));
-  } catch (error) {
-    return new Set();
-  }
-}
+const AccountingEngine = require('./AccountingEngine');
+const { getEntriesByVoucher } = require('./LedgerService');
 
 async function ensureVoucherTables() {
-  try {
-    await db.run(`
-      CREATE TABLE IF NOT EXISTS voucher (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        voucher_type TEXT NOT NULL,
-        voucher_no TEXT UNIQUE NOT NULL,
-        date TEXT NOT NULL,
-        reference_no TEXT,
-        narration TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-  } catch (error) {
-    console.warn('Voucher table setup skipped:', error.message);
-  }
-
-  try {
-    await db.run(`
-      CREATE TABLE IF NOT EXISTS voucher_entry (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        voucher_id INTEGER NOT NULL,
-        type TEXT NOT NULL,
-        ledger_id INTEGER,
-        debit REAL DEFAULT 0,
-        credit REAL DEFAULT 0,
-        remarks TEXT,
-        FOREIGN KEY (voucher_id) REFERENCES voucher(id) ON DELETE CASCADE
-      )
-    `);
-  } catch (error) {
-    console.warn('Voucher entry table setup skipped:', error.message);
-  }
-
-  try {
-    const columns = await getTableColumns('voucher_entry');
-    if (!columns.has('ledger_name')) {
-      try {
-        await db.run('ALTER TABLE voucher_entry ADD COLUMN ledger_name TEXT');
-      } catch (_) {}
-      try {
-        await db.run('CREATE INDEX IF NOT EXISTS idx_voucher_entry_voucher_id ON voucher_entry(voucher_id)');
-      } catch (_) {}
-    }
-  } catch (error) {
-    console.warn('Voucher index setup skipped:', error.message);
-  }
+  const cId = AccountingEngine.getActiveCompanyId();
+  await AccountingEngine.ensureAccountingSchema(db.forCompany(cId));
 }
 
-async function generateVoucherNumber(voucherType) {
-  await ensureVoucherTables();
-  const normalized = String(voucherType || '').toUpperCase();
-  const prefixMap = {
-    PURCHASE: 'PUR',
-    SALES: 'SAL',
-    ADVANCE: 'ADV',
-    PAYMENT: 'PAY',
-    RECEIPT: 'REC',
-    JOURNAL: 'JNL',
-    CONTRA: 'CON',
-  };
-  const prefix = prefixMap[normalized] || 'VOC';
-
-  const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const existingRes = await db.query(
-    'SELECT voucher_no FROM voucher WHERE voucher_no LIKE ? ORDER BY id DESC',
-    [`${prefix}%`]
-  );
-  let maxNum = 0;
-  const exactRegex = new RegExp(`^${escapedPrefix}-?(\\d+)$`, 'i');
-  for (const row of existingRes.rows || []) {
-    const vNo = String(row.voucher_no || '').trim();
-    const match = vNo.match(exactRegex);
-    if (match) {
-      const parsed = parseInt(match[1], 10);
-      if (!Number.isNaN(parsed) && parsed > maxNum) {
-        maxNum = parsed;
-      }
-    }
-  }
-  let nextNum = maxNum + 1;
-
-  while (true) {
-    const candidate = `${prefix}${String(nextNum).padStart(5, '0')}`;
-    const check = await db.query('SELECT id FROM voucher WHERE voucher_no = ? LIMIT 1', [candidate]);
-    if (!check.rows || check.rows.length === 0) {
-      return candidate;
-    }
-    nextNum++;
-  }
+async function generateVoucherNumber(voucherType, companyId = null, date = null) {
+  return AccountingEngine.nextVoucherNumber({
+    companyId: AccountingEngine.getActiveCompanyId(companyId),
+    voucherType: voucherType || 'Journal',
+    date,
+  });
 }
 
 async function createVoucher(params = {}) {
-  await ensureVoucherTables();
+  const companyId = AccountingEngine.getActiveCompanyId(params.companyId || params.company_id);
   const voucherType = params.voucherType || params.voucher_type || 'Journal';
-  const voucherNo = params.voucherNo || params.voucher_no || await generateVoucherNumber(voucherType);
   const date = params.date || params.voucher_date || new Date().toISOString().split('T')[0];
   const referenceNo = params.referenceNo || params.reference_no || '';
   const narration = params.narration || '';
   const entries = params.entries || [];
+  const sourceModule = params.sourceModule || params.source_module || null;
+  const sourceId = params.sourceId ?? params.source_id ?? null;
+  const postingKey = params.postingKey || params.posting_key || null;
 
-  if (!entries || !Array.isArray(entries) || entries.length < 2) {
-    throw new Error(`Cannot create ${voucherType} voucher ${voucherNo}: At least 2 entries required.`);
-  }
+  const lines = entries.map((entry) => ({
+    ledgerId: entry.ledgerId ?? entry.ledger_id ?? null,
+    ledgerName: entry.ledgerName || entry.ledger_name || null,
+    groupName: entry.groupName || entry.group_name || null,
+    ledgerType: entry.ledgerType || entry.ledger_type || null,
+    debit: entry.debit ?? entry.debit_amount ?? 0,
+    credit: entry.credit ?? entry.credit_amount ?? 0,
+    remarks: entry.remarks || entry.narration || '',
+    particulars: entry.particulars || entry.remarks || entry.narration || '',
+    referenceId: entry.referenceId ?? entry.reference_id ?? sourceId ?? (referenceNo || null),
+    referenceType: entry.referenceType || entry.reference_type || sourceModule || String(voucherType).toLowerCase(),
+    transactionId: entry.transactionId ?? entry.transaction_id ?? sourceId ?? (referenceNo || null),
+    transactionType: entry.transactionType || entry.transaction_type || sourceModule || String(voucherType).toLowerCase(),
+  }));
 
-  // Pre-validate double-entry balance and resolve ledgers BEFORE beginning transaction
-  let totalDebit = 0;
-  let totalCredit = 0;
-  const preparedEntries = [];
-  for (const entry of entries) {
-    const debitVal = Number(entry.debit ?? entry.debit_amount ?? 0);
-    const creditVal = Number(entry.credit ?? entry.credit_amount ?? 0);
-    if (debitVal < 0 || creditVal < 0) {
-      throw new Error(`Cannot create ${voucherType} voucher ${voucherNo}: Debit and credit amounts cannot be negative.`);
-    }
-    totalDebit += debitVal;
-    totalCredit += creditVal;
-
-    let ledgerName = entry.ledgerName || entry.ledger_name;
-    const resolvedLedgerId = entry.ledgerId ?? entry.ledger_id ?? (ledgerName ? await resolveLedgerId(ledgerName) : 1);
-    const safeLedgerId = (resolvedLedgerId && Number(resolvedLedgerId) > 0) ? Number(resolvedLedgerId) : 1;
-
-    if (!ledgerName && safeLedgerId > 0) {
-      try {
-        const lmRes = await db.query('SELECT name FROM ledgermaster WHERE id = ?', [safeLedgerId]);
-        if (lmRes.rows && lmRes.rows.length > 0) ledgerName = lmRes.rows[0].name;
-      } catch (e) {}
-    }
-    if (!ledgerName) ledgerName = 'General Ledger';
-
-    preparedEntries.push({
-      type: entry.type || (debitVal > 0 ? 'Dr' : 'Cr'),
-      ledgerId: safeLedgerId,
-      ledgerName,
-      debitVal,
-      creditVal,
-      remarksVal: entry.remarks || entry.narration || '',
-      particulars: entry.particulars || entry.remarks || entry.narration || '',
-      referenceId: entry.referenceId || referenceNo || null,
-      referenceType: entry.referenceType || 'transaction',
-      transactionId: entry.transactionId || referenceNo || null,
-      transactionType: entry.transactionType || 'transaction'
-    });
-  }
-
-  if (Math.abs(totalDebit - totalCredit) > 0.01) {
-    throw new Error(
-      `Cannot create ${voucherType} voucher ${voucherNo}: Debit (₹${totalDebit.toFixed(2)}) and Credit (₹${totalCredit.toFixed(2)}) do not balance!`
-    );
-  }
-  if (totalDebit <= 0) {
-    throw new Error(`Cannot create ${voucherType} voucher ${voucherNo}: Voucher amount must be greater than 0.`);
-  }
-
-  const voucherNumber = voucherNo;
-  const conn = await db.getConnection();
-  try {
-    await conn.beginTransaction();
-
-    const voucherResult = await conn.run(
-      'INSERT INTO voucher (voucher_type, voucher_no, date, reference_no, narration) VALUES (?, ?, ?, ?, ?)',
-      [voucherType, voucherNumber, date, referenceNo, narration]
-    );
-    const voucherId = voucherResult.lastInsertRowid || voucherResult.lastID;
-
-    for (const item of preparedEntries) {
-      await conn.run(
-        'INSERT INTO voucher_entry (voucher_id, type, ledger_id, ledger_name, debit, credit, remarks) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [voucherId, item.type, item.ledgerId, item.ledgerName, item.debitVal, item.creditVal, item.remarksVal]
-      );
-
-      await conn.run(`
-        INSERT INTO ledger_entries (
-          ledger_id, ledger_name, date, voucher_type, voucher_no, debit, credit,
-          reference_id, reference_type, particulars, voucher_id, transaction_id, transaction_type
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, [
-        item.ledgerId,
-        item.ledgerName,
-        date,
-        voucherType,
-        voucherNumber,
-        item.debitVal,
-        item.creditVal,
-        item.referenceId,
-        item.referenceType,
-        item.particulars,
-        voucherId,
-        item.transactionId,
-        item.transactionType
-      ]);
-    }
-
-    await conn.commit();
-    return { id: voucherId, voucherId, voucherNo: voucherNumber, voucher_no: voucherNumber, voucherType };
-  } catch (entryErr) {
-    try {
-      await conn.rollback();
-    } catch (_) {}
-    throw entryErr;
-  } finally {
-    await conn.release();
-  }
+  return AccountingEngine.postVoucher({
+    companyId,
+    voucherType,
+    prefix: params.prefix || null,
+    existingVoucherNo: params.voucherNo || params.voucher_no || null,
+    date,
+    referenceNo,
+    narration,
+    sourceModule: sourceModule || AccountingEngine.normalizeVoucherType(voucherType).toLowerCase().replace(/\s+/g, '_'),
+    sourceId: sourceId ?? (/^\d+$/.test(String(referenceNo)) ? Number(referenceNo) : null),
+    postingKey,
+    lines,
+    allowUpdate: Boolean(params.allowUpdate),
+    status: params.status || 'Approved',
+  });
 }
 
 async function createPurchaseVoucher({
+  companyId = null,
   purchaseId,
   supplier,
   date,
@@ -227,13 +70,14 @@ async function createPurchaseVoucher({
   netAmount = 0,
   narration = '',
 }) {
-  const voucherNo = await generateVoucherNumber('Purchase');
-  const entries = [];
+  const cId = AccountingEngine.getActiveCompanyId(companyId);
+  const lines = [];
   const particulars = `Purchase Inv: ${invNo || purchaseId}`;
 
-  if (supplier) {
-    entries.push({
+  if (supplier && Number(netAmount || 0) > 0) {
+    lines.push({
       ledgerName: supplier,
+      ledgerType: 'Supplier',
       debit: 0,
       credit: Number(netAmount || 0),
       remarks: particulars,
@@ -245,8 +89,9 @@ async function createPurchaseVoucher({
   }
 
   if (Number(baseAmount || 0) > 0) {
-    entries.push({
+    lines.push({
       ledgerName: 'Purchase Account',
+      ledgerType: 'Expense',
       debit: Number(baseAmount || 0),
       credit: 0,
       remarks: particulars,
@@ -258,8 +103,9 @@ async function createPurchaseVoucher({
   }
 
   if (Number(taxAmount || 0) > 0) {
-    entries.push({
+    lines.push({
       ledgerName: 'Input Tax',
+      ledgerType: 'Tax',
       debit: Number(taxAmount || 0),
       credit: 0,
       remarks: `Tax on ${particulars}`,
@@ -271,8 +117,9 @@ async function createPurchaseVoucher({
   }
 
   if (Number(discAmount || 0) > 0) {
-    entries.push({
+    lines.push({
       ledgerName: 'Discount Received',
+      ledgerType: 'Income',
       debit: 0,
       credit: Number(discAmount || 0),
       remarks: `Discount on ${particulars}`,
@@ -283,32 +130,41 @@ async function createPurchaseVoucher({
     });
   }
 
-  return createVoucher({
+  return AccountingEngine.postVoucher({
+    companyId: cId,
     voucherType: 'Purchase',
-    voucherNo,
+    prefix: 'PUR',
     date,
     referenceNo: String(purchaseId || ''),
     narration: narration || `Purchase ${invNo || purchaseId}`,
-    entries,
+    sourceModule: 'purchase',
+    sourceId: Number(purchaseId),
+    postingKey: `purchase:${purchaseId}`,
+    lines,
+    allowUpdate: true,
+    preserveVoucherNoOnUpdate: true,
   });
 }
 
-async function deleteVoucherChain(referenceNo, voucherType = 'Purchase') {
-  await ensureVoucherTables();
-  const vouchers = await db.query('SELECT id, voucher_no FROM voucher WHERE reference_no = ? AND voucher_type = ? ORDER BY id DESC', [String(referenceNo), voucherType]);
-
-  for (const voucher of vouchers.rows || []) {
-    await db.run('DELETE FROM voucher_entry WHERE voucher_id = ?', [voucher.id]);
-    await deleteEntriesByReference(referenceNo, 'purchase');
-    await db.run('DELETE FROM voucher WHERE id = ?', [voucher.id]);
-  }
-
+async function deleteVoucherChain(referenceNo, voucherType = 'Purchase', companyId = null) {
+  const cId = AccountingEngine.getActiveCompanyId(companyId);
+  const canonical = AccountingEngine.normalizeVoucherType(voucherType);
+  const sourceMod = canonical.toLowerCase().replace(/\s+/g, '_');
+  const idNum = /^\d+$/.test(String(referenceNo)) ? Number(referenceNo) : null;
+  await AccountingEngine.deleteVoucherBySource({
+    companyId: cId,
+    sourceModule: sourceMod,
+    sourceId: idNum,
+    voucherTypes: [voucherType, canonical],
+    referenceNo: String(referenceNo),
+  });
   return true;
 }
 
-async function getVoucherEntries(voucherId) {
+async function getVoucherEntries(voucherId, companyId = null) {
+  const cId = AccountingEngine.getActiveCompanyId(companyId);
   await ensureVoucherTables();
-  const result = await db.query('SELECT * FROM voucher_entry WHERE voucher_id = ? ORDER BY id ASC', [voucherId]);
+  const result = await db.forCompany(cId).query('SELECT * FROM voucher_entry WHERE voucher_id = ? ORDER BY id ASC', [voucherId]);
   return result.rows;
 }
 

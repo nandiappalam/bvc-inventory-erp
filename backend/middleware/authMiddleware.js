@@ -45,8 +45,6 @@ async function getAuthorizedUser(userId, companyId) {
         AND LOWER(TRIM(COALESCE(u.status, 'Active'))) NOT IN ('inactive', 'disabled', '0')
         AND (
           u.company_id = ?
-          OR LOWER(TRIM(u.username)) IN ('admin', 'staff')
-          OR LOWER(TRIM(COALESCE(u.role, ''))) IN ('admin', 'manager', 'superadmin')
           OR EXISTS (
             SELECT 1
               FROM user_company_access a
