@@ -109,8 +109,10 @@ export const DynamicMasterDisplay = ({ configKey }) => {
         if (copy.deduction_name !== undefined && copy.ded_name === undefined) copy.ded_name = copy.deduction_name;
         if (copy.code !== undefined && copy.ded_code === undefined) copy.ded_code = copy.code;
         // Status & is_active mappings
-        if (copy.is_active !== undefined) {
-          copy.status = Number(copy.is_active) === 1 ? 'Active' : 'Inactive';
+        if (copy.is_active !== undefined && copy.is_active !== null) {
+          const activeFlag = copy.is_active === true || copy.is_active === 1 || ['1', 'true', 't', 'active', 'yes'].includes(String(copy.is_active).trim().toLowerCase());
+          copy.status = activeFlag ? 'Active' : 'Inactive';
+          copy.is_active = activeFlag ? 1 : 0;
         }
         if (copy.status !== undefined && copy.is_active === undefined) {
           copy.is_active = String(copy.status).toLowerCase() === 'active' ? 1 : 0;
@@ -134,7 +136,11 @@ export const DynamicMasterDisplay = ({ configKey }) => {
       loadData(true);
     };
     window.addEventListener('erp_company_changed', handleCompanyChange);
-    return () => window.removeEventListener('erp_company_changed', handleCompanyChange);
+    window.addEventListener('erp_master_updated', handleCompanyChange);
+    return () => {
+      window.removeEventListener('erp_company_changed', handleCompanyChange);
+      window.removeEventListener('erp_master_updated', handleCompanyChange);
+    };
   }, [tableName, location.key]);
 
   const handleDelete = async (row) => {

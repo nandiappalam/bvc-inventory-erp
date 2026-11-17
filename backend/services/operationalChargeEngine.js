@@ -346,6 +346,7 @@ async function _ensureOperationalTablesImpl(companyId = 1) {
   // Seed default rate masters and default parties if empty
   await seedDefaultRateMasters(companyId);
   await seedDefaultParties(companyId);
+  await backfillMissingLoadmanParties(companyId);
 
   if (db.isPostgres && typeof db.ensurePostgresCompanySequences === 'function') {
     await db.ensurePostgresCompanySequences(companyId).catch(() => {});
@@ -382,6 +383,280 @@ async function seedDefaultParties(companyId = 1) {
     }
   } catch (err) {
     console.warn('[operationalChargeEngine] seedDefaultParties non-fatal:', err.message);
+  }
+}
+
+const EXCLUDED_LOADMAN_NAMES = new Set([
+  '',
+  'general labour pool',
+  'loadman',
+  'loadman charges',
+  'loadman payable',
+  'labour charges',
+  'wages',
+  'unloading charges',
+  'loading charges',
+  'inward loadman team',
+  'outward loading team',
+  'manual',
+  'none',
+  'null',
+  'undefined',
+  'n/a',
+  'direct expenses',
+  'indirect expenses',
+  'current liabilities'
+]);
+
+function normalizeCandidateLoadmanName(rawName) {
+  if (rawName === null || rawName === undefined) return '';
+  const cleaned = String(rawName)
+    .trim()
+    .replace(/\s*\((Worker|Loadman|Loadmen|Labour|Driver|Helper|Artisan|Contractor)\)$/i, '')
+    .trim();
+  if (!cleaned) return '';
+  if (/^\d+$/.test(cleaned)) return '';
+  const lower = cleaned.toLowerCase();
+  if (EXCLUDED_LOADMAN_NAMES.has(lower)) return '';
+  if (/\b(charges|payable|expense|recovery|account|gst|cgst|sgst|igst|tds|vat|round off)\b/i.test(cleaned)) {
+    return '';
+  }
+  return cleaned;
+}
+
+/**
+ * Idempotently recover previously created or used Loadman masters into operational_parties
+ * for companies whose operational_parties table only has the seeded General Labour Pool
+ * (e.g., after schema sync, legacy person_master usage, or backup restores).
+ */
+async function backfillMissingLoadmanParties(companyId = 1) {
+  const pfx = getPrefix(companyId);
+  const companyDb = typeof db.forCompany === 'function' ? db.forCompany(companyId) : db;
+
+  try {
+    const existingRows = await companyDb.all(`SELECT name, party_code FROM ${pfx}operational_parties`).catch(() => []);
+    const existingNames = new Set();
+    const existingCodes = new Set();
+    let maxLmNum = 0;
+
+    for (const r of existingRows || []) {
+      const n = String(r.name || '').trim().toLowerCase();
+      if (n) existingNames.add(n);
+      const code = String(r.party_code || '').trim();
+      if (code) {
+        existingCodes.add(code.toUpperCase());
+        const m = code.match(/^LM-(\d+)$/i);
+        if (m) maxLmNum = Math.max(maxLmNum, parseInt(m[1], 10) || 0);
+      }
+    }
+
+    // Respect records intentionally deleted to Recycle Bin
+    const deletedNames = new Set();
+    try {
+      const binRows = await companyDb.all(
+        `SELECT title, record_data FROM recycle_bin WHERE LOWER(COALESCE(module_name, '')) LIKE '%operational%' OR LOWER(COALESCE(module_name, '')) LIKE '%loadman%'`
+      );
+      for (const b of binRows || []) {
+        const t = String(b.title || '').trim().toLowerCase();
+        if (t) deletedNames.add(t);
+        if (b.record_data) {
+          try {
+            const parsed = typeof b.record_data === 'string' ? JSON.parse(b.record_data) : b.record_data;
+            const recName = parsed?.record?.name || parsed?.name;
+            if (recName) deletedNames.add(String(recName).trim().toLowerCase());
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
+
+    const candidates = new Map();
+    const upsertCandidate = (rawName, meta = {}) => {
+      const cleanName = normalizeCandidateLoadmanName(rawName);
+      if (!cleanName) return;
+      const key = cleanName.toLowerCase();
+      if (existingNames.has(key) || deletedNames.has(key)) return;
+
+      const prev = candidates.get(key) || {
+        name: cleanName,
+        print_name: cleanName,
+        contact_person: null,
+        phone: null,
+        phone_res: null,
+        phone_off: null,
+        address: null,
+        area: null,
+        opening_balance: 0,
+        per_kg_amount: 0,
+        ledger_id: null
+      };
+
+      candidates.set(key, {
+        name: prev.name || cleanName,
+        print_name: prev.print_name || meta.print_name || cleanName,
+        contact_person: prev.contact_person || meta.contact_person || null,
+        phone: prev.phone || meta.phone || null,
+        phone_res: prev.phone_res || meta.phone_res || null,
+        phone_off: prev.phone_off || meta.phone_off || null,
+        address: prev.address || meta.address || null,
+        area: prev.area || meta.area || null,
+        opening_balance: prev.opening_balance || Number(meta.opening_balance || 0) || 0,
+        per_kg_amount: prev.per_kg_amount > 0 ? prev.per_kg_amount : (Number(meta.per_kg_amount || 0) || 0),
+        ledger_id: prev.ledger_id || meta.ledger_id || null
+      });
+    };
+
+    // 1. Legacy person_master
+    try {
+      const persons = await companyDb.all(`SELECT * FROM person_master`);
+      for (const p of persons || []) {
+        const st = String(p.status || 'Active').trim().toLowerCase();
+        if (st === 'inactive' || st === 'deleted' || st === '0' || st === 'false') continue;
+        upsertCandidate(p.name, {
+          print_name: p.print_name || p.name,
+          contact_person: p.contact_person || null,
+          address: p.address || null,
+          area: p.area || null,
+          phone: p.mobile || p.phone_off || p.phone_res || null,
+          phone_res: p.phone_res || null,
+          phone_off: p.phone_off || null
+        });
+      }
+    } catch (_) {}
+
+    // 2. Worker / Loadman ledgers in ledgermaster
+    try {
+      const lmRows = await companyDb.all(`
+        SELECT id, COALESCE(NULLIF(TRIM(ledger_name), ''), name) AS name, printname,
+               under, group_name, ledger_type,
+               COALESCE(opening_balance, openingbalance, 0) AS opening_balance,
+               status
+        FROM ledgermaster
+        WHERE LOWER(TRIM(COALESCE(ledger_type, ''))) IN ('worker', 'loadman', 'loadmen', 'labour', 'unload_worker')
+           OR LOWER(TRIM(COALESCE(under, group_name, ''))) LIKE '%loadman%'
+           OR LOWER(TRIM(COALESCE(under, group_name, ''))) LIKE '%worker%'
+      `);
+      for (const lm of lmRows || []) {
+        const st = String(lm.status || 'Active').trim().toLowerCase();
+        if (st === 'inactive' || st === 'deleted' || st === '0' || st === 'false') continue;
+        upsertCandidate(lm.name, {
+          print_name: lm.printname || lm.name,
+          opening_balance: Number(lm.opening_balance || 0),
+          ledger_id: lm.id || null
+        });
+      }
+    } catch (_) {}
+
+    // 3. Operational charges history
+    try {
+      const ocRows = await companyDb.all(`
+        SELECT DISTINCT party_name
+        FROM ${pfx}operational_charges
+        WHERE UPPER(COALESCE(party_category, charge_category, '')) IN ('LOADMAN', 'LOADMEN', 'WORKER', 'UNLOAD_WORKER', 'HELPER', 'LABOUR')
+          AND party_name IS NOT NULL AND TRIM(party_name) != ''
+      `);
+      for (const oc of ocRows || []) {
+        upsertCandidate(oc.party_name);
+      }
+    } catch (_) {}
+
+    // 4. Transaction tables referencing loadman_name
+    for (const tbl of ['purchases', 'sales', 'flour_out', 'cold_storage_vouchers', 'quotations']) {
+      try {
+        let rows;
+        try {
+          rows = await companyDb.all(
+            `SELECT TRIM(loadman_name) AS name, MAX(COALESCE(loadman_rate_per_kg, 0)) AS rate
+             FROM ${tbl}
+             WHERE loadman_name IS NOT NULL AND TRIM(loadman_name) != ''
+             GROUP BY TRIM(loadman_name)`
+          );
+        } catch (_) {
+          rows = await companyDb.all(
+            `SELECT DISTINCT TRIM(loadman_name) AS name
+             FROM ${tbl}
+             WHERE loadman_name IS NOT NULL AND TRIM(loadman_name) != ''`
+          );
+        }
+        for (const r of rows || []) {
+          upsertCandidate(r.name, { per_kg_amount: Number(r.rate || 0) });
+        }
+      } catch (_) {}
+    }
+
+    if (candidates.size === 0) return 0;
+
+    if (db.isPostgres) {
+      await companyDb.run(
+        `SELECT setval(pg_get_serial_sequence('${pfx}operational_parties', 'id'), COALESCE((SELECT MAX(id) FROM ${pfx}operational_parties), 1), true)`
+      ).catch(() => {});
+    }
+
+    let insertedCount = 0;
+    for (const [key, cand] of candidates.entries()) {
+      let partyCode;
+      do {
+        maxLmNum += 1;
+        partyCode = `LM-${String(maxLmNum).padStart(3, '0')}`;
+      } while (existingCodes.has(partyCode.toUpperCase()));
+      existingCodes.add(partyCode.toUpperCase());
+
+      let ledgerId = cand.ledger_id;
+      if (!ledgerId) {
+        try {
+          const lmMatch = await companyDb.get(
+            `SELECT id FROM ledgermaster WHERE LOWER(TRIM(COALESCE(NULLIF(TRIM(ledger_name), ''), name))) = LOWER(TRIM(?)) LIMIT 1`,
+            [cand.name]
+          );
+          if (lmMatch?.id) ledgerId = lmMatch.id;
+        } catch (_) {}
+      }
+
+      try {
+        await companyDb.run(
+          `INSERT INTO ${pfx}operational_parties (
+            party_code, name, print_name, contact_person, category, party_category,
+            phone, phone_res, phone_off, address, area,
+            default_payment_mode, payment_mode, opening_balance, per_kg_amount,
+            ledger_id, linked_ledger_id, linked_ledger_name, is_active
+          ) VALUES (?, ?, ?, ?, 'LOADMAN', 'LOADMAN', ?, ?, ?, ?, ?, 'CASH', 'CASH', ?, ?, ?, ?, ?, 1)`,
+          [
+            partyCode,
+            cand.name,
+            cand.print_name || cand.name,
+            cand.contact_person || null,
+            cand.phone || null,
+            cand.phone_res || null,
+            cand.phone_off || null,
+            cand.address || null,
+            cand.area || null,
+            Number(cand.opening_balance || 0),
+            Number(cand.per_kg_amount || 0),
+            ledgerId || null,
+            ledgerId || null,
+            cand.name
+          ]
+        );
+        existingNames.add(key);
+        insertedCount += 1;
+      } catch (insErr) {
+        if (insErr.code !== '23505') {
+          console.warn(`[operationalChargeEngine] backfill '${cand.name}' non-fatal:`, insErr.message);
+        }
+      }
+    }
+
+    if (insertedCount > 0) {
+      if (db.isPostgres) {
+        await companyDb.run(
+          `SELECT setval(pg_get_serial_sequence('${pfx}operational_parties', 'id'), COALESCE((SELECT MAX(id) FROM ${pfx}operational_parties), 1), true)`
+        ).catch(() => {});
+      }
+      console.log(`🔄 [operationalChargeEngine] Backfilled ${insertedCount} Loadman master(s) for company ${companyId}`);
+    }
+    return insertedCount;
+  } catch (err) {
+    console.warn('[operationalChargeEngine] backfillMissingLoadmanParties non-fatal:', err.message);
+    return 0;
   }
 }
 
@@ -1025,6 +1300,7 @@ async function logOperationalAudit(companyId, entityType, entityId, entityRef, a
 module.exports = {
   ensureOperationalTables,
   invalidateOperationalTablesCache,
+  backfillMissingLoadmanParties,
   seedDefaultRateMasters,
   resolveOperationalLedgers,
   recordOperationalCharge,

@@ -191,24 +191,50 @@ async function healAllTransactions() {
       }
     }
 
-    // 2. Heal Sales (Only if no voucher already exists with this reference)
-    const sales = await db.query('SELECT * FROM sales', []);
+    // 2. Heal Sales (Only real invoices, never Sales Orders, and only if no voucher already exists with this reference)
+    const sales = await db.query('SELECT * FROM sales WHERE COALESCE(is_order, 0) = 0', []);
     for (const s of sales.rows || []) {
       const vResult = await db.query(
-        "SELECT id FROM voucher WHERE reference_no = ? LIMIT 1",
+        "SELECT id FROM voucher WHERE reference_no = ? AND voucher_type = 'Sales' LIMIT 1",
         [String(s.id)]
       );
       if (!vResult.rows || vResult.rows.length === 0) {
         console.log(`Syncing missing Sales ID ${s.id} to voucher/ledger...`);
+        let parsedDeductions = [];
+        try {
+          if (s.deductions_json) {
+            const raw = JSON.parse(s.deductions_json);
+            if (Array.isArray(raw)) {
+              parsedDeductions = raw
+                .map(d => {
+                  const amt = parseFloat(d?.amount || d?.deduction_amount || 0);
+                  if (!(amt > 0)) return null;
+                  const rawType = String(d?.type || d?.ded_type || '').trim().toUpperCase();
+                  const isAdd = rawType === 'ADD' || rawType === '+' || rawType === 'ADDITION';
+                  return {
+                    name: (d?.name || d?.deduction_name || d?.deduction || '').trim() || (isAdd ? 'Other Charges' : 'Sales Deduction'),
+                    type: isAdd ? 'ADD' : 'LESS',
+                    amount: amt
+                  };
+                })
+                .filter(Boolean);
+            }
+          }
+        } catch (_) {}
         await createSalesLedgerEntries({
-          customer: s.customer,
+          customer: s.customer_id || s.customer,
           date: s.date,
           invNo: s.s_no,
           salesId: s.id,
           totalAmount: s.grand_total || s.total_amt,
           taxAmount: s.tax_amt || 0,
+          cgstAmount: s.cgst_amt || 0,
+          sgstAmount: s.sgst_amt || 0,
+          igstAmount: s.igst_amt || 0,
+          isInterstate: String(s.tax_type || '').toLowerCase().includes('inter'),
           discAmount: 0,
-          baseAmount: s.base_amt || s.total_amt
+          baseAmount: s.base_amt || s.bill_amt || s.total_amt,
+          deductions: parsedDeductions
         });
       }
     }
@@ -937,7 +963,7 @@ router.get('/ledgers', async (req, res) => {
     try {
       const { ensureOperationalTables } = require('../services/operationalChargeEngine');
       await ensureOperationalTables(cId);
-      const opParties = await cDb.all(`SELECT id, name, COALESCE(category, party_category, 'Worker') as cat FROM operational_parties WHERE is_active = 1`).catch(() => []);
+      const opParties = await cDb.all(`SELECT id, name, COALESCE(category, party_category, 'Worker') as cat FROM operational_parties WHERE (is_active IS NULL OR LOWER(TRIM(CAST(is_active AS TEXT))) IN ('1', 'true', 't', 'active', 'yes', ''))`).catch(() => []);
       for (const row of opParties || []) {
         const name = String(row.name || '').trim();
         if (name && !seenNames.has(name.toLowerCase())) {
