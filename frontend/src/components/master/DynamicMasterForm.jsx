@@ -222,7 +222,13 @@ export const DynamicMasterForm = ({ configKey }) => {
         const successMessage = `${title} ${editId ? "updated" : "saved"} successfully!`;
         setMessage(successMessage);
         setMessageType("success");
-        alert(successMessage);
+        const masterTypeKey = API_NAME_MAP[configKey] || config.table || configKey;
+        invalidateMasterCache(masterTypeKey);
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("erp_master_updated", {
+            detail: { type: masterTypeKey, table: config.table }
+          }));
+        }
         const routeKey = configKey.replace(/_/g, "-");
         navigate(`/master/${routeKey}-display`);
       } else {

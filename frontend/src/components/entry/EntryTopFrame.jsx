@@ -509,9 +509,12 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
       }
       const resultData = safeArray(rawResult.data || rawResult);
       if (requestId === masterRequestId.current) {
-        setMasterOptions(current => resultData.length > 0
-          ? resultData
-          : ((field.options?.length || 0) > 1 ? field.options : current));
+        setMasterOptions(current => {
+          if (resultData.length > 0) return resultData;
+          if ((field.options?.length || 0) > 1) return field.options;
+          if (force || rawResult?.success === true) return [];
+          return current;
+        });
       }
     } catch (err) {
       if (requestId === masterRequestId.current) {
@@ -533,15 +536,26 @@ const MasterFieldWrapper = ({ field, data, onChange, autoFillFields = [], genera
 
   useEffect(() => {
     const handleCompanyChange = () => fetchMasterData(true);
+    const handleMasterUpdate = (e) => {
+      const updatedType = normalizeMasterKey(e?.detail?.type || '');
+      const key = normKey || normalizeMasterKey(masterKeyFromTypes) || normalizeMasterKey(field.name);
+      if (!updatedType || !key || updatedType === key) {
+        fetchMasterData(true);
+      }
+    };
     window.addEventListener('erp_company_changed', handleCompanyChange);
+    window.addEventListener('erp_master_updated', handleMasterUpdate);
     return () => {
       masterRequestId.current += 1;
       window.removeEventListener('erp_company_changed', handleCompanyChange);
+      window.removeEventListener('erp_master_updated', handleMasterUpdate);
     };
-  }, [normKey, field.masterType, field.name, isMasterField]);
+  }, [normKey, masterKeyFromTypes, field.masterType, field.name, isMasterField]);
 
   const handleDropdownFocus = () => {
-    if ((isMasterField || MASTER_FIELD_TYPES[field.name]) && masterOptions.length === 0 && !loading) {
+    const key = normKey || normalizeMasterKey(masterKeyFromTypes) || normalizeMasterKey(field.name);
+    const isMaster = isMasterField || MASTER_FIELD_TYPES[field.name] || MASTER_FIELD_TYPES[String(field.name || '').toLowerCase()];
+    if (isMaster && !loading && (masterOptions.length === 0 || (key && getCachedMasters(key).length === 0))) {
       fetchMasterData(true);
     }
   };

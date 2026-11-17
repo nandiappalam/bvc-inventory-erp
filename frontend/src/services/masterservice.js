@@ -125,7 +125,7 @@ export const getMasters = async (type, options = {}) => {
   // 3. Dispatch fresh request with retry logic
   const requestPromise = (async () => {
     let lastError = null;
-    const maxRetries = 2;
+    const maxRetries = 3;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
@@ -145,9 +145,19 @@ export const getMasters = async (type, options = {}) => {
           }
 
           if (list !== null) {
-            // Successfully fetched from backend — store in cache and return
-            masterCache.set(key, { data: list, timestamp: Date.now() });
-            return list;
+            if (list.length > 0) {
+              // Successfully fetched non-empty list — store in cache and return
+              masterCache.set(key, { data: list, timestamp: Date.now() });
+              return list;
+            }
+            if (attempt < maxRetries) {
+              await new Promise(r => setTimeout(r, 100 * attempt));
+              continue;
+            }
+            if (forceRefresh) {
+              masterCache.delete(key);
+            }
+            return [];
           }
         }
         lastError = new Error(result?.message || result?.error || `Failed to fetch master for ${rawKey}`);
@@ -214,7 +224,11 @@ export const getAllMasters = async (table, options = {}) => {
       if (result && (Array.isArray(result) || result.success)) {
         const rawData = Array.isArray(result) ? result : (result.data || []);
         const list = Array.isArray(rawData) ? rawData : [];
-        masterCache.set(key, { data: list, timestamp: Date.now() });
+        if (list.length > 0) {
+          masterCache.set(key, { data: list, timestamp: Date.now() });
+        } else if (forceRefresh) {
+          masterCache.delete(key);
+        }
         return list;
       }
     } catch (e) {

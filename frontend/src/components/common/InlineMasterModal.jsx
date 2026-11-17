@@ -81,7 +81,7 @@ export const MASTER_CONFIGS = {
   },
   transports: {
     title: 'Create New Transporter',
-    table: 'transports',
+    table: 'transport_master',
     key: 'transports',
     labelField: 'name',
     fields: [
@@ -162,26 +162,31 @@ export const MASTER_CONFIGS = {
   },
   senders: {
     title: 'Create New Sender Group',
-    table: 'senders',
+    table: 'sender_group_master',
     key: 'senders',
-    labelField: 'sender_name',
+    labelField: 'name',
     fields: [
-      { name: 'sender_name', label: 'Sender Name', required: true, fullWidth: true },
-      { name: 'group_name', label: 'Sender Group', required: false },
-      { name: 'phone', label: 'Phone', required: false },
+      { name: 'name', label: 'Sender Name', required: true, fullWidth: true },
+      { name: 'print_name', label: 'Print Name', required: false },
+      { name: 'contact_person', label: 'Contact Person', required: false },
+      { name: 'mobile', label: 'Phone / Mobile', required: false },
+      { name: 'area', label: 'Area / Location', required: false },
+      { name: 'tin_no', label: 'GSTIN / TIN', required: false },
       { name: 'address', label: 'Address', required: false, multiline: true, fullWidth: true }
     ]
   },
   consignees: {
     title: 'Create New Consignee Group',
-    table: 'consignees',
+    table: 'consignee_group_master',
     key: 'consignees',
-    labelField: 'consignee_name',
+    labelField: 'name',
     fields: [
-      { name: 'consignee_name', label: 'Consignee Name', required: true, fullWidth: true },
-      { name: 'group_name', label: 'Consignee Group', required: false },
-      { name: 'phone', label: 'Phone', required: false },
-      { name: 'gst_no', label: 'GSTIN', required: false },
+      { name: 'name', label: 'Consignee Name', required: true, fullWidth: true },
+      { name: 'print_name', label: 'Print Name', required: false },
+      { name: 'contact_person', label: 'Contact Person', required: false },
+      { name: 'mobile', label: 'Phone / Mobile', required: false },
+      { name: 'area', label: 'Area / Location', required: false },
+      { name: 'tin_no', label: 'GSTIN / TIN', required: false },
       { name: 'address', label: 'Address', required: false, multiline: true, fullWidth: true }
     ]
   },
@@ -426,6 +431,8 @@ export const InlineMasterModal = ({ open, onClose, masterType, initialName = '',
           default_payment_mode: formState.payment_mode || 'CASH',
           payment_mode: formState.payment_mode || 'CASH',
           upi_id: formState.upi_id || '',
+          per_kg_amount: Number(formState.per_kg_amount || 0),
+          period_duration: formState.period_duration || '',
           notes: formState.notes || '',
           is_active: 1
         };
@@ -484,6 +491,12 @@ export const InlineMasterModal = ({ open, onClose, masterType, initialName = '',
       invalidateMasterCache('workers');
       invalidateMasterCache('loadman');
       invalidateMasterCache('operational_parties');
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('erp_master_updated', {
+          detail: { type: normType, table: config.table }
+        }));
+      }
 
       if (onSuccess) {
         onSuccess(newId, createdRecord || formState);

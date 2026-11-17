@@ -14,6 +14,7 @@ try {
 
 if (DatabaseSync) {
   console.log('✅ [SQLite] Initialized database engine via node:sqlite DatabaseSync.');
+  const dbCache = new Map();
   sqlite3 = {
     verbose: () => sqlite3,
     OPEN_READONLY: 1,
@@ -25,12 +26,14 @@ if (DatabaseSync) {
           mode = undefined;
         }
         this.filename = filename;
-        try {
-          this._syncDb = new DatabaseSync(filename);
-        } catch (dbErr) {
-          console.error('[node:sqlite] Failed to open', filename, dbErr.message);
-          this._syncDb = null;
+        if (!dbCache.has(filename)) {
+          try {
+            dbCache.set(filename, new DatabaseSync(filename));
+          } catch (dbErr) {
+            console.error('[node:sqlite] Failed to open', filename, dbErr.message);
+          }
         }
+        this._syncDb = dbCache.get(filename) || null;
         if (callback) {
           setTimeout(() => callback(null), 0);
         }
@@ -43,7 +46,10 @@ if (DatabaseSync) {
       }
       try {
         if (!this._syncDb) {
-          this._syncDb = new DatabaseSync(this.filename);
+          if (!dbCache.has(this.filename)) {
+            dbCache.set(this.filename, new DatabaseSync(this.filename));
+          }
+          this._syncDb = dbCache.get(this.filename);
         }
         const stmt = this._syncDb.prepare(sql);
         const info = stmt.run(...(params || []));
@@ -61,7 +67,10 @@ if (DatabaseSync) {
       }
       try {
         if (!this._syncDb) {
-          this._syncDb = new DatabaseSync(this.filename);
+          if (!dbCache.has(this.filename)) {
+            dbCache.set(this.filename, new DatabaseSync(this.filename));
+          }
+          this._syncDb = dbCache.get(this.filename);
         }
         const stmt = this._syncDb.prepare(sql);
         const rows = stmt.all(...(params || []));
@@ -78,7 +87,10 @@ if (DatabaseSync) {
       }
       try {
         if (!this._syncDb) {
-          this._syncDb = new DatabaseSync(this.filename);
+          if (!dbCache.has(this.filename)) {
+            dbCache.set(this.filename, new DatabaseSync(this.filename));
+          }
+          this._syncDb = dbCache.get(this.filename);
         }
         const stmt = this._syncDb.prepare(sql);
         const row = stmt.get(...(params || []));
@@ -91,7 +103,10 @@ if (DatabaseSync) {
     sqlite3.Database.prototype.exec = function(sql, callback) {
       try {
         if (!this._syncDb) {
-          this._syncDb = new DatabaseSync(this.filename);
+          if (!dbCache.has(this.filename)) {
+            dbCache.set(this.filename, new DatabaseSync(this.filename));
+          }
+          this._syncDb = dbCache.get(this.filename);
         }
         this._syncDb.exec(sql);
         if (callback) setTimeout(() => callback(null), 0);
@@ -1502,6 +1517,19 @@ async function ensurePostgresCompanySequences(companyId = 1) {
   }
 }
 
+function sanitizePgParams(params = []) {
+  return (params || []).map(p => {
+    if (p === null || p === undefined) return null;
+    if (typeof p === 'string') {
+      const trimmed = p.trim();
+      if (trimmed === '' || trimmed === 'null' || trimmed === 'undefined') return null;
+      const ddmmyyyy = trimmed.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
+      if (ddmmyyyy) return `${ddmmyyyy[3]}-${ddmmyyyy[2].padStart(2, '0')}-${ddmmyyyy[1].padStart(2, '0')}`;
+    }
+    return p;
+  });
+}
+
 // ============================================================================
 // POSTGRESQL MULTI-TENANT QUERY RUNNER
 // ============================================================================
@@ -1528,32 +1556,35 @@ async function executePgQuery(sql, params = [], companyId = 1, isMaster = false)
       await client.query(`SET search_path TO public;`);
     }
 
-    let transformedSql = translateSqlForPostgres(sql, cId);
+    let currentSql = translateSqlForPostgres(sql, cId);
+    let currentParams = params;
+    let retriedSequence = false;
+    let retriedSanitize = false;
     let result;
-    try {
-      result = await client.query(transformedSql, params);
-    } catch (queryErr) {
-      if (queryErr.code === '42703' && /RETURNING id/i.test(transformedSql)) {
-        const withoutReturning = transformedSql.replace(/\s+RETURNING\s+id\b/gi, '');
-        result = await client.query(withoutReturning, params);
-      } else if (queryErr.code === '23505' && /duplicate key value violates unique constraint/i.test(queryErr.message)) {
-        await resyncPostgresSequences(client, schemaName);
-        result = await client.query(transformedSql, params);
-      } else if (queryErr.code === '22007' || /invalid input syntax for type (?:date|timestamp)/i.test(queryErr.message)) {
-        // Automatically convert empty strings to null and format DD-MM-YYYY to YYYY-MM-DD
-        const sanitizedParams = (params || []).map(p => {
-          if (p === null || p === undefined) return null;
-          if (typeof p === 'string') {
-            const trimmed = p.trim();
-            if (trimmed === '' || trimmed === 'null' || trimmed === 'undefined') return null;
-            const ddmmyyyy = trimmed.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
-            if (ddmmyyyy) return `${ddmmyyyy[3]}-${ddmmyyyy[2].padStart(2, '0')}-${ddmmyyyy[1].padStart(2, '0')}`;
-          }
-          return p;
-        });
-        result = await client.query(transformedSql, sanitizedParams);
-      } else {
-        throw queryErr;
+
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        result = await client.query(currentSql, currentParams);
+        break;
+      } catch (queryErr) {
+        if (queryErr.code === '42703' && /RETURNING id/i.test(currentSql)) {
+          currentSql = currentSql.replace(/\s+RETURNING\s+id\b/gi, '');
+        } else if (
+          !retriedSanitize &&
+          (queryErr.code === '22007' || /invalid input syntax for type (?:date|timestamp)/i.test(queryErr.message || ''))
+        ) {
+          retriedSanitize = true;
+          currentParams = sanitizePgParams(currentParams);
+        } else if (
+          !retriedSequence &&
+          queryErr.code === '23505' &&
+          /_pkey\b/i.test(queryErr.constraint || queryErr.message || '')
+        ) {
+          retriedSequence = true;
+          await resyncPostgresSequences(client, schemaName);
+        } else {
+          throw queryErr;
+        }
       }
     }
 
@@ -2685,18 +2716,38 @@ class PgDbConnection {
         await this.client.query(`SET search_path TO public;`);
       }
     }
+    let currentSql = transformed;
+    let currentParams = params;
+    let retriedSequence = false;
+    let retriedSanitize = false;
     let result;
-    try {
-      result = await this.client.query(transformed, params);
-    } catch (queryErr) {
-      if (queryErr.code === '42703' && /RETURNING id/i.test(transformed)) {
-        const withoutReturning = transformed.replace(/\s+RETURNING\s+id\b/gi, '');
-        result = await this.client.query(withoutReturning, params);
-      } else if (queryErr.code === '23505' && /duplicate key value violates unique constraint/i.test(queryErr.message)) {
-        await resyncPostgresSequences(this.client, schemaName);
-        result = await this.client.query(transformed, params);
-      } else {
-        throw queryErr;
+
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        result = await this.client.query(currentSql, currentParams);
+        break;
+      } catch (queryErr) {
+        if (this.inTransaction) {
+          throw queryErr;
+        }
+        if (queryErr.code === '42703' && /RETURNING id/i.test(currentSql)) {
+          currentSql = currentSql.replace(/\s+RETURNING\s+id\b/gi, '');
+        } else if (
+          !retriedSanitize &&
+          (queryErr.code === '22007' || /invalid input syntax for type (?:date|timestamp)/i.test(queryErr.message || ''))
+        ) {
+          retriedSanitize = true;
+          currentParams = sanitizePgParams(currentParams);
+        } else if (
+          !retriedSequence &&
+          queryErr.code === '23505' &&
+          /_pkey\b/i.test(queryErr.constraint || queryErr.message || '')
+        ) {
+          retriedSequence = true;
+          await resyncPostgresSequences(this.client, schemaName);
+        } else {
+          throw queryErr;
+        }
       }
     }
 
@@ -2907,10 +2958,14 @@ async function restoreFromJsonData(jsonData, companyId = 1) {
         if (!Array.isArray(rows) || rows.length === 0 || table.startsWith('sqlite_') || table === 'users' || table === 'companies') continue;
 
         let tblCheck = await client.query(
-          `SELECT column_name FROM information_schema.columns WHERE LOWER(table_schema) = LOWER($1) AND LOWER(table_name) = LOWER($2)`,
+          `SELECT column_name, data_type FROM information_schema.columns WHERE LOWER(table_schema) = LOWER($1) AND LOWER(table_name) = LOWER($2)`,
           [schemaName, table]
         );
-        let colSet = new Set((tblCheck.rows || []).map((r) => r.column_name.toLowerCase()));
+        const colSet = new Set((tblCheck.rows || []).map((r) => r.column_name.toLowerCase()));
+        const colTypeMap = {};
+        for (const r of tblCheck.rows || []) {
+          colTypeMap[r.column_name.toLowerCase()] = String(r.data_type || '').toLowerCase();
+        }
 
         // Dynamically add any missing columns from backup rows into PostgreSQL table
         if (rows.length > 0 && rows[0] && typeof rows[0] === 'object') {
@@ -2919,6 +2974,7 @@ async function restoreFromJsonData(jsonData, companyId = 1) {
               try {
                 await client.query(`ALTER TABLE "${schemaName}"."${table}" ADD COLUMN IF NOT EXISTS "${key}" TEXT;`);
                 colSet.add(key.toLowerCase());
+                colTypeMap[key.toLowerCase()] = 'text';
               } catch (alterErr) {}
             }
           }
@@ -2938,14 +2994,37 @@ async function restoreFromJsonData(jsonData, companyId = 1) {
           const colList = validKeys.map((k) => `"${k}"`).join(', ');
           const values = validKeys.map((k) => {
             const v = row[k];
-            if (typeof v === 'object' && v !== null) return JSON.stringify(v);
-            if (typeof v === 'string' && (k.toLowerCase().includes('date') || k.toLowerCase().endsWith('_dt'))) {
+            const pgType = colTypeMap[k.toLowerCase()] || '';
+            if (v === undefined || v === null) return null;
+            if (typeof v === 'object') return JSON.stringify(v);
+            if (typeof v === 'string') {
               const s = v.trim();
-              if (s === '' || s === 'null' || s === 'undefined') return null;
-              const ddmmyyyy = s.match(/^(\d{1,2})\s*[-\/]\s*(\d{1,2})\s*[-\/]\s*(\d{4})$/);
-              if (ddmmyyyy) {
-                return `${ddmmyyyy[3]}-${ddmmyyyy[2].padStart(2, '0')}-${ddmmyyyy[1].padStart(2, '0')}`;
+              const lower = s.toLowerCase();
+              if (lower === 'null' || lower === 'undefined') return null;
+              if (pgType === 'date' || pgType.includes('timestamp') || k.toLowerCase().includes('date') || k.toLowerCase().endsWith('_dt')) {
+                if (!s) return null;
+                const ddmmyyyy = s.match(/^(\d{1,2})\s*[-\/]\s*(\d{1,2})\s*[-\/]\s*(\d{4})$/);
+                if (ddmmyyyy) {
+                  return `${ddmmyyyy[3]}-${ddmmyyyy[2].padStart(2, '0')}-${ddmmyyyy[1].padStart(2, '0')}`;
+                }
+                return s;
               }
+              if (pgType.includes('int') || pgType === 'numeric' || pgType === 'double precision' || pgType === 'real') {
+                if (!s) return null;
+                if (k.toLowerCase() === 'is_active') {
+                  if (lower === 'false' || lower === 'inactive' || lower === 'no' || lower === '0') return 0;
+                  if (lower === 'true' || lower === 'active' || lower === 'yes' || lower === '1') return 1;
+                }
+                const num = Number(s);
+                return Number.isFinite(num) ? num : null;
+              }
+              if (pgType === 'boolean') {
+                if (!s) return null;
+                return !(lower === '0' || lower === 'false' || lower === 'inactive' || lower === 'no');
+              }
+            }
+            if (typeof v === 'boolean' && (pgType.includes('int') || pgType === 'numeric')) {
+              return v ? 1 : 0;
             }
             return v;
           });
@@ -2954,7 +3033,11 @@ async function restoreFromJsonData(jsonData, companyId = 1) {
               `INSERT INTO "${schemaName}"."${table}" (${colList}) VALUES (${placeholders}) ON CONFLICT DO NOTHING`,
               values
             );
-          } catch (err) {}
+          } catch (err) {
+            if (err.code !== '23505') {
+              console.warn(`[Restore PG] Skipped row in ${schemaName}.${table}:`, err.message);
+            }
+          }
         }
       }
 
@@ -2970,6 +3053,7 @@ async function restoreFromJsonData(jsonData, companyId = 1) {
         }
       } catch (e) {}
 
+      await postRestoreSyncCompany(targetCompanyId);
       return { success: true, message: `Database restored successfully into PostgreSQL schema ${schemaName}.` };
     } finally {
       client.release();

@@ -89,8 +89,18 @@ router.get('/summary', handleSummary);
 // -----------------------------------------------------------------------------
 // 2. OPERATIONAL PARTIES (WORKERS / DRIVERS / LOADMEN / TRANSPORTERS)
 // -----------------------------------------------------------------------------
+const sanitizeDateOrNull = (val) => {
+  if (val === null || val === undefined) return null;
+  const s = String(val).trim();
+  if (!s || s === 'null' || s === 'undefined') return null;
+  const ddmmyyyy = s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
+  if (ddmmyyyy) return `${ddmmyyyy[3]}-${ddmmyyyy[2].padStart(2, '0')}-${ddmmyyyy[1].padStart(2, '0')}`;
+  return s;
+};
+
 router.get('/parties', async (req, res) => {
   try {
+    await ensureOperationalTables(req.companyId);
     const pfx = getPrefix(req.companyId);
     const { category, search, activeOnly } = req.query;
     let sql = `
@@ -107,7 +117,7 @@ router.get('/parties', async (req, res) => {
       params.push(category, category);
     }
     if (activeOnly === 'true') {
-      sql += ' AND p.is_active = 1';
+      sql += " AND (p.is_active IS NULL OR LOWER(TRIM(CAST(p.is_active AS TEXT))) IN ('1', 'true', 't', 'active', 'yes', ''))";
     }
     if (search) {
       sql += ' AND (p.name LIKE ? OR p.phone LIKE ? OR p.party_code LIKE ?)';
@@ -151,19 +161,30 @@ router.get('/parties', async (req, res) => {
 
 router.post('/parties', async (req, res) => {
   try {
+    await ensureOperationalTables(req.companyId);
     const pfx = getPrefix(req.companyId);
-    const name = req.body.name;
+    const name = String(req.body.name || '').trim();
     const category = req.body.category || req.body.party_category || 'LOADMAN';
-    const phone = req.body.phone || '';
-    const whatsapp_number = req.body.whatsapp_number || req.body.phone || '';
+    const print_name = req.body.print_name || name;
+    const contact_person = req.body.contact_person || '';
+    const phone = req.body.phone || req.body.mobile || '';
+    const whatsapp_number = req.body.whatsapp_number || phone;
     const email = req.body.email || '';
+    const address = req.body.address || '';
+    const area = req.body.area || '';
     const default_payment_mode = req.body.default_payment_mode || req.body.payment_mode || 'CASH';
     const bank_name = req.body.bank_name || '';
     const account_no = req.body.account_no || '';
     const ifsc_code = req.body.ifsc_code || '';
     const upi_id = req.body.upi_id || '';
     const notes = req.body.notes || '';
-    const is_active = req.body.is_active !== undefined ? (req.body.is_active ? 1 : 0) : 1;
+    const opening_balance = Number(req.body.opening_balance || 0) || 0;
+    const opening_balance_date = sanitizeDateOrNull(req.body.opening_balance_date);
+    const per_kg_amount = Number(req.body.per_kg_amount || 0) || 0;
+    const period_duration = req.body.period_duration || '';
+    const from_date = sanitizeDateOrNull(req.body.from_date || req.body.effective_from);
+    const till_date = sanitizeDateOrNull(req.body.till_date || req.body.effective_to);
+    const is_active = req.body.is_active !== undefined ? (['0', 'false', 'inactive'].includes(String(req.body.is_active).trim().toLowerCase()) ? 0 : 1) : 1;
 
     if (!name) {
       return res.status(400).json({ success: false, error: 'Name is required' });
@@ -194,14 +215,24 @@ router.post('/parties', async (req, res) => {
 
     const ins = await db.run(`
       INSERT INTO ${pfx}operational_parties (
-        party_code, name, category, party_category, phone, whatsapp_number, email, default_payment_mode, payment_mode,
-        bank_name, account_no, ifsc_code, upi_id, notes, is_active
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        party_code, name, print_name, contact_person, category, party_category,
+        phone, whatsapp_number, email, address, area, default_payment_mode, payment_mode,
+        bank_name, account_no, ifsc_code, upi_id,
+        opening_balance, opening_balance_date, per_kg_amount, period_duration,
+        from_date, till_date, effective_from, effective_to, notes, is_active
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
-      party_code, name, category, category, phone, whatsapp_number, email,
-      default_payment_mode, default_payment_mode, bank_name, account_no,
-      ifsc_code, upi_id, notes, is_active
+      party_code, name, print_name, contact_person, category, category,
+      phone, whatsapp_number, email, address, area, default_payment_mode, default_payment_mode,
+      bank_name, account_no, ifsc_code, upi_id,
+      opening_balance, opening_balance_date, per_kg_amount, period_duration,
+      from_date, till_date, from_date, till_date, notes, is_active
     ]);
+
+    try {
+      const { resolveLedgerId } = require('../utils/ledgerHelper');
+      await resolveLedgerId(name, 'Loadman');
+    } catch (_) {}
 
     const created = await db.get(`SELECT * FROM ${pfx}operational_parties WHERE id = ?`, [ins.lastID]);
     res.json({ success: true, data: created, message: 'Party registered successfully' });
@@ -212,31 +243,48 @@ router.post('/parties', async (req, res) => {
 
 router.put('/parties/:id', async (req, res) => {
   try {
+    await ensureOperationalTables(req.companyId);
     const pfx = getPrefix(req.companyId);
     const { id } = req.params;
-    const name = req.body.name;
+    const name = String(req.body.name || '').trim();
     const category = req.body.category || req.body.party_category || 'LOADMAN';
-    const phone = req.body.phone || '';
-    const whatsapp_number = req.body.whatsapp_number || '';
+    const print_name = req.body.print_name || name;
+    const contact_person = req.body.contact_person || '';
+    const phone = req.body.phone || req.body.mobile || '';
+    const whatsapp_number = req.body.whatsapp_number || phone;
     const email = req.body.email || '';
+    const address = req.body.address || '';
+    const area = req.body.area || '';
     const default_payment_mode = req.body.default_payment_mode || req.body.payment_mode || 'CASH';
     const bank_name = req.body.bank_name || '';
     const account_no = req.body.account_no || '';
     const ifsc_code = req.body.ifsc_code || '';
     const upi_id = req.body.upi_id || '';
     const notes = req.body.notes || '';
-    const is_active = req.body.is_active !== undefined ? (req.body.is_active ? 1 : 0) : 1;
+    const opening_balance = Number(req.body.opening_balance || 0) || 0;
+    const opening_balance_date = sanitizeDateOrNull(req.body.opening_balance_date);
+    const per_kg_amount = Number(req.body.per_kg_amount || 0) || 0;
+    const period_duration = req.body.period_duration || '';
+    const from_date = sanitizeDateOrNull(req.body.from_date || req.body.effective_from);
+    const till_date = sanitizeDateOrNull(req.body.till_date || req.body.effective_to);
+    const is_active = req.body.is_active !== undefined ? (['0', 'false', 'inactive'].includes(String(req.body.is_active).trim().toLowerCase()) ? 0 : 1) : 1;
 
     await db.run(`
       UPDATE ${pfx}operational_parties
-      SET name = ?, category = ?, party_category = ?, phone = ?, whatsapp_number = ?, email = ?,
+      SET name = ?, print_name = ?, contact_person = ?, category = ?, party_category = ?,
+          phone = ?, whatsapp_number = ?, email = ?, address = ?, area = ?,
           default_payment_mode = ?, payment_mode = ?, bank_name = ?, account_no = ?, ifsc_code = ?,
-          upi_id = ?, notes = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP
+          upi_id = ?, opening_balance = ?, opening_balance_date = ?, per_kg_amount = ?, period_duration = ?,
+          from_date = ?, till_date = ?, effective_from = ?, effective_to = ?,
+          notes = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `, [
-      name, category, category, phone, whatsapp_number, email,
+      name, print_name, contact_person, category, category,
+      phone, whatsapp_number, email, address, area,
       default_payment_mode, default_payment_mode, bank_name, account_no, ifsc_code,
-      upi_id, notes, is_active, id
+      upi_id, opening_balance, opening_balance_date, per_kg_amount, period_duration,
+      from_date, till_date, from_date, till_date,
+      notes, is_active, id
     ]);
 
     const updated = await db.get(`SELECT * FROM ${pfx}operational_parties WHERE id = ?`, [id]);

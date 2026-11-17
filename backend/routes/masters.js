@@ -27,6 +27,32 @@ async function tableExists(tableName) {
   }
 }
 
+async function ensureTransportMasterTable(companyId) {
+  try {
+    const cId = parseInt(companyId, 10) || 1;
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS transport_master (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT UNIQUE,
+        print_name TEXT,
+        phone TEXT,
+        lorry_no TEXT,
+        address TEXT,
+        gst_no TEXT,
+        status TEXT DEFAULT 'Active',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `, [], cId);
+    for (const col of ['phone', 'lorry_no', 'address', 'gst_no']) {
+      try {
+        await db.run(`ALTER TABLE transport_master ADD COLUMN ${col} TEXT`, [], cId);
+      } catch (_) {}
+    }
+  } catch (e) {
+    console.warn('Notice ensuring transport_master:', e.message);
+  }
+}
+
 // Helper function to safely get column names for a table (works on both Postgres and SQLite)
 async function getTableColumns(tableName) {
   try {
@@ -320,7 +346,7 @@ const resolveTableConfig = (tableParam) => {
   };
 };
 
-const normalizeMasterData = async (tableName, rawData) => {
+const normalizeMasterData = async (tableName, rawData, isUpdate = false) => {
   const actualColumns = await getTableColumns(tableName);
 
   const fieldSynonyms = {
@@ -352,7 +378,6 @@ const normalizeMasterData = async (tableName, rawData) => {
     flour_mill: 'flourmill',
     flourmill_name: 'flourmill',
     papad_company_name: 'name',
-    mobile: 'phone',
     whatsapp: 'whatsapp_number',
   };
 
@@ -379,8 +404,27 @@ const normalizeMasterData = async (tableName, rawData) => {
       }
     }
 
+    const multiSynonyms = {
+      sender_name: ['name'],
+      consignee_name: ['name'],
+      gst_no: ['gst_number', 'tin_no'],
+      gst_number: ['gst_no', 'tin_no'],
+      phone: ['phone_off', 'mobile', 'mobile1', 'phone_res'],
+      mobile: ['mobile1', 'phone', 'phone_off']
+    };
+    for (const [syn, candidates] of Object.entries(multiSynonyms)) {
+      if (rawData[syn] !== undefined) {
+        for (const col of candidates) {
+          if (actualColumns.has(col) && filteredData[col] === undefined) {
+            filteredData[col] = rawData[syn];
+            break;
+          }
+        }
+      }
+    }
+
     // Auto-generate deduction code if missing
-    if (actualColumns.has('ded_code') && (!filteredData.ded_code || String(filteredData.ded_code).trim() === '')) {
+    if (actualColumns.has('ded_code') && !isUpdate && (!filteredData.ded_code || String(filteredData.ded_code).trim() === '')) {
       const nameToUse = filteredData.ded_name || rawData.ded_name || rawData.deduction_name || 'DED';
       const cleanName = nameToUse.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 6);
       const randomSuffix = Math.floor(100 + Math.random() * 900);
@@ -388,58 +432,121 @@ const normalizeMasterData = async (tableName, rawData) => {
     }
 
     // Default status
-    if (actualColumns.has('status') && filteredData.status === undefined) {
+    if (actualColumns.has('status') && !isUpdate && filteredData.status === undefined) {
       filteredData.status = 'Active';
     }
   }
 
-  // Force categories for operational parties ALWAYS
+  // Normalize operational_parties (Loadman / Workers)
   if (tableName === 'operational_parties' || tableName.endsWith('_operational_parties')) {
-    // Auto-generate party code if missing
-    if (!filteredData.party_code || String(filteredData.party_code).trim() === '') {
+    if (!isUpdate && (!filteredData.party_code || String(filteredData.party_code).trim() === '')) {
       let maxNum = 0;
       try {
         const codesRes = await db.query(`SELECT party_code FROM ${tableName} WHERE party_code LIKE 'LM-%'`);
         for (const r of codesRes.rows || []) {
           const num = parseInt(String(r.party_code || '').replace(/[^0-9]/g, ''), 10);
-          if (num > maxNum) maxNum = num;
+          if (!Number.isNaN(num) && num > maxNum) maxNum = num;
         }
       } catch (_) {}
-      filteredData.party_code = `LM-${String(maxNum + 1).padStart(3, '0')}`;
+      let nextNum = maxNum + 1;
+      while (true) {
+        const candidate = `LM-${String(nextNum).padStart(3, '0')}`;
+        try {
+          const dup = await db.query(`SELECT id FROM ${tableName} WHERE party_code = ? LIMIT 1`, [candidate]);
+          if (!dup.rows || dup.rows.length === 0) {
+            filteredData.party_code = candidate;
+            break;
+          }
+        } catch (_) {
+          filteredData.party_code = candidate;
+          break;
+        }
+        nextNum++;
+      }
+    } else if (isUpdate && filteredData.party_code === '') {
+      delete filteredData.party_code;
     }
 
-    if (!filteredData.category) filteredData.category = 'LOADMAN';
-    if (!filteredData.party_category) filteredData.party_category = 'LOADMAN';
-    filteredData.category = 'LOADMAN';
-    filteredData.party_category = 'LOADMAN'; // Hard force to satisfy NOT NULL constraint
-    if (filteredData.is_active === undefined) filteredData.is_active = 1;
-    
-    // Ensure name is present (mapping from rawData if filteredData skipped it)
+    const resolvedCategory = String(filteredData.category || filteredData.party_category || 'LOADMAN').trim() || 'LOADMAN';
+    if (!isUpdate || filteredData.category !== undefined) {
+      filteredData.category = resolvedCategory;
+    }
+    if (!isUpdate || filteredData.party_category !== undefined) {
+      filteredData.party_category = resolvedCategory;
+    }
+
+    if (actualColumns.has('phone') && (!filteredData.phone || String(filteredData.phone).trim() === '')) {
+      const altPhone = rawData.mobile || rawData.mobile1 || rawData.phone_off || rawData.phone_res;
+      if (altPhone !== undefined && String(altPhone).trim() !== '') {
+        filteredData.phone = altPhone;
+      }
+    }
+
+    if (actualColumns.has('effective_from') && filteredData.from_date !== undefined && filteredData.effective_from === undefined) {
+      filteredData.effective_from = filteredData.from_date;
+    }
+    if (actualColumns.has('effective_to') && filteredData.till_date !== undefined && filteredData.effective_to === undefined) {
+      filteredData.effective_to = filteredData.till_date;
+    }
+    if (actualColumns.has('from_date') && filteredData.effective_from !== undefined && filteredData.from_date === undefined) {
+      filteredData.from_date = filteredData.effective_from;
+    }
+    if (actualColumns.has('till_date') && filteredData.effective_to !== undefined && filteredData.till_date === undefined) {
+      filteredData.till_date = filteredData.effective_to;
+    }
+
+    if (filteredData.is_active !== undefined) {
+      const rawAct = String(filteredData.is_active).trim().toLowerCase();
+      if (['0', 'false', 'f', 'inactive', 'no'].includes(rawAct)) {
+        filteredData.is_active = 0;
+      } else {
+        filteredData.is_active = 1;
+      }
+    } else if (!isUpdate) {
+      filteredData.is_active = 1;
+    }
+
     if (!filteredData.name && rawData.name) filteredData.name = rawData.name;
     if (!filteredData.name && rawData.loadman_name) filteredData.name = rawData.loadman_name;
   }
 
-  // ========================================================================
-  // PostgreSQL Compatibility: Convert empty strings to NULL for numeric fields
-  // This prevents "invalid input syntax for type numeric" errors
-  // ========================================================================
-  const isPg = db.isPostgres;
+  // Coerce empty strings -> NULL and DD-MM-YYYY -> YYYY-MM-DD on date/numeric columns for PostgreSQL & SQLite safety
+  const dateFields = ['opening_balance_date', 'from_date', 'till_date', 'effective_from', 'effective_to', 'approval_date'];
+  for (const field of dateFields) {
+    if (field in filteredData) {
+      const raw = filteredData[field];
+      if (raw === null || raw === undefined) {
+        filteredData[field] = null;
+      } else if (typeof raw === 'string') {
+        const trimmed = raw.trim();
+        if (trimmed === '' || trimmed === 'null' || trimmed === 'undefined') {
+          filteredData[field] = null;
+        } else {
+          const ddmmyyyy = trimmed.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
+          if (ddmmyyyy) {
+            filteredData[field] = `${ddmmyyyy[3]}-${ddmmyyyy[2].padStart(2, '0')}-${ddmmyyyy[1].padStart(2, '0')}`;
+          }
+        }
+      }
+    }
+  }
+
   const godownBillingNumericFields = ['storage_duration', 'rate_per_kg', 'rate_per_ton', 'min_billable_days'];
   for (const field of godownBillingNumericFields) {
     if (field in filteredData && filteredData[field] === '') {
       filteredData[field] = null;
     }
   }
-  if (isPg) {
-    const numericFields = ['tax', 'gst_rate', 'rate', 'weight', 'qty', 'amount', 'value',
-      'opening_balance', 'wages_kg', 'ed_percent', 'minimum_qty', 'reorder_level',
-      'critical_level', 'limit_days', 'limit_amount', 'ded_value', 'deduction_value',
-      'opening_advance'];
-    
-    for (const field of numericFields) {
-      if (field in filteredData && filteredData[field] === '') {
-        filteredData[field] = null;
-      }
+
+  const numericFields = [
+    'tax', 'gst_rate', 'rate', 'weight', 'qty', 'amount', 'value',
+    'opening_balance', 'per_kg_amount', 'wages_kg', 'ed_percent', 'minimum_qty', 'reorder_level',
+    'critical_level', 'limit_days', 'limit_amount', 'ded_value', 'deduction_value',
+    'opening_advance'
+  ];
+  for (const field of numericFields) {
+    if (field in filteredData && (filteredData[field] === '' || filteredData[field] === undefined)) {
+      filteredData[field] = db.isPostgres ? null : 0;
     }
   }
 
@@ -540,10 +647,18 @@ const masterTypeAliases = {
   area_master: { table: 'area_master', displayField: 'name', hasStatus: true },
   city_master: { table: 'city_master', displayField: 'name', hasStatus: true },
   transport_master: { table: 'transport_master', displayField: 'name', hasStatus: true },
-  consignee_master: { table: 'consignee_group_master', displayField: 'name', hasStatus: true },
-  consignee_group_master: { table: 'consignee_group_master', displayField: 'name', hasStatus: true },
-  sender_master: { table: 'sender_group_master', displayField: 'name', hasStatus: true },
-  sender_group_master: { table: 'sender_group_master', displayField: 'name', hasStatus: true },
+  transports: { table: 'transport_master', displayField: 'name', hasStatus: true, uniqueField: 'name' },
+  transport: { table: 'transport_master', displayField: 'name', hasStatus: true, uniqueField: 'name' },
+  p_trans: { table: 'transport_master', displayField: 'name', hasStatus: true, uniqueField: 'name' },
+  ptrans: { table: 'transport_master', displayField: 'name', hasStatus: true, uniqueField: 'name' },
+  sender: { table: 'sender_group_master', displayField: 'name', hasStatus: true, uniqueField: 'name' },
+  senders: { table: 'sender_group_master', displayField: 'name', hasStatus: true, uniqueField: 'name' },
+  consignee: { table: 'consignee_group_master', displayField: 'name', hasStatus: true, uniqueField: 'name' },
+  consignees: { table: 'consignee_group_master', displayField: 'name', hasStatus: true, uniqueField: 'name' },
+  consignee_master: { table: 'consignee_group_master', displayField: 'name', hasStatus: true, uniqueField: 'name' },
+  consignee_group_master: { table: 'consignee_group_master', displayField: 'name', hasStatus: true, uniqueField: 'name' },
+  sender_master: { table: 'sender_group_master', displayField: 'name', hasStatus: true, uniqueField: 'name' },
+  sender_group_master: { table: 'sender_group_master', displayField: 'name', hasStatus: true, uniqueField: 'name' },
   person_master: { table: 'person_master', displayField: 'name', hasStatus: true },
   godown_master: { table: 'godown_master', displayField: 'godown_name', hasStatus: false },
   godowns: { table: 'godown_master', displayField: 'godown_name', hasStatus: false },
@@ -727,19 +842,40 @@ const masterTables = {
   },
   operational_parties: {
     table: 'operational_parties',
-    fields: ['id', 'party_code', 'name', 'category', 'party_category', 'phone', 'whatsapp_number', 'email', 'default_payment_mode', 'payment_mode', 'address', 'bank_name', 'account_no', 'ifsc_code', 'upi_id', 'notes', 'is_active'],
+    fields: [
+      'id', 'party_code', 'name', 'print_name', 'contact_person', 'category', 'party_category',
+      'phone', 'phone_res', 'phone_off', 'whatsapp_number', 'email',
+      'default_payment_mode', 'payment_mode', 'address', 'area',
+      'opening_balance', 'opening_balance_date', 'per_kg_amount', 'period_duration',
+      'from_date', 'till_date', 'effective_from', 'effective_to',
+      'bank_name', 'account_no', 'ifsc_code', 'upi_id', 'notes', 'is_active'
+    ],
     uniqueField: 'name',
     displayField: 'name'
   },
   workers: {
     table: 'operational_parties',
-    fields: ['id', 'party_code', 'name', 'category', 'party_category', 'phone', 'whatsapp_number', 'email', 'default_payment_mode', 'payment_mode', 'address', 'bank_name', 'account_no', 'ifsc_code', 'upi_id', 'notes', 'is_active'],
+    fields: [
+      'id', 'party_code', 'name', 'print_name', 'contact_person', 'category', 'party_category',
+      'phone', 'phone_res', 'phone_off', 'whatsapp_number', 'email',
+      'default_payment_mode', 'payment_mode', 'address', 'area',
+      'opening_balance', 'opening_balance_date', 'per_kg_amount', 'period_duration',
+      'from_date', 'till_date', 'effective_from', 'effective_to',
+      'bank_name', 'account_no', 'ifsc_code', 'upi_id', 'notes', 'is_active'
+    ],
     uniqueField: 'name',
     displayField: 'name'
   },
   loadman: {
     table: 'operational_parties',
-    fields: ['id', 'party_code', 'name', 'category', 'party_category', 'phone', 'whatsapp_number', 'email', 'default_payment_mode', 'payment_mode', 'address', 'bank_name', 'account_no', 'ifsc_code', 'upi_id', 'notes', 'is_active'],
+    fields: [
+      'id', 'party_code', 'name', 'print_name', 'contact_person', 'category', 'party_category',
+      'phone', 'phone_res', 'phone_off', 'whatsapp_number', 'email',
+      'default_payment_mode', 'payment_mode', 'address', 'area',
+      'opening_balance', 'opening_balance_date', 'per_kg_amount', 'period_duration',
+      'from_date', 'till_date', 'effective_from', 'effective_to',
+      'bank_name', 'account_no', 'ifsc_code', 'upi_id', 'notes', 'is_active'
+    ],
     uniqueField: 'name',
     displayField: 'name'
   }
@@ -1107,7 +1243,7 @@ router.get('/:type', async (req, res, next) => {
       const allItemsList = Array.from(itemMap.values())
       return res.json({ success: true, data: allItemsList })
     } else if (tableName.endsWith('operational_parties')) {
-      query += ` WHERE (is_active = 1 OR is_active IS NULL)`;
+      query += ` WHERE name IS NOT NULL AND TRIM(name) != '' AND (is_active IS NULL OR LOWER(TRIM(CAST(is_active AS TEXT))) IN ('1', 'true', 't', 'active', 'yes', ''))`;
       query += orderClause || ` ORDER BY name ASC`;
     } else {
       if (hasStatus) {
@@ -1389,10 +1525,16 @@ router.post("/:table", async (req, res) => {
       console.error("❌ DB ERROR:", err);
       const isDuplicate = err.code === '23505' || /unique constraint|duplicate key/i.test(err.message);
       if (isDuplicate) {
+        const constraintHint = `${err.constraint || ''} ${err.detail || ''} ${err.message || ''}`;
+        const duplicateMsg = /party_code/i.test(constraintHint)
+          ? `A record with this party_code already exists in ${tableName}.`
+          : /_pkey\b/i.test(constraintHint)
+            ? `Primary key sequence conflict in ${tableName}. Please try saving again.`
+            : `A record with this ${uniqueCol} already exists in ${tableName}.`;
         return res.status(409).json({
           success: false,
-          message: `A record with this ${uniqueCol} already exists in ${tableName}.`,
-          error: `A record with this ${uniqueCol} already exists in ${tableName}.`
+          message: duplicateMsg,
+          error: duplicateMsg
         });
       }
       return res.status(500).json({
@@ -1469,20 +1611,43 @@ router.post('/record/:table', async (req, res) => {
 
     try {
       const result = await db.run(query, values)
+      const createdId = result.lastID || result.lastInsertRowid || result.rows?.[0]?.id
+      if (tableName === 'supplier_master' || tableName === 'customer_master' || tableName === 'operational_parties' || tableName.endsWith('_operational_parties')) {
+        try {
+          const { resolveLedgerId } = require('../utils/ledgerHelper');
+          const partyName = filteredData.name || data.name;
+          if (partyName) {
+            const role = tableName === 'customer_master' ? 'Customer' : (tableName === 'supplier_master' ? 'Supplier' : 'Loadman');
+            await resolveLedgerId(partyName, role);
+            if (role === 'Loadman') {
+              await db.run(
+                `UPDATE ledgermaster SET under = 'Direct Expenses', ledger_type = 'Worker' WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) AND (under IS NULL OR under = '')`,
+                [partyName]
+              ).catch(() => {});
+            }
+          }
+        } catch (lErr) {}
+      }
       res.status(201).json({
         success: true,
-        data: { id: result.lastID || result.lastInsertRowid || result.rows?.[0]?.id },
-        id: result.lastID || result.lastInsertRowid || result.rows?.[0]?.id,
+        data: { id: createdId },
+        id: createdId,
         message: 'Record created successfully'
       })
     } catch (err) {
       console.error("❌ DB INSERT ERROR:", err.message);
       const isDuplicate = err.code === '23505' || /unique constraint|duplicate key/i.test(err.message);
       if (isDuplicate) {
+        const constraintHint = `${err.constraint || ''} ${err.detail || ''} ${err.message || ''}`;
+        const duplicateMsg = /party_code/i.test(constraintHint)
+          ? `A record with this party_code already exists in ${tableName}.`
+          : /_pkey\b/i.test(constraintHint)
+            ? `Primary key sequence conflict in ${tableName}. Please try saving again.`
+            : `A record with this ${uniqueCol} already exists in ${tableName}.`;
         return res.status(409).json({
           success: false,
-          message: `A record with this ${uniqueCol} already exists in ${tableName}.`,
-          error: `A record with this ${uniqueCol} already exists in ${tableName}.`
+          message: duplicateMsg,
+          error: duplicateMsg
         });
       }
       return res.status(500).json({
@@ -1515,7 +1680,7 @@ router.put('/:table/:id', async (req, res) => {
 
     const tableName = await resolveCompanyMasterTable(resolvedTableName, req.companyId)
     const data = req.body
-    const filteredData = await normalizeMasterData(tableName, data);
+    const filteredData = await normalizeMasterData(tableName, data, true);
     const validationError = await validateAndPrepareMasterData(tableName, filteredData, req.params.id);
     if (validationError) {
       return res.status(400).json({ success: false, message: validationError });
@@ -1596,7 +1761,7 @@ router.put('/record/:table/:id', async (req, res) => {
 
     const tableName = await resolveCompanyMasterTable(resolvedTableName, req.companyId)
     const data = req.body
-    const filteredData = await normalizeMasterData(tableName, data);
+    const filteredData = await normalizeMasterData(tableName, data, true);
     const validationError = await validateAndPrepareMasterData(tableName, filteredData, req.params.id);
     if (validationError) {
       return res.status(400).json({ success: false, message: validationError });
@@ -1633,9 +1798,9 @@ router.put('/record/:table/:id', async (req, res) => {
     }
 
     if (result.changes > 0) {
-      res.json({ message: 'Record updated successfully' })
+      res.json({ success: true, message: 'Record updated successfully' })
     } else {
-      res.status(404).json({ message: 'Record not found' })
+      res.status(404).json({ success: false, message: 'Record not found' })
     }
   } catch (error) {
     console.error('Error updating master record:', error)

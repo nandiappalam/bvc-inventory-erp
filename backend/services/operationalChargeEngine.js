@@ -12,10 +12,39 @@ function getPrefix(companyId) {
   return '';
 }
 
+// Track per-company operational schema initialization so repeated master lookups don't re-run 70 DDL statements
+const ensuredOperationalCompanies = new Map();
+
+function invalidateOperationalTablesCache(companyId = null) {
+  if (companyId === null || companyId === undefined) {
+    ensuredOperationalCompanies.clear();
+    return;
+  }
+  ensuredOperationalCompanies.delete(parseInt(companyId, 10) || 1);
+}
+
+if (typeof db.registerCacheInvalidator === 'function') {
+  db.registerCacheInvalidator(invalidateOperationalTablesCache);
+}
+
 /**
  * Ensure all operational charge tables exist for this company schema
  */
-async function ensureOperationalTables(companyId = 1) {
+async function ensureOperationalTables(companyId = 1, force = false) {
+  const activeCompanyId = parseInt(companyId, 10) || 1;
+  if (!force && ensuredOperationalCompanies.has(activeCompanyId)) {
+    return ensuredOperationalCompanies.get(activeCompanyId);
+  }
+
+  const runPromise = _ensureOperationalTablesImpl(activeCompanyId).catch((err) => {
+    ensuredOperationalCompanies.delete(activeCompanyId);
+    throw err;
+  });
+  ensuredOperationalCompanies.set(activeCompanyId, runPromise);
+  return runPromise;
+}
+
+async function _ensureOperationalTablesImpl(companyId = 1) {
   const pfx = getPrefix(companyId);
   const isPostgres = db.isPostgres;
   const idCol = isPostgres ? 'SERIAL PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
@@ -168,9 +197,11 @@ async function ensureOperationalTables(companyId = 1) {
     )`
   ];
 
+  const companyDb = typeof db.forCompany === 'function' ? db.forCompany(companyId) : db;
+
   for (const sql of queries) {
     try {
-      await db.run(sql);
+      await companyDb.run(sql);
     } catch (err) {
       console.warn(`[operationalChargeEngine] ensureOperationalTables non-fatal:`, err.message);
     }
@@ -264,7 +295,7 @@ async function ensureOperationalTables(companyId = 1) {
 
   for (const altSql of safeAlterColumns) {
     try {
-      await db.run(altSql);
+      await companyDb.run(altSql);
     } catch (_) {
       // Column already exists, ignore error
     }
@@ -272,49 +303,53 @@ async function ensureOperationalTables(companyId = 1) {
 
   // Column value sync for backward compatibility (safely isolated per query)
   try {
-    await db.run(`UPDATE ${pfx}operational_parties SET party_code = 'OPP-GEN-' || id WHERE party_code IS NULL OR party_code = ''`);
+    await companyDb.run(`UPDATE ${pfx}operational_parties SET party_code = 'OPP-GEN-' || id WHERE party_code IS NULL OR party_code = ''`);
   } catch (_) {}
   try {
-    await db.run(`UPDATE ${pfx}operational_parties SET category = COALESCE(category, party_category, 'LOADMAN') WHERE category IS NULL OR category = ''`);
+    await companyDb.run(`UPDATE ${pfx}operational_parties SET category = COALESCE(category, party_category, 'LOADMAN') WHERE category IS NULL OR category = ''`);
   } catch (_) {}
   try {
-    await db.run(`UPDATE ${pfx}operational_parties SET party_category = COALESCE(party_category, category, 'LOADMAN') WHERE party_category IS NULL OR party_category = ''`);
+    await companyDb.run(`UPDATE ${pfx}operational_parties SET party_category = COALESCE(party_category, category, 'LOADMAN') WHERE party_category IS NULL OR party_category = ''`);
   } catch (_) {}
   try {
-    await db.run(`UPDATE ${pfx}operational_parties SET default_payment_mode = COALESCE(default_payment_mode, payment_mode, 'CASH') WHERE default_payment_mode IS NULL OR default_payment_mode = ''`);
+    await companyDb.run(`UPDATE ${pfx}operational_parties SET default_payment_mode = COALESCE(default_payment_mode, payment_mode, 'CASH') WHERE default_payment_mode IS NULL OR default_payment_mode = ''`);
   } catch (_) {}
   try {
-    await db.run(`UPDATE ${pfx}operational_parties SET payment_mode = COALESCE(payment_mode, default_payment_mode, 'CASH') WHERE payment_mode IS NULL OR payment_mode = ''`);
+    await companyDb.run(`UPDATE ${pfx}operational_parties SET payment_mode = COALESCE(payment_mode, default_payment_mode, 'CASH') WHERE payment_mode IS NULL OR payment_mode = ''`);
   } catch (_) {}
 
   try {
-    await db.run(`UPDATE ${pfx}operational_charges SET date = COALESCE(date, charge_date, CURRENT_DATE) WHERE date IS NULL`);
+    await companyDb.run(`UPDATE ${pfx}operational_charges SET date = COALESCE(date, charge_date, CURRENT_DATE) WHERE date IS NULL`);
   } catch (_) {}
   try {
-    await db.run(`UPDATE ${pfx}operational_charges SET final_amount = COALESCE(final_amount, total_amount, amount, 0.00) WHERE final_amount IS NULL OR final_amount = 0`);
+    await companyDb.run(`UPDATE ${pfx}operational_charges SET final_amount = COALESCE(final_amount, total_amount, amount, 0.00) WHERE final_amount IS NULL OR final_amount = 0`);
   } catch (_) {}
   try {
-    await db.run(`UPDATE ${pfx}operational_charges SET payment_status = COALESCE(payment_status, status, 'UNPAID') WHERE payment_status IS NULL OR payment_status = ''`);
+    await companyDb.run(`UPDATE ${pfx}operational_charges SET payment_status = COALESCE(payment_status, status, 'UNPAID') WHERE payment_status IS NULL OR payment_status = ''`);
   } catch (_) {}
   try {
-    await db.run(`UPDATE ${pfx}operational_charges SET operation_type = COALESCE(operation_type, charge_type, 'LOADING') WHERE operation_type IS NULL OR operation_type = ''`);
+    await companyDb.run(`UPDATE ${pfx}operational_charges SET operation_type = COALESCE(operation_type, charge_type, 'LOADING') WHERE operation_type IS NULL OR operation_type = ''`);
   } catch (_) {}
   try {
-    await db.run(`UPDATE ${pfx}operational_charges SET charge_category = COALESCE(charge_category, party_category, 'LABOUR') WHERE charge_category IS NULL OR charge_category = ''`);
+    await companyDb.run(`UPDATE ${pfx}operational_charges SET charge_category = COALESCE(charge_category, party_category, 'LABOUR') WHERE charge_category IS NULL OR charge_category = ''`);
   } catch (_) {}
   try {
-    await db.run(`UPDATE ${pfx}operational_charges SET party_category = COALESCE(party_category, charge_category, 'LABOUR') WHERE party_category IS NULL OR party_category = ''`);
+    await companyDb.run(`UPDATE ${pfx}operational_charges SET party_category = COALESCE(party_category, charge_category, 'LABOUR') WHERE party_category IS NULL OR party_category = ''`);
   } catch (_) {}
   try {
-    await db.run(`UPDATE ${pfx}operational_charges SET rate_basis = COALESCE(rate_basis, calculation_basis, 'PER_BAG') WHERE rate_basis IS NULL OR rate_basis = ''`);
+    await companyDb.run(`UPDATE ${pfx}operational_charges SET rate_basis = COALESCE(rate_basis, calculation_basis, 'PER_BAG') WHERE rate_basis IS NULL OR rate_basis = ''`);
   } catch (_) {}
   try {
-    await db.run(`UPDATE ${pfx}operational_charges SET rate_per_unit = COALESCE(rate_per_unit, rate, 0.00) WHERE rate_per_unit IS NULL OR rate_per_unit = 0`);
+    await companyDb.run(`UPDATE ${pfx}operational_charges SET rate_per_unit = COALESCE(rate_per_unit, rate, 0.00) WHERE rate_per_unit IS NULL OR rate_per_unit = 0`);
   } catch (_) {}
 
   // Seed default rate masters and default parties if empty
   await seedDefaultRateMasters(companyId);
   await seedDefaultParties(companyId);
+
+  if (db.isPostgres && typeof db.ensurePostgresCompanySequences === 'function') {
+    await db.ensurePostgresCompanySequences(companyId).catch(() => {});
+  }
 }
 
 /**
@@ -322,22 +357,28 @@ async function ensureOperationalTables(companyId = 1) {
  */
 async function seedDefaultParties(companyId = 1) {
   const pfx = getPrefix(companyId);
+  const companyDb = typeof db.forCompany === 'function' ? db.forCompany(companyId) : db;
   try {
-    const existing = await db.get(`SELECT id FROM ${pfx}operational_parties WHERE id = 1 OR party_code = 'OPP-GEN-0001' LIMIT 1`);
+    const existing = await companyDb.get(`SELECT id FROM ${pfx}operational_parties WHERE id = 1 OR party_code = 'OPP-GEN-0001' LIMIT 1`);
     if (!existing) {
       const isPostgres = db.isPostgres;
       if (isPostgres) {
-        await db.run(
+        await companyDb.run(
           `INSERT INTO ${pfx}operational_parties (id, party_code, name, category, party_category, default_payment_mode, payment_mode, is_active)
            VALUES (1, 'OPP-GEN-0001', 'General Labour Pool', 'LOADMAN', 'LOADMAN', 'CASH', 'CASH', 1)
            ON CONFLICT (id) DO NOTHING`
         );
       } else {
-        await db.run(
+        await companyDb.run(
           `INSERT OR IGNORE INTO ${pfx}operational_parties (id, party_code, name, category, party_category, default_payment_mode, payment_mode, is_active)
            VALUES (1, 'OPP-GEN-0001', 'General Labour Pool', 'LOADMAN', 'LOADMAN', 'CASH', 'CASH', 1)`
         );
       }
+    }
+    if (db.isPostgres) {
+      await companyDb.run(
+        `SELECT setval(pg_get_serial_sequence('${pfx}operational_parties', 'id'), COALESCE((SELECT MAX(id) FROM ${pfx}operational_parties), 1), true)`
+      ).catch(() => {});
     }
   } catch (err) {
     console.warn('[operationalChargeEngine] seedDefaultParties non-fatal:', err.message);
@@ -983,6 +1024,7 @@ async function logOperationalAudit(companyId, entityType, entityId, entityRef, a
 
 module.exports = {
   ensureOperationalTables,
+  invalidateOperationalTablesCache,
   seedDefaultRateMasters,
   resolveOperationalLedgers,
   recordOperationalCharge,
