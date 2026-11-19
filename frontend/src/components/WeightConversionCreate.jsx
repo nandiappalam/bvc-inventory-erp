@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import './WeightConversionCreate.css';
 import { api } from "../utils/api.js";
+import { InlineMasterModal } from './common/InlineMasterModal.jsx';
 
 const WeightConversionCreate = () => {
   const navigate = useNavigate();
@@ -18,6 +19,13 @@ const WeightConversionCreate = () => {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState('success');
+
+  const [inlineItemModalOpen, setInlineItemModalOpen] = useState(false);
+  const [inlineItemModalRowIndex, setInlineItemModalRowIndex] = useState(0);
+  const [inlineItemModalRowType, setInlineItemModalRowType] = useState('input');
+
+  const [inlineWeightModalOpen, setInlineWeightModalOpen] = useState(false);
+  const [inlineWeightModalRowIndex, setInlineWeightModalRowIndex] = useState(0);
 
   // Dynamic rows of conversion items (Input - Top Table)
   const [rows, setRows] = useState([
@@ -90,9 +98,10 @@ const WeightConversionCreate = () => {
 
   const parseWeightValue = (weightStr) => {
     if (!weightStr) return 0;
-    const num = parseFloat(weightStr);
+    const str = String(weightStr);
+    const num = parseFloat(str);
     if (isNaN(num)) return 0;
-    if (weightStr.toUpperCase().includes('GM')) {
+    if (str.toUpperCase().includes('GM')) {
       return num / 1000; // Convert GM to KG
     }
     return num; // Default assumes KG
@@ -525,7 +534,21 @@ const WeightConversionCreate = () => {
       };
     });
 
+    const totalInWt = validItems.reduce((s, r) => s + (parseFloat(r.total_wt) || 0), 0);
+    const totalOutWt = validOutputItems.reduce((s, r) => s + (parseFloat(r.total_wt) || 0), 0);
+    const remainderWt = parseFloat(Math.max(0, totalInWt - totalOutWt).toFixed(2));
+
     const allItems = [...validItems, ...validOutputItems];
+    if (remainderWt > 0.001 && validItems.length > 0) {
+      allItems.push({
+        item_name: validItems[0].item_name,
+        lot_no: validItems[0].lot_no || '',
+        weight: remainderWt,
+        qty: 1,
+        total_wt: remainderWt,
+        type: 'remainder'
+      });
+    }
 
     if (allItems.length === 0) {
       setMessage('At least one input or output item with quantity greater than zero is required');
@@ -688,10 +711,20 @@ const WeightConversionCreate = () => {
                 <td style={{ border: '1px solid #9bb4e0', padding: '8px' }}>
                   <select 
                     value={row.item_name} 
-                    onChange={(e) => handleRowItemSelect(idx, e.target.value)} 
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === '__CREATE_NEW__' || val === 'create_new' || val === 'manual') {
+                        setInlineItemModalRowIndex(idx);
+                        setInlineItemModalRowType('input');
+                        setInlineItemModalOpen(true);
+                        return;
+                      }
+                      handleRowItemSelect(idx, val);
+                    }} 
                     style={{ width: '100%', height: '28px', padding: '2px', border: '1px solid #9bb4e0', borderRadius: '4px', outline: 'none' }}
                   >
                     <option value="">-- Select Item --</option>
+                    <option value="__CREATE_NEW__" style={{ fontWeight: 'bold', color: '#1d4ed8' }}>+ Enter Item Name Manually</option>
                     {availableItems.map((item, itemIdx) => (
                       <option key={itemIdx} value={item}>{item}</option>
                     ))}
@@ -826,10 +859,20 @@ const WeightConversionCreate = () => {
                 <td style={{ border: '1px solid #9bb4e0', padding: '8px' }}>
                   <select 
                     value={row.item_name} 
-                    onChange={(e) => handleOutputRowChange(idx, 'item_name', e.target.value)} 
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === '__CREATE_NEW__' || val === 'create_new' || val === 'manual') {
+                        setInlineItemModalRowIndex(idx);
+                        setInlineItemModalRowType('output');
+                        setInlineItemModalOpen(true);
+                        return;
+                      }
+                      handleOutputRowChange(idx, 'item_name', val);
+                    }} 
                     style={{ width: '100%', height: '28px', padding: '2px', border: '1px solid #9bb4e0', borderRadius: '4px', outline: 'none' }}
                   >
                     <option value="">-- Select Item --</option>
+                    <option value="__CREATE_NEW__" style={{ fontWeight: 'bold', color: '#1d4ed8' }}>+ Enter Item Name Manually</option>
                     {availableItems.map((item, itemIdx) => (
                       <option key={itemIdx} value={item}>{item}</option>
                     ))}
@@ -864,10 +907,19 @@ const WeightConversionCreate = () => {
                 <td style={{ border: '1px solid #9bb4e0', padding: '8px', textAlign: 'center' }}>
                   <select
                     value={row.weight}
-                    onChange={(e) => handleOutputRowChange(idx, 'weight', e.target.value)}
-                    style={{ width: '90%', height: '28px', padding: '2px', border: '1px solid #cbd5e1', borderRadius: '4px', outline: 'none' }}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === '__CREATE_NEW__' || val === 'create_new' || val === 'manual') {
+                        setInlineWeightModalRowIndex(idx);
+                        setInlineWeightModalOpen(true);
+                        return;
+                      }
+                      handleOutputRowChange(idx, 'weight', val);
+                    }}
+                    style={{ width: '90%', height: '28px', padding: '2px', border: '1px solid cbd5e1', borderRadius: '4px', outline: 'none' }}
                   >
                     <option value="">-- Select Weight --</option>
+                    <option value="__CREATE_NEW__" style={{ fontWeight: 'bold', color: '#1d4ed8' }}>+ Enter Weight Manually</option>
                     {availableWeights.map((w, wIdx) => (
                       <option key={wIdx} value={w}>{w}</option>
                     ))}
@@ -928,6 +980,11 @@ const WeightConversionCreate = () => {
             <div>Total Output Qty: <span style={{ color: '#0f172a' }}>{outputSummaryQty.toFixed(2)} Bags</span></div>
             <div>Total Output Weight: <span style={{ color: '#0f172a' }}>{outputSummaryTotWt.toFixed(2)} KG</span></div>
           </div>
+          {summaryTotWt > outputSummaryTotWt && summaryTotWt > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '15px', color: '#b45309', background: '#fef3c7', padding: '6px 14px', borderRadius: '4px', border: '1px solid #fde68a', marginTop: '4px', fontSize: '13px' }}>
+              <span>📦 <strong>Unconverted Remainder:</strong> {(summaryTotWt - outputSummaryTotWt).toFixed(2)} KG will remain in the opened bag in Lot <strong>{rows[0]?.lot_no || 'Input Lot'}</strong></span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -955,6 +1012,40 @@ const WeightConversionCreate = () => {
           {loading ? (editId ? 'Updating...' : 'Saving...') : (editId ? 'Update' : 'Save')}
         </button>
       </div>
+
+      <InlineMasterModal
+        open={inlineItemModalOpen}
+        onClose={() => setInlineItemModalOpen(false)}
+        masterType="items"
+        onSuccess={(newItem) => {
+          const name = newItem?.item_name || newItem?.name || newItem;
+          if (name) {
+            if (!availableItems.includes(name)) {
+              setAvailableItems(prev => [...prev, name].sort());
+            }
+            if (inlineItemModalRowType === 'input') {
+              handleRowItemSelect(inlineItemModalRowIndex, name);
+            } else {
+              handleOutputRowChange(inlineItemModalRowIndex, 'item_name', name);
+            }
+          }
+        }}
+      />
+
+      <InlineMasterModal
+        open={inlineWeightModalOpen}
+        onClose={() => setInlineWeightModalOpen(false)}
+        masterType="weights"
+        onSuccess={(newWeight) => {
+          const name = newWeight?.name || newWeight?.weight || newWeight;
+          if (name) {
+            if (!availableWeights.includes(name)) {
+              setAvailableWeights(prev => [...prev, name].sort());
+            }
+            handleOutputRowChange(inlineWeightModalRowIndex, 'weight', name);
+          }
+        }}
+      />
     </div>
   );
 };

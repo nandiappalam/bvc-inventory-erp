@@ -1,12 +1,29 @@
-const express = require('express')
-const router = express.Router()
-const db = require('../config/database')
-const { deductFlourOutStock, revertFlourOutStock } = require('../utils/stockSync')
+const express = require('express');
+const router = express.Router();
+const db = require('../config/database');
+const { deductFlourOutStock, revertFlourOutStock } = require('../utils/stockSync');
+
+const getCompanyId = (req) => req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+const _flourOutSchemaEnsured = new Set();
+
+async function ensureFlourOutSchema(companyId) {
+  if (_flourOutSchemaEnsured.has(companyId)) return;
+  const compDb = db.forCompany(companyId);
+  try { await compDb.run("ALTER TABLE flour_out ADD COLUMN loadman_name TEXT", []); } catch (_) {}
+  try { await compDb.run("ALTER TABLE flour_out ADD COLUMN loadman_worker_id INTEGER", []); } catch (_) {}
+  try { await compDb.run("ALTER TABLE flour_out ADD COLUMN loadman_rate_per_kg REAL DEFAULT 0.50", []); } catch (_) {}
+  try { await compDb.run("ALTER TABLE flour_out ADD COLUMN loadman_charges REAL DEFAULT 0", []); } catch (_) {}
+  _flourOutSchemaEnsured.add(companyId);
+}
 
 // GET next sequential S.No for flour out
 router.get('/next-sno', async (req, res) => {
   try {
-    const result = await db.query(`
+    const activeCompanyId = getCompanyId(req);
+    await ensureFlourOutSchema(activeCompanyId);
+    const compDb = db.forCompany(activeCompanyId);
+
+    const result = await compDb.query(`
       SELECT 
         MAX(CAST(s_no AS INTEGER)) as max_sno,
         MAX(id) as max_id,
@@ -36,15 +53,19 @@ router.get('/next-sno', async (req, res) => {
 // GET all flour out records (returns flat rows for Display pages)
 router.get(['/', '/list'], async (req, res) => {
   try {
+    const activeCompanyId = getCompanyId(req);
+    await ensureFlourOutSchema(activeCompanyId);
+    const compDb = db.forCompany(activeCompanyId);
+
     // Dynamic sequence auto-repair if any s_no is null or empty
     try {
-      const nullSnoCheck = await db.query("SELECT id FROM flour_out WHERE s_no IS NULL OR s_no = '' ORDER BY created_at ASC");
+      const nullSnoCheck = await compDb.query("SELECT id FROM flour_out WHERE s_no IS NULL OR s_no = '' ORDER BY created_at ASC");
       if (nullSnoCheck.rows.length > 0) {
-        const maxSnoRes = await db.query("SELECT COALESCE(MAX(CAST(s_no AS INTEGER)), 0) as maxSno FROM flour_out WHERE s_no IS NOT NULL AND s_no != ''");
+        const maxSnoRes = await compDb.query("SELECT COALESCE(MAX(CAST(s_no AS INTEGER)), 0) as maxSno FROM flour_out WHERE s_no IS NOT NULL AND s_no != ''");
         let currentMax = maxSnoRes.rows[0]?.maxSno || 0;
         for (const row of nullSnoCheck.rows) {
           currentMax++;
-          await db.run('UPDATE flour_out SET s_no = ? WHERE id = ?', [String(currentMax), row.id]);
+          await compDb.run('UPDATE flour_out SET s_no = ? WHERE id = ?', [String(currentMax), row.id]);
         }
       }
     } catch (migErr) {
@@ -52,7 +73,7 @@ router.get(['/', '/list'], async (req, res) => {
     }
 
     // Get all flour_out records with their items joined
-    const result = await db.query(`
+    const result = await compDb.query(`
       SELECT 
         fo.id,
         fo.s_no as s_no,
@@ -140,17 +161,20 @@ router.get(['/', '/list'], async (req, res) => {
 // GET flour out by ID (for Update / Edit Page)
 router.get('/:id', async (req, res) => {
   try {
+    const activeCompanyId = getCompanyId(req);
+    await ensureFlourOutSchema(activeCompanyId);
+    const compDb = db.forCompany(activeCompanyId);
     const id = req.params.id;
     if (!id || id === 'undefined' || id === 'null' || isNaN(Number(id))) {
       return res.status(404).json({ message: 'Flour out record not found' });
     }
 
-    const flourOutResult = await db.query('SELECT * FROM flour_out WHERE id = ?', [id]);
+    const flourOutResult = await compDb.query('SELECT * FROM flour_out WHERE id = ?', [id]);
     if (flourOutResult.rows.length === 0) {
       return res.status(404).json({ message: 'Flour out record not found' });
     }
 
-    const itemsResult = await db.query('SELECT * FROM flour_out_items WHERE flour_out_id = ? ORDER BY id ASC', [id]);
+    const itemsResult = await compDb.query('SELECT * FROM flour_out_items WHERE flour_out_id = ? ORDER BY id ASC', [id]);
     
     const raw = flourOutResult.rows[0];
     const flourOut = {
@@ -184,6 +208,10 @@ router.get('/:id', async (req, res) => {
 // POST create new flour out
 router.post('/', async (req, res) => {
   try {
+    const activeCompanyId = getCompanyId(req);
+    await ensureFlourOutSchema(activeCompanyId);
+    const compDb = db.forCompany(activeCompanyId);
+
     const body = req.body || {};
     const formData = body.formData || body;
     const items = body.items || [];
@@ -204,34 +232,34 @@ router.post('/', async (req, res) => {
     let companyName = rawComp;
     const isId = /^\d+$/.test(String(rawComp));
     const existingCompany = isId
-      ? await db.query('SELECT id, name FROM papad_company_master WHERE id = ?', [rawComp])
-      : await db.query('SELECT id, name FROM papad_company_master WHERE name = ?', [rawComp]);
+      ? await compDb.query('SELECT id, name FROM papad_company_master WHERE id = ?', [rawComp])
+      : await compDb.query('SELECT id, name FROM papad_company_master WHERE name = ?', [rawComp]);
 
     if (existingCompany.rows.length > 0) {
       companyName = existingCompany.rows[0].name;
     } else if (!isId && rawComp.trim()) {
-      await db.run('INSERT INTO papad_company_master (name, status) VALUES (?, ?)', [rawComp.trim(), 'Active']);
+      await compDb.run('INSERT INTO papad_company_master (name, status) VALUES (?, ?)', [rawComp.trim(), 'Active']);
     }
 
     // Auto-generate S.No if not provided
     let sNoVal = formData.sNo || formData.s_no || formData.sno || '';
     if (!sNoVal || sNoVal === '1') {
-      const maxSnoRes = await db.query('SELECT COALESCE(MAX(CAST(s_no AS INTEGER)), 0) as maxSno FROM flour_out');
+      const maxSnoRes = await compDb.query('SELECT COALESCE(MAX(CAST(s_no AS INTEGER)), 0) as maxSno FROM flour_out');
       const nextNum = (maxSnoRes.rows[0]?.maxSno || 0) + 1;
       if (!sNoVal) sNoVal = String(nextNum);
     }
 
-    // Insert flour out record
-    const flourOutResult = await db.run(`
-      INSERT INTO flour_out (s_no, date, papad_company, address, remarks, total_qty, total_weight, total_wages,
-                             loadman_name, loadman_worker_id, loadman_rate_per_kg, loadman_charges)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [sNoVal, formData.date, companyName, formData.address || '', formData.remarks || '', totalQty, totalWeight, totalWages,
-        formData.loadman_name || '', formData.loadman_worker_id || null, parseFloat(formData.loadman_rate_per_kg) || 0.50, parseFloat(formData.loadman_charges) || 0]);
+    const flourOutId = await compDb.withTransaction(async () => {
+      // Insert flour out record
+      const flourOutResult = await compDb.run(`
+        INSERT INTO flour_out (s_no, date, papad_company, address, remarks, total_qty, total_weight, total_wages,
+                               loadman_name, loadman_worker_id, loadman_rate_per_kg, loadman_charges)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [sNoVal, formData.date, companyName, formData.address || '', formData.remarks || '', totalQty, totalWeight, totalWages,
+          formData.loadman_name || '', formData.loadman_worker_id || null, parseFloat(formData.loadman_rate_per_kg) || 0.50, parseFloat(formData.loadman_charges) || 0]);
 
-    const flourOutId = flourOutResult.lastID;
+      const fId = flourOutResult.lastID;
 
-    try {
       // Insert items
       for (const item of activeItems) {
         const item_name = item.item_name || item.itemName;
@@ -244,42 +272,42 @@ router.post('/', async (req, res) => {
         const wages = parseFloat(item.wages) || (papad_kg * wages_bag);
 
         // Ensure item exists in item_master under Flour item_group
-        const existingItem = await db.query('SELECT id, item_group FROM item_master WHERE item_name = ?', [item_name]);
+        const existingItem = await compDb.query('SELECT id, item_group FROM item_master WHERE item_name = ?', [item_name]);
         if (existingItem.rows.length === 0) {
-          await db.run('INSERT INTO item_master (item_name, status, item_group) VALUES (?, ?, ?)', [item_name, 'Active', 'Flour']);
+          await compDb.run('INSERT INTO item_master (item_name, status, item_group) VALUES (?, ?, ?)', [item_name, 'Active', 'Flour']);
         } else if (!existingItem.rows[0].item_group) {
-          await db.run('UPDATE item_master SET item_group = ? WHERE id = ?', ['Flour', existingItem.rows[0].id]);
+          await compDb.run('UPDATE item_master SET item_group = ? WHERE id = ?', ['Flour', existingItem.rows[0].id]);
         }
 
-        await db.run(`
+        await compDb.run(`
           INSERT INTO flour_out_items (flour_out_id, item_name, lot_no, weight, qty, total_wt, papad_kg, wages_bag, wages)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [flourOutId, item_name, lot_no, weight, qty, total_wt, papad_kg, wages_bag, wages]);
+        `, [fId, item_name, lot_no, weight, qty, total_wt, papad_kg, wages_bag, wages]);
       }
 
       // Deduct stock
-      await deductFlourOutStock(flourOutId, formData.date, activeItems);
+      await deductFlourOutStock(fId, formData.date, activeItems);
 
       // Track vehicle movement if vehicle/lorry is provided
       if (formData.vehicle_no || formData.lorry_no) {
         try {
           const vNo = formData.vehicle_no || formData.lorry_no;
-          await db.run(`
+          await compDb.run(`
             INSERT INTO vehicle_movements (
               reference_type, reference_id, movement_type, operation_type, vehicle_no, driver_name,
               gate_in_time, gate_out_time, status, item_name, qty, weight, party_name, lot_no, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'OUT', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
           `, [
             'FLOUR_OUT',
-            formData.s_no || flourOutId,
+            sNoVal || fId,
             'OUTWARD',
             'Flour Out Dispatched',
             vNo,
             formData.driver || '',
             activeItems[0]?.item_name || 'Flour',
-            parseFloat(formData.total_qty) || 0,
-            parseFloat(formData.total_weight) || 0,
-            formData.papad_company || '',
+            parseFloat(totalQty) || 0,
+            parseFloat(totalWeight) || 0,
+            companyName || '',
             activeItems[0]?.lot_no || ''
           ]);
         } catch (vmErr) {
@@ -287,45 +315,44 @@ router.post('/', async (req, res) => {
         }
       }
 
-      try {
-        const { triggerTransactionNotification } = require('../utils/transactionNotifier');
-        const flNo = `FO-${formData.s_no || formData.sNo || flourOutId}`;
-        const itemDesc = activeItems.map(i => `${i.qty || 0} ${i.item_name || i.itemName}`).slice(0, 3).join(', ') || 'Flour';
-        await triggerTransactionNotification({
-          eventType: 'PRODUCTION_CREATED',
-          moduleName: 'PRODUCTION',
-          referenceNo: flNo,
-          referenceId: flourOutId,
-          companyId: req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1),
-          title: `⚙️ FLOUR OUT DISPATCH – ${flNo}`,
-          message: `Papad Company: ${formData.papad_company || formData.papadCompany || 'Mill'} | ${itemDesc} | Weight: ${formData.total_weight || 0} KG`,
-          severity: 'INFO',
-          details: {
-            reference_no: flNo,
-            action_label: 'FLOUR OUT',
-            module_label: 'Flour Out Dispatch',
-            party_name: formData.papad_company || formData.papadCompany || 'Papad Unit',
-            item_summary: itemDesc,
-            quantity: `${formData.total_qty || 0} Bags / ${formData.total_weight || 0} KG`,
-            godown: 'Flour Store',
-            status: 'DISPATCHED',
-            created_by: req.user?.username || 'Production Operator',
-            date: formData.date
-          }
-        });
-      } catch (notifErr) {
-        console.warn('Notification warning (Flour Out):', notifErr.message);
-      }
+      return fId;
+    });
 
-      res.status(201).json({
-        success: true,
-        message: 'Flour out record saved successfully!',
-        id: flourOutId
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const flNo = `FO-${sNoVal || flourOutId}`;
+      const itemDesc = activeItems.map(i => `${i.qty || 0} ${i.item_name || i.itemName}`).slice(0, 3).join(', ') || 'Flour';
+      await triggerTransactionNotification({
+        eventType: 'PRODUCTION_CREATED',
+        moduleName: 'PRODUCTION',
+        referenceNo: flNo,
+        referenceId: flourOutId,
+        companyId: activeCompanyId,
+        title: `⚙️ FLOUR OUT DISPATCH – ${flNo}`,
+        message: `Papad Company: ${companyName || 'Mill'} | ${itemDesc} | Weight: ${totalWeight} KG`,
+        severity: 'INFO',
+        details: {
+          reference_no: flNo,
+          action_label: 'FLOUR OUT',
+          module_label: 'Flour Out Dispatch',
+          party_name: companyName || 'Papad Unit',
+          item_summary: itemDesc,
+          quantity: `${totalQty} Bags / ${totalWeight} KG`,
+          godown: 'Flour Store',
+          status: 'DISPATCHED',
+          created_by: req.user?.username || 'Production Operator',
+          date: formData.date
+        }
       });
-    } catch (error) {
-      await db.run('DELETE FROM flour_out WHERE id = ?', [flourOutId]);
-      throw error;
+    } catch (notifErr) {
+      console.warn('Notification warning (Flour Out):', notifErr.message);
     }
+
+    res.status(201).json({
+      success: true,
+      message: 'Flour out record saved successfully!',
+      id: flourOutId
+    });
   } catch (error) {
     console.error('Error saving flour out:', error);
     res.status(500).json({ success: false, message: 'Error saving flour out', error: error.message });
@@ -346,14 +373,14 @@ function sanitizeDate(val) {
 // PUT update flour out
 router.put('/:id', async (req, res) => {
   try {
+    const activeCompanyId = getCompanyId(req);
+    await ensureFlourOutSchema(activeCompanyId);
+    const compDb = db.forCompany(activeCompanyId);
     const flourOutId = req.params.id;
     const body = req.body || {};
     const formData = body.formData || body;
     const items = body.items || [];
     const activeItems = (items || []).filter(item => item.item_name || item.itemName);
-
-    // Revert existing stock changes first
-    await revertFlourOutStock(flourOutId);
 
     // Calculate totals
     const totalQty = activeItems.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0);
@@ -364,46 +391,51 @@ router.put('/:id', async (req, res) => {
     const compVal = formData.papad_company || formData.papadCompany || formData.company || '';
     const cleanDate = sanitizeDate(formData.date) || new Date().toISOString().slice(0, 10);
 
-    // Update flour out header
-    await db.run(`
-      UPDATE flour_out 
-      SET s_no = ?, date = ?, papad_company = ?, address = ?, remarks = ?, total_qty = ?, total_weight = ?, total_wages = ?,
-          loadman_name = ?, loadman_worker_id = ?, loadman_rate_per_kg = ?, loadman_charges = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `, [sNoVal, cleanDate, compVal, formData.address || '', formData.remarks || '', totalQty, totalWeight, totalWages,
-        formData.loadman_name || '', formData.loadman_worker_id || null, parseFloat(formData.loadman_rate_per_kg) || 0.50, parseFloat(formData.loadman_charges) || 0,
-        flourOutId]);
+    await compDb.withTransaction(async () => {
+      // Revert existing stock changes first
+      await revertFlourOutStock(flourOutId);
 
-    // Delete existing items
-    await db.run('DELETE FROM flour_out_items WHERE flour_out_id = ?', [flourOutId]);
+      // Update flour out header
+      await compDb.run(`
+        UPDATE flour_out 
+        SET s_no = ?, date = ?, papad_company = ?, address = ?, remarks = ?, total_qty = ?, total_weight = ?, total_wages = ?,
+            loadman_name = ?, loadman_worker_id = ?, loadman_rate_per_kg = ?, loadman_charges = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `, [sNoVal, cleanDate, compVal, formData.address || '', formData.remarks || '', totalQty, totalWeight, totalWages,
+          formData.loadman_name || '', formData.loadman_worker_id || null, parseFloat(formData.loadman_rate_per_kg) || 0.50, parseFloat(formData.loadman_charges) || 0,
+          flourOutId]);
 
-    // Insert updated items
-    for (const item of activeItems) {
-      const item_name = item.item_name || item.itemName;
-      const lot_no = item.lot_no || item.lotNo || '';
-      const weight = parseFloat(item.weight) || 0;
-      const qty = parseFloat(item.qty) || 0;
-      const total_wt = parseFloat(item.total_wt || item.totalWt) || (weight * qty);
-      const papad_kg = parseFloat(item.papad_kg || item.papadKg) || 0;
-      const wages_bag = parseFloat(item.wages_bag || item.wagesBag) || 0;
-      const wages = parseFloat(item.wages) || (papad_kg * wages_bag);
+      // Delete existing items
+      await compDb.run('DELETE FROM flour_out_items WHERE flour_out_id = ?', [flourOutId]);
 
-      // Ensure item group is Flour
-      const existingItem = await db.query('SELECT id, item_group FROM item_master WHERE item_name = ?', [item_name]);
-      if (existingItem.rows.length === 0) {
-        await db.run('INSERT INTO item_master (item_name, status, item_group) VALUES (?, ?, ?)', [item_name, 'Active', 'Flour']);
-      } else if (!existingItem.rows[0].item_group) {
-        await db.run('UPDATE item_master SET item_group = ? WHERE id = ?', ['Flour', existingItem.rows[0].id]);
+      // Insert updated items
+      for (const item of activeItems) {
+        const item_name = item.item_name || item.itemName;
+        const lot_no = item.lot_no || item.lotNo || '';
+        const weight = parseFloat(item.weight) || 0;
+        const qty = parseFloat(item.qty) || 0;
+        const total_wt = parseFloat(item.total_wt || item.totalWt) || (weight * qty);
+        const papad_kg = parseFloat(item.papad_kg || item.papadKg) || 0;
+        const wages_bag = parseFloat(item.wages_bag || item.wagesBag) || 0;
+        const wages = parseFloat(item.wages) || (papad_kg * wages_bag);
+
+        // Ensure item group is Flour
+        const existingItem = await compDb.query('SELECT id, item_group FROM item_master WHERE item_name = ?', [item_name]);
+        if (existingItem.rows.length === 0) {
+          await compDb.run('INSERT INTO item_master (item_name, status, item_group) VALUES (?, ?, ?)', [item_name, 'Active', 'Flour']);
+        } else if (!existingItem.rows[0].item_group) {
+          await compDb.run('UPDATE item_master SET item_group = ? WHERE id = ?', ['Flour', existingItem.rows[0].id]);
+        }
+
+        await compDb.run(`
+          INSERT INTO flour_out_items (flour_out_id, item_name, lot_no, weight, qty, total_wt, papad_kg, wages_bag, wages)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [flourOutId, item_name, lot_no, weight, qty, total_wt, papad_kg, wages_bag, wages]);
       }
 
-      await db.run(`
-        INSERT INTO flour_out_items (flour_out_id, item_name, lot_no, weight, qty, total_wt, papad_kg, wages_bag, wages)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, [flourOutId, item_name, lot_no, weight, qty, total_wt, papad_kg, wages_bag, wages]);
-    }
-
-    // Re-deduct stock for the updated items
-    await deductFlourOutStock(flourOutId, formData.date, activeItems);
+      // Re-deduct stock for the updated items
+      await deductFlourOutStock(flourOutId, cleanDate, activeItems);
+    });
 
     try {
       const { triggerTransactionNotification } = require('../utils/transactionNotifier');
@@ -415,12 +447,13 @@ router.put('/:id', async (req, res) => {
         moduleName: 'PRODUCTION',
         referenceNo: refNo,
         referenceId: flourOutId,
-        companyId: req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1),
+        companyId: activeCompanyId,
         title: `✏️ FLOUR OUT UPDATED – ${refNo}`,
         message: `Updated Flour Out | Unit: ${compVal || 'Papad Unit'} | ${itemDesc} | Total: ${totalQty} Bags (${totalWeight} KG)`,
         severity: 'INFO',
         details: {
           reference_no: refNo,
+          sales_no: refNo,
           action_label: 'FLOUR OUT',
           module_label: 'Flour Outward',
           party_name: compVal || 'Papad Unit',
@@ -447,14 +480,21 @@ router.put('/:id', async (req, res) => {
 // DELETE flour out
 router.delete('/:id', async (req, res) => {
   try {
+    const activeCompanyId = getCompanyId(req);
+    await ensureFlourOutSchema(activeCompanyId);
+    const compDb = db.forCompany(activeCompanyId);
     const flourOutId = req.params.id;
-    await revertFlourOutStock(flourOutId);
-    await db.run('DELETE FROM flour_out_items WHERE flour_out_id = ?', [flourOutId]);
-    await db.run('DELETE FROM flour_out WHERE id = ?', [flourOutId]);
+
+    await compDb.withTransaction(async () => {
+      await revertFlourOutStock(flourOutId);
+      await compDb.run('DELETE FROM flour_out_items WHERE flour_out_id = ?', [flourOutId]);
+      await compDb.run('DELETE FROM flour_out WHERE id = ?', [flourOutId]);
+    });
+
     res.json({ success: true, message: 'Flour out record deleted successfully' });
   } catch (error) {
     console.error('Error deleting flour out:', error);
-    res.status(500).json({ success: false, message: 'Error deleting flour out' });
+    res.status(500).json({ success: false, message: 'Error deleting flour out', error: error.message });
   }
 });
 

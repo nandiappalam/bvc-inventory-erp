@@ -478,7 +478,11 @@ router.get('/lots', async (req, res) => {
           (SELECT CASE WHEN COALESCE(qty, 0) != 0 THEN ROUND(CAST(ABS(weight) / ABS(qty) AS NUMERIC), 2) ELSE 0 END FROM stock WHERE lot_no = sl.lot_no AND item_name = sl.item_name AND qty != 0 LIMIT 1),
           (SELECT COALESCE(per_unit_weight, weight) FROM purchase_items WHERE lot_no = sl.lot_no AND item_name = sl.item_name AND COALESCE(per_unit_weight, weight) > 0 LIMIT 1),
           50
-        ) as weight
+        ) as weight,
+        COALESCE(
+          (SELECT SUM(COALESCE(s_rem.weight, 0)) FROM stock s_rem WHERE s_rem.lot_no = sl.lot_no AND (LOWER(TRIM(s_rem.item_name)) = LOWER(TRIM(sl.item_name)) OR sl.item_name IS NULL)),
+          sl.remaining_quantity * 50
+        ) as remaining_weight
       FROM stock_lots sl
       LEFT JOIN item_master im ON (sl.item_id = im.id OR LOWER(sl.item_name) = LOWER(im.item_name))
       WHERE 1=1
@@ -686,12 +690,13 @@ router.get('/lots', async (req, res) => {
         `, [row.lot_no], cId);
         for (const wcRow of wcRes.rows) {
           const isInput = wcRow.item_type === 'input';
+          const isRemainder = wcRow.item_type === 'remainder';
           lifecycle.push({
-            module: `Weight Conversion (${isInput ? 'Input' : 'Output'})`,
+            module: isRemainder ? 'Weight Conversion (Remainder)' : `Weight Conversion (${isInput ? 'Input' : 'Output'})`,
             reference_id: wcRow.wc_id,
             reference_no: wcRow.s_no,
             date: wcRow.date,
-            party: wcRow.remarks || 'Weight Conversion',
+            party: isRemainder ? 'Retained in opened bag' : (wcRow.remarks || 'Weight Conversion'),
             qty: isInput ? -wcRow.qty : wcRow.qty,
             weight: isInput ? -wcRow.total_wt : wcRow.total_wt,
             rate: 0,
@@ -804,19 +809,22 @@ router.get('/lots', async (req, res) => {
             const wcIds = wcIn.rows.map(r => r.id);
             const placeholders = wcIds.map(() => '?').join(',');
             const wcOutRes = await db.query(`
-              SELECT item_name, lot_no, qty, total_wt FROM weight_conversion_items WHERE weight_conversion_id IN (${placeholders}) AND type = 'output'
+              SELECT item_name, lot_no, qty, total_wt, type FROM weight_conversion_items WHERE weight_conversion_id IN (${placeholders}) AND type IN ('output', 'remainder')
             `, wcIds, cId);
             
-            const wcOutputs = wcOutRes.rows.map(o => ({ item_name: o.item_name, lot_no: o.lot_no, qty: o.qty, weight: o.total_wt }));
+            const wcOutputs = wcOutRes.rows.filter(o => o.type === 'output').map(o => ({ item_name: o.item_name, lot_no: o.lot_no, qty: o.qty, weight: o.total_wt }));
+            const wcRemainders = wcOutRes.rows.filter(o => o.type === 'remainder').map(o => ({ item_name: o.item_name, lot_no: o.lot_no, qty: o.qty, weight: o.total_wt }));
             if (!processingDetails) {
               processingDetails = {
                 processed_runs: wcIds.length,
                 outputs: wcOutputs,
+                remainders: wcRemainders,
                 wastages: []
               };
             } else {
               processingDetails.processed_runs += wcIds.length;
               processingDetails.outputs = [...(processingDetails.outputs || []), ...wcOutputs];
+              processingDetails.remainders = [...(processingDetails.remainders || []), ...wcRemainders];
             }
           }
         } catch (e) {}
@@ -905,8 +913,28 @@ router.get('/lots', async (req, res) => {
         } catch (e) {}
       }
 
+      const remQty = parseFloat(row.remaining_quantity) || 0;
+      const unitWeight = parseFloat(row.weight) || 50;
+      const remWeight = parseFloat(row.remaining_weight != null ? row.remaining_weight : (remQty * unitWeight));
+      const expectedStdWeight = remQty * unitWeight;
+
+      let partialBreakdownText = null;
+      let hasPartialBags = false;
+
+      if (remQty > 0 && Math.abs(remWeight - expectedStdWeight) > 0.01 && remWeight > 0) {
+        const fullBags = Math.floor(remWeight / unitWeight);
+        const partialWeight = parseFloat((remWeight - (fullBags * unitWeight)).toFixed(2));
+        if (partialWeight > 0.001) {
+          partialBreakdownText = `${fullBags} bag ${unitWeight} kg + 1 bag ${partialWeight} KG`;
+          hasPartialBags = true;
+        }
+      }
+
       return {
         ...row,
+        remaining_weight: remWeight,
+        partial_breakdown_text: partialBreakdownText,
+        has_partial_bags: hasPartialBags,
         returned_qty: returnedQty,
         returned_weight: returnedWeight,
         actual_sold_qty: Math.max(0, (row.purchased_qty - row.remaining_quantity - returnedQty)),
@@ -931,6 +959,11 @@ router.get('/lots', async (req, res) => {
         existing.sold_qty = (parseFloat(existing.sold_qty) || 0) + (parseFloat(r.sold_qty) || 0);
         existing.returned_qty = (parseFloat(existing.returned_qty) || 0) + (parseFloat(r.returned_qty) || 0);
         existing.remaining_quantity = (parseFloat(existing.remaining_quantity) || 0) + (parseFloat(r.remaining_quantity) || 0);
+        existing.remaining_weight = (parseFloat(existing.remaining_weight) || 0) + (parseFloat(r.remaining_weight) || 0);
+        if (r.partial_breakdown_text) {
+          existing.partial_breakdown_text = r.partial_breakdown_text;
+          existing.has_partial_bags = r.has_partial_bags;
+        }
         if (r.lifecycle_history && Array.isArray(r.lifecycle_history)) {
           existing.lifecycle_history = [...(existing.lifecycle_history || []), ...r.lifecycle_history];
         }

@@ -145,6 +145,7 @@ const StockReport = () => {
         for (const row of responseData) {
           const lotNorm = (row.lot_no || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
           const itemNorm = (row.item_name || '').trim().toUpperCase();
+          const key = `${itemNorm}:::${lotNorm || (row.lot_no || '').trim().toUpperCase()}`;
           if (!lotMap.has(key)) {
             let rowGodown = row.godown_name || '-';
             lotMap.set(key, { ...row, godown_name: rowGodown });
@@ -154,6 +155,13 @@ const StockReport = () => {
             existing.sold_qty = (parseFloat(existing.sold_qty) || 0) + (parseFloat(row.sold_qty) || 0);
             existing.returned_qty = (parseFloat(existing.returned_qty) || 0) + (parseFloat(row.returned_qty) || 0);
             existing.remaining_quantity = (parseFloat(existing.remaining_quantity) || 0) + (parseFloat(row.remaining_quantity) || 0);
+            if (row.remaining_weight != null) {
+              existing.remaining_weight = parseFloat(row.remaining_weight);
+            }
+            if (row.partial_breakdown_text) {
+              existing.partial_breakdown_text = row.partial_breakdown_text;
+              existing.has_partial_bags = row.has_partial_bags;
+            }
             if (row.lifecycle && Array.isArray(row.lifecycle)) {
               existing.lifecycle = [...(existing.lifecycle || []), ...row.lifecycle];
             }
@@ -304,7 +312,8 @@ const StockReport = () => {
     if (reportMode === 'summary') {
       return sum + (parseFloat(row.balance || 0) * bagWt);
     } else {
-      return sum + (parseFloat(row.remaining_quantity || 0) * bagWt);
+      const rowWeight = row.remaining_weight != null ? parseFloat(row.remaining_weight) : ((parseFloat(row.remaining_quantity) || 0) * bagWt);
+      return sum + rowWeight;
     }
   }, 0);
 
@@ -604,15 +613,30 @@ const StockReport = () => {
                               fontWeight: 'bold', 
                               color: (row.remaining_quantity || 0) <= 0 ? '#94a3b8' : 'green'
                             }}>
-                              {parseFloat(row.remaining_quantity || 0).toFixed(2)}
+                              <div>{parseFloat(row.remaining_quantity || 0).toFixed(2)}</div>
+                              {row.partial_breakdown_text && (
+                                <div style={{
+                                  fontSize: '11px',
+                                  color: '#15803d',
+                                  fontWeight: 'bold',
+                                  marginTop: '2px',
+                                  background: '#dcfce7',
+                                  padding: '2px 5px',
+                                  borderRadius: '3px',
+                                  display: 'inline-block',
+                                  border: '1px solid #86efac'
+                                }}>
+                                  {row.partial_breakdown_text}
+                                </div>
+                              )}
                             </td>
                             <td style={{
                               ...styles.td, 
                               textAlign: 'right', 
                               fontWeight: 'bold', 
-                              color: ((row.remaining_quantity || 0) * getBagWeight(row)) <= 0 ? '#94a3b8' : 'green'
+                              color: ((row.remaining_weight ?? ((row.remaining_quantity || 0) * getBagWeight(row))) <= 0) ? '#94a3b8' : 'green'
                             }}>
-                              {((row.remaining_quantity || 0) * getBagWeight(row)).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg
+                              {parseFloat(row.remaining_weight ?? ((row.remaining_quantity || 0) * getBagWeight(row))).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg
                             </td>
                             <td style={{...styles.td, textAlign: 'right', color: '#475569'}}>{parseFloat(row.rate || 0).toFixed(2)}</td>
                           </>
@@ -638,7 +662,14 @@ const StockReport = () => {
                                 </div>
                                 <div style={styles.detailItem}><strong>Initial Qty:</strong> {parseFloat(row.purchased_qty || 0).toFixed(2)}</div>
                                 <div style={styles.detailItem}><strong>Used Qty:</strong> {parseFloat(row.sold_qty || 0).toFixed(2)}</div>
-                                <div style={styles.detailItem}><strong>Current Balance:</strong> <strong style={{color: 'green'}}>{parseFloat(row.remaining_quantity || 0).toFixed(2)}</strong></div>
+                                <div style={styles.detailItem}>
+                                  <strong>Current Balance:</strong> <strong style={{color: 'green'}}>{parseFloat(row.remaining_quantity || 0).toFixed(2)} ({parseFloat(row.remaining_weight ?? ((row.remaining_quantity || 0) * getBagWeight(row))).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg)</strong>
+                                  {row.partial_breakdown_text && (
+                                    <div style={{ color: '#166534', fontWeight: 'bold', marginTop: '4px', background: '#dcfce7', padding: '3px 8px', borderRadius: '4px', border: '1px solid #bbf7d0' }}>
+                                      📦 Composition: {row.partial_breakdown_text}
+                                    </div>
+                                  )}
+                                </div>
                               </div>
 
                               {/* 1. LIFECYCLE TRANSACTION LIST */}
@@ -714,6 +745,18 @@ const StockReport = () => {
                                             </ul>
                                           ) : (
                                             <span style={{fontSize: '11px', color: '#64748b'}}>No FG lot registered.</span>
+                                          )}
+                                          {row.processing_details.remainders && row.processing_details.remainders.length > 0 && (
+                                            <div style={{marginTop: '10px', paddingTop: '8px', borderTop: '1px dashed #86efac'}}>
+                                              <span style={{fontSize: '11px', fontWeight: 'bold', color: '#b45309'}}>📦 Unconverted Balance in Same Lot:</span>
+                                              <ul style={{margin: '4px 0 0 0', paddingLeft: '15px', fontSize: '11px', color: '#92400e'}}>
+                                                {row.processing_details.remainders.map((rem, rmIdx) => (
+                                                  <li key={rmIdx} style={{marginBottom: '2px'}}>
+                                                    <strong>{rem.item_name}</strong> - Lot: <span style={{fontFamily: 'monospace', fontWeight: 'bold'}}>{rem.lot_no}</span> ({rem.qty} Bag / {rem.weight} kg retained in lot)
+                                                  </li>
+                                                ))}
+                                              </ul>
+                                            </div>
                                           )}
                                         </div>
 

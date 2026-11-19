@@ -86,8 +86,9 @@ const WeightConversionDisplay = () => {
 
   const handlePrintRow = (record) => {
     const groupItems = records.filter(r => r.id === record.id);
-    const inputItems = groupItems.filter(r => r.item_type === 'input');
+    const inputItems = groupItems.filter(r => (r.item_type || 'input') === 'input');
     const outputItems = groupItems.filter(r => r.item_type === 'output');
+    const remainderItems = groupItems.filter(r => r.item_type === 'remainder');
 
     const htmlContent = `
       <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
@@ -125,10 +126,10 @@ const WeightConversionDisplay = () => {
           </tbody>
         </table>
 
-        <div style="font-weight: bold; margin-top: 15px; color: #1e4fa8; font-size: 15px;">Output Converted Items</div>
+        <div style="font-weight: bold; margin-top: 15px; color: #16a34a; font-size: 15px;">Output Converted Items</div>
         <table style="width: 100%; border-collapse: collapse; margin-top: 10px; margin-bottom: 20px;">
           <thead>
-            <tr style="background: #1e4fa8; color: white;">
+            <tr style="background: #16a34a; color: white;">
               <th style="border: 1px solid #ccc; padding: 8px; text-align: left;">S.No</th>
               <th style="border: 1px solid #ccc; padding: 8px; text-align: left;">Item Name</th>
               <th style="border: 1px solid #ccc; padding: 8px; text-align: left;">Lot No</th>
@@ -150,6 +151,34 @@ const WeightConversionDisplay = () => {
             `).join('')}
           </tbody>
         </table>
+
+        ${remainderItems.length > 0 ? `
+          <div style="font-weight: bold; margin-top: 15px; color: #b45309; font-size: 15px;">Remainder Retained in Input Lot</div>
+          <table style="width: 100%; border-collapse: collapse; margin-top: 10px; margin-bottom: 20px;">
+            <thead>
+              <tr style="background: #d97706; color: white;">
+                <th style="border: 1px solid #ccc; padding: 8px; text-align: left;">S.No</th>
+                <th style="border: 1px solid #ccc; padding: 8px; text-align: left;">Item Name</th>
+                <th style="border: 1px solid #ccc; padding: 8px; text-align: left;">Lot No</th>
+                <th style="border: 1px solid #ccc; padding: 8px; text-align: left;">Weight</th>
+                <th style="border: 1px solid #ccc; padding: 8px; text-align: left;">Qty</th>
+                <th style="border: 1px solid #ccc; padding: 8px; text-align: left;">Total Wt</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${remainderItems.map((item, i) => `
+                <tr>
+                  <td style="border: 1px solid #ccc; padding: 8px;">${i + 1}</td>
+                  <td style="border: 1px solid #ccc; padding: 8px;">${item.item_name || ''}</td>
+                  <td style="border: 1px solid #ccc; padding: 8px;">${item.lot_no || ''}</td>
+                  <td style="border: 1px solid #ccc; padding: 8px;">${item.weight || ''}</td>
+                  <td style="border: 1px solid #ccc; padding: 8px;">${item.qty || 0}</td>
+                  <td style="border: 1px solid #ccc; padding: 8px;">${parseFloat(item.total_wt || 0).toFixed(2)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        ` : ''}
       </div>
     `;
 
@@ -199,8 +228,17 @@ const WeightConversionDisplay = () => {
     return true
   })
 
-  const totalQtySum = filteredRecords.reduce((sum, r) => sum + (parseFloat(r.qty) || 0), 0)
-  const totalWeightSum = filteredRecords.reduce((sum, r) => sum + (parseFloat(r.total_wt) || 0), 0)
+  const inputRecords = filteredRecords.filter(r => (r.item_type || 'input') === 'input');
+  const outputRecords = filteredRecords.filter(r => r.item_type === 'output');
+  const remainderRecords = filteredRecords.filter(r => r.item_type === 'remainder');
+
+  const inputQtySum = inputRecords.reduce((sum, r) => sum + (parseFloat(r.qty) || 0), 0);
+  const inputWeightSum = inputRecords.reduce((sum, r) => sum + (parseFloat(r.total_wt) || 0), 0);
+  const outputQtySum = outputRecords.reduce((sum, r) => sum + (parseFloat(r.qty) || 0), 0);
+  const outputWeightSum = outputRecords.reduce((sum, r) => sum + (parseFloat(r.total_wt) || 0), 0);
+  const remainderQtySum = remainderRecords.reduce((sum, r) => sum + (parseFloat(r.qty) || 0), 0);
+  const remainderWeightSum = remainderRecords.reduce((sum, r) => sum + (parseFloat(r.total_wt) || 0), 0);
+
   const uniqueParentIds = new Set(filteredRecords.map(r => r.id))
   const distinctRowsCount = uniqueParentIds.size
 
@@ -227,7 +265,7 @@ const WeightConversionDisplay = () => {
               <th style={{ width: '100px' }}>Date</th>
               <th style={{ width: '150px' }}>Item Name</th>
               <th style={{ width: '100px' }}>Lot No</th>
-              <th style={{ width: '100px' }}>Type</th>
+              <th style={{ width: '130px' }}>Type</th>
               <th style={{ width: '80px' }}>Weight</th>
               <th style={{ width: '80px' }}>Qty</th>
               <th style={{ width: '100px' }}>Tot Wt</th>
@@ -247,18 +285,29 @@ const WeightConversionDisplay = () => {
               filteredRecords.map((record, index) => {
                 const isFirstInGroup = record.id !== lastParentId;
                 lastParentId = record.id;
+                const isRemainder = record.item_type === 'remainder';
+                const isOutput = record.item_type === 'output';
+
                 return (
-                  <tr key={record.item_id || record.id || index} style={{ background: isFirstInGroup ? '#fff' : '#fcfdfe' }}>
+                  <tr key={record.item_id || record.id || index} style={{ background: isFirstInGroup ? '#fff' : (isRemainder ? '#fffdf5' : '#fcfdfe') }}>
                     <td style={{ fontWeight: isFirstInGroup ? 'bold' : 'normal', color: '#1e4fa8' }}>{isFirstInGroup ? record.s_no || index + 1 : ""}</td>
                     <td>{isFirstInGroup ? formatDate(record.date) : ""}</td>
-                    <td>{record.item_name}</td>
-                    <td>{record.lot_no}</td>
-                    <td style={{ fontWeight: '600', color: record.item_type === 'output' ? '#16a34a' : '#2563eb' }}>
-                      {record.item_type === 'output' ? 'Output' : 'Input'}
+                    <td style={{ fontWeight: isRemainder ? '600' : 'normal' }}>{record.item_name}</td>
+                    <td style={{ fontWeight: 'bold', color: isRemainder ? '#b45309' : '#1e293b' }}>{record.lot_no}</td>
+                    <td>
+                      {isOutput ? (
+                        <span style={{ background: '#dcfce7', color: '#16a34a', padding: '2px 8px', borderRadius: '4px', fontWeight: 'bold', fontSize: '12px' }}>Output</span>
+                      ) : isRemainder ? (
+                        <span style={{ background: '#fef3c7', color: '#b45309', padding: '2px 8px', borderRadius: '4px', fontWeight: 'bold', fontSize: '11px', border: '1px solid #fde68a' }} title="Unconverted weight remaining in opened bag in the same lot">
+                          Remainder (In Lot)
+                        </span>
+                      ) : (
+                        <span style={{ background: '#dbeafe', color: '#2563eb', padding: '2px 8px', borderRadius: '4px', fontWeight: 'bold', fontSize: '12px' }}>Input</span>
+                      )}
                     </td>
                     <td>{record.weight}</td>
                     <td style={{ textAlign: 'right', paddingRight: '8px' }}>{parseFloat(record.qty || 0).toFixed(3)}</td>
-                    <td style={{ textAlign: 'right', paddingRight: '8px', fontWeight: 'bold' }}>{parseFloat(record.total_wt || 0).toFixed(3)}</td>
+                    <td style={{ textAlign: 'right', paddingRight: '8px', fontWeight: 'bold', color: isRemainder ? '#b45309' : '#0f172a' }}>{parseFloat(record.total_wt || 0).toFixed(3)}</td>
                     <td>
                       {isFirstInGroup && (
                         <div style={{ display: 'flex', gap: '4px' }}>
@@ -275,11 +324,19 @@ const WeightConversionDisplay = () => {
           </tbody>
           {!loading && filteredRecords.length > 0 && (
             <tfoot>
-              <tr style={{ background: '#f5f8ff', fontWeight: 'bold', borderTop: '2px solid #9bb4e0' }}>
-                <td colSpan="6" style={{ textAlign: 'right', paddingRight: '15px', height: '30px' }}>Total:</td>
-                <td style={{ textAlign: 'right', paddingRight: '8px', color: '#1e4fa8' }}>{totalQtySum.toFixed(3)}</td>
-                <td style={{ textAlign: 'right', paddingRight: '8px', color: '#1e4fa8' }}>{totalWeightSum.toFixed(3)}</td>
-                <td></td>
+              <tr style={{ background: '#f8fafc', fontWeight: 'bold', borderTop: '2px solid #9bb4e0' }}>
+                <td colSpan="5" style={{ textAlign: 'right', paddingRight: '15px', height: '32px', color: '#334155' }}>Summary Breakdown:</td>
+                <td colSpan="4" style={{ paddingLeft: '10px' }}>
+                  <div style={{ display: 'flex', gap: '15px', flexWrap: 'wrap', alignItems: 'center', fontSize: '12px' }}>
+                    <span style={{ color: '#2563eb' }}>📥 Input: <b>{inputQtySum.toFixed(3)}</b> Bags (<b>{inputWeightSum.toFixed(3)}</b> KG)</span>
+                    <span style={{ color: '#16a34a' }}>📦 Output: <b>{outputQtySum.toFixed(3)}</b> Bags (<b>{outputWeightSum.toFixed(3)}</b> KG)</span>
+                    {remainderWeightSum > 0 && (
+                      <span style={{ color: '#b45309', background: '#fef3c7', padding: '2px 6px', borderRadius: '3px', border: '1px solid #fde68a' }}>
+                        🟡 Remainder in Lot: <b>{remainderQtySum.toFixed(3)}</b> Bag (<b>{remainderWeightSum.toFixed(3)}</b> KG)
+                      </span>
+                    )}
+                  </div>
+                </td>
               </tr>
             </tfoot>
           )}
@@ -289,8 +346,13 @@ const WeightConversionDisplay = () => {
           <div>
             <button onClick={handlePrint}>Print</button>
           </div>
-          <div style={{ color: '#fff', fontSize: '15px' }}>
-            Row(s): {distinctRowsCount} &nbsp;&nbsp; Total: <b>{totalWeightSum.toFixed(2)}</b>
+          <div style={{ color: '#fff', fontSize: '13px', display: 'flex', gap: '15px' }}>
+            <span>Row(s): <b>{distinctRowsCount}</b></span>
+            <span>Input: <b>{inputWeightSum.toFixed(2)} KG</b></span>
+            <span>Output: <b>{outputWeightSum.toFixed(2)} KG</b></span>
+            {remainderWeightSum > 0 && (
+              <span>Remainder: <b>{remainderWeightSum.toFixed(2)} KG</b></span>
+            )}
           </div>
         </div>
       </div>

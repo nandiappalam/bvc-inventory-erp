@@ -52,6 +52,7 @@ app.use('/api/papad-in', papadInRouter)
 app.use('/api/stock', stockRouter)
 app.use('/api/reports', reportsRouter)
 app.use('/api/weight-conversion', weightConversionRouter)
+app.use('/api/weight-conversions', weightConversionRouter)
 app.use('/api/sales-export-orders', salesExportOrdersRouter)
 app.use('/api/open', openRouter)
 

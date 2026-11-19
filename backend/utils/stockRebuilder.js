@@ -696,20 +696,74 @@ async function rebuildStockLedger(targetCompanyId = null) {
       }
     } catch (e) {}
 
-    // F. Weight Conversion Inputs (Consumed Items)
+    // F. Weight Conversion Inputs (Consumed Items) & Remainder in Lot
     try {
+      const conversionInputMap = new Map();
       for (const row of (wcInputs.rows || [])) {
-        if (!row.item_name) continue;
-        const qty = parseFloat(row.qty) || 0;
-        const wt = parseFloat(row.total_wt) || (qty * (parseFloat(row.weight) || 1));
-        const { godownId, godownName } = await resolveOutflowGodown(row.item_name, row.lot_no, rmGodown.id, rmGodown.godown_name);
-        deductFromLot(row.item_name, row.lot_no, qty, godownId, 'consumed_qty');
-        await db.run(`
-          INSERT INTO stock (date, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, godown_id)
-          VALUES (?, ?, ?, ?, ?, 0, 0, 'Weight Conversion Input', ?, ?, ?)
-        `, [row.date, row.item_name, row.lot_no || '', -qty, -wt, row.conversion_id, godownName, godownId]);
+        const cId = String(row.conversion_id);
+        if (!conversionInputMap.has(cId)) conversionInputMap.set(cId, []);
+        conversionInputMap.get(cId).push(row);
       }
-    } catch (e) {}
+
+      const conversionOutputMap = new Map();
+      for (const row of (wcOutputs.rows || [])) {
+        const cId = String(row.conversion_id);
+        if (!conversionOutputMap.has(cId)) conversionOutputMap.set(cId, []);
+        conversionOutputMap.get(cId).push(row);
+      }
+
+      for (const [cId, inRows] of conversionInputMap.entries()) {
+        const outRows = conversionOutputMap.get(cId) || [];
+        const totalInWt = inRows.reduce((s, r) => s + (parseFloat(r.total_wt) || ((parseFloat(r.qty) || 0) * (parseFloat(r.weight) || 0))), 0);
+        const totalOutWt = outRows.reduce((s, r) => s + (parseFloat(r.total_wt) || ((parseFloat(r.qty) || 0) * (parseFloat(r.weight) || 0))), 0);
+        const remainderWt = parseFloat(Math.max(0, totalInWt - totalOutWt).toFixed(2));
+
+        for (let i = 0; i < inRows.length; i++) {
+          const row = inRows[i];
+          if (!row.item_name) continue;
+          const qty = parseFloat(row.qty) || 0;
+          const wt = parseFloat(row.total_wt) || (qty * (parseFloat(row.weight) || 1));
+          const { godownId, godownName } = await resolveOutflowGodown(row.item_name, row.lot_no, rmGodown.id, rmGodown.godown_name);
+
+          if (i === 0 && remainderWt > 0.001) {
+            const fullBagsConsumed = Math.max(0, qty - 1);
+            if (fullBagsConsumed > 0) {
+              deductFromLot(row.item_name, row.lot_no, fullBagsConsumed, godownId, 'consumed_qty');
+            }
+            await db.run(`
+              INSERT INTO stock (date, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, godown_id, remarks)
+              VALUES (?, ?, ?, ?, ?, 0, 0, 'Weight Conversion Input', ?, ?, ?, ?)
+            `, [row.date, row.item_name, row.lot_no || '', -qty, -wt, row.conversion_id, godownName, godownId, 'Input opened for conversion']);
+
+            await db.run(`
+              INSERT INTO stock (date, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, godown_id, remarks)
+              VALUES (?, ?, ?, 1, ?, 0, 0, 'Weight Conversion Remainder', ?, ?, ?, ?)
+            `, [row.date, row.item_name, row.lot_no || '', remainderWt, row.conversion_id, godownName, godownId, `Remaining ${remainderWt} kg retained in opened bag in lot ${row.lot_no}`]);
+
+            try {
+              const remCheck = await db.query(
+                `SELECT id FROM weight_conversion_items WHERE CAST(weight_conversion_id AS TEXT) = CAST(? AS TEXT) AND type = 'remainder'`,
+                [row.conversion_id]
+              );
+              if (!remCheck.rows || remCheck.rows.length === 0) {
+                await db.run(
+                  `INSERT INTO weight_conversion_items (weight_conversion_id, s_no, item_name, lot_no, weight, qty, total_wt, type) VALUES (?, 99, ?, ?, ?, 1, ?, 'remainder')`,
+                  [row.conversion_id, row.item_name, row.lot_no || '', remainderWt, remainderWt]
+                );
+              }
+            } catch (_) {}
+          } else {
+            deductFromLot(row.item_name, row.lot_no, qty, godownId, 'consumed_qty');
+            await db.run(`
+              INSERT INTO stock (date, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, godown_id)
+              VALUES (?, ?, ?, ?, ?, 0, 0, 'Weight Conversion Input', ?, ?, ?)
+            `, [row.date, row.item_name, row.lot_no || '', -qty, -wt, row.conversion_id, godownName, godownId]);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Error rebuilding weight conversion stock:', e);
+    }
 
     // G. Stock Adjustments (Additions and Deductions)
     try {

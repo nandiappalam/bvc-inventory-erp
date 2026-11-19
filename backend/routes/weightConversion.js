@@ -39,7 +39,7 @@ const revertWeightConversionStock = async (conversionId, companyId = 1) => {
         }
       }
     }
-    await db.run(`DELETE FROM stock WHERE CAST(reference_id AS TEXT) = CAST(? AS TEXT) AND type IN ('Weight Conversion Input', 'Weight Conversion Output', 'Weight Conversion')`, [conversionId], cId);
+    await db.run(`DELETE FROM stock WHERE CAST(reference_id AS TEXT) = CAST(? AS TEXT) AND type IN ('Weight Conversion Input', 'Weight Conversion Output', 'Weight Conversion', 'Weight Conversion Remainder')`, [conversionId], cId);
   } catch (err) {
     console.error('Error reverting weight conversion stock:', err);
   }
@@ -81,7 +81,17 @@ const processWeightConversionStock = async (conversionId, date, items, companyId
     console.warn('Notice querying godown_master in weightConversion:', e.message);
   }
 
-  for (const item of items) {
+  // Calculate total input weight and total output weight to determine unconverted remainder
+  const inputItems = items.filter(i => (i.type || 'input') === 'input');
+  const outputItems = items.filter(i => i.type === 'output');
+  const totalInWt = inputItems.reduce((s, i) => s + (parseFloat(i.total_wt) || ((parseFloat(i.qty) || 0) * (parseFloat(i.weight) || 0))), 0);
+  const totalOutWt = outputItems.reduce((s, i) => s + (parseFloat(i.total_wt) || ((parseFloat(i.qty) || 0) * (parseFloat(i.weight) || 0))), 0);
+  const remainderWt = parseFloat(Math.max(0, totalInWt - totalOutWt).toFixed(2));
+
+  let remainderHandled = false;
+
+  for (let idx = 0; idx < items.length; idx++) {
+    const item = items[idx];
     let itemName = (item.item_name || '').trim();
     let lotNo = item.lot_no ? String(item.lot_no).trim() : '';
     const qty = parseFloat(item.qty) || 0;
@@ -158,20 +168,35 @@ const processWeightConversionStock = async (conversionId, date, items, companyId
         }
       }
 
-      // Deduct from stock_lots
-      if (lotNo) {
+      // Check if this input row carries the remainder
+      const isFirstInput = !remainderHandled && remainderWt > 0.001;
+      const fullBagsConsumed = isFirstInput ? Math.max(0, qty - 1) : qty;
+
+      // Deduct from stock_lots: if 1 bag was opened and partially converted, 0 full bags leave the lot
+      if (lotNo && fullBagsConsumed > 0) {
         await db.run(
           `UPDATE stock_lots SET remaining_quantity = CASE WHEN remaining_quantity >= ? THEN remaining_quantity - ? ELSE 0 END WHERE lot_no = ? OR (LOWER(TRIM(item_name)) = LOWER(TRIM(?)) AND lot_no = ?)`,
-          [qty, qty, lotNo, itemName, lotNo],
+          [fullBagsConsumed, fullBagsConsumed, lotNo, itemName, lotNo],
           cId
         );
       }
 
+      // 1. Post negative input into stock
       await db.run(
-        `INSERT INTO stock (date, item_id, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, godown_id) VALUES (?, ?, ?, ?, ?, ?, 0, 0, 'Weight Conversion Input', ?, ?, ?)`,
-        [date, itemId, itemName, lotNo, -qty, -totalWt, conversionId, itemGodownName, itemGodownId],
+        `INSERT INTO stock (date, item_id, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, godown_id, remarks) VALUES (?, ?, ?, ?, ?, ?, 0, 0, 'Weight Conversion Input', ?, ?, ?, ?)`,
+        [date, itemId, itemName, lotNo, -qty, -totalWt, conversionId, itemGodownName, itemGodownId, 'Opened for weight conversion'],
         cId
       );
+
+      // 2. Post remainder back into stock for this input lot (keeps 1 opened bag with remaining weight)
+      if (isFirstInput) {
+        remainderHandled = true;
+        await db.run(
+          `INSERT INTO stock (date, item_id, item_name, lot_no, qty, weight, rate, amount, type, reference_id, godown, godown_id, remarks) VALUES (?, ?, ?, ?, 1, ?, 0, 0, 'Weight Conversion Remainder', ?, ?, ?, ?)`,
+          [date, itemId, itemName, lotNo, remainderWt, conversionId, itemGodownName, itemGodownId, `Remaining ${remainderWt} kg retained in opened bag in lot ${lotNo}`],
+          cId
+        );
+      }
     } else if (type === 'output') {
       if (!lotNo) {
         try {
@@ -216,8 +241,8 @@ const processWeightConversionStock = async (conversionId, date, items, companyId
       }
 
       // Link input lots to this output lot in lot_genealogy
-      const inputItems = items.filter(i => (i.type || 'input') === 'input' && i.lot_no);
-      for (const inItem of inputItems) {
+      const inputItemsForGen = items.filter(i => (i.type || 'input') === 'input' && i.lot_no);
+      for (const inItem of inputItemsForGen) {
         try {
           const genExists = await db.query(
             `SELECT id FROM lot_genealogy WHERE parent_lot_no = ? AND child_lot_no = ? AND transaction_type = 'WEIGHT_CONVERSION' AND transaction_id = ?`,
@@ -560,6 +585,25 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ message: 'All items must have a name and positive quantity' })
     }
 
+    // Calculate unconverted remainder if total input wt > total output wt
+    const inputItems = items.filter(i => (i.type || 'input') === 'input');
+    const outputItems = items.filter(i => i.type === 'output');
+    const hasRemainder = items.some(i => i.type === 'remainder');
+    const totalInWt = inputItems.reduce((s, i) => s + (parseFloat(i.total_wt) || ((parseFloat(i.qty) || 0) * (parseFloat(i.weight) || 0))), 0);
+    const totalOutWt = outputItems.reduce((s, i) => s + (parseFloat(i.total_wt) || ((parseFloat(i.qty) || 0) * (parseFloat(i.weight) || 0))), 0);
+    const remainderWt = parseFloat(Math.max(0, totalInWt - totalOutWt).toFixed(2));
+
+    if (!hasRemainder && remainderWt > 0.001 && inputItems.length > 0) {
+      items.push({
+        item_name: inputItems[0].item_name,
+        lot_no: inputItems[0].lot_no || '',
+        weight: remainderWt,
+        qty: 1,
+        total_wt: remainderWt,
+        type: 'remainder'
+      });
+    }
+
     // Insert weight conversion
     const weightConversionResult = await db.run(`
       INSERT INTO weight_conversion (s_no, date, remarks, type)
@@ -599,6 +643,25 @@ router.put('/:id', async (req, res) => {
     const items = req.body.items || [];
     const weightConversionId = req.params.id;
     const companyId = req.companyId || req.headers?.['x-company-id'] || 1;
+
+    // Calculate unconverted remainder if total input wt > total output wt
+    const inputItems = items.filter(i => (i.type || 'input') === 'input');
+    const outputItems = items.filter(i => i.type === 'output');
+    const hasRemainder = items.some(i => i.type === 'remainder');
+    const totalInWt = inputItems.reduce((s, i) => s + (parseFloat(i.total_wt) || ((parseFloat(i.qty) || 0) * (parseFloat(i.weight) || 0))), 0);
+    const totalOutWt = outputItems.reduce((s, i) => s + (parseFloat(i.total_wt) || ((parseFloat(i.qty) || 0) * (parseFloat(i.weight) || 0))), 0);
+    const remainderWt = parseFloat(Math.max(0, totalInWt - totalOutWt).toFixed(2));
+
+    if (!hasRemainder && remainderWt > 0.001 && inputItems.length > 0) {
+      items.push({
+        item_name: inputItems[0].item_name,
+        lot_no: inputItems[0].lot_no || '',
+        weight: remainderWt,
+        qty: 1,
+        total_wt: remainderWt,
+        type: 'remainder'
+      });
+    }
 
     // Revert existing stock
     await revertWeightConversionStock(weightConversionId, companyId);
