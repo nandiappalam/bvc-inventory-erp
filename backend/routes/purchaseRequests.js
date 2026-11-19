@@ -919,6 +919,37 @@ router.post('/', async (req, res) => {
     `, [prId, initialAction, requested_by || 'Admin', remarks || `PR ${initialAction}`]);
 
     await connection.commit();
+
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const itemDesc = (items || []).filter(i => i.item_name || i.itemName).map(i => `${i.requested_qty || 0} ${i.item_name || i.itemName}`).slice(0, 3).join(', ') || 'Materials';
+      const totalReqQty = (items || []).reduce((s, i) => s + (parseFloat(i.requested_qty) || 0), 0);
+      const totalEstAmt = (items || []).reduce((s, i) => s + (parseFloat(i.estimated_amount) || ((parseFloat(i.requested_qty) || 0) * (parseFloat(i.estimated_rate) || 0))), 0);
+      await triggerTransactionNotification({
+        eventType: 'ORDER_CREATED',
+        moduleName: 'PURCHASE_REQUEST',
+        referenceNo: prNumber,
+        referenceId: prId,
+        companyId: req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1),
+        title: `📋 PURCHASE REQUEST – ${prNumber}`,
+        message: `Supplier: ${supplier_name || department || 'Internal'} | ${itemDesc} | Qty: ${totalReqQty} | Status: ${status}`,
+        severity: 'INFO',
+        details: {
+          reference_no: prNumber,
+          action_label: 'PURCHASE REQUEST',
+          party_name: supplier_name || department || 'Internal Indent',
+          item_summary: itemDesc,
+          quantity: `${totalReqQty}`,
+          amount: totalEstAmt,
+          status,
+          created_by: requested_by || req.user?.username || 'Procurement Operator',
+          date: reqDate
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Purchase Request):', notifErr.message);
+    }
+
     res.status(201).json({
       success: true,
       id: prId,
@@ -1082,6 +1113,44 @@ router.put('/:id', async (req, res) => {
     `, [id, actionName, requested_by || 'Admin', remarks || `PR ${actionName}`]);
 
     await connection.commit();
+
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const prevPr = existing.rows[0] || {};
+      const prNumber = prevPr.pr_no || `PR-${id}`;
+      const partyLabel = supplier_name || prevPr.supplier_name || department || prevPr.department || 'Internal Indent';
+      const itemDesc = Array.isArray(items) && items.length > 0
+        ? items.filter(i => i.item_name || i.itemName).map(i => `${i.requested_qty || i.qty || 0} ${i.item_name || i.itemName}`).slice(0, 3).join(', ')
+        : 'Materials';
+      const totalReqQty = Array.isArray(items) ? items.reduce((s, i) => s + (parseFloat(i.requested_qty || i.qty) || 0), 0) : 0;
+      const totalEstAmt = Array.isArray(items) ? items.reduce((s, i) => s + (parseFloat(i.estimated_amount) || ((parseFloat(i.requested_qty || i.qty) || 0) * (parseFloat(i.estimated_rate) || 0))), 0) : 0;
+      await triggerTransactionNotification({
+        eventType: 'ORDER_UPDATED',
+        isUpdate: true,
+        moduleName: 'PURCHASE_REQUEST',
+        referenceNo: prNumber,
+        referenceId: id,
+        companyId: req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1),
+        title: `✏️ PURCHASE REQUEST UPDATED – ${prNumber}`,
+        message: `Updated PR | Party: ${partyLabel} | ${itemDesc} | Qty: ${totalReqQty} | Status: ${newStatus}`,
+        severity: 'INFO',
+        details: {
+          reference_no: prNumber,
+          action_label: 'PURCHASE REQUEST',
+          party_name: partyLabel,
+          item_summary: itemDesc,
+          quantity: `${totalReqQty}`,
+          amount: totalEstAmt,
+          status: newStatus,
+          updated_by: requested_by || req.user?.username || 'Procurement Operator',
+          created_by: requested_by || req.user?.username || 'Procurement Operator',
+          date: request_date || prevPr.request_date || undefined
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Purchase Request Update):', notifErr.message);
+    }
+
     res.json({ success: true, message: `Purchase Request updated successfully (${newStatus})` });
   } catch (err) {
     if (connection) {

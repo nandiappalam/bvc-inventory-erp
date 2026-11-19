@@ -204,6 +204,36 @@ router.post('/', async (req, res) => {
       }
     }
 
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const refNo = `FOR-${sNo || flourOutReturnId}`;
+      const itemDesc = items.filter(i => i.itemName || i.item_name).map(i => `${i.qty || 0} ${i.itemName || i.item_name}`).slice(0, 3).join(', ') || 'Flour Return';
+      await triggerTransactionNotification({
+        eventType: 'PRODUCTION_CREATED',
+        moduleName: 'PRODUCTION',
+        referenceNo: refNo,
+        referenceId: flourOutReturnId,
+        companyId: req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1),
+        title: `⚙️ FLOUR OUT RETURN – ${refNo}`,
+        message: `Papad Company: ${papadCompany || 'Unit'} | ${itemDesc} | Weight: ${totals.totalWeight || 0} KG`,
+        severity: 'INFO',
+        details: {
+          reference_no: refNo,
+          action_label: 'FLOUR OUT RETURN',
+          module_label: 'Flour Out Return',
+          party_name: papadCompany || 'Papad Unit',
+          item_summary: itemDesc,
+          quantity: `${totals.totalQty || 0} Bags / ${totals.totalWeight || 0} KG`,
+          godown: 'Flour Store',
+          status: 'RETURNED',
+          created_by: req.user?.username || 'Production Operator',
+          date
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Flour Out Return):', notifErr.message);
+    }
+
     res.status(201).json({
       success: true,
       message: 'Flour out return saved successfully!',
@@ -262,6 +292,38 @@ router.put('/:id', async (req, res) => {
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [flourOutReturnId, itemName, lotNo, weight, qty, totalWt, papadKg, cost, wagesBag, wages]);
       }
+    }
+
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const refNo = `FR-${sNo || flourOutReturnId}`;
+      const itemDesc = (items || []).map(i => `${i.qty || 0} ${i.itemName || i.item_name || 'Item'}`).slice(0, 3).join(', ') || 'Flour Return';
+      await triggerTransactionNotification({
+        eventType: 'PRODUCTION_UPDATED',
+        isUpdate: true,
+        moduleName: 'PRODUCTION',
+        referenceNo: refNo,
+        referenceId: flourOutReturnId,
+        companyId: req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1),
+        title: `✏️ FLOUR OUT RETURN UPDATED – ${refNo}`,
+        message: `Updated Flour Return | Unit: ${papadCompany || 'Papad Unit'} | ${itemDesc} | Total Wt: ${totals.totalWeight || 0} KG`,
+        severity: 'INFO',
+        details: {
+          reference_no: refNo,
+          action_label: 'FLOUR OUT RETURN',
+          module_label: 'Flour Out Return',
+          party_name: papadCompany || 'Papad Unit',
+          item_summary: itemDesc,
+          quantity: `${totals.totalQty || 0} Bags / ${totals.totalWeight || 0} KG`,
+          godown: 'Flour Store',
+          status: 'UPDATED',
+          updated_by: req.user?.username || 'Production Operator',
+          created_by: req.user?.username || 'Production Operator',
+          date
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Flour Out Return Update):', notifErr.message);
     }
 
     res.json({ success: true, message: 'Flour out return updated successfully!' });

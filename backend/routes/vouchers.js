@@ -1313,6 +1313,35 @@ router.post('/', async (req, res) => {
       WHERE v.id = ? GROUP BY v.id
     `, [posted.voucherId]);
 
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const vRow = created.rows[0] || {};
+      const totalAmt = Math.max(parseFloat(vRow.total_debit) || 0, parseFloat(vRow.total_credit) || 0);
+      const firstParty = (mappedLines && mappedLines[0]?.ledgerName) || data.party_name || 'Accounting Ledger';
+      await triggerTransactionNotification({
+        eventType: 'VOUCHER_CREATED',
+        moduleName: 'VOUCHER',
+        referenceNo: vRow.voucher_no || posted.voucherNo,
+        referenceId: posted.voucherId,
+        companyId: cId,
+        title: `💳 ${data.voucher_type.toUpperCase()} VOUCHER – ${vRow.voucher_no || posted.voucherNo}`,
+        message: `${data.voucher_type} Voucher #${vRow.voucher_no || posted.voucherNo} | Ledger: ${firstParty} | Amount: ₹${totalAmt.toLocaleString('en-IN')}`,
+        severity: 'INFO',
+        details: {
+          reference_no: vRow.voucher_no || posted.voucherNo,
+          action_label: `${data.voucher_type} Voucher`,
+          party_name: firstParty,
+          payment_mode: data.payment_mode || data.voucher_type,
+          amount: totalAmt,
+          remarks: data.narration || '-',
+          created_by: req.user?.username || 'Accounts Operator',
+          date: data.date
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Voucher):', notifErr.message);
+    }
+
     res.status(201).json(created.rows[0] || posted);
   } catch (err) {
     console.error('POST /vouchers error:', err);
@@ -1877,6 +1906,41 @@ router.put('/:id', async (req, res) => {
         status: data.status || existingVoucher.status || 'Approved',
       });
     });
+
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const totalAmt = mappedLines.reduce((max, l) => {
+        const d = parseFloat(l.debit) || 0;
+        const c = parseFloat(l.credit) || 0;
+        return max + (d > 0 ? d : c);
+      }, 0) / (mappedLines.length >= 2 ? 2 : 1) || mappedLines.reduce((s, l) => s + (parseFloat(l.debit) || 0), 0);
+      const firstParty = (mappedLines && mappedLines[0]?.ledgerName) || data.party_name || 'Accounting Ledger';
+      const vNo = updated.voucherNo || data.voucher_no || `VCH-${req.params.id}`;
+      await triggerTransactionNotification({
+        eventType: 'VOUCHER_UPDATED',
+        isUpdate: true,
+        moduleName: 'VOUCHER',
+        referenceNo: vNo,
+        referenceId: updated.voucherId || req.params.id,
+        companyId: cId,
+        title: `✏️ ${data.voucher_type.toUpperCase()} VOUCHER UPDATED – ${vNo}`,
+        message: `Updated ${data.voucher_type} Voucher #${vNo} | Ledger: ${firstParty} | Amount: ₹${totalAmt.toLocaleString('en-IN')}`,
+        severity: 'INFO',
+        details: {
+          reference_no: vNo,
+          action_label: `${data.voucher_type} Voucher`,
+          party_name: firstParty,
+          payment_mode: data.payment_mode || data.voucher_type,
+          amount: totalAmt,
+          remarks: data.narration || '-',
+          updated_by: req.user?.username || 'Accounts Operator',
+          created_by: req.user?.username || 'Accounts Operator',
+          date: data.date
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Voucher Update):', notifErr.message);
+    }
 
     res.json({ success: true, message: 'Voucher updated successfully', voucher_no: updated.voucherNo, data: updated });
   } catch (err) {

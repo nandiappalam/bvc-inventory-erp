@@ -269,7 +269,7 @@ body {
 
 .grid-table,
 .data-table,
-table {
+table:not(.MuiTable-root) {
   width: 100%;
   border-collapse: collapse;
   background: white;
@@ -278,7 +278,7 @@ table {
 
 .grid-table th,
 .data-table th,
-table th {
+table:not(.MuiTable-root) th:not(.MuiTableCell-root) {
   background: var(--light-blue);
   border: 1px solid #9fb8e8;
   padding: 8px;
@@ -290,7 +290,7 @@ table th {
 
 .grid-table td,
 .data-table td,
-table td {
+table:not(.MuiTable-root) td:not(.MuiTableCell-root) {
   border: 1px solid #c7d6f3;
   padding: 6px 8px;
   height: 28px;
@@ -299,7 +299,7 @@ table td {
 
 .grid-table tr:hover,
 .data-table tr:hover,
-table tr:hover {
+table:not(.MuiTable-root) tr:hover {
   background: var(--bg-light);
 }
 

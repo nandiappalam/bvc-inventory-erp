@@ -39,20 +39,20 @@ body{
 }
 
 /* TABLE */
-table{
+table:not(.MuiTable-root){
     width:70%;
     border-collapse:collapse;
 	margin-top:10px;
 }
 
-th{
+th:not(.MuiTableCell-root){
     background:#3d6fd1;
     color:#fff;
     border:1px solid #9bb4e0;
     height:24px;
 }
 
-td{
+td:not(.MuiTableCell-root){
     border:1px solid #9bb4e0;
     height:22px;
     text-align:center;

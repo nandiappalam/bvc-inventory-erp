@@ -11,6 +11,7 @@ async function ensureSalesColumns() {
     "sender_id INTEGER", "consignee_id INTEGER", "godown_from_id INTEGER",
     "bill_amt REAL DEFAULT 0", "tax_amt REAL DEFAULT 0", "total_amt REAL DEFAULT 0",
     "base_amt REAL DEFAULT 0", "grand_total REAL DEFAULT 0", "deduction TEXT", "deduction_remarks TEXT",
+    "voucher_no TEXT", "cgst_amt REAL DEFAULT 0", "sgst_amt REAL DEFAULT 0", "igst_amt REAL DEFAULT 0",
     "is_order INTEGER DEFAULT 0", "loadman_name TEXT", "loadman_worker_id INTEGER", "loadman_rate_per_kg REAL DEFAULT 0.50", "loadman_charges REAL DEFAULT 0"
   ];
   for (const col of salesColumns) {
@@ -40,14 +41,11 @@ router.post('/sale', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Missing form data or items' });
     }
 
-    // Auto-generate next Sales s_no if not provided
     let s_no = formData.s_no || formData.sNo;
+    const isOrderFlag = Boolean(formData.is_order) && Number(formData.is_order) === 1 ? 1 : 0;
     if (!s_no) {
-      const maxRes = await db.query("SELECT COALESCE(MAX(CAST(NULLIF(s_no, '') AS INTEGER)), 0) AS max_sno, COALESCE(MAX(id), 0) AS max_id FROM sales");
-      const maxVal = Math.max(
-        parseInt(maxRes.rows?.[0]?.max_sno, 10) || 0,
-        parseInt(maxRes.rows?.[0]?.max_id, 10) || 0
-      );
+      const maxRes = await db.query("SELECT COALESCE(MAX(CAST(NULLIF(s_no, '') AS INTEGER)), 0) AS max_sno FROM sales WHERE COALESCE(is_order, 0) = ?", [isOrderFlag]);
+      const maxVal = parseInt(maxRes.rows?.[0]?.max_sno, 10) || 0;
       s_no = maxVal + 1;
     }
 
@@ -217,42 +215,88 @@ router.post('/sale', async (req, res) => {
       }
     }
 
-    // Post to ledger and create Sales Voucher chain
-    try {
-      const salesTaxVal = parseFloat(formData.tax_amt) || parseFloat(totals?.taxAmount) || 0;
-      const isInterstateSales = String(formData.tax_type || '').toLowerCase().includes('inter');
-      const cgstSales = parseFloat(formData.cgst_amt) || (isInterstateSales ? 0 : Number((salesTaxVal / 2).toFixed(2)));
-      const sgstSales = parseFloat(formData.sgst_amt) || (isInterstateSales ? 0 : Number((salesTaxVal - cgstSales).toFixed(2)));
-      const igstSales = parseFloat(formData.igst_amt) || (isInterstateSales ? salesTaxVal : 0);
+    // Post to ledger and create Sales Voucher chain ONLY for actual Sales Invoices (not Sales Orders)
+    let voucherNo = null;
+    if (!isOrderFlag && grandTotalVal > 0) {
+      try {
+        const salesTaxVal = parseFloat(formData.tax_amt) || parseFloat(totals?.taxAmount) || 0;
+        const isInterstateSales = String(formData.tax_type || '').toLowerCase().includes('inter');
+        const cgstSales = parseFloat(formData.cgst_amt) || (isInterstateSales ? 0 : Number((salesTaxVal / 2).toFixed(2)));
+        const sgstSales = parseFloat(formData.sgst_amt) || (isInterstateSales ? 0 : Number((salesTaxVal - cgstSales).toFixed(2)));
+        const igstSales = parseFloat(formData.igst_amt) || (isInterstateSales ? salesTaxVal : 0);
 
-      await createSalesLedgerEntries({
-        customer: formData.customer_id || formData.customer,
-        date: formData.date || new Date().toISOString().split('T')[0],
-        invNo: s_no,
-        salesId: salesId,
-        totalAmount: totalAmt,
-        taxAmount: salesTaxVal,
-        cgstAmount: cgstSales,
-        sgstAmount: sgstSales,
-        igstAmount: igstSales,
-        isInterstate: isInterstateSales,
-        discAmount: 0,
-        baseAmount: parseFloat(totals?.baseAmount) || parseFloat(formData.bill_amt) || Math.max(0, totalAmt - salesTaxVal),
-        deductions: formData.deduction_amount ? [{
-          deduction: formData.deduction,
-          amount: parseFloat(formData.deduction_amount) || 0,
-          remarks: formData.deduction_remarks || ''
-        }] : []
-      });
-      console.log('✓ Sales Voucher chain and ledger entries auto-created for sales ID:', salesId);
-    } catch (ledgerErr) {
-      console.error('Error auto-creating Sales Voucher chain:', ledgerErr);
+        const rawSelected = Array.isArray(formData.selectedDeductions)
+          ? formData.selectedDeductions
+          : (Array.isArray(req.body.selectedDeductions) ? req.body.selectedDeductions : []);
+        const normalizedDeductions = rawSelected
+          .map(d => {
+            const amt = parseFloat(d?.amount || d?.deduction_amount || 0);
+            if (!(amt > 0)) return null;
+            const rawType = String(d?.type || d?.ded_type || d?.deduction_type || '').trim().toUpperCase();
+            const isAdd = rawType === 'ADD' || rawType === '+' || rawType === 'ADDITION' || rawType === 'PLUS';
+            return {
+              deduction_id: d?.deduction_id || d?.id || null,
+              name: (d?.deduction_name || d?.name || d?.deduction || '').trim() || (isAdd ? 'Other Charges' : 'Sales Deduction'),
+              type: isAdd ? 'ADD' : 'LESS',
+              amount: amt,
+              remarks: d?.remarks || ''
+            };
+          })
+          .filter(Boolean);
+
+        const customManualDed = parseFloat(formData.deduction) || 0;
+        if (customManualDed > 0) {
+          normalizedDeductions.push({
+            name: 'Manual Deduction',
+            type: 'LESS',
+            amount: customManualDed,
+            remarks: formData.deduction_remarks || ''
+          });
+        } else if (normalizedDeductions.length === 0 && formData.deduction_amount) {
+          const rawDedAmt = parseFloat(formData.deduction_amount) || 0;
+          if (rawDedAmt !== 0) {
+            const isAdd = rawDedAmt < 0;
+            normalizedDeductions.push({
+              name: (formData.deduction && isNaN(Number(formData.deduction)))
+                ? String(formData.deduction).trim()
+                : (isAdd ? 'Other Charges' : 'Sales Deduction'),
+              type: isAdd ? 'ADD' : 'LESS',
+              amount: Math.abs(rawDedAmt),
+              remarks: formData.deduction_remarks || ''
+            });
+          }
+        }
+
+        const vRes = await createSalesLedgerEntries({
+          customer: formData.customer_id || formData.customer,
+          date: formData.date || new Date().toISOString().split('T')[0],
+          invNo: s_no,
+          salesId: salesId,
+          totalAmount: grandTotalVal,
+          taxAmount: salesTaxVal,
+          cgstAmount: cgstSales,
+          sgstAmount: sgstSales,
+          igstAmount: igstSales,
+          isInterstate: isInterstateSales,
+          discAmount: 0,
+          baseAmount: parseFloat(totals?.baseAmount) || parseFloat(formData.bill_amt) || Math.max(0, totalAmt - salesTaxVal),
+          deductions: normalizedDeductions
+        });
+        voucherNo = vRes?.voucherNo || null;
+        if (voucherNo) {
+          await db.run('UPDATE sales SET voucher_no = ? WHERE id = ?', [voucherNo, salesId]).catch(() => {});
+        }
+        console.log('✓ Sales Voucher chain and ledger entries auto-created for sales ID:', salesId);
+      } catch (ledgerErr) {
+        console.error('Error auto-creating Sales Voucher chain:', ledgerErr);
+      }
     }
 
     return res.status(201).json({
       success: true,
-      message: 'Sales record saved successfully!',
-      id: salesId
+      message: isOrderFlag ? 'Sales Order saved successfully!' : 'Sales record saved successfully!',
+      id: salesId,
+      voucher_no: voucherNo
     });
 
   } catch (err) {

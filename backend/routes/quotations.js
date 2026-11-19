@@ -262,6 +262,38 @@ router.post('/', async (req, res) => {
     }
 
     await connection.commit()
+
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const refNo = `QTN-${finalBillNo}`;
+      const itemDesc = Array.isArray(items) && items.length > 0
+        ? items.filter(i => i.item_name).map(i => `${i.qty || 0} ${i.item_name}`).slice(0, 3).join(', ')
+        : 'Quoted Items';
+      await triggerTransactionNotification({
+        eventType: 'ORDER_CREATED',
+        moduleName: 'QUOTATION',
+        referenceNo: refNo,
+        referenceId: quotationId,
+        companyId: req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1),
+        title: `📋 QUOTATION CREATED – ${refNo}`,
+        message: `Customer: ${customer || 'Customer'} | ${itemDesc} | Total Qty: ${totalQty} | Amount: ₹${parseFloat(total_amt) || totalItemAmt}`,
+        severity: 'INFO',
+        details: {
+          reference_no: refNo,
+          action_label: 'QUOTATION',
+          party_name: customer || 'Customer',
+          item_summary: itemDesc,
+          quantity: `${totalQty} Bags`,
+          amount: parseFloat(total_amt) || totalItemAmt,
+          status: 'CREATED',
+          created_by: req.user?.username || 'Sales Operator',
+          date: date || new Date().toISOString().slice(0, 10)
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Quotation):', notifErr.message);
+    }
+
     res.json({ success: true, id: quotationId, message: 'Quotation created successfully' })
   } catch (error) {
     await connection.rollback()
@@ -398,6 +430,40 @@ router.put('/:id', async (req, res) => {
     }
 
     await connection.commit();
+
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const refNo = `QTN-${bill_no || id}`;
+      const itemDesc = Array.isArray(items) && items.length > 0
+        ? items.filter(i => i.item_name).map(i => `${i.qty || 0} ${i.item_name}`).slice(0, 3).join(', ')
+        : 'Quoted Items';
+      await triggerTransactionNotification({
+        eventType: 'ORDER_UPDATED',
+        isUpdate: true,
+        moduleName: 'QUOTATION',
+        referenceNo: refNo,
+        referenceId: id,
+        companyId: req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1),
+        title: `✏️ QUOTATION UPDATED – ${refNo}`,
+        message: `Updated Quotation | Customer: ${customer || 'Customer'} | ${itemDesc} | Total Qty: ${totalQty} | Amount: ₹${parseFloat(total_amt) || totalItemAmt}`,
+        severity: 'INFO',
+        details: {
+          reference_no: refNo,
+          action_label: 'QUOTATION',
+          party_name: customer || 'Customer',
+          item_summary: itemDesc,
+          quantity: `${totalQty} Bags`,
+          amount: parseFloat(total_amt) || totalItemAmt,
+          status: 'UPDATED',
+          updated_by: req.user?.username || 'Sales Operator',
+          created_by: req.user?.username || 'Sales Operator',
+          date: date || undefined
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Quotation Update):', notifErr.message);
+    }
+
     res.json({ success: true, message: 'Quotation updated successfully' });
   } catch (error) {
     await connection.rollback();

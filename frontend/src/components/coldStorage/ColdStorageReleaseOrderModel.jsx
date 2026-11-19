@@ -36,6 +36,7 @@ import {
 } from '@mui/icons-material';
 import { printHtml } from '../../utils/printHelper';
 import { useAuth } from '../../context/AuthContext';
+import api from '../../services/api';
 
 const ColdStorageReleaseOrderModal = ({ open, onClose, csoData }) => {
   const { selectedCompany } = useAuth();
@@ -58,10 +59,9 @@ const ColdStorageReleaseOrderModal = ({ open, onClose, csoData }) => {
     }
     setLoading(true);
     try {
-      const res = await fetch(`/api/cold-storage/vouchers/${voucherId}`);
-      const data = await res.json();
-      if (data && data.success && data.voucher) {
-        setDetailedVoucher(data.voucher);
+      const data = await api(`/cold-storage/vouchers/${voucherId}`);
+      if (data && data.success && (data.voucher || data.data)) {
+        setDetailedVoucher(data.voucher || data.data);
       } else {
         setDetailedVoucher(csoData);
       }
@@ -507,16 +507,16 @@ const ColdStorageReleaseOrderModal = ({ open, onClose, csoData }) => {
           </Typography>
           <TableContainer component={Paper} variant="outlined" sx={{ mb: 2 }}>
             <Table size="small">
-              <TableHead sx={{ bgcolor: '#1e3a8a' }}>
+              <TableHead sx={{ '& th, & .MuiTableCell-head': { bgcolor: '#1e3a8a !important', color: '#ffffff !important', fontWeight: 800, borderColor: '#1e40af' } }}>
                 <TableRow>
-                  <TableCell sx={{ color: '#fff', fontWeight: 800 }}>Item Name</TableCell>
-                  <TableCell sx={{ color: '#fff', fontWeight: 800 }}>Factory Lot</TableCell>
-                  <TableCell sx={{ color: '#fff', fontWeight: 800 }}>CS Lot</TableCell>
-                  <TableCell align="right" sx={{ color: '#fff', fontWeight: 800 }}>Inward Qty</TableCell>
-                  <TableCell align="right" sx={{ color: '#fff', fontWeight: 800 }}>Prev Released</TableCell>
-                  <TableCell align="right" sx={{ color: '#fff', fontWeight: 800 }}>Auth Release Qty</TableCell>
-                  <TableCell align="right" sx={{ color: '#fff', fontWeight: 800 }}>Exp. Balance</TableCell>
-                  <TableCell align="right" sx={{ color: '#fff', fontWeight: 800 }}>Release Wt (KG)</TableCell>
+                  <TableCell sx={{ color: '#ffffff !important', fontWeight: 800 }}>Item Name</TableCell>
+                  <TableCell sx={{ color: '#ffffff !important', fontWeight: 800 }}>Factory Lot</TableCell>
+                  <TableCell sx={{ color: '#ffffff !important', fontWeight: 800 }}>CS Lot</TableCell>
+                  <TableCell align="right" sx={{ color: '#ffffff !important', fontWeight: 800 }}>Inward Qty</TableCell>
+                  <TableCell align="right" sx={{ color: '#ffffff !important', fontWeight: 800 }}>Prev Released</TableCell>
+                  <TableCell align="right" sx={{ color: '#ffffff !important', fontWeight: 800 }}>Auth Release Qty</TableCell>
+                  <TableCell align="right" sx={{ color: '#ffffff !important', fontWeight: 800 }}>Exp. Balance</TableCell>
+                  <TableCell align="right" sx={{ color: '#ffffff !important', fontWeight: 800 }}>Release Wt (KG)</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>

@@ -282,6 +282,35 @@ router.post('/', async (req, res) => {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [sNoVal, date, compVal, papadBalVal, pymtBalVal, typeVal, papadLessVal, pymtLessVal, remarksVal]);
 
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const refNo = `PRT-${sNoVal || result.lastID}`;
+      await triggerTransactionNotification({
+        eventType: 'PRODUCTION_CREATED',
+        moduleName: 'PRODUCTION',
+        referenceNo: refNo,
+        referenceId: result.lastID,
+        companyId: req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1),
+        title: `⚙️ PAPAD RETURN – ${refNo}`,
+        message: `Papad Company: ${compVal || 'Unit'} | Type: ${typeVal} | Papad Less: ${papadLessVal} KG | Payment Less: ₹${pymtLessVal}`,
+        severity: 'INFO',
+        details: {
+          reference_no: refNo,
+          action_label: 'PAPAD RETURN',
+          module_label: `Papad Return (${typeVal})`,
+          party_name: compVal || 'Papad Unit',
+          item_summary: `Papad Less: ${papadLessVal} KG | Pymt Less: ₹${pymtLessVal}`,
+          quantity: `${papadLessVal} KG`,
+          godown: 'Papad Store',
+          status: 'RECORDED',
+          created_by: req.user?.username || 'Production Operator',
+          date
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Papad Return):', notifErr.message);
+    }
+
     res.status(201).json({
       success: true,
       message: 'Papad Return saved successfully!',
@@ -315,6 +344,38 @@ router.put('/:id', async (req, res) => {
         type = ?, papad_less = ?, payment_less = ?, remarks = ?
       WHERE id = ?
     `, [sNoVal, date, compVal, papadBalVal, pymtBalVal, typeVal, papadLessVal, pymtLessVal, remarksVal, req.params.id]);
+
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const refNo = `PRTN-${sNoVal || req.params.id}`;
+      await triggerTransactionNotification({
+        eventType: 'PRODUCTION_UPDATED',
+        isUpdate: true,
+        moduleName: 'PRODUCTION',
+        referenceNo: refNo,
+        referenceId: req.params.id,
+        companyId: req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1),
+        title: `✏️ PAPAD RETURN UPDATED – ${refNo}`,
+        message: `Updated Papad Return | Company: ${compVal || 'Jobwork Unit'} | Type: ${typeVal} | Papad Less: ${papadLessVal} | Payment Less: ₹${pymtLessVal}`,
+        severity: 'INFO',
+        details: {
+          reference_no: refNo,
+          action_label: 'PAPAD RETURN',
+          module_label: `Papad Return (${typeVal})`,
+          party_name: compVal || 'Jobwork Unit',
+          item_summary: `Papad Less: ${papadLessVal} / Payment Less: ₹${pymtLessVal}`,
+          quantity: `${papadLessVal} KG`,
+          amount: pymtLessVal,
+          status: 'UPDATED',
+          remarks: remarksVal || '-',
+          updated_by: req.user?.username || 'Production Operator',
+          created_by: req.user?.username || 'Production Operator',
+          date
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Papad Return Update):', notifErr.message);
+    }
 
     res.json({ success: true, message: 'Papad Return updated successfully!' });
   } catch (error) {

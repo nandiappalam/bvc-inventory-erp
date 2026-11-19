@@ -313,6 +313,13 @@ const SalesCreate = () => {
     setFormData(prev => ({
       ...prev,
       customer_id: custId,
+      sender_id: sourceRecord.sender_id || prev.sender_id,
+      consignee_id: sourceRecord.consignee_id || prev.consignee_id,
+      godown_from_id: sourceRecord.godown_from_id || prev.godown_from_id,
+      lorry_no: sourceRecord.lorry_no || prev.lorry_no,
+      p_o_no: sourceRecord.p_o_no || sourceRecord.s_no || prev.p_o_no,
+      driver: sourceRecord.driver || prev.driver,
+      pur_trans: sourceRecord.pur_trans || prev.pur_trans,
       address: sourceRecord.address || prev.address,
       tax_type: sourceRecord.tax_type || prev.tax_type,
       tax_percent: sourceRecord.tax_percent !== undefined ? sourceRecord.tax_percent : prev.tax_percent,
@@ -321,8 +328,25 @@ const SalesCreate = () => {
       loadman_worker_id: sourceRecord.loadman_worker_id || prev.loadman_worker_id,
       loadman_rate_per_kg: sourceRecord.loadman_rate_per_kg || prev.loadman_rate_per_kg,
       loadman_charges: sourceRecord.loadman_charges || prev.loadman_charges,
+      deduction: sourceRecord.deduction || prev.deduction,
+      deduction_remarks: sourceRecord.deduction_remarks || prev.deduction_remarks,
       remarks: `Ref: ${sourceRecord.bill_no || sourceRecord.s_no || ''}. ${sourceRecord.remarks || ''}`.trim()
     }));
+
+    let importedDeductions = [];
+    if (Array.isArray(sourceRecord.selectedDeductions) && sourceRecord.selectedDeductions.length > 0) {
+      importedDeductions = sourceRecord.selectedDeductions;
+    } else if (Array.isArray(sourceRecord.deductions) && sourceRecord.deductions.length > 0) {
+      importedDeductions = sourceRecord.deductions;
+    } else if (typeof sourceRecord.deductions_json === 'string' && sourceRecord.deductions_json.trim()) {
+      try {
+        const parsed = JSON.parse(sourceRecord.deductions_json);
+        if (Array.isArray(parsed)) importedDeductions = parsed;
+      } catch (_) {}
+    }
+    if (importedDeductions.length > 0) {
+      setSelectedDeductions(importedDeductions);
+    }
 
     let itemsToImport = [];
     if (Array.isArray(sourceRecord.items) && sourceRecord.items.length > 0) {
@@ -557,6 +581,7 @@ const SalesCreate = () => {
 
   const handleSubmit = async (e) => {
     if (e) e.preventDefault()
+    if (loading) return
     setLoading(true)
     setError('')
     setSuccess('')

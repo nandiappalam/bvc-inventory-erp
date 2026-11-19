@@ -89,8 +89,8 @@ const OutpassCreate = () => {
       uom: 'KG',
       rate: '',
       amount: 0,
-      godown_id: 1,
-      godown_name: 'PJ',
+      godown_id: '',
+      godown_name: '',
       reason: 'Outside Processing Grinding'
     }
   ]);
@@ -177,8 +177,23 @@ const OutpassCreate = () => {
     // 5. Fetch Godowns
     api('/masters/godowns')
       .then(res => {
-        if (Array.isArray(res)) setGodownsList(res);
-        else if (res?.data && Array.isArray(res.data)) setGodownsList(res.data);
+        const list = Array.isArray(res) ? res : (res?.data && Array.isArray(res.data) ? res.data : []);
+        setGodownsList(list);
+        if (list.length > 0) {
+          const firstG = list[0];
+          const firstId = String(firstG.id);
+          const firstName = firstG.print_name || firstG.godown_name || 'Main Godown';
+          setFormData(prev => prev.from_godown_id ? prev : {
+            ...prev,
+            from_godown_id: firstId,
+            from_godown_name: prev.from_godown_name || firstName
+          });
+          setItems(prevItems => prevItems.map(it => ({
+            ...it,
+            godown_id: it.godown_id || Number(firstId),
+            godown_name: it.godown_name || firstName
+          })));
+        }
       })
       .catch(() => {});
   }, []);
@@ -191,16 +206,23 @@ const OutpassCreate = () => {
       api(`/grains/${targetGrindId}`)
         .then(g => {
           if (g && g.id) {
-            setFormData(prev => ({
-              ...prev,
-              reference_type: 'Grind',
-              reference_id: g.id,
-              reference_no: `GRIND-${g.s_no || g.id}`,
-              party_name: g.external_mill_name || g.flour_mill || prev.party_name,
-              destination: g.external_mill_name || g.flour_mill || prev.destination,
-              processing_rate_kg: g.processing_charge_per_kg ? String(g.processing_charge_per_kg) : prev.processing_rate_kg,
-              remarks: `Dispatched against Grind #${g.s_no || g.id}${g.remarks ? ' - ' + g.remarks : ''}`
-            }));
+            setFormData(prev => {
+              const resolvedParty = [g.flour_mill_name, g.external_mill_name, g.flour_mill].find(
+                v => v !== null && v !== undefined && String(v).trim() !== '' && !/^\d+$/.test(String(v).trim())
+              ) || g.flour_mill_name || g.external_mill_name || g.flour_mill || prev.party_name;
+              const resolvedDest = g.mill_area || g.destination || resolvedParty || prev.destination;
+              return {
+                ...prev,
+                reference_type: 'Grind',
+                reference_id: g.id,
+                reference_no: `GRIND-${g.s_no || g.id}`,
+                party_id: g.external_mill_id || g.party_id || (/^\d+$/.test(String(g.flour_mill || '')) ? String(g.flour_mill) : prev.party_id),
+                party_name: resolvedParty,
+                destination: resolvedDest,
+                processing_rate_kg: g.processing_charge_per_kg ? String(g.processing_charge_per_kg) : prev.processing_rate_kg,
+                remarks: `Dispatched against Grind #${g.s_no || g.id}${g.remarks ? ' - ' + g.remarks : ''}`
+              };
+            });
 
             // Pre-fill items from Grind input items
             if (g.inputItems && g.inputItems.length > 0) {
@@ -213,8 +235,8 @@ const OutpassCreate = () => {
                 uom: 'KG',
                 rate: String(it.rate || 0),
                 amount: (parseFloat(it.qty || 0) * parseFloat(it.rate || 0)),
-                godown_id: 1,
-                godown_name: 'PJ',
+                godown_id: it.godown_id || '',
+                godown_name: it.godown_name || '',
                 reason: 'Outside Processing Grinding'
               }));
               setItems(prefilled);
@@ -321,8 +343,8 @@ const OutpassCreate = () => {
         uom: 'KG',
         rate: '',
         amount: 0,
-        godown_id: formData.from_godown_id || 1,
-        godown_name: formData.from_godown_name || 'PJ',
+        godown_id: formData.from_godown_id || availableGodowns[0]?.id || '',
+        godown_name: formData.from_godown_name || availableGodowns[0]?.print_name || availableGodowns[0]?.godown_name || '',
         reason: formData.purpose || 'Outside Processing'
       }
     ]);
@@ -356,15 +378,25 @@ const OutpassCreate = () => {
     setMessage('');
 
     try {
+      const effectiveGodownId = formData.from_godown_id || (availableGodowns[0]?.id ? String(availableGodowns[0].id) : '');
+      const selectedGodown = availableGodowns.find(g => String(g.id) === String(effectiveGodownId));
+      const effectiveGodownName = formData.from_godown_name || (selectedGodown ? (selectedGodown.print_name || selectedGodown.godown_name) : '');
+      const normalizedItems = validItems.map(it => ({
+        ...it,
+        godown_id: it.godown_id || effectiveGodownId || undefined,
+        godown_name: it.godown_name || effectiveGodownName
+      }));
       const payload = {
         formData: {
           ...formData,
+          from_godown_id: effectiveGodownId,
+          from_godown_name: effectiveGodownName,
           total_qty: totalQty,
           total_weight: totalWeight,
           total_amount: totalAmount,
           estimated_charges: estimatedCharges
         },
-        items: validItems
+        items: normalizedItems
       };
 
       const res = await api('/outpasses', {
@@ -719,7 +751,7 @@ const OutpassCreate = () => {
             <label className="outpass-label">From Dispatch Godown</label>
             <select
               name="from_godown_id"
-              value={String(formData.from_godown_id || '1')}
+              value={String(formData.from_godown_id || (availableGodowns[0]?.id ?? ''))}
               onChange={(e) => {
                 const gId = e.target.value;
                 const sel = availableGodowns.find(g => String(g.id) === String(gId));
@@ -731,6 +763,9 @@ const OutpassCreate = () => {
               }}
               className="outpass-select"
             >
+              {availableGodowns.length === 0 && (
+                <option value="">Select Godown</option>
+              )}
               {availableGodowns.map(g => (
                 <option key={g.id} value={String(g.id)}>
                   {g.print_name || g.godown_name}

@@ -129,19 +129,19 @@ input{
 }
 
 /* ===== TABLE ===== */
-table{
+table:not(.MuiTable-root){
     width:50%;
     border-collapse:collapse;
     margin-top:6px;
 	  
 }
-th{
+th:not(.MuiTableCell-root){
     background:#3f6fc0;
     color:white;
     border:1px solid #8aa4d8;
     height:22px;
 }
-td{
+td:not(.MuiTableCell-root){
     border:1px solid #8aa4d8;
     height:22px;
 }

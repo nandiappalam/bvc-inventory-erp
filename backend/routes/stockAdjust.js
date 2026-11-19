@@ -120,6 +120,35 @@ router.post('/', async (req, res) => {
     await applyStockAdjustments(adjustmentId, formData.date, items)
     await rebuildStockLedger();
 
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const refNo = `SA-${formData.sNo || adjustmentId}`;
+      const itemDesc = items.map(i => `${i.qty || 0} ${i.item_name || 'Item'}`).slice(0, 3).join(', ');
+      const totalWt = items.reduce((s, i) => s + (parseFloat(i.totWt || i.total_wt) || 0), 0);
+      await triggerTransactionNotification({
+        eventType: 'STOCK_ADJUST_CREATED',
+        moduleName: 'STOCK_ADJUST',
+        referenceNo: refNo,
+        referenceId: adjustmentId,
+        companyId: req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1),
+        title: `📊 STOCK ADJUSTMENT – ${refNo}`,
+        message: `Type: ${formData.type || 'Adjustment'} | Items: ${itemDesc} | Total Wt: ${totalWt} KG`,
+        severity: 'WARNING',
+        details: {
+          reference_no: refNo,
+          action_label: formData.type || 'Stock Adjustment',
+          godown: formData.papadComp || formData.flourMill || 'Main Godown',
+          item_summary: itemDesc,
+          quantity: `${totalWt} KG`,
+          remarks: formData.remarks || '-',
+          created_by: req.user?.username || 'Store Operator',
+          date: formData.date
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Stock Adjust):', notifErr.message);
+    }
+
     res.status(201).json({
       success: true,
       message: 'Stock adjustment saved successfully!',
@@ -170,6 +199,44 @@ router.put('/:id', async (req, res) => {
     // Apply the new inventory changes
     await applyStockAdjustments(adjustmentId, formData.date, items)
     await rebuildStockLedger();
+
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const { resolveFlourMillInfo } = require('../utils/millResolver');
+      const cId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+      const refNo = `SA-${formData.sNo || adjustmentId}`;
+      const itemDesc = items.map(i => `${i.qty || 0} ${i.item_name || 'Item'}`).slice(0, 3).join(', ');
+      const totalWt = items.reduce((s, i) => s + (parseFloat(i.totWt || i.total_wt) || 0), 0);
+      let resolvedLocation = formData.papadComp || '';
+      if (!resolvedLocation && formData.flourMill) {
+        const mInfo = await resolveFlourMillInfo(formData.flourMill, cId);
+        resolvedLocation = mInfo.millName || formData.flourMill;
+      }
+      await triggerTransactionNotification({
+        eventType: 'STOCK_ADJUST_UPDATED',
+        isUpdate: true,
+        moduleName: 'STOCK_ADJUST',
+        referenceNo: refNo,
+        referenceId: adjustmentId,
+        companyId: cId,
+        title: `✏️ STOCK ADJUSTMENT UPDATED – ${refNo}`,
+        message: `Updated Adjustment | Type: ${formData.type || 'Adjustment'} | Items: ${itemDesc} | Total Wt: ${totalWt} KG`,
+        severity: 'WARNING',
+        details: {
+          reference_no: refNo,
+          action_label: formData.type || 'Stock Adjustment',
+          godown: resolvedLocation || 'Main Godown',
+          item_summary: itemDesc,
+          quantity: `${totalWt} KG`,
+          remarks: formData.remarks || '-',
+          updated_by: req.user?.username || 'Store Operator',
+          created_by: req.user?.username || 'Store Operator',
+          date: formData.date
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Stock Adjust Update):', notifErr.message);
+    }
 
     res.json({ success: true, message: 'Stock adjustment record updated successfully!' })
   } catch (error) {

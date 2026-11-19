@@ -275,26 +275,71 @@ const ColdStorageOut = () => {
           items: v.items || []
         };
 
-        const enrichedItems = (v.items || []).map(it => {
+        const billItems = Array.isArray(b.items) ? b.items : [];
+        const rawItems = (v.items && v.items.length > 0) ? v.items : billItems;
+        const enrichedItems = rawItems.map((it, idx) => {
           const qty = parseFloat(it.quantity || 0);
           const wt = parseFloat(it.weight || 1);
           const totWt = parseFloat(it.total_wt || (qty * wt));
-          const calendarDays = it.calendar_days || 1;
-          const sRate = it.storage_charges && totWt > 0 ? (it.storage_charges / (totWt * Math.max(1, calendarDays))) : (tariff?.storageSlabs?.[0]?.rate || 0.20);
-          const hRate = it.loading_charges && totWt > 0 ? (it.loading_charges / totWt) : parseFloat(v.handling_rate || 0.50);
+          const billItem = billItems[idx] || billItems.find(bi =>
+            (it.cold_storage_lot_no && bi.cold_storage_lot_no === it.cold_storage_lot_no) ||
+            (it.item_name && bi.item_name === it.item_name)
+          );
+
+          const inDateStr = it.inward_date || billItem?.inward_date || v.voucher_date;
+          let computedDays = 1;
+          if (inDateStr && v.voucher_date) {
+            const inD = new Date(inDateStr);
+            const outD = new Date(v.voucher_date);
+            if (!isNaN(inD.getTime()) && !isNaN(outD.getTime())) {
+              computedDays = Math.max(1, Math.round(Math.max(0, outD - inD) / (1000 * 60 * 60 * 24)) + 1);
+            }
+          }
+          const calendarDays = parseInt(
+            it.calendar_days || it.storage_days || billItem?.storage_days || v.storage_days || computedDays || 1,
+            10
+          ) || 1;
+
+          let storageCharge = parseFloat(it.storage_charges ?? it.storage_charge ?? billItem?.storage_charges ?? 0) || 0;
+          if (storageCharge === 0 && rawItems.length === 1 && parseFloat(b.storage_charges || 0) > 0) {
+            storageCharge = parseFloat(b.storage_charges || 0);
+          }
+
+          const defaultHRate = parseFloat(v.handling_rate || tariff?.outwardLoadingRate || 0.50);
+          let loadingCharge = parseFloat(it.loading_charges ?? it.labour_charge ?? billItem?.handling_charges ?? 0) || 0;
+          if (loadingCharge === 0 && rawItems.length === 1 && parseFloat(b.handling_charges || 0) > 0) {
+            loadingCharge = parseFloat(b.handling_charges || 0);
+          } else if (loadingCharge === 0) {
+            loadingCharge = Number((totWt * defaultHRate).toFixed(2));
+          }
+
+          const sRate = storageCharge > 0 && totWt > 0
+            ? Number((storageCharge / totWt).toFixed(2))
+            : (tariff?.storageSlabs?.[0]?.rate || 0.20);
+          const hRate = loadingCharge > 0 && totWt > 0
+            ? Number((loadingCharge / totWt).toFixed(2))
+            : defaultHRate;
+
+          const remainingQty = it.remaining_quantity != null ? Number(parseFloat(it.remaining_quantity).toFixed(2)) : 0;
+          const remainingWt = it.remaining_weight != null
+            ? Number(parseFloat(it.remaining_weight).toFixed(2))
+            : Number((remainingQty * (wt > 1 ? wt : 1)).toFixed(2));
+          const displayUnit = (!it.unit || String(it.unit).toUpperCase() === 'KG') && wt > 1 ? 'Bags' : (it.unit || 'KG');
 
           return {
             ...it,
+            unit: displayUnit,
+            inward_date: inDateStr,
             charges: {
-              calendarDays: it.calendar_days || calendarDays,
-              billableDays: it.calendar_days || calendarDays,
-              storageCharge: parseFloat(it.storage_charges || 0),
-              loadingCharge: parseFloat(it.loading_charges || (totWt * hRate)),
-              totalReleasedCost: (parseFloat(it.storage_charges || 0) + parseFloat(it.loading_charges || (totWt * hRate))),
+              calendarDays,
+              billableDays: parseInt(billItem?.billable_days || calendarDays, 10) || calendarDays,
+              storageCharge: Number(storageCharge.toFixed(2)),
+              loadingCharge: Number(loadingCharge.toFixed(2)),
+              totalReleasedCost: Number((storageCharge + loadingCharge).toFixed(2)),
               storageRatePerKg: sRate,
               handlingRatePerKg: hRate,
-              remainingQty: it.remaining_quantity !== undefined ? it.remaining_quantity : 0,
-              remainingWt: it.remaining_weight !== undefined ? it.remaining_weight : 0
+              remainingQty,
+              remainingWt
             }
           };
         });
@@ -304,7 +349,7 @@ const ColdStorageOut = () => {
           voucher_no: v.voucher_no,
           voucher_date: v.voucher_date,
           cold_storage_name: v.cold_storage_name,
-          operator_name: v.operator_name || 'Cold Storage Operator',
+          operator_name: v.operator_name || b.operator_name || 'Cold Storage Operator',
           outward_dest_type: v.destination_godown_name?.toLowerCase().includes('customer') ? 'Customer Dispatch' : 'Internal Godown',
           destination_godown_name: v.destination_godown_name || 'Main Godown',
           customer_name: v.customer_name || '',
@@ -316,7 +361,8 @@ const ColdStorageOut = () => {
           lr_no: v.lr_no || '',
           gate_pass_no: v.gate_pass_no || '',
           handling_rate: v.handling_rate || 0,
-          handling_amount: v.handling_amount || 0,
+          handling_amount: parseFloat(b.handling_charges ?? v.handling_amount ?? 0),
+          total_storage_charges: parseFloat(b.storage_charges ?? v.storage_charges ?? 0),
           total_qty: v.total_qty || 0,
           total_wt: v.total_wt || 0,
           remarks: v.remarks || '',
@@ -520,7 +566,14 @@ const ColdStorageOut = () => {
 
   const totalQtySum = items.reduce((sum, i) => sum + parseFloat(i.quantity || 0), 0);
   const totalWtSum = items.reduce((sum, i) => sum + parseFloat(i.total_wt || 0), 0);
-  const totalHandlingCharges = totalQtySum * (parseFloat(handlingRate) || 0);
+  const totalStorageChargesEst = items.reduce((sum, i) => {
+    if (!i.cold_storage_lot_no || !(parseFloat(i.quantity || 0) > 0)) return sum;
+    return sum + calculateReleasedCharge(i).storageCharge;
+  }, 0);
+  const totalHandlingCharges = items.reduce((sum, i) => {
+    if (!(parseFloat(i.quantity || 0) > 0)) return sum;
+    return sum + calculateReleasedCharge(i).loadingCharge;
+  }, 0);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -686,11 +739,62 @@ const ColdStorageOut = () => {
       });
       if (res && (res.success || res.bill || res.data)) {
         const updatedBill = res.bill || res.data || res;
-        setSavedVoucher(prev => ({
-          ...prev,
-          bill: updatedBill
-        }));
+        const nextStorage = parseFloat(updatedBill.storage_charges ?? billEditData.storage_charges ?? 0) || 0;
+        const nextHandling = parseFloat(updatedBill.handling_charges ?? billEditData.handling_charges ?? 0) || 0;
+        const nextGrand = parseFloat(updatedBill.grand_total ?? 0) || 0;
+
+        setSavedVoucher(prev => {
+          if (!prev) return prev;
+          const nextItems = Array.isArray(prev.items) && prev.items.length === 1
+            ? prev.items.map(it => {
+                const totWt = parseFloat(it.total_wt || (parseFloat(it.quantity || 0) * parseFloat(it.weight || 1))) || 0;
+                return {
+                  ...it,
+                  charges: {
+                    ...(it.charges || {}),
+                    storageCharge: nextStorage,
+                    loadingCharge: nextHandling,
+                    totalReleasedCost: Number((nextStorage + nextHandling).toFixed(2)),
+                    storageRatePerKg: totWt > 0 ? Number((nextStorage / totWt).toFixed(2)) : (it.charges?.storageRatePerKg || 0),
+                    handlingRatePerKg: totWt > 0 ? Number((nextHandling / totWt).toFixed(2)) : (it.charges?.handlingRatePerKg || 0)
+                  }
+                };
+              })
+            : prev.items;
+          return {
+            ...prev,
+            handling_amount: nextHandling,
+            total_storage_charges: nextStorage,
+            items: nextItems,
+            bill: updatedBill
+          };
+        });
+        setBillEditData({
+          operator_invoice_no: updatedBill.operator_invoice_no || '',
+          operator_invoice_date: updatedBill.operator_invoice_date || savedVoucher.voucher_date,
+          operator_invoice_amount: updatedBill.operator_invoice_amount || nextGrand,
+          storage_charges: nextStorage,
+          handling_charges: nextHandling,
+          insurance_charges: parseFloat(updatedBill.insurance_charges || 0),
+          mamool_charges: parseFloat(updatedBill.mamool_charges || 0),
+          other_charges: parseFloat(updatedBill.other_charges || 0),
+          tax_rate: parseFloat(updatedBill.tax_rate ?? 18),
+          remarks: updatedBill.remarks || ''
+        });
+        setHistoryVouchers(prev => prev.map(row =>
+          (String(row.id) === String(savedVoucher.id) || String(row.bill_id) === String(updatedBill.id) || row.voucher_no === savedVoucher.voucher_no)
+            ? {
+                ...row,
+                storage_charges: nextStorage,
+                handling_amount: nextHandling,
+                bill_storage_charges: nextStorage,
+                bill_handling_charges: nextHandling,
+                bill_grand_total: nextGrand
+              }
+            : row
+        ));
         setIsEditingBill(false);
+        await fetchHistoryVouchers();
         setMessage(`Cold Storage Bill #${updatedBill.bill_no || savedVoucher.bill.bill_no} updated successfully!`);
         setMessageType('success');
       } else {
@@ -1251,18 +1355,18 @@ const ColdStorageOut = () => {
 
               <TableContainer component={Paper} variant="outlined" sx={{ overflowX: 'auto', borderRadius: 1.5 }}>
                 <Table sx={{ minWidth: 1250, '& .MuiTableCell-root': { py: 1, px: 1 } }}>
-                  <TableHead sx={{ backgroundColor: '#fffbe3' }}>
+                  <TableHead sx={{ '& th, & .MuiTableCell-head': { backgroundColor: '#fffbe3 !important', color: '#78350f !important', fontWeight: '800' } }}>
                     <TableRow>
-                      <TableCell sx={{ fontWeight: 'bold', width: 45, textAlign: 'center' }}>#</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold', minWidth: 280, width: 320 }}>Cold Storage Lot & Item</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold', minWidth: 140, width: 160 }}>Purchase Lot #</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold', minWidth: 130, width: 150 }}>Avail Stock in CS</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold', minWidth: 120, width: 135 }}>Issue Qty</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold', minWidth: 100, width: 110 }}>Per Wt</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold', minWidth: 120, width: 135 }}>Total Wt</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold', minWidth: 90, width: 100 }}>Unit</TableCell>
-                      <TableCell sx={{ fontWeight: 'bold', minWidth: 160 }}>Item Remarks</TableCell>
-                      <TableCell align="center" sx={{ fontWeight: 'bold', width: 60 }}>Action</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', width: 45, textAlign: 'center', color: '#78350f !important' }}>#</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', minWidth: 280, width: 320, color: '#78350f !important' }}>Cold Storage Lot & Item</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', minWidth: 140, width: 160, color: '#78350f !important' }}>Purchase Lot #</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', minWidth: 130, width: 150, color: '#78350f !important' }}>Avail Stock in CS</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', minWidth: 120, width: 135, color: '#78350f !important' }}>Issue Qty</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', minWidth: 100, width: 110, color: '#78350f !important' }}>Per Wt</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', minWidth: 120, width: 135, color: '#78350f !important' }}>Total Wt</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', minWidth: 90, width: 100, color: '#78350f !important' }}>Unit</TableCell>
+                      <TableCell sx={{ fontWeight: 'bold', minWidth: 160, color: '#78350f !important' }}>Item Remarks</TableCell>
+                      <TableCell align="center" sx={{ fontWeight: 'bold', width: 60, color: '#78350f !important' }}>Action</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -1439,18 +1543,18 @@ const ColdStorageOut = () => {
 
                   <TableContainer component={Paper} variant="outlined" sx={{ backgroundColor: '#ffffff', mb: 1.5, overflowX: 'auto' }}>
                     <Table size="small">
-                      <TableHead sx={{ backgroundColor: '#fef3c7' }}>
+                      <TableHead sx={{ '& th, & .MuiTableCell-head': { backgroundColor: '#fef3c7 !important', color: '#78350f !important', fontWeight: 'bold' } }}>
                         <TableRow>
-                          <TableCell sx={{ fontWeight: 'bold' }}>Lot No & Item</TableCell>
-                          <TableCell sx={{ fontWeight: 'bold' }} align="center">Inward Date</TableCell>
-                          <TableCell sx={{ fontWeight: 'bold' }} align="center">Calendar Days</TableCell>
-                          <TableCell sx={{ fontWeight: 'bold' }} align="right">Released Qty (KG)</TableCell>
-                          <TableCell sx={{ fontWeight: 'bold' }} align="right">Storage Rate (₹/kg)</TableCell>
-                          <TableCell sx={{ fontWeight: 'bold' }} align="right">Storage Charge (₹)</TableCell>
-                          <TableCell sx={{ fontWeight: 'bold' }} align="right">Handling Rate (₹/kg)</TableCell>
-                          <TableCell sx={{ fontWeight: 'bold' }} align="right">Total Handling Amnt (₹)</TableCell>
-                          <TableCell sx={{ fontWeight: 'bold' }} align="right">Total Release Cost</TableCell>
-                          <TableCell sx={{ fontWeight: 'bold' }} align="center">Remaining Balance in CS</TableCell>
+                          <TableCell sx={{ fontWeight: 'bold', color: '#78350f !important' }}>Lot No & Item</TableCell>
+                          <TableCell sx={{ fontWeight: 'bold', color: '#78350f !important' }} align="center">Inward Date</TableCell>
+                          <TableCell sx={{ fontWeight: 'bold', color: '#78350f !important' }} align="center">Calendar Days</TableCell>
+                          <TableCell sx={{ fontWeight: 'bold', color: '#78350f !important' }} align="right">Released Qty (KG)</TableCell>
+                          <TableCell sx={{ fontWeight: 'bold', color: '#78350f !important' }} align="right">Storage Rate (₹/kg)</TableCell>
+                          <TableCell sx={{ fontWeight: 'bold', color: '#78350f !important' }} align="right">Storage Charge (₹)</TableCell>
+                          <TableCell sx={{ fontWeight: 'bold', color: '#78350f !important' }} align="right">Handling Rate (₹/kg)</TableCell>
+                          <TableCell sx={{ fontWeight: 'bold', color: '#78350f !important' }} align="right">Total Handling Amnt (₹)</TableCell>
+                          <TableCell sx={{ fontWeight: 'bold', color: '#78350f !important' }} align="right">Total Release Cost</TableCell>
+                          <TableCell sx={{ fontWeight: 'bold', color: '#78350f !important' }} align="center">Remaining Balance in CS</TableCell>
                         </TableRow>
                       </TableHead>
                       <TableBody>
@@ -1515,7 +1619,7 @@ const ColdStorageOut = () => {
               )}
 
               {/* Total Summary */}
-              <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 4, mt: 2, p: 1.5, backgroundColor: '#fef3c7', borderRadius: 1, flexWrap: 'wrap' }}>
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 3, mt: 2, p: 1.5, backgroundColor: '#fef3c7', borderRadius: 1, flexWrap: 'wrap' }}>
                 <Typography variant="subtitle2">
                   Total Items: <strong>{items.length}</strong>
                 </Typography>
@@ -1526,7 +1630,13 @@ const ColdStorageOut = () => {
                   Total Issued Weight: <strong style={{ color: '#b45309' }}>{totalWtSum.toFixed(2)} KG</strong>
                 </Typography>
                 <Typography variant="subtitle2">
+                  Est. Storage Charge: <strong style={{ color: '#0369a1' }}>₹{totalStorageChargesEst.toFixed(2)}</strong>
+                </Typography>
+                <Typography variant="subtitle2">
                   Est. Outward Handling: <strong style={{ color: '#b45309' }}>₹{totalHandlingCharges.toFixed(2)}</strong>
+                </Typography>
+                <Typography variant="subtitle2">
+                  Est. Total Release Cost: <strong style={{ color: '#15803d' }}>₹{(totalStorageChargesEst + totalHandlingCharges).toFixed(2)}</strong>
                 </Typography>
               </Box>
             </CardContent>
@@ -1713,19 +1823,19 @@ const ColdStorageOut = () => {
                       <>
                         <TableContainer sx={{ maxHeight: 600 }}>
                           <Table stickyHeader size="small">
-                            <TableHead sx={{ '& th': { bgcolor: '#92400e', color: '#ffffff', fontWeight: 800, textTransform: 'uppercase', fontSize: '11px', letterSpacing: '0.5px' } }}>
+                            <TableHead sx={{ '& th, & .MuiTableCell-head': { backgroundColor: '#92400e !important', color: '#ffffff !important', fontWeight: 800, textTransform: 'uppercase', fontSize: '11px', letterSpacing: '0.5px' } }}>
                               <TableRow>
-                                <TableCell align="center" width="50" sx={{ color: '#fff' }}>#</TableCell>
-                                <TableCell sx={{ color: '#fff' }}>Voucher No</TableCell>
-                                <TableCell sx={{ color: '#fff' }}>Date</TableCell>
-                                <TableCell sx={{ color: '#fff' }}>Cold Storage Facility</TableCell>
-                                <TableCell sx={{ color: '#fff' }}>Destination / Target</TableCell>
-                                <TableCell align="right" sx={{ color: '#fff' }}>Released Qty</TableCell>
-                                <TableCell align="right" sx={{ color: '#fff' }}>Total Wt (KG)</TableCell>
-                                <TableCell sx={{ color: '#fff' }}>Vehicle & Driver</TableCell>
-                                <TableCell sx={{ color: '#fff' }}>CSO Bill #</TableCell>
-                                <TableCell align="right" sx={{ color: '#fff' }}>Bill Total (₹)</TableCell>
-                                <TableCell align="center" sx={{ color: '#fff' }}>Actions</TableCell>
+                                <TableCell align="center" width="50" sx={{ color: '#ffffff !important' }}>#</TableCell>
+                                <TableCell sx={{ color: '#ffffff !important' }}>Voucher No</TableCell>
+                                <TableCell sx={{ color: '#ffffff !important' }}>Date</TableCell>
+                                <TableCell sx={{ color: '#ffffff !important' }}>Cold Storage Facility</TableCell>
+                                <TableCell sx={{ color: '#ffffff !important' }}>Destination / Target</TableCell>
+                                <TableCell align="right" sx={{ color: '#ffffff !important' }}>Released Qty</TableCell>
+                                <TableCell align="right" sx={{ color: '#ffffff !important' }}>Total Wt (KG)</TableCell>
+                                <TableCell sx={{ color: '#ffffff !important' }}>Vehicle & Driver</TableCell>
+                                <TableCell sx={{ color: '#ffffff !important' }}>CSO Bill #</TableCell>
+                                <TableCell align="right" sx={{ color: '#ffffff !important' }}>Bill Total (₹)</TableCell>
+                                <TableCell align="center" sx={{ color: '#ffffff !important' }}>Actions</TableCell>
                               </TableRow>
                             </TableHead>
                             <TableBody>
@@ -2226,18 +2336,18 @@ const ColdStorageOut = () => {
 
                 <TableContainer component={Paper} variant="outlined" sx={{ overflowX: 'auto' }}>
                   <Table size="small">
-                    <TableHead sx={{ backgroundColor: '#f1f5f9' }}>
+                    <TableHead sx={{ '& th, & .MuiTableCell-head': { backgroundColor: '#1e293b !important', color: '#ffffff !important', fontWeight: 800 } }}>
                       <TableRow>
-                        <TableCell sx={{ fontWeight: 800 }}>Lot No & Item</TableCell>
-                        <TableCell sx={{ fontWeight: 800 }} align="center">Inward Date</TableCell>
-                        <TableCell sx={{ fontWeight: 800 }} align="center">Calendar Days</TableCell>
-                        <TableCell sx={{ fontWeight: 800 }} align="right">Released Qty (KG)</TableCell>
-                        <TableCell sx={{ fontWeight: 800 }} align="right">Storage Charge / KG (₹)</TableCell>
-                        <TableCell sx={{ fontWeight: 800 }} align="right">Storage Charge (₹)</TableCell>
-                        <TableCell sx={{ fontWeight: 800 }} align="right">Handling Amnt / KG (₹)</TableCell>
-                        <TableCell sx={{ fontWeight: 800 }} align="right">Total Handling Amnt (₹)</TableCell>
-                        <TableCell sx={{ fontWeight: 800 }} align="right">Total Release Cost (₹)</TableCell>
-                        <TableCell sx={{ fontWeight: 800 }} align="center">Remaining Balance in CS</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#ffffff !important' }}>Lot No & Item</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#ffffff !important' }} align="center">Inward Date</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#ffffff !important' }} align="center">Calendar Days</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#ffffff !important' }} align="right">Released Qty (KG)</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#ffffff !important' }} align="right">Storage Charge / KG (₹)</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#ffffff !important' }} align="right">Storage Charge (₹)</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#ffffff !important' }} align="right">Handling Amnt / KG (₹)</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#ffffff !important' }} align="right">Total Handling Amnt (₹)</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#ffffff !important' }} align="right">Total Release Cost (₹)</TableCell>
+                        <TableCell sx={{ fontWeight: 800, color: '#ffffff !important' }} align="center">Remaining Balance in CS</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>

@@ -270,6 +270,36 @@ router.post('/', async (req, res) => {
       console.warn('Notice rebuilding stock ledger on sales return save:', stkErr.message);
     }
 
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const retNo = s_no ? `SRT-${s_no}` : `SRT-${txResult.salesReturnId}`;
+      const itemDesc = validItems.map(i => `${i.qty || 0} ${i.item_name || i.itemName || 'Item'}`).slice(0, 3).join(', ');
+      const grandAmt = parseFloat(grand_total) || parseFloat(total_amt) || 0;
+      await triggerTransactionNotification({
+        eventType: 'SALES_RETURN_CREATED',
+        moduleName: 'SALES_RETURN',
+        referenceNo: retNo,
+        referenceId: txResult.salesReturnId,
+        companyId: activeCompanyId,
+        title: `🟡 SALES RETURN – ${retNo}`,
+        message: `Customer: ${customer || 'Customer'} | Items: ${itemDesc || 'Returned Stock'} | Qty: ${total_qty || 0} (${total_wt || 0} KG) | Amount: ₹${grandAmt}`,
+        severity: 'WARNING',
+        details: {
+          reference_no: retNo,
+          customer: customer || 'Customer',
+          invoice_no: req.body.invoice_no || req.body.bill_no || '-',
+          item_summary: itemDesc || 'Returned Goods',
+          quantity: `${total_qty || 0} Bags / ${total_wt || 0} KG`,
+          amount: grandAmt,
+          remarks: remarks || '-',
+          created_by: req.user?.username || 'Sales Operator',
+          date: cleanDate
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Sales Return):', notifErr.message);
+    }
+
     res.status(201).json({ success: true, id: txResult.salesReturnId, voucher_no: txResult.voucherNo, message: 'Sales return created successfully' });
   } catch (err) {
     console.error('Error creating sales return:', err);
@@ -399,6 +429,37 @@ router.put('/:id', async (req, res) => {
       await rebuildStockLedger(activeCompanyId);
     } catch (stkErr) {
       console.warn('Notice rebuilding stock ledger on sales return update:', stkErr.message);
+    }
+
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const retNo = s_no ? `SRT-${s_no}` : `SRT-${id}`;
+      const retItems = Array.isArray(items) ? items : [];
+      const itemSummary = retItems.map(i => `${i.qty || 0} ${i.itemName || i.item_name}`).slice(0, 3).join(', ') || 'Returned Goods';
+      await triggerTransactionNotification({
+        eventType: 'SALES_RETURN_UPDATED',
+        isUpdate: true,
+        moduleName: 'SALES_RETURN',
+        referenceNo: retNo,
+        referenceId: id,
+        companyId: activeCompanyId,
+        title: `✏️ SALES RETURN UPDATED – ${retNo}`,
+        message: `Customer: ${customer || 'Customer'} | ${itemSummary} | Amount: ₹${parseFloat(grand_total || total_amt || 0)}`,
+        severity: 'WARNING',
+        details: {
+          reference_no: retNo,
+          customer: customer || 'Customer',
+          invoice_no: s_no || retNo,
+          item_summary: itemSummary,
+          quantity: `${total_wt || 0} KG (${total_qty || 0} Bags)`,
+          amount: parseFloat(grand_total || total_amt || 0),
+          remarks: remarks || '-',
+          updated_by: req.user?.username || 'Billing Desk',
+          date: cleanDate
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Sales Return Update):', notifErr.message);
     }
 
     res.json({ success: true, message: 'Sales return updated successfully', voucher_no: vRes?.voucherNo || null });

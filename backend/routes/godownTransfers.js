@@ -482,6 +482,35 @@ router.post('/', async (req, res) => {
       }
     } catch (_) {}
 
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      await triggerTransactionNotification({
+        eventType: 'GODOWN_TRANSFER_CREATED',
+        moduleName: 'GODOWN_TRANSFER',
+        referenceNo: finalSNo,
+        referenceId: transferId,
+        companyId: activeCompanyId,
+        title: `🔄 GODOWN TRANSFER – ${finalSNo}`,
+        message: `${sourceGodown.godown_name} ➔ ${destinationGodown.godown_name} | ${item_name} (Lot: ${lot_no}) | Qty: ${transferQty} Bags (${transferWt} KG)`,
+        severity: 'INFO',
+        details: {
+          reference_no: finalSNo,
+          from_location: sourceGodown.godown_name,
+          to_location: destinationGodown.godown_name,
+          item_summary: `${item_name} (Lot: ${lot_no})`,
+          item_name,
+          lot_no,
+          quantity: `${transferQty} Bags / ${transferWt} KG`,
+          vehicle: req.body.vehicle_no || '-',
+          remarks: remarks || '-',
+          created_by: req.user?.username || 'Warehouse Operator',
+          date: transfer_date || new Date().toISOString().slice(0, 10)
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Godown Transfer):', notifErr.message);
+    }
+
     res.status(201).json({
       message: coldStorageSyncWarning
         ? `Transfer saved. Cold-storage voucher sync is pending: ${coldStorageSyncWarning}`
@@ -583,6 +612,43 @@ router.put('/:id', async (req, res) => {
       await rebuildStockLedger(activeCompanyId);
     } catch (syncErr) {
       console.warn('Sync notice after transfer update:', syncErr.message);
+    }
+
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const existingRow = existing.rows[0] || {};
+      const refNo = existingRow.s_no || `GT-${id}`;
+      const fromName = existingRow.from_godown || existingRow.from_godown_name || existingRow.from_godown_id || 'Source Godown';
+      const toName = existingRow.to_godown || existingRow.to_godown_name || existingRow.to_godown_id || 'Destination Godown';
+      const itemNameVal = existingRow.item_name || 'Stock Item';
+      const lotNoVal = existingRow.lot_no || '';
+      await triggerTransactionNotification({
+        eventType: 'GODOWN_TRANSFER_UPDATED',
+        isUpdate: true,
+        moduleName: 'GODOWN_TRANSFER',
+        referenceNo: refNo,
+        referenceId: id,
+        companyId: activeCompanyId,
+        title: `✏️ GODOWN TRANSFER UPDATED – ${refNo}`,
+        message: `Updated Transfer | ${fromName} ➔ ${toName} | ${itemNameVal}${lotNoVal ? ` (Lot: ${lotNoVal})` : ''} | Qty: ${qtyVal} Bags (${weightVal} KG)`,
+        severity: 'INFO',
+        details: {
+          reference_no: refNo,
+          from_location: String(fromName),
+          to_location: String(toName),
+          item_summary: `${itemNameVal}${lotNoVal ? ` (Lot: ${lotNoVal})` : ''}`,
+          item_name: itemNameVal,
+          lot_no: lotNoVal,
+          quantity: `${qtyVal} Bags / ${weightVal} KG`,
+          vehicle: vehicleNoVal || '-',
+          remarks: remarksVal || '-',
+          updated_by: req.user?.username || 'Warehouse Operator',
+          created_by: req.user?.username || 'Warehouse Operator',
+          date: existingRow.transfer_date || undefined
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Godown Transfer Update):', notifErr.message);
     }
 
     res.json({ success: true, message: 'Godown transfer updated successfully' });

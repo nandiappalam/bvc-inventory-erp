@@ -12,8 +12,11 @@ async function triggerTransactionNotification({
   referenceId,
   companyId = 1,
   details = {},
-  eventType
+  eventType,
+  isUpdate = false
 }) {
+  const modUpper = String(moduleName || 'GENERAL').toUpperCase();
+  const isUpd = Boolean(isUpdate || /_(UPDATED|EDITED|MODIFIED)$/i.test(String(eventType || '')));
   return emitTransactionEvent({
     moduleName,
     referenceNo,
@@ -23,7 +26,8 @@ async function triggerTransactionNotification({
     referenceId,
     companyId,
     details,
-    eventType: eventType || `${moduleName}_CREATED`
+    isUpdate: isUpd,
+    eventType: eventType || `${modUpper}_${isUpd ? 'UPDATED' : 'CREATED'}`
   });
 }
 

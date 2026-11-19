@@ -399,13 +399,14 @@ const TENANT_BUSINESS_TABLES = new Set([
   'work_order_items', 'work_order_outputs', 'work_order_wastages', 'weightmaster', 'lot_sequence',
   'outpasses', 'outpass_items', 'inpasses', 'inpass_items',
   'operational_parties', 'operational_rates', 'operational_rate_masters', 'operational_charges',
-  'operational_charge_lines', 'operational_payments', 'operational_payment_allocations', 'operational_audit_logs', 'operational_settings'
+  'operational_charge_lines', 'operational_payments', 'operational_payment_allocations', 'operational_audit_logs', 'operational_settings',
+  'system_notifications', 'notification_recipients', 'notification_templates', 'notification_delivery_logs', 'notification_channel_settings'
 ]);
 
 // Master tables MUST NEVER be included in TENANT_BUSINESS_TABLES
 const MASTER_TABLE_NAMES_SET = new Set([
   'companies', 'database_registry', 'users', 'roles', 'permissions', 'user_permissions',
-  'user_company_access', 'login_history', '_master_migrations'
+  'user_company_access', 'login_history', '_master_migrations', 'whatsapp_server_sessions'
 ]);
 
 // Dynamically add any additional tables declared in COMPANY_TABLES (strictly excluding master tables)

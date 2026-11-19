@@ -334,26 +334,38 @@ const createOutwardVoucherForTransfer = async (transfer, companyId = 1) => {
   const insuranceCharges = parseFloat(transfer.insurance_charges || 0);
 
   if (voucherId) {
-    await db.run(`
-      UPDATE cold_storage_vouchers SET
-        vehicle_no = ?, driver_name = ?, driver_phone = ?, transporter_name = ?,
-        loadman_name = ?, loadman_charges = ?, handling_amount = ?,
-        storage_days = ?, storage_charges = ?, additional_charges = ?,
-        total_qty = ?, total_wt = ?
-      WHERE id = ?
-    `, [
-      vehicleNo, driverName, driverPhone, transporterName,
-      loadmanName, loadingCharges, loadingCharges,
-      calendarDays, storageCharges, insuranceCharges,
-      quantity, totalWeight, voucherId
-    ], cId);
+    let isManualBill = false;
+    try {
+      const mRes = await db.query(
+        `SELECT id FROM cold_storage_bills WHERE (voucher_id = ? OR voucher_no = ?) AND COALESCE(is_manually_edited, 0) = 1 LIMIT 1`,
+        [voucherId, voucherNo],
+        cId
+      );
+      if (mRes.rows && mRes.rows.length > 0) isManualBill = true;
+    } catch (_) {}
 
-    await db.run(`
-      UPDATE cold_storage_items SET
-        quantity = ?, weight = ?, total_wt = ?,
-        storage_days = ?, storage_charge = ?, labour_charge = ?
-      WHERE voucher_id = ?
-    `, [quantity, perUnitWeight, totalWeight, calendarDays, storageCharges, loadingCharges, voucherId], cId);
+    if (!isManualBill) {
+      await db.run(`
+        UPDATE cold_storage_vouchers SET
+          vehicle_no = ?, driver_name = ?, driver_phone = ?, transporter_name = ?,
+          loadman_name = ?, loadman_charges = ?, handling_amount = ?,
+          storage_days = ?, storage_charges = ?, additional_charges = ?,
+          total_qty = ?, total_wt = ?
+        WHERE id = ?
+      `, [
+        vehicleNo, driverName, driverPhone, transporterName,
+        loadmanName, loadingCharges, loadingCharges,
+        calendarDays, storageCharges, insuranceCharges,
+        quantity, totalWeight, voucherId
+      ], cId);
+
+      await db.run(`
+        UPDATE cold_storage_items SET
+          quantity = ?, weight = ?, total_wt = ?,
+          storage_days = ?, storage_charge = ?, labour_charge = ?
+        WHERE voucher_id = ?
+      `, [quantity, perUnitWeight, totalWeight, calendarDays, storageCharges, loadingCharges, voucherId], cId);
+    }
   } else {
     const voucherResult = await db.run(`
       INSERT INTO cold_storage_vouchers (
@@ -411,7 +423,7 @@ const createOutwardVoucherForTransfer = async (transfer, companyId = 1) => {
       quantity,
       perUnitWeight,
       totalWeight,
-      item?.unit || 'KG',
+      perUnitWeight > 1 ? 'Bags' : (item?.unit || 'KG'),
       `Godown Transfer ${transfer.s_no}`,
       inwardDate,
       trfDate,

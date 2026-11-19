@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../config/database');
 const { rebuildStockLedger } = require('../utils/stockRebuilder');
 const { ensureMovementPassesSchema } = require('../utils/movementPassesSchema');
+const { resolveFlourMillInfo, enrichRecordsWithMillNames, isNumericId } = require('../utils/millResolver');
 
 // Ensure tables exist on request
 router.use(async (req, res, next) => {
@@ -63,6 +64,8 @@ router.get('/pending-return', async (req, res) => {
       `, [op.id], activeCompanyId);
       op.items = itemsRes.rows || [];
     }
+
+    await enrichRecordsWithMillNames(outpasses, activeCompanyId);
 
     res.json({ success: true, data: outpasses });
   } catch (err) {
@@ -139,28 +142,15 @@ router.get('/', async (req, res) => {
     const result = await db.query(query, params, activeCompanyId);
     const outpasses = result.rows || [];
 
-    // Attach items count and items, plus mill area if available
+    // Attach items count and pending weights
     for (const op of outpasses) {
       const itemsRes = await db.query(`SELECT * FROM outpass_items WHERE outpass_id = ?`, [op.id], activeCompanyId);
       op.items = itemsRes.rows || [];
       op.pending_weight = Math.max(0, (parseFloat(op.total_weight) || 0) - (parseFloat(op.returned_weight) || 0));
       op.pending_qty = Math.max(0, (parseFloat(op.total_qty) || 0) - (parseFloat(op.returned_qty) || 0));
-
-      // Resolve mill details like area/city
-      if (op.party_name) {
-        try {
-          const millRes = await db.query(
-            `SELECT area, address1, address2, address3 FROM flour_mill_master WHERE flourmill = ? OR print_name = ? OR name = ? LIMIT 1`,
-            [op.party_name, op.party_name, op.party_name],
-            activeCompanyId
-          );
-          if (millRes.rows && millRes.rows.length > 0) {
-            op.mill_area = millRes.rows[0].area || '';
-            op.mill_address = [millRes.rows[0].address1, millRes.rows[0].address2, millRes.rows[0].area].filter(Boolean).join(', ');
-          }
-        } catch (e) {}
-      }
     }
+
+    await enrichRecordsWithMillNames(outpasses, activeCompanyId);
 
     res.json({ success: true, data: outpasses });
   } catch (err) {
@@ -182,10 +172,11 @@ router.get('/:id', async (req, res) => {
     const outpass = opRes.rows[0];
     const itemsRes = await db.query(`SELECT * FROM outpass_items WHERE outpass_id = ?`, [outpass.id], activeCompanyId);
     outpass.items = itemsRes.rows || [];
+    await enrichRecordsWithMillNames([outpass], activeCompanyId);
 
     // Fetch linked inpasses
     const inpassesRes = await db.query(`SELECT * FROM inpasses WHERE outpass_id = ? OR outpass_no = ?`, [outpass.id, outpass.outpass_no], activeCompanyId);
-    outpass.inpasses = inpassesRes.rows || [];
+    outpass.inpasses = await enrichRecordsWithMillNames(inpassesRes.rows || [], activeCompanyId);
 
     res.json({ success: true, data: outpass });
   } catch (err) {
@@ -213,7 +204,32 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ success: false, message: 'At least one item is required for Outpass' });
     }
 
-    const fromGodownId = Number(formData.from_godown_id);
+    let fromGodownId = Number(formData.from_godown_id);
+    if (!Number.isSafeInteger(fromGodownId) || fromGodownId <= 0) {
+      const firstItemGodownId = Number(activeItems[0]?.godown_id || activeItems[0]?.godownId);
+      if (Number.isSafeInteger(firstItemGodownId) && firstItemGodownId > 0) {
+        fromGodownId = firstItemGodownId;
+      } else if (formData.from_godown_name) {
+        const gByName = await db.query(
+          `SELECT id FROM godown_master WHERE LOWER(TRIM(godown_name)) = LOWER(TRIM(?)) OR LOWER(TRIM(COALESCE(print_name, ''))) = LOWER(TRIM(?)) LIMIT 1`,
+          [formData.from_godown_name, formData.from_godown_name],
+          activeCompanyId
+        );
+        if (gByName.rows?.[0]?.id) {
+          fromGodownId = Number(gByName.rows[0].id);
+        }
+      }
+      if (!Number.isSafeInteger(fromGodownId) || fromGodownId <= 0) {
+        const defaultGodown = await db.query(
+          'SELECT id FROM godown_master ORDER BY id ASC LIMIT 1',
+          [],
+          activeCompanyId
+        );
+        if (defaultGodown.rows?.[0]?.id) {
+          fromGodownId = Number(defaultGodown.rows[0].id);
+        }
+      }
+    }
     if (!Number.isSafeInteger(fromGodownId) || fromGodownId <= 0) {
       return res.status(400).json({ success: false, message: 'A valid company Godown is required' });
     }
@@ -252,6 +268,20 @@ router.post('/', async (req, res) => {
       const wt = parseFloat(it.total_weight || it.totalWeight) || ((parseFloat(it.qty) || 0) * (parseFloat(it.weight) || 50));
       return sum + wt;
     }, 0);
+
+    const rawPartyRef = formData.party_name || formData.partyName || formData.flour_mill || '';
+    const millInfo = await resolveFlourMillInfo(rawPartyRef, activeCompanyId, {
+      partyId: formData.party_id,
+      destination: formData.destination
+    });
+    const resolvedPartyId = formData.party_id || millInfo.id || null;
+    const resolvedPartyName = (!isNumericId(millInfo.millName) && millInfo.millName)
+      ? millInfo.millName
+      : ((!isNumericId(rawPartyRef) && rawPartyRef) ? rawPartyRef : (millInfo.millName || rawPartyRef));
+    const resolvedDestination = (!isNumericId(formData.destination) && formData.destination)
+      ? formData.destination
+      : (millInfo.areaName || millInfo.resolvedDestination || resolvedPartyName || '');
+    const resolvedAreaName = millInfo.areaName || (!isNumericId(resolvedDestination) ? resolvedDestination : '') || '-';
 
     const processingRate = parseFloat(formData.processing_rate_kg || formData.processingRateKg) || 0;
     const estimatedCharges = Number((totalWeight * processingRate).toFixed(2));
@@ -295,12 +325,12 @@ router.post('/', async (req, res) => {
         formData.reference_id || null,
         formData.reference_no || '',
         formData.party_type || 'Flour Mill',
-        formData.party_id || null,
-        formData.party_name || formData.partyName || formData.flour_mill || '',
+        resolvedPartyId,
+        resolvedPartyName,
         formData.from_location || 'Inside Factory',
         fromGodownId,
         godownsById.get(fromGodownId).godown_name,
-        formData.destination || formData.party_name || '',
+        resolvedDestination,
         formData.vehicle_no || '',
         formData.driver_name || '',
         formData.driver_phone || '',
@@ -368,7 +398,7 @@ router.post('/', async (req, res) => {
           createdOutpassId,
           godownName,
           godownId,
-          `Outpass #${outpassNo} to ${formData.party_name || 'Outside Mill'} (${formData.purpose || 'Outside Processing'})`
+          `Outpass #${outpassNo} to ${resolvedPartyName || 'Outside Mill'} (${formData.purpose || 'Outside Processing'})`
         ], activeCompanyId);
 
         if (lotNo) {
@@ -390,11 +420,12 @@ router.post('/', async (req, res) => {
               outpass_no = ?,
               process_mode = 'OUTSIDE_MILL',
               mill_type = 'Outside Mill',
+              external_mill_id = COALESCE(?, external_mill_id),
               external_mill_name = ?,
               status = 'Outpassed',
               updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
-          `, [createdOutpassId, outpassNo, formData.party_name || 'External Mill', formData.reference_id], activeCompanyId);
+          `, [createdOutpassId, outpassNo, resolvedPartyId, resolvedPartyName || 'External Mill', formData.reference_id], activeCompanyId);
         } catch (gErr) {
           console.warn('Error updating linked grind from outpass:', gErr.message);
         }
@@ -446,7 +477,7 @@ router.post('/', async (req, res) => {
         moduleName: 'OUTPASS',
         referenceNo: outpassNo,
         title: `🚚 OUTPASS CREATED – ${outpassNo}`,
-        message: `Outpass: ${outpassNo} | Purpose: ${formData.purpose || 'Outside Processing'} | Item: ${firstItem.item_name || 'Goods'} | Lot: ${firstItem.lot_no || '-'} | Qty: ${totalWeight.toLocaleString()} KG (${totalBags} Bags) | Destination: ${formData.party_name || 'External Mill'} | Vehicle: ${formData.vehicle_no || 'N/A'} | Status: OUTPASSED`,
+        message: `Outpass: ${outpassNo} | Purpose: ${formData.purpose || 'Outside Processing'} | Item: ${firstItem.item_name || 'Goods'} | Lot: ${firstItem.lot_no || '-'} | Qty: ${totalWeight.toLocaleString()} KG (${totalBags} Bags) | Destination: ${resolvedPartyName || 'External Mill'} (${resolvedAreaName}) | Vehicle: ${formData.vehicle_no || 'N/A'} | Status: OUTPASSED`,
         severity: 'INFO',
         referenceId: outpassId,
         companyId: activeCompanyId,
@@ -459,8 +490,9 @@ router.post('/', async (req, res) => {
           lot_no: firstItem.lot_no || '-',
           quantity: `${totalWeight.toLocaleString()} KG`,
           bags: totalBags,
-          external_mill: formData.party_name || 'External Mill',
-          area: formData.destination || formData.party_name || '-',
+          party_id: resolvedPartyId,
+          external_mill: resolvedPartyName || 'External Mill',
+          area: resolvedAreaName || '-',
           vehicle: formData.vehicle_no || 'N/A',
           expected_return: formData.expected_return_date || '-',
           status: 'OUTPASSED',
@@ -493,10 +525,28 @@ router.put('/:id', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Form data required' });
     }
 
+    const existingRes = await db.query('SELECT * FROM outpasses WHERE id = ? LIMIT 1', [id], activeCompanyId);
+    const existing = existingRes.rows?.[0];
+    if (!existing) {
+      return res.status(404).json({ success: false, message: 'Outpass not found' });
+    }
+
+    const rawPartyRef = formData.party_name || formData.partyName || formData.flour_mill || existing.party_name;
+    const millInfo = await resolveFlourMillInfo(rawPartyRef, activeCompanyId, {
+      partyId: formData.party_id || existing.party_id,
+      destination: formData.destination !== undefined ? formData.destination : existing.destination
+    });
+    const resolvedPartyName = (!isNumericId(millInfo.millName) && millInfo.millName) ? millInfo.millName : existing.party_name;
+    const resolvedDest = (formData.destination && !isNumericId(formData.destination))
+      ? formData.destination
+      : (millInfo.areaName || (!isNumericId(existing.destination) ? existing.destination : '') || resolvedPartyName);
+
     await db.run(`
       UPDATE outpasses SET
         date = COALESCE(?, date),
         purpose = COALESCE(?, purpose),
+        party_id = COALESCE(?, party_id),
+        party_name = COALESCE(?, party_name),
         vehicle_no = COALESCE(?, vehicle_no),
         driver_name = COALESCE(?, driver_name),
         driver_phone = COALESCE(?, driver_phone),
@@ -508,18 +558,64 @@ router.put('/:id', async (req, res) => {
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `, [
-      formData.date,
-      formData.purpose,
-      formData.vehicle_no,
-      formData.driver_name,
-      formData.driver_phone,
-      formData.transporter,
-      formData.destination,
-      formData.expected_return_date,
-      formData.status,
-      formData.remarks,
+      formData.date || null,
+      formData.purpose || null,
+      formData.party_id || millInfo.id || null,
+      resolvedPartyName || null,
+      formData.vehicle_no !== undefined ? formData.vehicle_no : null,
+      formData.driver_name !== undefined ? formData.driver_name : null,
+      formData.driver_phone !== undefined ? formData.driver_phone : null,
+      formData.transporter !== undefined ? formData.transporter : null,
+      resolvedDest || null,
+      formData.expected_return_date !== undefined ? formData.expected_return_date : null,
+      formData.status || null,
+      formData.remarks !== undefined ? formData.remarks : null,
       id
     ], activeCompanyId);
+
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const updatedRes = await db.query('SELECT * FROM outpasses WHERE id = ? LIMIT 1', [id], activeCompanyId);
+      const updatedOp = updatedRes.rows?.[0] || existing;
+      await enrichRecordsWithMillNames([updatedOp], activeCompanyId);
+      const itemsRes = await db.query('SELECT * FROM outpass_items WHERE outpass_id = ?', [id], activeCompanyId);
+      const opItems = itemsRes.rows || [];
+      const firstItem = opItems[0] || {};
+      const totalWt = parseFloat(updatedOp.total_weight) || 0;
+      const totalBags = parseFloat(updatedOp.total_qty) || 0;
+      const resolvedArea = updatedOp.mill_area || updatedOp.destination || '-';
+
+      await triggerTransactionNotification({
+        eventType: 'OUTPASS_UPDATED',
+        isUpdate: true,
+        moduleName: 'OUTPASS',
+        referenceNo: updatedOp.outpass_no,
+        referenceId: updatedOp.id,
+        companyId: activeCompanyId,
+        title: `✏️ OUTPASS UPDATED – ${updatedOp.outpass_no}`,
+        message: `Outpass ${updatedOp.outpass_no} updated | Mill: ${updatedOp.party_name || 'External Mill'} (${resolvedArea}) | Qty: ${totalWt.toLocaleString()} KG (${totalBags} Bags) | Vehicle: ${updatedOp.vehicle_no || 'N/A'} | Status: ${updatedOp.status}`,
+        severity: 'INFO',
+        details: {
+          outpass_no: updatedOp.outpass_no,
+          date: updatedOp.date,
+          purpose: updatedOp.purpose || 'Outside Processing',
+          reference: updatedOp.reference_no || '-',
+          item_name: firstItem.item_name || 'Material Item',
+          lot_no: firstItem.lot_no || '-',
+          quantity: `${totalWt.toLocaleString()} KG`,
+          bags: totalBags,
+          party_id: updatedOp.party_id,
+          external_mill: updatedOp.party_name || 'External Mill',
+          area: resolvedArea,
+          vehicle: updatedOp.vehicle_no || 'N/A',
+          expected_return: updatedOp.expected_return_date || '-',
+          status: updatedOp.status || 'OUTPASSED',
+          updated_by: req.user?.username || 'Factory Operator'
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Error triggering outpass update notification:', notifErr.message);
+    }
 
     res.json({ success: true, message: 'Outpass updated successfully' });
   } catch (err) {

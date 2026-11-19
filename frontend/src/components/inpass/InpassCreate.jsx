@@ -71,8 +71,8 @@ const InpassCreate = () => {
       rate: '',
       amount: 0,
       qc_status: 'PASS',
-      godown_id: 1,
-      godown_name: 'PJ',
+      godown_id: '',
+      godown_name: '',
       remarks: 'External Mill Processed Output'
     }
   ]);
@@ -108,8 +108,18 @@ const InpassCreate = () => {
     // 4. Fetch Godowns
     api('/masters/godowns')
       .then(res => {
-        if (Array.isArray(res)) setGodownsList(res);
-        else if (res?.data && Array.isArray(res.data)) setGodownsList(res.data);
+        const list = Array.isArray(res) ? res : (res?.data && Array.isArray(res.data) ? res.data : []);
+        setGodownsList(list);
+        if (list.length > 0) {
+          const firstG = list[0];
+          const firstId = String(firstG.id);
+          const firstName = firstG.print_name || firstG.godown_name || 'Main Godown';
+          setFormData(prev => prev.to_godown_id ? prev : {
+            ...prev,
+            to_godown_id: firstId,
+            to_godown_name: prev.to_godown_name || firstName
+          });
+        }
       })
       .catch(() => {});
   }, []);
@@ -166,8 +176,8 @@ const InpassCreate = () => {
       vehicle_no: op.vehicle_no || prev.vehicle_no,
       driver_name: op.driver_name || prev.driver_name,
       processing_charge_per_kg: ratePerKg || prev.processing_charge_per_kg,
-      to_godown_id: op.from_godown_id || prev.to_godown_id || '',
-      to_godown_name: op.from_godown_name || prev.to_godown_name || '',
+      to_godown_id: op.from_godown_id || prev.to_godown_id || (godownsList[0]?.id ? String(godownsList[0].id) : ''),
+      to_godown_name: op.from_godown_name || prev.to_godown_name || (godownsList[0] ? (godownsList[0].print_name || godownsList[0].godown_name) : ''),
       remarks: `Received against Outpass #${op.outpass_no} (${op.party_name || 'Outside Mill'})`
     }));
 
@@ -196,8 +206,8 @@ const InpassCreate = () => {
         rate: '',
         amount: 0,
         qc_status: 'PASS',
-        godown_id: op.from_godown_id || 1,
-        godown_name: op.from_godown_name || 'PJ',
+        godown_id: op.from_godown_id || formData.to_godown_id || godownsList[0]?.id || '',
+        godown_name: op.from_godown_name || formData.to_godown_name || godownsList[0]?.print_name || godownsList[0]?.godown_name || '',
         remarks: 'Main Processed Yield'
       },
       {
@@ -213,8 +223,8 @@ const InpassCreate = () => {
         rate: '',
         amount: 0,
         qc_status: 'PASS',
-        godown_id: op.from_godown_id || 1,
-        godown_name: op.from_godown_name || 'PJ',
+        godown_id: op.from_godown_id || formData.to_godown_id || godownsList[0]?.id || '',
+        godown_name: op.from_godown_name || formData.to_godown_name || godownsList[0]?.print_name || godownsList[0]?.godown_name || '',
         remarks: 'Mill By-product Recovery'
       },
       {
@@ -230,8 +240,8 @@ const InpassCreate = () => {
         rate: '0',
         amount: 0,
         qc_status: 'PASS',
-        godown_id: op.from_godown_id || 1,
-        godown_name: op.from_godown_name || 'PJ',
+        godown_id: op.from_godown_id || formData.to_godown_id || godownsList[0]?.id || '',
+        godown_name: op.from_godown_name || formData.to_godown_name || godownsList[0]?.print_name || godownsList[0]?.godown_name || '',
         remarks: 'Normal Process Loss'
       }
     ]);
@@ -311,8 +321,8 @@ const InpassCreate = () => {
         rate: '',
         amount: 0,
         qc_status: 'PASS',
-        godown_id: formData.to_godown_id || 1,
-        godown_name: formData.to_godown_name || 'PJ',
+        godown_id: formData.to_godown_id || availableGodowns[0]?.id || '',
+        godown_name: formData.to_godown_name || availableGodowns[0]?.print_name || availableGodowns[0]?.godown_name || '',
         remarks: ''
       }
     ]);
@@ -373,9 +383,19 @@ const InpassCreate = () => {
     setMessage('');
 
     try {
+      const effectiveGodownId = formData.to_godown_id || (availableGodowns[0]?.id ? String(availableGodowns[0].id) : '');
+      const selectedGodown = availableGodowns.find(g => String(g.id) === String(effectiveGodownId));
+      const effectiveGodownName = formData.to_godown_name || (selectedGodown ? (selectedGodown.print_name || selectedGodown.godown_name) : '');
+      const normalizedItems = validItems.map(it => ({
+        ...it,
+        godown_id: it.godown_id || effectiveGodownId || undefined,
+        godown_name: it.godown_name || effectiveGodownName
+      }));
       const payload = {
         formData: {
           ...formData,
+          to_godown_id: effectiveGodownId,
+          to_godown_name: effectiveGodownName,
           input_weight: inputWeight,
           output_weight: outputWeight,
           byproduct_weight: byproductWeight,
@@ -386,7 +406,7 @@ const InpassCreate = () => {
           yield_percent: yieldPercent,
           total_processing_charges: totalProcessingCharges
         },
-        items: validItems
+        items: normalizedItems
       };
 
       const res = await api('/inpasses', {
@@ -784,7 +804,7 @@ const InpassCreate = () => {
             <label className="inpass-label">Receiving Godown</label>
             <select
               name="to_godown_id"
-              value={String(formData.to_godown_id || '1')}
+              value={String(formData.to_godown_id || (availableGodowns[0]?.id ?? ''))}
               onChange={(e) => {
                 const gId = e.target.value;
                 const sel = availableGodowns.find(g => String(g.id) === String(gId));
@@ -796,6 +816,9 @@ const InpassCreate = () => {
               }}
               className="inpass-select"
             >
+              {availableGodowns.length === 0 && (
+                <option value="">Select Godown</option>
+              )}
               {availableGodowns.map(g => (
                 <option key={g.id} value={String(g.id)}>
                   {g.print_name || g.godown_name}

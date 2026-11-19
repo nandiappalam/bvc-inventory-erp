@@ -546,6 +546,35 @@ router.post('/', async (req, res) => {
       }
     }
 
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const inDesc = (rawItems || []).map(i => `${i.qty || 0} ${i.item_name || i.itemName || 'RM'}`).slice(0, 3).join(', ') || product;
+      await triggerTransactionNotification({
+        eventType: 'PRODUCTION_CREATED',
+        moduleName: 'WORK_ORDER',
+        referenceNo: woNumber,
+        referenceId: workOrderId,
+        companyId: req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1),
+        title: `⚙️ WORK ORDER CREATED – ${woNumber}`,
+        message: `Unit: ${work_unit} | Product: ${product} | Input: ${inDesc} | Expected Out: ${calcOutputWt} KG`,
+        severity: 'INFO',
+        details: {
+          reference_no: woNumber,
+          action_label: 'WORK ORDER',
+          module_label: `Work Order (${work_unit})`,
+          party_name: work_unit,
+          item_summary: `${product} (${inDesc})`,
+          quantity: `${calcOutputQty} Bags / ${calcOutputWt} KG`,
+          godown: work_unit,
+          status,
+          created_by: req.user?.username || 'Production Planner',
+          date: date || new Date().toISOString().slice(0, 10)
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Work Order):', notifErr.message);
+    }
+
     res.status(201).json({
       success: true,
       message: 'Work Order Slip created successfully',
@@ -783,6 +812,42 @@ router.put('/:id', async (req, res) => {
       } catch (e) {
         console.error('Error replacing work order wastages:', e);
       }
+    }
+
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const { resolveFlourMillInfo } = require('../utils/millResolver');
+      const cId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+      const millInfo = await resolveFlourMillInfo(flour_mill_id || work_unit, cId, { partyId: flour_mill_id });
+      const resolvedUnit = millInfo.millName || work_unit || 'Production Mill';
+      const refNo = work_order_no || `WO-${id}`;
+      await triggerTransactionNotification({
+        eventType: 'ORDER_UPDATED',
+        isUpdate: true,
+        moduleName: 'WORK_ORDER',
+        referenceNo: refNo,
+        referenceId: id,
+        companyId: cId,
+        title: `✏️ WORK ORDER UPDATED – ${refNo}`,
+        message: `Updated Work Order | Mill: ${resolvedUnit} | Product: ${product || 'Output'} | Expected: ${calcOutputQty} Bags (${calcOutputWt} KG) | Status: ${status || 'UPDATED'}`,
+        severity: 'INFO',
+        details: {
+          reference_no: refNo,
+          action_label: 'WORK ORDER',
+          party_name: resolvedUnit,
+          external_mill: resolvedUnit,
+          area: millInfo.areaName || '-',
+          item_summary: product || 'Work Order Items',
+          quantity: `${calcOutputQty} Bags / ${calcOutputWt} KG`,
+          status: status || 'UPDATED',
+          remarks: remarks || '-',
+          updated_by: req.user?.username || 'Production Operator',
+          created_by: req.user?.username || 'Production Operator',
+          date: cleanDate || undefined
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Work Order Update):', notifErr.message);
     }
 
     res.json({ success: true, message: 'Work Order Slip updated successfully' });

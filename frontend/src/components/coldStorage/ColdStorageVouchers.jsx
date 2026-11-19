@@ -437,18 +437,18 @@ const ColdStorageVouchers = () => {
           ) : (
             <TableContainer component={Paper} elevation={0} sx={{ overflowX: 'auto' }}>
               <Table size="small" sx={{ minWidth: 1100 }}>
-                <TableHead sx={{ backgroundColor: '#1f4fb2' }}>
+                <TableHead sx={{ '& th, & .MuiTableCell-head': { backgroundColor: '#1f4fb2 !important', color: '#ffffff !important', fontWeight: 'bold', borderColor: '#1d4ed8' } }}>
                   <TableRow>
-                    <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>#</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Voucher No</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Type</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Date</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Cold Storage Facility</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Origin / Destination</TableCell>
-                    <TableCell align="right" sx={{ color: '#fff', fontWeight: 'bold' }}>Total Qty</TableCell>
-                    <TableCell align="right" sx={{ color: '#fff', fontWeight: 'bold' }}>Total Wt (KG)</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Remarks</TableCell>
-                    <TableCell align="center" sx={{ color: '#fff', fontWeight: 'bold' }}>Actions</TableCell>
+                    <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>#</TableCell>
+                    <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Voucher No</TableCell>
+                    <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Type</TableCell>
+                    <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Date</TableCell>
+                    <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Cold Storage Facility</TableCell>
+                    <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Origin / Destination</TableCell>
+                    <TableCell align="right" sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Total Qty</TableCell>
+                    <TableCell align="right" sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Total Wt (KG)</TableCell>
+                    <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Remarks</TableCell>
+                    <TableCell align="center" sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Actions</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>

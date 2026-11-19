@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../config/database');
 const { rebuildStockLedger } = require('../utils/stockRebuilder');
 const { ensureMovementPassesSchema } = require('../utils/movementPassesSchema');
+const { resolveFlourMillInfo, enrichRecordsWithMillNames, isNumericId } = require('../utils/millResolver');
 
 // Ensure tables exist on request
 router.use(async (req, res, next) => {
@@ -137,22 +138,9 @@ router.get('/', async (req, res) => {
     for (const ip of inpasses) {
       const itemsRes = await db.query(`SELECT * FROM inpass_items WHERE inpass_id = ?`, [ip.id], activeCompanyId);
       ip.items = itemsRes.rows || [];
-
-      // Resolve mill details
-      if (ip.party_name) {
-        try {
-          const millRes = await db.query(
-            `SELECT area, address1, address2, address3 FROM flour_mill_master WHERE flourmill = ? OR print_name = ? OR name = ? LIMIT 1`,
-            [ip.party_name, ip.party_name, ip.party_name],
-            activeCompanyId
-          );
-          if (millRes.rows && millRes.rows.length > 0) {
-            ip.mill_area = millRes.rows[0].area || '';
-            ip.mill_address = [millRes.rows[0].address1, millRes.rows[0].address2, millRes.rows[0].area].filter(Boolean).join(', ');
-          }
-        } catch (e) {}
-      }
     }
+
+    await enrichRecordsWithMillNames(inpasses, activeCompanyId);
 
     res.json({ success: true, data: inpasses });
   } catch (err) {
@@ -174,6 +162,7 @@ router.get('/:id', async (req, res) => {
     const inpass = ipRes.rows[0];
     const itemsRes = await db.query(`SELECT * FROM inpass_items WHERE inpass_id = ?`, [inpass.id], activeCompanyId);
     inpass.items = itemsRes.rows || [];
+    await enrichRecordsWithMillNames([inpass], activeCompanyId);
 
     // Attach linked outpass
     if (inpass.outpass_id || inpass.outpass_no) {
@@ -186,6 +175,7 @@ router.get('/:id', async (req, res) => {
         inpass.outpass = opRes.rows[0];
         const opItemsRes = await db.query(`SELECT * FROM outpass_items WHERE outpass_id = ?`, [inpass.outpass.id], activeCompanyId);
         inpass.outpass.items = opItemsRes.rows || [];
+        await enrichRecordsWithMillNames([inpass.outpass], activeCompanyId);
       }
     }
 
@@ -215,7 +205,42 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ success: false, message: 'At least one item is required for Inpass' });
     }
 
-    const toGodownId = Number(formData.to_godown_id);
+    let toGodownId = Number(formData.to_godown_id);
+    if (!Number.isSafeInteger(toGodownId) || toGodownId <= 0) {
+      const firstItemGodownId = Number(activeItems[0]?.godown_id || activeItems[0]?.godownId);
+      if (Number.isSafeInteger(firstItemGodownId) && firstItemGodownId > 0) {
+        toGodownId = firstItemGodownId;
+      } else if (formData.to_godown_name) {
+        const gByName = await db.query(
+          `SELECT id FROM godown_master WHERE LOWER(TRIM(godown_name)) = LOWER(TRIM(?)) OR LOWER(TRIM(COALESCE(print_name, ''))) = LOWER(TRIM(?)) LIMIT 1`,
+          [formData.to_godown_name, formData.to_godown_name],
+          activeCompanyId
+        );
+        if (gByName.rows?.[0]?.id) {
+          toGodownId = Number(gByName.rows[0].id);
+        }
+      }
+      if ((!Number.isSafeInteger(toGodownId) || toGodownId <= 0) && (formData.outpass_id || formData.outpass_no)) {
+        const opGodownRes = await db.query(
+          `SELECT from_godown_id FROM outpasses WHERE id = ? OR outpass_no = ? LIMIT 1`,
+          [formData.outpass_id || -1, formData.outpass_no || ''],
+          activeCompanyId
+        );
+        if (opGodownRes.rows?.[0]?.from_godown_id) {
+          toGodownId = Number(opGodownRes.rows[0].from_godown_id);
+        }
+      }
+      if (!Number.isSafeInteger(toGodownId) || toGodownId <= 0) {
+        const defaultGodown = await db.query(
+          'SELECT id FROM godown_master ORDER BY id ASC LIMIT 1',
+          [],
+          activeCompanyId
+        );
+        if (defaultGodown.rows?.[0]?.id) {
+          toGodownId = Number(defaultGodown.rows[0].id);
+        }
+      }
+    }
     if (!Number.isSafeInteger(toGodownId) || toGodownId <= 0) {
       return res.status(400).json({ success: false, message: 'A valid company Godown is required' });
     }
@@ -304,6 +329,15 @@ router.post('/', async (req, res) => {
       (linkedOutpass ? parseFloat(linkedOutpass.processing_rate_kg) : 0);
     const totalProcessingCharges = Number((outputWeight * chargeRate).toFixed(2));
 
+    const rawPartyRef = formData.party_name || formData.partyName || (linkedOutpass ? linkedOutpass.party_name : '');
+    const millInfo = await resolveFlourMillInfo(rawPartyRef, activeCompanyId, {
+      partyId: formData.party_id || (linkedOutpass ? linkedOutpass.party_id : null)
+    });
+    const resolvedPartyId = formData.party_id || (linkedOutpass ? linkedOutpass.party_id : null) || millInfo.id || null;
+    const resolvedPartyName = (!isNumericId(millInfo.millName) && millInfo.millName)
+      ? millInfo.millName
+      : ((!isNumericId(rawPartyRef) && rawPartyRef) ? rawPartyRef : (millInfo.millName || rawPartyRef || 'Outside Mill'));
+
     const txRes = await db.forCompany(activeCompanyId).withTransaction(async () => {
       const insRes = await db.run(`
         INSERT INTO inpasses (
@@ -321,8 +355,8 @@ router.post('/', async (req, res) => {
         formData.reference_type || (linkedOutpass ? linkedOutpass.reference_type : 'Grind'),
         formData.reference_id || (linkedOutpass ? linkedOutpass.reference_id : null),
         formData.reference_no || (linkedOutpass ? linkedOutpass.reference_no : ''),
-        formData.party_id || (linkedOutpass ? linkedOutpass.party_id : null),
-        formData.party_name || formData.partyName || (linkedOutpass ? linkedOutpass.party_name : ''),
+        resolvedPartyId,
+        resolvedPartyName,
         formData.vehicle_no || '',
         formData.driver_name || '',
         formData.received_by || 'Admin',
@@ -614,7 +648,7 @@ router.post('/', async (req, res) => {
         moduleName: 'INPASS',
         referenceNo: inpassNo,
         title: `🟢 INPASS RECEIVED – ${inpassNo}`,
-        message: `Against Outpass: ${formData.outpass_no || '-'} | Mill: ${formData.party_name || 'Outside Mill'} | Output: ${outputWeight.toLocaleString()} KG | By-Product: ${byproductWeight.toLocaleString()} KG | Loss: ${lossWeight.toLocaleString()} KG | Mass Balance: ${massBalanceStatus} | QC: ${formData.qc_status || 'PENDING'}`,
+        message: `Against Outpass: ${formData.outpass_no || '-'} | Mill: ${resolvedPartyName} | Output: ${outputWeight.toLocaleString()} KG | By-Product: ${byproductWeight.toLocaleString()} KG | Loss: ${lossWeight.toLocaleString()} KG | Mass Balance: ${massBalanceStatus} | QC: ${formData.qc_status || 'PENDING'}`,
         severity: Math.abs(discrepancyWeight) > 0.01 ? 'WARNING' : 'INFO',
         referenceId: inpassId,
         companyId: activeCompanyId,
@@ -622,7 +656,9 @@ router.post('/', async (req, res) => {
           inpass_no: inpassNo,
           outpass_no: formData.outpass_no || '-',
           reference: formData.reference_no || (formData.reference_type === 'Grind' ? `GRIND-${formData.reference_id}` : '-'),
-          external_mill: formData.party_name || 'Outside Mill',
+          party_id: resolvedPartyId,
+          external_mill: resolvedPartyName,
+          area: millInfo.areaName || '-',
           original_input: inputWeight,
           received_date: formData.date,
           received_output: `${outputWeight.toLocaleString()} KG`,
@@ -630,7 +666,7 @@ router.post('/', async (req, res) => {
           loss: `${lossWeight.toLocaleString()} KG`,
           mass_balance: massBalanceStatus,
           qc_status: formData.qc_status || 'PENDING',
-          receiving_godown: formData.to_godown_name || 'Main Godown',
+          receiving_godown: formData.to_godown_name || godownsById.get(toGodownId)?.godown_name || 'Main Godown',
           received_by: req.user?.username || formData.received_by || 'Store Operator',
           status: `RECEIVED — QC ${formData.qc_status || 'PENDING'}`
         }
@@ -681,16 +717,57 @@ router.put('/:id', async (req, res) => {
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `, [
-      formData.date,
-      formData.vehicle_no,
-      formData.driver_name,
-      formData.received_by,
-      formData.qc_status,
-      formData.discrepancy_reason,
-      formData.remarks,
-      formData.status,
+      formData.date || null,
+      formData.vehicle_no !== undefined ? formData.vehicle_no : null,
+      formData.driver_name !== undefined ? formData.driver_name : null,
+      formData.received_by !== undefined ? formData.received_by : null,
+      formData.qc_status || null,
+      formData.discrepancy_reason !== undefined ? formData.discrepancy_reason : null,
+      formData.remarks !== undefined ? formData.remarks : null,
+      formData.status || null,
       id
     ], activeCompanyId);
+
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const updatedRes = await db.query('SELECT * FROM inpasses WHERE id = ? LIMIT 1', [id], activeCompanyId);
+      const ip = updatedRes.rows?.[0];
+      if (ip) {
+        await enrichRecordsWithMillNames([ip], activeCompanyId);
+        await triggerTransactionNotification({
+          eventType: 'INPASS_UPDATED',
+          isUpdate: true,
+          moduleName: 'INPASS',
+          referenceNo: ip.inpass_no,
+          referenceId: ip.id,
+          companyId: activeCompanyId,
+          title: `✏️ INPASS UPDATED – ${ip.inpass_no}`,
+          message: `Inpass ${ip.inpass_no} updated | Mill: ${ip.party_name || 'Outside Mill'} | Output: ${(parseFloat(ip.output_weight) || 0).toLocaleString()} KG | QC: ${ip.qc_status || 'PENDING'} | Status: ${ip.status || 'RECEIVED'}`,
+          severity: 'INFO',
+          details: {
+            inpass_no: ip.inpass_no,
+            outpass_no: ip.outpass_no || '-',
+            reference: ip.reference_no || '-',
+            party_id: ip.party_id,
+            external_mill: ip.party_name || 'Outside Mill',
+            area: ip.mill_area || '-',
+            original_input: ip.input_weight,
+            received_date: ip.date,
+            received_output: `${(parseFloat(ip.output_weight) || 0).toLocaleString()} KG`,
+            by_product: `${(parseFloat(ip.byproduct_weight) || 0).toLocaleString()} KG`,
+            loss: `${(parseFloat(ip.loss_weight) || 0).toLocaleString()} KG`,
+            mass_balance: Math.abs(parseFloat(ip.discrepancy_weight) || 0) > 0.01 ? `⚠ ${ip.discrepancy_weight} KG DISCREPANCY` : 'BALANCED',
+            qc_status: ip.qc_status || 'PENDING',
+            receiving_godown: ip.to_godown_name || 'Main Godown',
+            received_by: req.user?.username || ip.received_by || 'Store Operator',
+            updated_by: req.user?.username || 'Store Operator',
+            status: `UPDATED — QC ${ip.qc_status || 'PENDING'}`
+          }
+        });
+      }
+    } catch (notifErr) {
+      console.warn('Error triggering inpass update notification:', notifErr.message);
+    }
 
     res.json({ success: true, message: 'Inpass updated successfully' });
   } catch (err) {

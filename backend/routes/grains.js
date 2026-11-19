@@ -1,7 +1,8 @@
-const express = require('express')
-const router = express.Router()
-const db = require('../config/database')
-const { rebuildStockLedger } = require('../utils/stockRebuilder')
+const express = require('express');
+const router = express.Router();
+const db = require('../config/database');
+const { rebuildStockLedger } = require('../utils/stockRebuilder');
+const { resolveFlourMillInfo, enrichRecordsWithMillNames, isNumericId } = require('../utils/millResolver');
 
 // Database auto-migration for grains wastage items and lot_no in output items
 const ensureGrainsSchema = async (companyId = 1) => {
@@ -338,6 +339,9 @@ router.get(['/', '/list'], async (req, res) => {
         grain.status = grain.status || 'Completed';
       }
     }
+
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    await enrichRecordsWithMillNames(grains, activeCompanyId);
     
     res.json(grains);
   } catch (error) {
@@ -366,6 +370,8 @@ router.get('/:id', async (req, res) => {
     }
 
     const grain = grainResult.rows[0];
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    await enrichRecordsWithMillNames([grain], activeCompanyId);
 
     let inputItemsResult = { rows: [] };
     let outputItemsResult = { rows: [] };
@@ -827,14 +833,24 @@ router.post('/', async (req, res) => {
   try {
     const { formData, inputItems, outputItems, wastageItems } = req.body
 
-    // Insert grain with process_mode support
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
     const workOrderId = formData.work_order_id || formData.workOrderId || null;
     const workOrderNo = formData.work_order_no || formData.workOrderNo || null;
 
     const processMode = (formData.process_mode || formData.processMode || (formData.mill_type === 'Outside Mill' ? 'OUTSIDE_MILL' : 'INSIDE_MILL')).toUpperCase();
     const millType = processMode === 'OUTSIDE_MILL' ? 'Outside Mill' : 'Inside Mill';
-    const externalMillId = formData.external_mill_id || formData.externalMillId || null;
-    const externalMillName = formData.external_mill_name || formData.externalMillName || (processMode === 'OUTSIDE_MILL' ? (formData.flourMill || formData.flour_mill) : null);
+    const rawMillRef = formData.flourMill || formData.flour_mill || formData.external_mill_name || formData.externalMillName;
+    const millInfo = await resolveFlourMillInfo(rawMillRef, activeCompanyId, {
+      partyId: formData.external_mill_id || formData.externalMillId,
+      destination: formData.destination
+    });
+    const externalMillId = formData.external_mill_id || formData.externalMillId || millInfo.id || null;
+    const rawExternalName = formData.external_mill_name || formData.externalMillName;
+    const resolvedMillName = (!isNumericId(millInfo.millName) && millInfo.millName)
+      ? millInfo.millName
+      : ((!isNumericId(rawExternalName) && rawExternalName) ? rawExternalName : ((!isNumericId(rawMillRef) && rawMillRef) ? rawMillRef : ''));
+    const externalMillName = resolvedMillName || (processMode === 'OUTSIDE_MILL' ? (millInfo.millName || formData.flourMill || formData.flour_mill || 'External Mill') : null);
+    const resolvedMillArea = millInfo.areaName || (!isNumericId(formData.destination) ? formData.destination : '') || '';
     const processingRate = parseFloat(formData.processing_charge_per_kg || formData.processingChargePerKg) || 0;
 
     const grainResult = await db.run(`
@@ -1030,6 +1046,10 @@ router.post('/', async (req, res) => {
           const totalInWt = activeInputItems.reduce((s, it) => s + (parseFloat(it.totalWt || it.total_wt) || ((parseFloat(it.qty) || 0) * (parseFloat(it.weight) || 50))), 0);
           const estimatedCharges = Number((totalInWt * processingRate).toFixed(2));
 
+          const resolvedDest = (!isNumericId(formData.destination) && formData.destination)
+            ? formData.destination
+            : (resolvedMillArea || externalMillName || 'Outside Mill');
+
           const insOp = await db.run(`
             INSERT INTO outpasses (
               outpass_no, date, purpose, item_type, reference_type, reference_id, reference_no,
@@ -1043,7 +1063,7 @@ router.post('/', async (req, res) => {
             `GRIND-${formData.sNo || formData.s_no || grainId}`,
             externalMillId,
             externalMillName || 'External Mill',
-            formData.destination || externalMillName || 'Outside Mill',
+            resolvedDest,
             formData.vehicle_no || '',
             formData.driver_name || '',
             totalInQty,
@@ -1238,6 +1258,42 @@ router.post('/', async (req, res) => {
       console.error('Error rebuilding stock after saving grains:', e);
     }
 
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const grindNo = `GRD-${formData.sNo || formData.s_no || grainId}`;
+      const inDesc = activeInputItems.map(i => `${i.qty || 0} ${i.itemName || i.item_name}`).slice(0, 3).join(', ') || 'Raw Grain';
+      const totalOutWt = activeOutputItems.reduce((s, i) => s + (parseFloat(i.totalWt || i.total_wt) || 0), 0);
+      const totalInWt = activeInputItems.reduce((s, i) => s + (parseFloat(i.totalWt || i.total_wt) || 0), 0);
+      const displayMill = resolvedMillName || externalMillName || millType;
+      await triggerTransactionNotification({
+        eventType: 'PRODUCTION_CREATED',
+        moduleName: 'PRODUCTION',
+        referenceNo: grindNo,
+        referenceId: grainId,
+        companyId: activeCompanyId,
+        title: `⚙️ MILLING / GRIND ENTRY – ${grindNo}`,
+        message: `Mill: ${displayMill}${resolvedMillArea ? ` (${resolvedMillArea})` : ''} | Input: ${inDesc} (${totalInWt} KG) | Output: ${totalOutWt} KG`,
+        severity: 'INFO',
+        details: {
+          reference_no: grindNo,
+          action_label: 'GRINDING / MILLING',
+          module_label: `Grinding (${millType})`,
+          party_id: externalMillId,
+          party_name: displayMill || 'Inside Mill',
+          external_mill: displayMill || 'Inside Mill',
+          area: resolvedMillArea || '-',
+          item_summary: inDesc,
+          quantity: `In: ${totalInWt} KG / Out: ${totalOutWt} KG`,
+          godown: 'Production Floor',
+          status: processMode === 'OUTSIDE_MILL' && createdOutpassNo ? `OUTPASSED (${createdOutpassNo})` : 'COMPLETED',
+          created_by: req.user?.username || 'Production Operator',
+          date: formData.date
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Grains):', notifErr.message);
+    }
+
     res.status(201).json({
       success: true,
       message: processMode === 'OUTSIDE_MILL' && createdOutpassNo
@@ -1288,6 +1344,18 @@ router.post('/:id/generate-outpass', async (req, res) => {
     }
     const outpassNo = `OP-${String(lastNum + 1).padStart(5, '0')}`;
 
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    const millInfo = await resolveFlourMillInfo(grain.external_mill_name || grain.flour_mill, activeCompanyId, {
+      partyId: grain.external_mill_id,
+      destination
+    });
+    const resolvedMillId = grain.external_mill_id || millInfo.id || null;
+    const resolvedMillName = (!isNumericId(millInfo.millName) && millInfo.millName)
+      ? millInfo.millName
+      : (grain.external_mill_name && !isNumericId(grain.external_mill_name) ? grain.external_mill_name : 'External Flour Mill');
+    const resolvedAreaName = millInfo.areaName || (!isNumericId(destination) ? destination : '') || '-';
+    const resolvedDest = (!isNumericId(destination) && destination) ? destination : (millInfo.areaName || resolvedMillName || 'Outside Mill');
+
     const totalQty = activeItems.reduce((s, it) => s + (parseFloat(it.qty) || 0), 0);
     const totalWt = activeItems.reduce((s, it) => s + (parseFloat(it.total_wt) || ((parseFloat(it.qty) || 0) * (parseFloat(it.weight) || 50))), 0);
     const processingRate = parseFloat(grain.processing_charge_per_kg) || 0;
@@ -1296,16 +1364,17 @@ router.post('/:id/generate-outpass', async (req, res) => {
     const insOp = await db.run(`
       INSERT INTO outpasses (
         outpass_no, date, purpose, item_type, reference_type, reference_id, reference_no,
-        party_type, party_name, destination, vehicle_no, driver_name, transporter,
+        party_type, party_id, party_name, destination, vehicle_no, driver_name, transporter,
         total_qty, total_weight, processing_rate_kg, estimated_charges, status, remarks, created_by
-      ) VALUES (?, ?, 'Outside Processing', 'RM', 'Grind', ?, ?, 'Flour Mill', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OUTPASSED', ?, 'Admin')
+      ) VALUES (?, ?, 'Outside Processing', 'RM', 'Grind', ?, ?, 'Flour Mill', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OUTPASSED', ?, 'Admin')
     `, [
       outpassNo,
       grain.date || new Date().toISOString().slice(0, 10),
       id,
       `GRIND-${grain.s_no || id}`,
-      grain.external_mill_name || grain.flour_mill || 'External Flour Mill',
-      destination || grain.external_mill_name || 'Outside Mill',
+      resolvedMillId,
+      resolvedMillName,
+      resolvedDest,
       vehicle_no || '',
       driver_name || '',
       transporter || '',
@@ -1336,7 +1405,7 @@ router.post('/:id/generate-outpass', async (req, res) => {
         VALUES (?, ?, ?, ?, ?, ?, ?, 'Outpass Issue', ?, ?)
       `, [
         it.item_name, it.lot_no, -itQty, -itTotWt, itRate, -itAmt,
-        grain.date || new Date().toISOString().slice(0, 10), outpassId, `Outpass #${outpassNo} to ${grain.external_mill_name || 'Outside Mill'}`
+        grain.date || new Date().toISOString().slice(0, 10), outpassId, `Outpass #${outpassNo} to ${resolvedMillName}`
       ]);
 
       if (it.lot_no) {
@@ -1354,25 +1423,44 @@ router.post('/:id/generate-outpass', async (req, res) => {
       UPDATE grains SET
         outpass_id = ?,
         outpass_no = ?,
+        external_mill_id = COALESCE(?, external_mill_id),
+        external_mill_name = ?,
         status = 'Outpassed',
         total_processing_charges = ?,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
-    `, [outpassId, outpassNo, estCharges, id]);
+    `, [outpassId, outpassNo, resolvedMillId, resolvedMillName, estCharges, id]);
 
     try { await rebuildStockLedger(); } catch (e) {}
 
     // Trigger Central Notification & WhatsApp Alert
     try {
       const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const firstItem = activeItems[0] || {};
       await triggerTransactionNotification({
         moduleName: 'OUTPASS',
         referenceNo: outpassNo,
         title: `🔵 BVC ERP – Material Outpass (Outside Grind)`,
-        message: `${totalWt.toLocaleString()} KG dispatched to ${grain.external_mill_name || grain.flour_mill || 'Outside Mill'} for outside processing. Outpass: ${outpassNo}. Vehicle: ${vehicle_no || 'N/A'}.`,
+        message: `${totalWt.toLocaleString()} KG dispatched to ${resolvedMillName} (${resolvedAreaName}) for outside processing. Outpass: ${outpassNo}. Vehicle: ${vehicle_no || 'N/A'}.`,
         severity: 'INFO',
         referenceId: outpassId,
-        companyId: req.companyId || 1
+        companyId: activeCompanyId,
+        details: {
+          outpass_no: outpassNo,
+          date: grain.date,
+          purpose: 'Outside Grind',
+          reference: `GRIND-${grain.s_no || id}`,
+          item_name: firstItem.item_name || 'Material Item',
+          lot_no: firstItem.lot_no || '-',
+          quantity: `${totalWt.toLocaleString()} KG`,
+          bags: totalQty,
+          party_id: resolvedMillId,
+          external_mill: resolvedMillName,
+          area: resolvedAreaName,
+          vehicle: vehicle_no || 'N/A',
+          status: 'OUTPASSED',
+          created_by: req.user?.username || 'Factory Operator'
+        }
       });
     } catch (_) {}
 
@@ -1390,17 +1478,52 @@ router.post('/:id/generate-outpass', async (req, res) => {
 // PUT update grains record
 router.put('/:id', async (req, res) => {
   try {
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
     const { formData, inputItems, outputItems, wastageItems } = req.body
     const grainId = req.params.id
 
     // Revert existing stock / lots first
     await revertGrainsStock(grainId);
 
+    const rawMillRef = formData.flourMill || formData.flour_mill || formData.external_mill_name || formData.externalMillName;
+    const millInfo = await resolveFlourMillInfo(rawMillRef, activeCompanyId, {
+      partyId: formData.external_mill_id || formData.externalMillId,
+      destination: formData.destination
+    });
+    const resolvedMillId = formData.external_mill_id || formData.externalMillId || millInfo.id || null;
+    const rawExternalName = formData.external_mill_name || formData.externalMillName;
+    const resolvedMillName = (!isNumericId(millInfo.millName) && millInfo.millName)
+      ? millInfo.millName
+      : ((!isNumericId(rawExternalName) && rawExternalName) ? rawExternalName : ((!isNumericId(rawMillRef) && rawMillRef) ? rawMillRef : ''));
+
     // Update grain
     await db.run(`
-      UPDATE grains SET s_no = ?, flour_mill = ?, date = ?, remarks = ?, updated_at = CURRENT_TIMESTAMP
+      UPDATE grains SET
+        s_no = ?,
+        flour_mill = ?,
+        date = ?,
+        remarks = ?,
+        external_mill_id = COALESCE(?, external_mill_id),
+        external_mill_name = COALESCE(?, external_mill_name),
+        updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
-    `, [formData.sNo || formData.s_no, formData.flourMill || formData.flour_mill, formData.date, formData.remarks, grainId])
+    `, [
+      formData.sNo || formData.s_no,
+      formData.flourMill || formData.flour_mill,
+      formData.date,
+      formData.remarks,
+      resolvedMillId,
+      resolvedMillName || null,
+      grainId
+    ]);
+
+    if (resolvedMillName) {
+      await db.run(
+        `UPDATE outpasses SET party_id = COALESCE(?, party_id), party_name = ?, destination = COALESCE(NULLIF(?, ''), destination) WHERE reference_type = 'Grind' AND reference_id = ?`,
+        [resolvedMillId, resolvedMillName, millInfo.areaName || '', grainId],
+        activeCompanyId
+      ).catch(() => {});
+    }
 
     // Delete existing items
     await db.run('DELETE FROM grain_input_items WHERE grain_id = ?', [grainId])
@@ -1583,6 +1706,45 @@ router.put('/:id', async (req, res) => {
       await rebuildStockLedger();
     } catch (e) {
       console.error('Error rebuilding stock after updating grains:', e);
+    }
+
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const grindNo = `GRD-${formData.sNo || formData.s_no || grainId}`;
+      const inDesc = activeInputItems.map(i => `${i.qty || 0} ${i.itemName || i.item_name}`).slice(0, 3).join(', ') || 'Raw Grain';
+      const totalOutWt = activeOutputItems.reduce((s, i) => s + (parseFloat(i.totalWt || i.total_wt) || 0), 0);
+      const totalInWt = activeInputItems.reduce((s, i) => s + (parseFloat(i.totalWt || i.total_wt) || 0), 0);
+      const millType = (formData.process_mode || formData.mill_type || '').toUpperCase().includes('OUTSIDE') ? 'Outside Mill' : 'Inside Mill';
+      const displayMill = resolvedMillName || millType;
+
+      await triggerTransactionNotification({
+        eventType: 'PRODUCTION_UPDATED',
+        isUpdate: true,
+        moduleName: 'PRODUCTION',
+        referenceNo: grindNo,
+        referenceId: grainId,
+        companyId: activeCompanyId,
+        title: `✏️ MILLING / GRIND UPDATED – ${grindNo}`,
+        message: `Mill: ${displayMill}${millInfo.areaName ? ` (${millInfo.areaName})` : ''} | Input: ${inDesc} (${totalInWt} KG) | Output: ${totalOutWt} KG`,
+        severity: 'INFO',
+        details: {
+          reference_no: grindNo,
+          action_label: 'GRINDING / MILLING',
+          module_label: `Grinding (${millType})`,
+          party_id: resolvedMillId,
+          party_name: displayMill || 'Inside Mill',
+          external_mill: displayMill || 'Inside Mill',
+          area: millInfo.areaName || '-',
+          item_summary: inDesc,
+          quantity: `In: ${totalInWt} KG / Out: ${totalOutWt} KG`,
+          godown: 'Production Floor',
+          status: 'UPDATED',
+          updated_by: req.user?.username || 'Production Operator',
+          date: formData.date
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Grains Update):', notifErr.message);
     }
 
     res.json({ success: true, message: 'Grains & Food Safety record updated successfully!' })

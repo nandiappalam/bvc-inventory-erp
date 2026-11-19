@@ -296,6 +296,36 @@ router.post('/', async (req, res) => {
       console.error('Error rebuilding stock after papad in:', e);
     }
 
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const refNo = `PI-${sNo || flourOutId}`;
+      const itemDesc = (items || []).map(i => `${i.qty || i.box_papad || 0} ${i.itemName || i.item_name || 'Papad'}`).slice(0, 3).join(', ') || 'Papad';
+      await triggerTransactionNotification({
+        eventType: 'PRODUCTION_CREATED',
+        moduleName: 'PRODUCTION',
+        referenceNo: refNo,
+        referenceId: flourOutId,
+        companyId: req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1),
+        title: `⚙️ PAPAD IN RECEIVED – ${refNo}`,
+        message: `Papad Company: ${papadCompany || 'Jobwork Unit'} | ${itemDesc} | Total Wt: ${totalWeight || 0} KG`,
+        severity: 'INFO',
+        details: {
+          reference_no: refNo,
+          action_label: 'PAPAD IN',
+          module_label: 'Papad Inward',
+          party_name: papadCompany || 'Jobwork Unit',
+          item_summary: itemDesc,
+          quantity: `${totalQty || 0} Boxes / ${totalWeight || 0} KG`,
+          godown: 'Papad Store',
+          status: 'RECEIVED',
+          created_by: req.user?.username || 'Production Operator',
+          date
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Papad In):', notifErr.message);
+    }
+
     res.status(201).json({
       success: true,
       message: 'Papad In record saved successfully!',
@@ -407,6 +437,38 @@ router.put('/:id', async (req, res) => {
       await rebuildStockLedger();
     } catch (e) {
       console.error('Error rebuilding stock after updating papad in:', e);
+    }
+
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const refNo = `PI-${sNo || flourOutId}`;
+      const itemDesc = (items || []).map(i => `${i.qty || i.box_papad || 0} ${i.itemName || i.item_name || 'Papad'}`).slice(0, 3).join(', ') || 'Papad';
+      await triggerTransactionNotification({
+        eventType: 'PRODUCTION_UPDATED',
+        isUpdate: true,
+        moduleName: 'PRODUCTION',
+        referenceNo: refNo,
+        referenceId: flourOutId,
+        companyId: req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1),
+        title: `✏️ PAPAD IN UPDATED – ${refNo}`,
+        message: `Updated Papad In | Company: ${papadCompany || 'Jobwork Unit'} | ${itemDesc} | Total Wt: ${totalWeight || 0} KG`,
+        severity: 'INFO',
+        details: {
+          reference_no: refNo,
+          action_label: 'PAPAD IN',
+          module_label: 'Papad Inward',
+          party_name: papadCompany || 'Jobwork Unit',
+          item_summary: itemDesc,
+          quantity: `${totalQty || 0} Boxes / ${totalWeight || 0} KG`,
+          godown: 'Papad Store',
+          status: 'UPDATED',
+          updated_by: req.user?.username || 'Production Operator',
+          created_by: req.user?.username || 'Production Operator',
+          date
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Papad In Update):', notifErr.message);
     }
 
     res.json({ success: true, message: 'Papad In record updated successfully!' });

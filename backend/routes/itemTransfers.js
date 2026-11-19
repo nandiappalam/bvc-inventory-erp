@@ -614,6 +614,35 @@ router.post('/', async (req, res) => {
       console.error('Item transfer saved, but cold-storage voucher sync failed:', syncError);
     }
 
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const totalQty = itemsToProcess.reduce((sum, i) => sum + (parseFloat(i.transfer_qty || i.qty) || 0), 0);
+      const itemDesc = itemsToProcess.map(i => `${i.transfer_qty || i.qty || 0} ${i.item_name}`).slice(0, 3).join(', ');
+      await triggerTransactionNotification({
+        eventType: 'GODOWN_TRANSFER_CREATED',
+        moduleName: 'GODOWN_TRANSFER',
+        referenceNo: trfNo,
+        referenceId: createdIds[0],
+        companyId: activeCompanyId,
+        title: `🔄 GODOWN TRANSFER – ${trfNo}`,
+        message: `${fGodownName || from_godown_id} ➔ ${tGodownName || to_godown_id} | ${itemDesc} | Total Qty: ${totalQty}`,
+        severity: 'INFO',
+        details: {
+          reference_no: trfNo,
+          from_location: fGodownName || String(from_godown_id),
+          to_location: tGodownName || String(to_godown_id),
+          item_summary: itemDesc,
+          quantity: `${totalQty}`,
+          vehicle: req.body.vehicle_no || req.body.lorry_no || '-',
+          remarks: remarks || '-',
+          created_by: req.user?.username || 'Warehouse Operator',
+          date: trfDate
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Item Transfer):', notifErr.message);
+    }
+
     res.status(201).json({
       success: true,
       message: coldStorageSyncWarning
@@ -643,7 +672,7 @@ router.put('/:id', async (req, res) => {
       transfer_qty, qty, weight
     } = req.body;
 
-    await cDb.withTransaction(async (txConn) => {
+    const txMeta = await cDb.withTransaction(async (txConn) => {
       const existingRes = await txConn.query('SELECT * FROM item_transfers WHERE id = ?', [id]);
       const existing = existingRes.rows?.[0];
       if (!existing) {
@@ -691,6 +720,20 @@ router.put('/:id', async (req, res) => {
           insuranceChargesVal, remarksVal, qtyVal, weightVal * (qtyVal || 1), trfNo
         ]);
       }
+      return {
+        transfer_no: trfNo || `IT-${id}`,
+        item_name: existing.item_name || 'Stock Item',
+        lot_no: existing.lot_no || '',
+        from_godown_id: existing.from_godown_id,
+        to_godown_id: existing.to_godown_id,
+        from_godown_name: existing.from_godown_name || existing.from_godown || '',
+        to_godown_name: existing.to_godown_name || existing.to_godown || '',
+        qty: qtyVal,
+        weight: weightVal,
+        vehicle_no: vehicleNoVal,
+        remarks: remarksVal,
+        date: existing.transfer_date || existing.date || undefined
+      };
     });
 
     await rebuildStockLedger(activeCompanyId);
@@ -698,6 +741,50 @@ router.put('/:id', async (req, res) => {
       await syncGodownTransfersToColdStorage(activeCompanyId);
     } catch (syncErr) {
       console.warn('Sync notice after item transfer update:', syncErr.message);
+    }
+
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      let fromLoc = txMeta?.from_godown_name || String(txMeta?.from_godown_id || 'Source Godown');
+      let toLoc = txMeta?.to_godown_name || String(txMeta?.to_godown_id || 'Destination Godown');
+      if (txMeta?.from_godown_id || txMeta?.to_godown_id) {
+        try {
+          const gRes = await cDb.query(
+            'SELECT id, godown_name FROM godown_master WHERE id IN (?, ?)',
+            [txMeta.from_godown_id || -1, txMeta.to_godown_id || -1]
+          );
+          for (const g of gRes.rows || []) {
+            if (String(g.id) === String(txMeta.from_godown_id) && g.godown_name) fromLoc = g.godown_name;
+            if (String(g.id) === String(txMeta.to_godown_id) && g.godown_name) toLoc = g.godown_name;
+          }
+        } catch (_) {}
+      }
+      const refNo = txMeta?.transfer_no || `IT-${id}`;
+      await triggerTransactionNotification({
+        eventType: 'GODOWN_TRANSFER_UPDATED',
+        isUpdate: true,
+        moduleName: 'GODOWN_TRANSFER',
+        referenceNo: refNo,
+        referenceId: id,
+        companyId: activeCompanyId,
+        title: `✏️ GODOWN TRANSFER UPDATED – ${refNo}`,
+        message: `Updated Transfer | ${fromLoc} ➔ ${toLoc} | ${txMeta?.qty || 0} ${txMeta?.item_name || 'Item'}${txMeta?.lot_no ? ` (Lot: ${txMeta.lot_no})` : ''}`,
+        severity: 'INFO',
+        details: {
+          reference_no: refNo,
+          from_location: fromLoc,
+          to_location: toLoc,
+          item_summary: `${txMeta?.qty || 0} ${txMeta?.item_name || 'Item'}${txMeta?.lot_no ? ` (${txMeta.lot_no})` : ''}`,
+          quantity: `${txMeta?.qty || 0}`,
+          vehicle: txMeta?.vehicle_no || '-',
+          remarks: txMeta?.remarks || '-',
+          updated_by: req.user?.username || 'Warehouse Operator',
+          created_by: req.user?.username || 'Warehouse Operator',
+          date: txMeta?.date
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Item Transfer Update):', notifErr.message);
     }
 
     res.json({ success: true, message: 'Item transfer updated successfully' });

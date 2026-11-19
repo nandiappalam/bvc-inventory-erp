@@ -2155,15 +2155,15 @@ router.get('/ledger/:ledgerName', async (req, res) => {
     if (!normalizedDetectedType || normalizedDetectedType.includes('flour')) {
       try {
         const fmQuery = await cDb.query(
-          `SELECT id, flourmill, name, print_name FROM flour_mill_master 
-           WHERE LOWER(TRIM(COALESCE(flourmill, ''))) = LOWER(?) OR LOWER(TRIM(COALESCE(name, ''))) = LOWER(?)`,
+          `SELECT id, flourmill, print_name FROM flour_mill_master 
+           WHERE LOWER(TRIM(COALESCE(flourmill, ''))) = LOWER(?) OR LOWER(TRIM(COALESCE(print_name, ''))) = LOWER(?)`,
           [cleanName, cleanName]
         )
         if (fmQuery.rows && fmQuery.rows.length > 0) {
           fmQuery.rows.forEach(r => {
             if (r.id) flourMillIds.add(Number(r.id))
             if (r.flourmill) exactLedgerNames.add(r.flourmill.trim().toLowerCase())
-            if (r.name) exactLedgerNames.add(r.name.trim().toLowerCase())
+            if (r.print_name) exactLedgerNames.add(r.print_name.trim().toLowerCase())
           })
         }
       } catch (e) {}

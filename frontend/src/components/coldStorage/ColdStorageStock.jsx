@@ -415,29 +415,29 @@ const ColdStorageStock = () => {
           ) : (
             <TableContainer component={Paper} elevation={0} sx={{ overflowX: 'auto' }}>
               <Table size="small" sx={{ minWidth: 1250 }}>
-                <TableHead sx={{ backgroundColor: '#1f4fb2' }}>
+                <TableHead sx={{ '& th, & .MuiTableCell-head': { backgroundColor: '#1f4fb2 !important', color: '#ffffff !important', fontWeight: 'bold', borderColor: '#1d4ed8' } }}>
                   <TableRow>
-                    <TableCell sx={{ color: '#fff', fontWeight: 'bold', width: 45 }}>#</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Cold Storage Facility</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Item Name</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>CS Lot #</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Original Purchase Lot #</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Inward Date</TableCell>
-                    <TableCell align="right" sx={{ color: '#fff', fontWeight: 'bold' }}>Available Balance</TableCell>
-                    <TableCell align="right" sx={{ color: '#fff', fontWeight: 'bold' }}>Available Weight</TableCell>
-                    <TableCell align="center" sx={{ color: '#fff', fontWeight: 'bold' }}>Duration / Slabs</TableCell>
+                    <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold', width: 45 }}>#</TableCell>
+                    <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Cold Storage Facility</TableCell>
+                    <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Item Name</TableCell>
+                    <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>CS Lot #</TableCell>
+                    <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Original Purchase Lot #</TableCell>
+                    <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Inward Date</TableCell>
+                    <TableCell align="right" sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Available Balance</TableCell>
+                    <TableCell align="right" sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Available Weight</TableCell>
+                    <TableCell align="center" sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Duration / Slabs</TableCell>
                     {viewMode === 'valuation' ? (
                       <>
-                        <TableCell align="right" sx={{ color: '#fff', fontWeight: 'bold' }}>Storage Rate</TableCell>
-                        <TableCell align="right" sx={{ color: '#fff', fontWeight: 'bold' }}>Accrued Rent</TableCell>
-                        <TableCell align="right" sx={{ color: '#fff', fontWeight: 'bold' }}>Handling Cost</TableCell>
-                        <TableCell align="right" sx={{ color: '#fff', fontWeight: 'bold' }}>Total Accrued</TableCell>
+                        <TableCell align="right" sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Storage Rate</TableCell>
+                        <TableCell align="right" sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Accrued Rent</TableCell>
+                        <TableCell align="right" sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Handling Cost</TableCell>
+                        <TableCell align="right" sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Total Accrued</TableCell>
                       </>
                     ) : (
                       <>
-                        <TableCell align="right" sx={{ color: '#fff', fontWeight: 'bold' }}>Inward Qty</TableCell>
-                        <TableCell align="right" sx={{ color: '#fff', fontWeight: 'bold' }}>Outward Qty</TableCell>
-                        <TableCell align="center" sx={{ color: '#fff', fontWeight: 'bold' }}>Stock Status</TableCell>
+                        <TableCell align="right" sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Inward Qty</TableCell>
+                        <TableCell align="right" sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Outward Qty</TableCell>
+                        <TableCell align="center" sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Stock Status</TableCell>
                       </>
                     )}
                   </TableRow>

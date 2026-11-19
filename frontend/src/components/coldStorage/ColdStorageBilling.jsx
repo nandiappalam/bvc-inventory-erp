@@ -844,19 +844,19 @@ const ColdStorageBilling = () => {
           ) : (
             <TableContainer component={Paper} elevation={0} sx={{ overflowX: 'auto' }}>
               <Table size="small" sx={{ minWidth: 1100 }}>
-                <TableHead sx={{ backgroundColor: '#1f4fb2' }}>
+                <TableHead sx={{ '& th, & .MuiTableCell-head': { backgroundColor: '#1f4fb2 !important', color: '#ffffff !important', fontWeight: 'bold', borderColor: '#1d4ed8' } }}>
                   <TableRow>
-                    <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Bill #</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Bill Date</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Cold Storage Facility</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Operator Name</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Operator Inv #</TableCell>
-                    <TableCell align="right" sx={{ color: '#fff', fontWeight: 'bold' }}>Invoiced Amt</TableCell>
-                    <TableCell align="right" sx={{ color: '#fff', fontWeight: 'bold' }}>ERP Amt</TableCell>
-                    <TableCell align="right" sx={{ color: '#fff', fontWeight: 'bold' }}>Variance</TableCell>
-                    <TableCell align="right" sx={{ color: '#fff', fontWeight: 'bold' }}>Grand Total</TableCell>
-                    <TableCell align="center" sx={{ color: '#fff', fontWeight: 'bold' }}>Status</TableCell>
-                    <TableCell align="center" sx={{ color: '#fff', fontWeight: 'bold' }}>Actions</TableCell>
+                    <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Bill #</TableCell>
+                    <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Bill Date</TableCell>
+                    <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Cold Storage Facility</TableCell>
+                    <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Operator Name</TableCell>
+                    <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Operator Inv #</TableCell>
+                    <TableCell align="right" sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Invoiced Amt</TableCell>
+                    <TableCell align="right" sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>ERP Amt</TableCell>
+                    <TableCell align="right" sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Variance</TableCell>
+                    <TableCell align="right" sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Grand Total</TableCell>
+                    <TableCell align="center" sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Status</TableCell>
+                    <TableCell align="center" sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Actions</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>

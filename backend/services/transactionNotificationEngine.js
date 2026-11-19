@@ -1,14 +1,57 @@
 const db = require('../config/database');
 const { formatPhoneNumber, sendEmailAlert } = require('./notificationService');
+const whatsappServerService = require('./whatsappServerService');
+const { resolveFlourMillInfo, isNumericId } = require('../utils/millResolver');
+const { resolveCustomerName } = require('../utils/customerResolver');
+
+const APP_TIMEZONE = process.env.APP_TIMEZONE || 'Asia/Kolkata';
+
+function formatDateInTimeZone(dateObj = new Date(), timeZone = APP_TIMEZONE) {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(dateObj);
+  } catch (_) {
+    return dateObj.toISOString().slice(0, 10);
+  }
+}
+
+function formatTimeInTimeZone(dateObj = new Date(), timeZone = APP_TIMEZONE) {
+  try {
+    return new Intl.DateTimeFormat('en-IN', {
+      timeZone,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true
+    }).format(dateObj);
+  } catch (_) {
+    return dateObj.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+  }
+}
+
+const ensuredNotificationCompanies = new Set();
+if (typeof db.registerCacheInvalidator === 'function') {
+  db.registerCacheInvalidator((companyId) => {
+    if (companyId) {
+      ensuredNotificationCompanies.delete(Number(companyId));
+    } else {
+      ensuredNotificationCompanies.clear();
+    }
+  });
+}
 
 /**
  * DEFAULT TEMPLATES FOR BVC ERP TRANSACTION NOTIFICATIONS
  */
 const DEFAULT_TEMPLATES = {
   PURCHASE_CREATED: {
-    WHATSAPP: `BVC ERP
+    WHATSAPP: `{{company_name}}
 
-🟢 PURCHASE CREATED
+🟢 *PURCHASE CREATED*
 
 Purchase No: {{purchase_no}}
 Date: {{date}}
@@ -18,6 +61,7 @@ Invoice No: {{invoice_no}}
 Items: {{item_summary}}
 Quantity: {{quantity}}
 Bags: {{bags}}
+Amount: {{amount_display}}
 
 Vehicle: {{vehicle}}
 Godown: {{godown}}
@@ -26,151 +70,246 @@ QC Status: {{qc_status}}
 IQR Status: {{iqr_status}}
 
 Created By: {{created_by}}
-Time: {{time}}
-
-Status: PURCHASE CREATED`,
-    SMS: `BVC ERP: PURCHASE {{purchase_no}} created. {{supplier}} | {{item_summary}} | Qty: {{quantity}} | Vehicle: {{vehicle}} | Status: Awaiting QC.`,
-    EMAIL_SUBJECT: `BVC ERP – Purchase Created: {{purchase_no}} ({{supplier}})`,
+Time: {{time}}`,
+    SMS: `{{company_name}}: PURCHASE {{purchase_no}} created. {{supplier}} | {{item_summary}} | Qty: {{quantity}} | Amt: {{amount_display}}.`,
+    EMAIL_SUBJECT: `{{company_name}} – Purchase Created: {{purchase_no}} ({{supplier}})`
   },
   SALES_CREATED: {
-    WHATSAPP: `BVC ERP
+    WHATSAPP: `{{company_name}}
 
-🔵 SALES CREATED
+🔵 *SALES CREATED*
 
 Sales Invoice: {{sales_no}}
 Date: {{date}}
+Customer: {{customer}}
 
-Customer:
-{{customer}}
+Items: {{item_summary}}
+Quantity: {{quantity}}
+Total Weight: {{total_weight}}
+Amount: {{amount_display}}
 
-Items:
-{{item_summary}}
+Vehicle: {{vehicle}}
+Godown: {{godown}}
+Loading Status: {{loading_status}}
+Dispatch Status: {{dispatch_status}}
 
-Quantity:
-{{quantity}}
+Created By: {{created_by}}
+Time: {{time}}`,
+    SMS: `{{company_name}}: SALES {{sales_no}} created. Customer: {{customer}} | Total: {{total_weight}} | Amt: {{amount_display}}.`,
+    EMAIL_SUBJECT: `{{company_name}} – Sales Created: {{sales_no}} ({{customer}})`
+  },
+  PURCHASE_RETURN_CREATED: {
+    WHATSAPP: `{{company_name}}
 
-Total Quantity:
-{{total_weight}}
+🟠 *PURCHASE RETURN CREATED*
 
-Vehicle:
-{{vehicle}}
+Return No: {{reference_no}}
+Date: {{date}}
+Supplier: {{supplier}}
+Against Invoice: {{invoice_no}}
 
-Loading Status:
-{{loading_status}}
+Items: {{item_summary}}
+Quantity: {{quantity}}
+Amount: {{amount_display}}
+Reason/Remarks: {{remarks}}
 
-Dispatch Status:
-{{dispatch_status}}
+Created By: {{created_by}}
+Time: {{time}}`,
+    SMS: `{{company_name}}: PURCHASE RETURN {{reference_no}} to {{supplier}}. {{item_summary}} | Qty: {{quantity}} | Amt: {{amount_display}}.`,
+    EMAIL_SUBJECT: `{{company_name}} – Purchase Return: {{reference_no}} ({{supplier}})`
+  },
+  SALES_RETURN_CREATED: {
+    WHATSAPP: `{{company_name}}
 
-Created By:
-{{created_by}}
+🟡 *SALES RETURN CREATED*
 
-Status:
-SALES CREATED`,
-    SMS: `BVC ERP: SALES {{sales_no}} created. Customer: {{customer}} | Total: {{total_weight}} | Vehicle: {{vehicle}} | Status: Ready for loading.`,
-    EMAIL_SUBJECT: `BVC ERP – Sales Order/Invoice: {{sales_no}} ({{customer}})`,
+Return No: {{reference_no}}
+Date: {{date}}
+Customer: {{customer}}
+Against Invoice: {{invoice_no}}
+
+Items: {{item_summary}}
+Quantity: {{quantity}}
+Amount: {{amount_display}}
+Reason/Remarks: {{remarks}}
+
+Created By: {{created_by}}
+Time: {{time}}`,
+    SMS: `{{company_name}}: SALES RETURN {{reference_no}} from {{customer}}. {{item_summary}} | Qty: {{quantity}} | Amt: {{amount_display}}.`,
+    EMAIL_SUBJECT: `{{company_name}} – Sales Return: {{reference_no}} ({{customer}})`
+  },
+  GODOWN_TRANSFER_CREATED: {
+    WHATSAPP: `{{company_name}}
+
+🔄 *GODOWN / STOCK TRANSFER*
+
+Transfer No: {{reference_no}}
+Date: {{date}}
+From Godown: {{from_location}}
+To Godown: {{to_location}}
+
+Items: {{item_summary}}
+Quantity: {{quantity}}
+Vehicle: {{vehicle}}
+Remarks: {{remarks}}
+
+Created By: {{created_by}}
+Time: {{time}}`,
+    SMS: `{{company_name}}: TRANSFER {{reference_no}} from {{from_location}} to {{to_location}}. {{item_summary}} | Qty: {{quantity}}.`,
+    EMAIL_SUBJECT: `{{company_name}} – Godown Transfer: {{reference_no}} ({{from_location}} -> {{to_location}})`
+  },
+  PRODUCTION_CREATED: {
+    WHATSAPP: `{{company_name}}
+
+⚙️ *{{action_label}} RECORDED*
+
+Ref No: {{reference_no}}
+Date: {{date}}
+Module: {{module_label}}
+Party / Mill: {{party_name}}
+
+Items: {{item_summary}}
+Quantity: {{quantity}}
+Godown: {{godown}}
+Status: {{status}}
+
+Created By: {{created_by}}
+Time: {{time}}`,
+    SMS: `{{company_name}}: {{module_label}} {{reference_no}} recorded. {{item_summary}} | Qty: {{quantity}} | Status: {{status}}.`,
+    EMAIL_SUBJECT: `{{company_name}} – {{module_label}}: {{reference_no}}`
+  },
+  COLD_STORAGE_CREATED: {
+    WHATSAPP: `{{company_name}}
+
+❄️ *COLD STORAGE ENTRY*
+
+Voucher No: {{reference_no}}
+Type: {{action_label}}
+Date: {{date}}
+Chamber: {{godown}}
+
+Items: {{item_summary}}
+Quantity: {{quantity}}
+Party: {{party_name}}
+Remarks: {{remarks}}
+
+Created By: {{created_by}}
+Time: {{time}}`,
+    SMS: `{{company_name}}: COLD STORAGE {{action_label}} {{reference_no}} at {{godown}}. {{item_summary}} | Qty: {{quantity}}.`,
+    EMAIL_SUBJECT: `{{company_name}} – Cold Storage {{action_label}}: {{reference_no}}`
+  },
+  STOCK_ADJUST_CREATED: {
+    WHATSAPP: `{{company_name}}
+
+📊 *STOCK ADJUSTMENT / OPENING*
+
+Ref No: {{reference_no}}
+Date: {{date}}
+Godown: {{godown}}
+Type: {{action_label}}
+
+Items: {{item_summary}}
+Quantity: {{quantity}}
+Remarks: {{remarks}}
+
+Created By: {{created_by}}
+Time: {{time}}`,
+    SMS: `{{company_name}}: STOCK ADJUSTMENT {{reference_no}} ({{action_label}}). {{item_summary}} | Qty: {{quantity}}.`,
+    EMAIL_SUBJECT: `{{company_name}} – Stock Adjustment: {{reference_no}}`
+  },
+  VOUCHER_CREATED: {
+    WHATSAPP: `{{company_name}}
+
+💳 *ACCOUNTING / VOUCHER ENTRY*
+
+Voucher No: {{reference_no}}
+Type: {{action_label}}
+Date: {{date}}
+Party / Account: {{party_name}}
+Mode: {{payment_mode}}
+
+Amount: {{amount_display}}
+Narration: {{remarks}}
+
+Created By: {{created_by}}
+Time: {{time}}`,
+    SMS: `{{company_name}}: {{action_label}} {{reference_no}} for {{party_name}} | Amt: {{amount_display}} | Mode: {{payment_mode}}.`,
+    EMAIL_SUBJECT: `{{company_name}} – {{action_label}}: {{reference_no}} ({{amount_display}})`
+  },
+  ORDER_CREATED: {
+    WHATSAPP: `{{company_name}}
+
+📋 *{{action_label}} CREATED*
+
+Ref No: {{reference_no}}
+Date: {{date}}
+Party: {{party_name}}
+
+Items: {{item_summary}}
+Quantity: {{quantity}}
+Amount: {{amount_display}}
+Status: {{status}}
+
+Created By: {{created_by}}
+Time: {{time}}`,
+    SMS: `{{company_name}}: {{action_label}} {{reference_no}} for {{party_name}}. {{item_summary}} | Qty: {{quantity}} | Amt: {{amount_display}}.`,
+    EMAIL_SUBJECT: `{{company_name}} – {{action_label}}: {{reference_no}}`
   },
   OUTPASS_CREATED: {
-    WHATSAPP: `BVC ERP
+    WHATSAPP: `{{company_name}}
 
-🚚 OUTPASS CREATED
+🚚 *OUTPASS CREATED*
 
-Outpass No:
-{{outpass_no}}
+Outpass No: {{outpass_no}}
+Date: {{date}}
+Purpose: {{purpose}}
+Reference: {{reference}}
 
-Date:
-{{date}}
+Input Item: {{item_name}}
+Lot: {{lot_no}}
+Quantity: {{quantity}}
+Bags: {{bags}}
 
-Purpose:
-{{purpose}}
+External Mill: {{external_mill}}
+Area: {{area}}
+Vehicle: {{vehicle}}
+Expected Return: {{expected_return}}
 
-Reference:
-{{reference}}
-
-Input Item:
-{{item_name}}
-
-Lot:
-{{lot_no}}
-
-Quantity:
-{{quantity}}
-
-Bags:
-{{bags}}
-
-External Mill:
-{{external_mill}}
-
-Area:
-{{area}}
-
-Vehicle:
-{{vehicle}}
-
-Expected Return:
-{{expected_return}}
-
-Status:
-{{status}}
-
-Created By:
-{{created_by}}`,
-    SMS: `BVC ERP: OUTPASS {{outpass_no}} created. {{item_name}} {{quantity}} sent to {{external_mill}}. Vehicle: {{vehicle}}. Status: {{status}}.`,
-    EMAIL_SUBJECT: `BVC ERP – Material Outpass: {{outpass_no}} to {{external_mill}}`,
+Status: {{status}}
+Created By: {{created_by}}
+Time: {{time}}`,
+    SMS: `{{company_name}}: OUTPASS {{outpass_no}} created. {{item_name}} {{quantity}} sent to {{external_mill}}. Vehicle: {{vehicle}}.`,
+    EMAIL_SUBJECT: `{{company_name}} – Material Outpass: {{outpass_no}} to {{external_mill}}`
   },
   INPASS_CREATED: {
-    WHATSAPP: `BVC ERP
+    WHATSAPP: `{{company_name}}
 
-🟢 INPASS RECEIVED
+🟢 *INPASS RECEIVED*
 
-Inpass No:
-{{inpass_no}}
+Inpass No: {{inpass_no}}
+Against Outpass: {{outpass_no}}
+Reference: {{reference}}
+External Mill: {{external_mill}}
 
-Against Outpass:
-{{outpass_no}}
+Original Input: {{original_input}}
+Received Date: {{received_date}}
+Received Output: {{received_output}}
+By Product: {{by_product}}
+Process Loss: {{loss}}
+Mass Balance: {{mass_balance}}
 
-Reference:
-{{reference}}
-
-External Mill:
-{{external_mill}}
-
-Original Input:
-{{original_input}}
-
-Received Date:
-{{received_date}}
-
-Received Output:
-{{received_output}}
-
-By Product:
-{{by_product}}
-
-Process Loss:
-{{loss}}
-
-Mass Balance:
-{{mass_balance}}
-
-QC Status:
-{{qc_status}}
-
-Receiving Godown:
-{{receiving_godown}}
-
-Received By:
-{{received_by}}
-
-Status:
-{{status}}`,
-    SMS: `BVC ERP: INPASS {{inpass_no}} received against {{outpass_no}} from {{external_mill}}. Output: {{received_output}} | QC: {{qc_status}}.`,
-    EMAIL_SUBJECT: `BVC ERP – Inpass Received: {{inpass_no}} against {{outpass_no}}`,
+QC Status: {{qc_status}}
+Receiving Godown: {{receiving_godown}}
+Received By: {{received_by}}
+Status: {{status}}
+Time: {{time}}`,
+    SMS: `{{company_name}}: INPASS {{inpass_no}} received against {{outpass_no}} from {{external_mill}}. Output: {{received_output}} | QC: {{qc_status}}.`,
+    EMAIL_SUBJECT: `{{company_name}} – Inpass Received: {{inpass_no}} against {{outpass_no}}`
   },
   LOADING_CHARGE_CREATED: {
-    WHATSAPP: `BVC ERP
+    WHATSAPP: `{{company_name}}
 
-🏗️ LOADING OPERATION RECORDED
+🏗️ *LOADING OPERATION RECORDED*
 
 Charge No: {{charge_no}}
 Source: {{source_module}} {{source_transaction_no}}
@@ -180,21 +319,20 @@ Vehicle: {{vehicle}}
 Item: {{item_name}}
 Quantity: {{quantity}} {{uom}}
 
-Workers/Loadmen:
-{{party_name}}
-
+Workers/Loadmen: {{party_name}}
 Loading Rate: ₹{{rate}} ({{calc_basis}})
 Total Loading Charge: ₹{{amount}}
 
 Status: {{status}}
-Recorded By: {{created_by}}`,
-    SMS: `BVC ERP: LOADING {{charge_no}} on {{vehicle}} for {{source_transaction_no}}. Loadmen: {{party_name}} | Qty: {{quantity}} | Charge: Rs.{{amount}}. Status: {{status}}.`,
-    EMAIL_SUBJECT: `BVC ERP – Loading Charge: {{charge_no}} for {{vehicle}} (Rs.{{amount}})`,
+Recorded By: {{created_by}}
+Time: {{time}}`,
+    SMS: `{{company_name}}: LOADING {{charge_no}} on {{vehicle}} for {{source_transaction_no}}. Loadmen: {{party_name}} | Charge: Rs.{{amount}}.`,
+    EMAIL_SUBJECT: `{{company_name}} – Loading Charge: {{charge_no}} for {{vehicle}} (Rs.{{amount}})`
   },
   UNLOADING_CHARGE_CREATED: {
-    WHATSAPP: `BVC ERP
+    WHATSAPP: `{{company_name}}
 
-📦 UNLOADING OPERATION RECORDED
+📦 *UNLOADING OPERATION RECORDED*
 
 Charge No: {{charge_no}}
 Source: {{source_module}} {{source_transaction_no}}
@@ -205,21 +343,20 @@ Item: {{item_name}}
 Quantity: {{quantity}} {{uom}}
 Godown: {{to_location}}
 
-Workers:
-{{party_name}}
-
+Workers: {{party_name}}
 Unloading Rate: ₹{{rate}} ({{calc_basis}})
 Total Unloading Charge: ₹{{amount}}
 
 Status: {{status}}
-Recorded By: {{created_by}}`,
-    SMS: `BVC ERP: UNLOADING {{charge_no}} on {{vehicle}} at {{to_location}}. Workers: {{party_name}} | Charge: Rs.{{amount}}. Status: {{status}}.`,
-    EMAIL_SUBJECT: `BVC ERP – Unloading Charge: {{charge_no}} for {{vehicle}} (Rs.{{amount}})`,
+Recorded By: {{created_by}}
+Time: {{time}}`,
+    SMS: `{{company_name}}: UNLOADING {{charge_no}} on {{vehicle}} at {{to_location}}. Workers: {{party_name}} | Charge: Rs.{{amount}}.`,
+    EMAIL_SUBJECT: `{{company_name}} – Unloading Charge: {{charge_no}} for {{vehicle}} (Rs.{{amount}})`
   },
   DRIVER_CHARGE_CREATED: {
-    WHATSAPP: `BVC ERP
+    WHATSAPP: `{{company_name}}
 
-🚚 DRIVER TRIP CHARGE RECORDED
+🚚 *DRIVER TRIP CHARGE RECORDED*
 
 Charge No: {{charge_no}}
 Source: {{source_module}} {{source_transaction_no}}
@@ -227,41 +364,42 @@ Date: {{date}}
 
 Driver: {{driver_name}}
 Vehicle: {{vehicle}}
-Trip: {{from_location}} ➔ {{to_location}}
+Trip: {{from_location}} -> {{to_location}}
 
 Charge Type: {{charge_type}}
 Rate: ₹{{rate}} ({{calc_basis}})
 Total Amount: ₹{{amount}}
 
 Status: {{status}}
-Recorded By: {{created_by}}`,
-    SMS: `BVC ERP: DRIVER CHARGE {{charge_no}} for {{driver_name}} ({{vehicle}}). Trip: {{from_location}} to {{to_location}} | Amount: Rs.{{amount}}. Status: {{status}}.`,
-    EMAIL_SUBJECT: `BVC ERP – Driver Charge: {{charge_no}} for {{driver_name}} (Rs.{{amount}})`,
+Recorded By: {{created_by}}
+Time: {{time}}`,
+    SMS: `{{company_name}}: DRIVER CHARGE {{charge_no}} for {{driver_name}} ({{vehicle}}). Amount: Rs.{{amount}}.`,
+    EMAIL_SUBJECT: `{{company_name}} – Driver Charge: {{charge_no}} for {{driver_name}} (Rs.{{amount}})`
   },
   TRANSFER_CHARGE_CREATED: {
-    WHATSAPP: `BVC ERP
+    WHATSAPP: `{{company_name}}
 
-🔄 GODOWN TRANSFER CHARGES RECORDED
+🔄 *GODOWN TRANSFER CHARGES RECORDED*
 
 Transfer No: {{source_transaction_no}}
 Date: {{date}}
-From: {{from_location}} ➔ To: {{to_location}}
+From: {{from_location}} -> To: {{to_location}}
 
 Item: {{item_name}}
 Quantity: {{quantity}} {{uom}}
 
-Charges:
-{{charge_summary}}
+Charges: {{charge_summary}}
 Total Operational Cost: ₹{{amount}}
 
-Status: {{status}}`,
-    SMS: `BVC ERP: TRANSFER CHARGES on {{source_transaction_no}} ({{from_location}} to {{to_location}}). Total: Rs.{{amount}}. Status: {{status}}.`,
-    EMAIL_SUBJECT: `BVC ERP – Godown Transfer Charges for {{source_transaction_no}} (Rs.{{amount}})`,
+Status: {{status}}
+Time: {{time}}`,
+    SMS: `{{company_name}}: TRANSFER CHARGES on {{source_transaction_no}} ({{from_location}} to {{to_location}}). Total: Rs.{{amount}}.`,
+    EMAIL_SUBJECT: `{{company_name}} – Godown Transfer Charges for {{source_transaction_no}} (Rs.{{amount}})`
   },
   OPERATIONAL_PAYMENT_COMPLETED: {
-    WHATSAPP: `BVC ERP
+    WHATSAPP: `{{company_name}}
 
-💰 WORKER / DRIVER PAYMENT ISSUED
+💰 *WORKER / DRIVER PAYMENT ISSUED*
 
 Receipt No: {{payment_no}}
 Date: {{date}}
@@ -271,13 +409,13 @@ Paid Amount: ₹{{paid_amount}}
 Payment Method: {{payment_mode}}
 Ref / Trx: {{reference_no}}
 
-Allocated Charges:
-{{allocated_charges}}
+Allocated Charges: {{allocated_charges}}
 
 Disbursed By: {{paid_by}}
-Status: PAID ✓`,
-    SMS: `BVC ERP: PAYMENT {{payment_no}} of Rs.{{paid_amount}} paid to {{party_name}} via {{payment_mode}}. Ref: {{reference_no}}.`,
-    EMAIL_SUBJECT: `BVC ERP – Payment Receipt {{payment_no}} to {{party_name}} (Rs.{{paid_amount}})`,
+Status: PAID
+Time: {{time}}`,
+    SMS: `{{company_name}}: PAYMENT {{payment_no}} of Rs.{{paid_amount}} paid to {{party_name}} via {{payment_mode}}.`,
+    EMAIL_SUBJECT: `{{company_name}} – Payment Receipt {{payment_no}} to {{party_name}} (Rs.{{paid_amount}})`
   }
 };
 
@@ -293,7 +431,6 @@ function maskPhoneNumber(phone) {
     return clean;
   }
   if (clean.length < 8) return clean;
-  // Keep first 5 and last 2 characters (e.g. +91 98******42)
   const prefix = clean.slice(0, 5);
   const suffix = clean.slice(-2);
   const middle = '*'.repeat(Math.max(4, clean.length - 7));
@@ -308,13 +445,19 @@ function validateAndFormatPhone(phone) {
     return { valid: false, isPlaceholder: true, formatted: '+91 98XXX XXXXX' };
   }
   const trimmed = phone.trim();
-  if (trimmed.includes('X') || trimmed.includes('x') || trimmed === '' || trimmed === '-') {
+  if (trimmed.includes('X') || trimmed.includes('x') || trimmed.includes('*') || trimmed === '' || trimmed === '-') {
     return { valid: true, isPlaceholder: true, formatted: trimmed || '+91 98XXX XXXXX' };
   }
-  const digitsOnly = trimmed.replace(/\D/g, '');
-  if (digitsOnly.length >= 10) {
-    const cleanNumber = digitsOnly.length === 10 ? `91${digitsOnly}` : digitsOnly;
-    return { valid: true, isPlaceholder: false, formatted: `+${cleanNumber}` };
+  let digitsOnly = trimmed.replace(/\D/g, '');
+  if (digitsOnly.startsWith('00')) {
+    digitsOnly = digitsOnly.slice(2);
+  } else if (digitsOnly.length === 11 && digitsOnly.startsWith('0')) {
+    digitsOnly = `91${digitsOnly.slice(1)}`;
+  } else if (digitsOnly.length === 10) {
+    digitsOnly = `91${digitsOnly}`;
+  }
+  if (digitsOnly.length >= 11 && digitsOnly.length <= 15) {
+    return { valid: true, isPlaceholder: false, formatted: `+${digitsOnly}` };
   }
   return { valid: false, isPlaceholder: false, formatted: trimmed };
 }
@@ -325,17 +468,46 @@ function validateAndFormatPhone(phone) {
 function renderTemplate(templateStr, data = {}) {
   if (!templateStr) return '';
   return templateStr.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, key) => {
-    return data[key] !== undefined && data[key] !== null ? String(data[key]) : '-';
+    return data[key] !== undefined && data[key] !== null && data[key] !== '' ? String(data[key]) : '-';
   });
 }
 
+function resolveSubscriptionColumn(moduleName) {
+  const mod = String(moduleName || '').toUpperCase();
+  if (mod === 'PURCHASE') return 'notify_purchase';
+  if (mod === 'PURCHASE_RETURN') return 'notify_purchase_return';
+  if (mod === 'SALES' || mod === 'EXPORT_ORDER') return 'notify_sales';
+  if (mod === 'SALES_RETURN') return 'notify_sales_return';
+  if (mod === 'GODOWN_TRANSFER' || mod === 'ITEM_TRANSFER') return 'notify_godown_transfer';
+  if (['PRODUCTION', 'GRIND', 'FLOUR_OUT', 'FLOUR_OUT_RETURN', 'PAPAD_IN', 'PAPAD_RETURN', 'PACKING', 'WORK_ORDER', 'COLD_STORAGE', 'STOCK_ADJUST', 'WEIGHT_CONVERSION'].includes(mod)) {
+    return 'notify_production';
+  }
+  if (['VOUCHER', 'ADVANCE', 'QUOTATION', 'PURCHASE_ORDER', 'PURCHASE_REQUEST'].includes(mod)) {
+    return 'notify_vouchers';
+  }
+  if (mod === 'OUTPASS') return 'notify_outpass';
+  if (mod === 'INPASS') return 'notify_inpass';
+  if (mod === 'QC' || mod === 'QUALITY') return 'notify_qc';
+  if (['VEHICLE', 'LOADING', 'UNLOADING', 'DRIVER', 'OPERATIONAL_PAYMENT'].includes(mod)) {
+    return 'notify_vehicle_loading';
+  }
+  return 'notify_all';
+}
+
 /**
- * Ensure database tables exist and are properly schema-migrated
+ * Ensure database tables exist and are properly schema-migrated for a given company
  */
-async function ensureNotificationEngineTables() {
+async function ensureNotificationEngineTables(companyId = 1) {
+  const cId = parseInt(companyId, 10) || 1;
+  if (ensuredNotificationCompanies.has(cId)) {
+    return;
+  }
+
+  const compDb = db.forCompany(cId);
+
   try {
     // 1. system_notifications
-    await db.run(`
+    await compDb.run(`
       CREATE TABLE IF NOT EXISTS system_notifications (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         alert_type TEXT,
@@ -361,7 +533,6 @@ async function ensureNotificationEngineTables() {
       )
     `);
 
-    // Ensure columns exist on older tables
     const notifCols = [
       'ALTER TABLE system_notifications ADD COLUMN alert_type TEXT',
       'ALTER TABLE system_notifications ADD COLUMN event_type TEXT',
@@ -373,24 +544,25 @@ async function ensureNotificationEngineTables() {
       'ALTER TABLE system_notifications ADD COLUMN is_read INTEGER DEFAULT 0',
       'ALTER TABLE system_notifications ADD COLUMN whatsapp_sent INTEGER DEFAULT 1',
       'ALTER TABLE system_notifications ADD COLUMN sms_sent INTEGER DEFAULT 1',
-      'ALTER TABLE system_notifications ADD COLUMN recipients TEXT DEFAULT "Owner,Manager,Factory In-charge"',
-      'ALTER TABLE system_notifications ADD COLUMN channel TEXT DEFAULT "ERP,WHATSAPP"',
-      'ALTER TABLE system_notifications ADD COLUMN status TEXT DEFAULT "SENT"',
+      `ALTER TABLE system_notifications ADD COLUMN recipients TEXT DEFAULT 'Owner,Manager,Factory In-charge'`,
+      `ALTER TABLE system_notifications ADD COLUMN channel TEXT DEFAULT 'ERP,WHATSAPP'`,
+      `ALTER TABLE system_notifications ADD COLUMN status TEXT DEFAULT 'SENT'`,
       'ALTER TABLE system_notifications ADD COLUMN acknowledged INTEGER DEFAULT 0',
       'ALTER TABLE system_notifications ADD COLUMN acknowledged_by TEXT',
       'ALTER TABLE system_notifications ADD COLUMN acknowledged_at DATETIME'
     ];
     for (const sql of notifCols) {
-      try { await db.run(sql); } catch (_) {}
+      try { await compDb.run(sql); } catch (_) {}
     }
 
-    // 2. notification_recipients / contacts
-    await db.run(`
+    // 2. notification_recipients / contacts (with description & granular entry subscriptions)
+    await compDb.run(`
       CREATE TABLE IF NOT EXISTS notification_recipients (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         company_id INTEGER DEFAULT 1,
         name TEXT NOT NULL,
         role TEXT NOT NULL,
+        description TEXT,
         phone TEXT,
         email TEXT,
         whatsapp_enabled INTEGER DEFAULT 1,
@@ -398,21 +570,39 @@ async function ensureNotificationEngineTables() {
         email_enabled INTEGER DEFAULT 0,
         in_app_enabled INTEGER DEFAULT 1,
         notify_purchase INTEGER DEFAULT 1,
+        notify_purchase_return INTEGER DEFAULT 1,
         notify_sales INTEGER DEFAULT 1,
+        notify_sales_return INTEGER DEFAULT 1,
+        notify_godown_transfer INTEGER DEFAULT 1,
+        notify_production INTEGER DEFAULT 1,
+        notify_vouchers INTEGER DEFAULT 1,
         notify_outpass INTEGER DEFAULT 1,
         notify_inpass INTEGER DEFAULT 1,
         notify_qc INTEGER DEFAULT 1,
         notify_vehicle_loading INTEGER DEFAULT 1,
+        notify_all INTEGER DEFAULT 0,
         is_active INTEGER DEFAULT 1,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    try { await db.run(`ALTER TABLE notification_recipients ADD COLUMN email TEXT`); } catch (_) {}
-    try { await db.run(`ALTER TABLE notification_recipients ADD COLUMN email_enabled INTEGER DEFAULT 0`); } catch (_) {}
+    const recipientCols = [
+      'ALTER TABLE notification_recipients ADD COLUMN description TEXT',
+      'ALTER TABLE notification_recipients ADD COLUMN email TEXT',
+      'ALTER TABLE notification_recipients ADD COLUMN email_enabled INTEGER DEFAULT 0',
+      'ALTER TABLE notification_recipients ADD COLUMN notify_purchase_return INTEGER DEFAULT 1',
+      'ALTER TABLE notification_recipients ADD COLUMN notify_sales_return INTEGER DEFAULT 1',
+      'ALTER TABLE notification_recipients ADD COLUMN notify_godown_transfer INTEGER DEFAULT 1',
+      'ALTER TABLE notification_recipients ADD COLUMN notify_production INTEGER DEFAULT 1',
+      'ALTER TABLE notification_recipients ADD COLUMN notify_vouchers INTEGER DEFAULT 1',
+      'ALTER TABLE notification_recipients ADD COLUMN notify_all INTEGER DEFAULT 0'
+    ];
+    for (const sql of recipientCols) {
+      try { await compDb.run(sql); } catch (_) {}
+    }
 
     // 3. notification_templates
-    await db.run(`
+    await compDb.run(`
       CREATE TABLE IF NOT EXISTS notification_templates (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         company_id INTEGER DEFAULT 1,
@@ -427,7 +617,7 @@ async function ensureNotificationEngineTables() {
     `);
 
     // 4. notification_delivery_logs
-    await db.run(`
+    await compDb.run(`
       CREATE TABLE IF NOT EXISTS notification_delivery_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         company_id INTEGER DEFAULT 1,
@@ -444,6 +634,7 @@ async function ensureNotificationEngineTables() {
         message_body TEXT,
         delivery_status TEXT,
         provider_message_id TEXT,
+        delivery_url TEXT,
         idempotency_key TEXT,
         retry_count INTEGER DEFAULT 0,
         error_message TEXT,
@@ -454,21 +645,26 @@ async function ensureNotificationEngineTables() {
       )
     `);
 
-    try { await db.run(`ALTER TABLE notification_delivery_logs ADD COLUMN idempotency_key TEXT`); } catch (_) {}
-    try { await db.run(`ALTER TABLE notification_delivery_logs ADD COLUMN retry_count INTEGER DEFAULT 0`); } catch (_) {}
-    try { await db.run(`ALTER TABLE notification_delivery_logs ADD COLUMN error_message TEXT`); } catch (_) {}
-    try { await db.run(`ALTER TABLE notification_delivery_logs ADD COLUMN provider_message_id TEXT`); } catch (_) {}
-    try { await db.run(`ALTER TABLE notification_delivery_logs ADD COLUMN recipient_id INTEGER`); } catch (_) {}
-    try { await db.run(`ALTER TABLE notification_delivery_logs ADD COLUMN reference_id TEXT`); } catch (_) {}
-    try { await db.run(`ALTER TABLE notification_delivery_logs ADD COLUMN delivery_url TEXT`); } catch (_) {}
+    const logCols = [
+      'ALTER TABLE notification_delivery_logs ADD COLUMN idempotency_key TEXT',
+      'ALTER TABLE notification_delivery_logs ADD COLUMN retry_count INTEGER DEFAULT 0',
+      'ALTER TABLE notification_delivery_logs ADD COLUMN error_message TEXT',
+      'ALTER TABLE notification_delivery_logs ADD COLUMN provider_message_id TEXT',
+      'ALTER TABLE notification_delivery_logs ADD COLUMN recipient_id INTEGER',
+      'ALTER TABLE notification_delivery_logs ADD COLUMN reference_id TEXT',
+      'ALTER TABLE notification_delivery_logs ADD COLUMN delivery_url TEXT'
+    ];
+    for (const sql of logCols) {
+      try { await compDb.run(sql); } catch (_) {}
+    }
 
     // 5. notification_channel_settings
-    await db.run(`
+    await compDb.run(`
       CREATE TABLE IF NOT EXISTS notification_channel_settings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         company_id INTEGER DEFAULT 1,
-        channel TEXT NOT NULL, /* WHATSAPP, SMS, EMAIL */
-        provider_name TEXT NOT NULL, /* Meta Cloud API, Gupshup, Twilio, SMTP, Simulated */
+        channel TEXT NOT NULL,
+        provider_name TEXT NOT NULL,
         api_endpoint TEXT,
         auth_token TEXT,
         sender_id TEXT,
@@ -480,93 +676,180 @@ async function ensureNotificationEngineTables() {
       )
     `);
 
-    // Seed default recipients if table empty or sanitize sample numbers to placeholder format
-    const checkRecipients = await db.query(`SELECT COUNT(*) as cnt FROM notification_recipients`);
-    if ((checkRecipients.rows?.[0]?.cnt || 0) === 0) {
-      await db.run(`
-        INSERT INTO notification_recipients 
-        (company_id, name, role, phone, email, whatsapp_enabled, sms_enabled, email_enabled, in_app_enabled, notify_purchase, notify_sales, notify_outpass, notify_inpass, notify_qc, notify_vehicle_loading)
-        VALUES 
-        (1, 'Factory Owner', 'Owner', '+91 98XXX X0001', 'owner@bvcexports.com', 1, 1, 1, 1, 1, 1, 1, 1, 1, 1),
-        (1, 'General Manager', 'Manager', '+91 98XXX X0002', 'manager@bvcexports.com', 1, 1, 1, 1, 1, 1, 1, 1, 1, 1),
-        (1, 'Factory In-charge', 'Factory In-charge', '+91 98XXX X0003', 'incharge@bvcexports.com', 1, 1, 0, 1, 1, 0, 1, 1, 1, 1),
-        (1, 'Purchase Officer', 'Purchase Manager', '+91 98XXX X0004', 'purchase@bvcexports.com', 1, 0, 0, 1, 1, 0, 0, 1, 1, 0),
-        (1, 'Dispatch & Sales Head', 'Sales Manager', '+91 98XXX X0005', 'sales@bvcexports.com', 1, 0, 0, 1, 0, 1, 1, 0, 0, 1),
-        (1, 'Senior QC Chemist', 'QC', '+91 98XXX X0006', 'qc@bvcexports.com', 1, 0, 0, 1, 1, 0, 0, 1, 1, 0)
-      `);
-      console.log('[Central Notification] Seeded default recipient profiles with placeholder contact numbers.');
-    } else {
-      // Migrate older sample numbers to placeholder format so users can edit them
-      try {
-        await db.run(`
-          UPDATE notification_recipients
-          SET phone = '+91 98XXX X' || substr('000' || id, -4)
-          WHERE phone LIKE '+91 9842%' OR phone = '' OR phone IS NULL
-        `);
-      } catch (_) {}
-    }
+    // Remove any previously auto-seeded placeholder rows while preserving all user-configured contacts
+    try {
+      await compDb.run(`
+        DELETE FROM notification_recipients
+        WHERE company_id = ?
+          AND (phone LIKE '+91 98XXX%' OR email LIKE '%@bvcexports.com')
+          AND name IN ('Factory Owner', 'General Manager', 'Factory In-charge', 'Purchase Officer', 'Dispatch & Sales Head', 'Senior QC Chemist')
+      `, [cId]);
+    } catch (_) {}
 
-    // Seed default channel settings if empty
-    const checkSettings = await db.query(`SELECT COUNT(*) as cnt FROM notification_channel_settings`);
-    if ((checkSettings.rows?.[0]?.cnt || 0) === 0) {
-      await db.run(`
+    // Seed default channel settings if empty for this company
+    const checkSettings = await compDb.query(`SELECT COUNT(*) as cnt FROM notification_channel_settings WHERE company_id = ?`, [cId]);
+    const settingsCount = Number(checkSettings.rows?.[0]?.cnt ?? 0);
+    if (settingsCount === 0) {
+      await compDb.run(`
         INSERT INTO notification_channel_settings
         (company_id, channel, provider_name, api_endpoint, sender_id, is_active, test_mode)
         VALUES
-        (1, 'WHATSAPP', 'WhatsApp Business API (Official/Approved)', 'https://graph.facebook.com/v19.0/messages', '+91 98420 00000', 1, 1),
-        (1, 'SMS', 'Enterprise Fast2SMS / DLT Gateway', 'https://api.gateway.com/sms/v2', 'BVCERP', 1, 1),
-        (1, 'EMAIL', 'SMTP Mail Service', 'smtp.gmail.com', 'alerts@bvcexports.com', 1, 1)
-      `);
+        (?, 'WHATSAPP', 'Server WhatsApp + Meta Cloud API', 'https://graph.facebook.com/v19.0/messages', '', 1, 1),
+        (?, 'SMS', 'SMS Gateway', '', '', 1, 1),
+        (?, 'EMAIL', 'SMTP Mail Service', '', '', 1, 1)
+      `, [cId, cId, cId]);
     }
 
-    // Seed default templates if empty
-    const checkTemplates = await db.query(`SELECT COUNT(*) as cnt FROM notification_templates`);
-    if ((checkTemplates.rows?.[0]?.cnt || 0) === 0) {
-      for (const [evt, chans] of Object.entries(DEFAULT_TEMPLATES)) {
-        if (chans.WHATSAPP) {
-          await db.run(`
-            INSERT INTO notification_templates (company_id, event_type, channel, template_name, template_body)
-            VALUES (1, ?, 'WHATSAPP', ?, ?)
-          `, [evt, `${evt} WhatsApp Template`, chans.WHATSAPP]);
-        }
-        if (chans.SMS) {
-          await db.run(`
-            INSERT INTO notification_templates (company_id, event_type, channel, template_name, template_body)
-            VALUES (1, ?, 'SMS', ?, ?)
-          `, [evt, `${evt} SMS Template`, chans.SMS]);
-        }
+    // Seed any missing default templates for this company
+    const existingTemplatesRes = await compDb.query(
+      `SELECT event_type, channel FROM notification_templates WHERE company_id = ?`,
+      [cId]
+    );
+    const existingSet = new Set(
+      (existingTemplatesRes.rows || []).map((r) => `${r.event_type}::${r.channel}`)
+    );
+
+    for (const [evt, chans] of Object.entries(DEFAULT_TEMPLATES)) {
+      if (chans.WHATSAPP && !existingSet.has(`${evt}::WHATSAPP`)) {
+        await compDb.run(`
+          INSERT INTO notification_templates (company_id, event_type, channel, template_name, template_body)
+          VALUES (?, ?, 'WHATSAPP', ?, ?)
+        `, [cId, evt, `${evt} WhatsApp Template`, chans.WHATSAPP]);
+      }
+      if (chans.SMS && !existingSet.has(`${evt}::SMS`)) {
+        await compDb.run(`
+          INSERT INTO notification_templates (company_id, event_type, channel, template_name, template_body)
+          VALUES (?, ?, 'SMS', ?, ?)
+        `, [cId, evt, `${evt} SMS Template`, chans.SMS]);
       }
     }
+
+    ensuredNotificationCompanies.add(cId);
   } catch (err) {
-    console.warn('[Notification Tables Init Warning]:', err.message);
+    console.warn(`[Notification Tables Init Warning (company ${cId})]:`, err.message);
   }
 }
 
-// Auto-run schema initialization
-ensureNotificationEngineTables();
+async function resolveCompanyDisplayName(companyId = 1) {
+  const cId = parseInt(companyId, 10) || 1;
+  try {
+    const res = await db.master.query(`SELECT name FROM companies WHERE id = ? LIMIT 1`, [cId]);
+    if (res.rows && res.rows[0] && res.rows[0].name) {
+      return res.rows[0].name;
+    }
+  } catch (_) {}
+  return 'BVC ERP';
+}
+
+function resolveBaseCreatedEventType(evtType) {
+  const upper = String(evtType || '').toUpperCase();
+  if (DEFAULT_TEMPLATES[upper]) return upper;
+  const candidate = upper.replace(/_(UPDATED|EDITED|MODIFIED)$/i, '_CREATED');
+  if (DEFAULT_TEMPLATES[candidate]) return candidate;
+
+  if (upper.includes('PURCHASE_RETURN')) return 'PURCHASE_RETURN_CREATED';
+  if (upper.includes('SALES_RETURN')) return 'SALES_RETURN_CREATED';
+  if (upper.includes('PURCHASE_ORDER') || upper.includes('PURCHASE_REQUEST') || upper.includes('QUOTATION') || upper.includes('WORK_ORDER') || upper.includes('EXPORT_ORDER') || upper.includes('ORDER')) {
+    return 'ORDER_CREATED';
+  }
+  if (upper.includes('PURCHASE')) return 'PURCHASE_CREATED';
+  if (upper.includes('SALES')) return 'SALES_CREATED';
+  if (upper.includes('GODOWN_TRANSFER') || upper.includes('ITEM_TRANSFER')) return 'GODOWN_TRANSFER_CREATED';
+  if (upper.includes('OUTPASS')) return 'OUTPASS_CREATED';
+  if (upper.includes('INPASS')) return 'INPASS_CREATED';
+  if (upper.includes('COLD_STORAGE')) return 'COLD_STORAGE_CREATED';
+  if (upper.includes('STOCK_ADJUST')) return 'STOCK_ADJUST_CREATED';
+  if (upper.includes('VOUCHER') || upper.includes('ADVANCE')) return 'VOUCHER_CREATED';
+  if (upper.includes('PRODUCTION') || upper.includes('GRIND') || upper.includes('FLOUR') || upper.includes('PAPAD') || upper.includes('PACKING')) {
+    return 'PRODUCTION_CREATED';
+  }
+  return candidate;
+}
+
+function adaptTemplateForUpdate(templateText, channel) {
+  if (!templateText) return '';
+  if (channel === 'WHATSAPP') {
+    let updated = templateText
+      .replace(/(?:🟢|🔵|🟠|🟡|🔄|⚙️|❄️|📊|💳|📋|🚚|🏗️|📦|💰)\s*\*([^*]+?)\s*(CREATED|RECORDED|RECEIVED)\*/i, '✏️ *$1 UPDATED*')
+      .replace(/\*COLD STORAGE ENTRY\*/i, '✏️ *COLD STORAGE ENTRY UPDATED*')
+      .replace(/\*GODOWN \/ STOCK TRANSFER\*/i, '✏️ *GODOWN / STOCK TRANSFER UPDATED*')
+      .replace(/\*STOCK ADJUSTMENT \/ OPENING\*/i, '✏️ *STOCK ADJUSTMENT UPDATED*')
+      .replace(/\*ACCOUNTING \/ VOUCHER ENTRY\*/i, '✏️ *VOUCHER ENTRY UPDATED*')
+      .replace(/(Created By|Recorded By):/gi, 'Updated By:');
+    if (!updated.includes('UPDATED*')) {
+      updated = updated.replace(/\*([^*]+)\*/i, '✏️ *$1 UPDATED*');
+    }
+    return updated;
+  }
+  if (channel === 'SMS') {
+    return templateText
+      .replace(/\b(created|recorded|received)\b/i, 'updated');
+  }
+  if (channel === 'EMAIL_SUBJECT') {
+    if (/\b(Created|Recorded|Received)\b/i.test(templateText)) {
+      return templateText.replace(/\b(Created|Recorded|Received)\b/gi, 'Updated');
+    }
+    return `${templateText} (Updated)`;
+  }
+  return templateText;
+}
 
 /**
- * Fetch active template body for event and channel, with fallback
+ * Fetch active template body for event and channel, with fallback and *_UPDATED derivation
  */
-async function getTemplateBody(eventType, channel, companyId = 1) {
+async function getTemplateBody(eventType, channel, companyId = 1, isUpdateEvent = false) {
+  const cId = parseInt(companyId, 10) || 1;
+  const compDb = db.forCompany(cId);
+  const evtUpper = String(eventType || '').toUpperCase();
+
   try {
-    const tRes = await db.query(`
+    const tRes = await compDb.query(`
       SELECT template_body FROM notification_templates
-      WHERE event_type = ? AND channel = ? AND is_active = 1
+      WHERE company_id = ? AND event_type = ? AND channel = ? AND is_active = 1
       ORDER BY id DESC LIMIT 1
-    `, [eventType, channel]);
+    `, [cId, evtUpper, channel]);
     if (tRes.rows && tRes.rows.length > 0 && tRes.rows[0].template_body) {
       return tRes.rows[0].template_body;
     }
   } catch (_) {}
 
-  // Fallback to static default
-  const defaults = DEFAULT_TEMPLATES[eventType] || {};
-  return defaults[channel] || '';
+  const directDefaults = DEFAULT_TEMPLATES[evtUpper];
+  if (directDefaults && directDefaults[channel]) {
+    return directDefaults[channel];
+  }
+
+  const baseEvtType = resolveBaseCreatedEventType(evtUpper);
+  let baseBody = '';
+
+  try {
+    const baseRes = await compDb.query(`
+      SELECT template_body FROM notification_templates
+      WHERE company_id = ? AND event_type = ? AND channel = ? AND is_active = 1
+      ORDER BY id DESC LIMIT 1
+    `, [cId, baseEvtType, channel]);
+    if (baseRes.rows && baseRes.rows.length > 0 && baseRes.rows[0].template_body) {
+      baseBody = baseRes.rows[0].template_body;
+    }
+  } catch (_) {}
+
+  if (!baseBody && DEFAULT_TEMPLATES[baseEvtType] && DEFAULT_TEMPLATES[baseEvtType][channel]) {
+    baseBody = DEFAULT_TEMPLATES[baseEvtType][channel];
+  }
+
+  if (baseBody && (isUpdateEvent || /_(UPDATED|EDITED|MODIFIED)$/i.test(evtUpper))) {
+    return adaptTemplateForUpdate(baseBody, channel);
+  }
+
+  return baseBody;
 }
 
 /**
  * Provider Abstraction: Dispatch WhatsApp message
+ * Priority:
+ *   1. Sandbox placeholder numbers (+91 98XXX XXXXX) -> DELIVERED (SANDBOX)
+ *   2. Connected Main Company Server WhatsApp (Baileys) -> DELIVERED (SERVER WHATSAPP)
+ *   3. Meta WhatsApp Cloud API / Custom HTTP Gateway -> DELIVERED (LIVE API)
+ *   4. 1-Click WhatsApp Web link fallback -> DELIVERED (1-CLICK READY)
  */
 async function dispatchWhatsApp({ phone, messageText, companyId = 1 }) {
   const phoneCheck = validateAndFormatPhone(phone);
@@ -574,7 +857,6 @@ async function dispatchWhatsApp({ phone, messageText, companyId = 1 }) {
     return { success: false, status: 'FAILED', error: 'Invalid recipient phone number format' };
   }
 
-  // If placeholder dummy number (+91 98XXX XXXXX)
   if (phoneCheck.isPlaceholder) {
     return {
       success: true,
@@ -588,14 +870,37 @@ async function dispatchWhatsApp({ phone, messageText, companyId = 1 }) {
   const cleanPhone = phoneCheck.formatted;
   const rawDigits = cleanPhone.replace(/\D/g, '');
   const whatsappUrl = `https://api.whatsapp.com/send?phone=${rawDigits}&text=${encodeURIComponent(messageText)}`;
+  let serverError = null;
 
-  // Check channel settings for live Meta WhatsApp Cloud API / HTTP Gateway
+  // 1. Primary Automated Dispatch via Main Company Server WhatsApp Session
+  if (whatsappServerService.isConnected(whatsappServerService.DEFAULT_SESSION_KEY)) {
+    const srvRes = await whatsappServerService.sendMessage({
+      to: cleanPhone,
+      text: messageText,
+      sessionKey: whatsappServerService.DEFAULT_SESSION_KEY
+    });
+    if (srvRes.success) {
+      return {
+        success: true,
+        status: 'DELIVERED (SERVER WHATSAPP)',
+        providerMessageId: srvRes.messageId,
+        senderPhone: srvRes.senderPhone,
+        whatsappUrl
+      };
+    }
+    serverError = srvRes.error || 'Server WhatsApp send failed';
+    console.warn('[WhatsApp Server Send Warning]:', serverError);
+  }
+
+  // 2. Fallback: Check channel settings for live Meta WhatsApp Cloud API / HTTP Gateway
+  const cId = parseInt(companyId, 10) || 1;
+  const compDb = db.forCompany(cId);
   try {
-    const setRes = await db.query(`
+    const setRes = await compDb.query(`
       SELECT * FROM notification_channel_settings
       WHERE channel = 'WHATSAPP' AND company_id = ? AND is_active = 1
       LIMIT 1
-    `, [companyId]);
+    `, [cId]);
     const setting = setRes.rows?.[0];
 
     const authToken = setting?.auth_token || process.env.WHATSAPP_API_TOKEN;
@@ -633,7 +938,7 @@ async function dispatchWhatsApp({ phone, messageText, companyId = 1 }) {
             status: 'DELIVERED (1-CLICK READY)',
             providerMessageId: `wamid_sim_${Date.now()}_${rawDigits.slice(-4)}`,
             whatsappUrl,
-            error: resData.error?.message || 'Gateway warning'
+            error: resData.error?.message || serverError || 'Gateway warning'
           };
         }
       } catch (httpErr) {
@@ -642,12 +947,13 @@ async function dispatchWhatsApp({ phone, messageText, companyId = 1 }) {
     }
   } catch (_) {}
 
-  // Standard Direct 1-Click WhatsApp Delivery + Simulation
+  // 3. Direct 1-Click WhatsApp Delivery Fallback
   return {
     success: true,
     status: 'DELIVERED (1-CLICK READY)',
     providerMessageId: `wamid_sim_${Date.now()}_${rawDigits.slice(-4)}`,
-    whatsappUrl
+    whatsappUrl,
+    ...(serverError ? { error: serverError } : {})
   };
 }
 
@@ -675,13 +981,14 @@ async function dispatchSMS({ phone, messageText, companyId = 1 }) {
   const targetPhone10 = rawDigits.length === 12 && rawDigits.startsWith('91') ? rawDigits.slice(2) : rawDigits;
   const smsUrl = `sms:${rawDigits}?body=${encodeURIComponent(messageText)}`;
 
-  // Check channel settings for live SMS gateway (Fast2SMS / Twilio / Custom HTTP)
+  const cId = parseInt(companyId, 10) || 1;
+  const compDb = db.forCompany(cId);
   try {
-    const setRes = await db.query(`
+    const setRes = await compDb.query(`
       SELECT * FROM notification_channel_settings
       WHERE channel = 'SMS' AND company_id = ? AND is_active = 1
       LIMIT 1
-    `, [companyId]);
+    `, [cId]);
     const setting = setRes.rows?.[0];
 
     const authToken = setting?.auth_token || process.env.SMS_API_KEY || process.env.FAST2SMS_API_KEY;
@@ -690,7 +997,6 @@ async function dispatchSMS({ phone, messageText, companyId = 1 }) {
     if (isLive) {
       const provider = (setting?.provider_name || '').toLowerCase();
 
-      // A. Fast2SMS Provider (India)
       if (provider.includes('fast2sms') || (!setting?.api_endpoint && authToken.length > 20)) {
         try {
           const res = await fetch('https://www.fast2sms.com/dev/bulkV2', {
@@ -716,7 +1022,6 @@ async function dispatchSMS({ phone, messageText, companyId = 1 }) {
               smsUrl
             };
           } else {
-            console.warn('[Fast2SMS API Response]:', resData);
             return {
               success: true,
               status: 'SENT (1-CLICK READY)',
@@ -730,7 +1035,6 @@ async function dispatchSMS({ phone, messageText, companyId = 1 }) {
         }
       }
 
-      // B. Custom HTTP SMS Gateway
       if (setting?.api_endpoint) {
         try {
           const res = await fetch(setting.api_endpoint, {
@@ -777,13 +1081,15 @@ async function dispatchEmail({ email, subject, messageText, companyId = 1 }) {
 
   let smtpConfig = null;
   let isTestMode = false;
+  const cId = parseInt(companyId, 10) || 1;
+  const compDb = db.forCompany(cId);
 
   try {
-    const setRes = await db.query(`
+    const setRes = await compDb.query(`
       SELECT * FROM notification_channel_settings
       WHERE channel = 'EMAIL' AND company_id = ? AND is_active = 1
       LIMIT 1
-    `, [companyId]);
+    `, [cId]);
     const setting = setRes.rows?.[0];
 
     if (setting) {
@@ -843,8 +1149,8 @@ async function dispatchEmail({ email, subject, messageText, companyId = 1 }) {
  * and maintains audit records WITHOUT blocking or rolling back ERP transactions.
  */
 async function emitTransactionEvent({
-  eventType, // 'PURCHASE_CREATED', 'SALES_CREATED', 'OUTPASS_CREATED', 'INPASS_CREATED'
-  moduleName, // 'PURCHASE', 'SALES', 'OUTPASS', 'INPASS'
+  eventType,
+  moduleName,
   referenceNo,
   referenceId,
   companyId = 1,
@@ -854,198 +1160,279 @@ async function emitTransactionEvent({
   severity = 'INFO',
   isTest = false,
   forceDispatch = false,
-  targetRecipientId = null
+  targetRecipientId = null,
+  isUpdate = false
 }) {
   try {
-    await ensureNotificationEngineTables();
-
     const cId = parseInt(companyId, 10) || 1;
-    const evtType = eventType || `${moduleName}_CREATED`;
+    await ensureNotificationEngineTables(cId);
+    const compDb = db.forCompany(cId);
+
+    const modUpper = String(moduleName || 'GENERAL').toUpperCase();
+    const isUpdateEvent = Boolean(isUpdate || /_(UPDATED|EDITED|MODIFIED)$/i.test(String(eventType || '')));
+    const evtType = eventType || `${modUpper}_${isUpdateEvent ? 'UPDATED' : 'CREATED'}`;
     const refNum = String(referenceNo || referenceId || '');
     const refId = String(referenceId || referenceNo || '');
+    const companyName = details.company_name || await resolveCompanyDisplayName(cId);
 
-    // 1. Prepare template variables from details
     const now = new Date();
-    const dateStr = details.date || now.toISOString().slice(0, 10);
-    const timeStr = details.time || now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const nowIso = now.toISOString();
+    const tenMinAgoIso = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const fiveSecAgoIso = new Date(Date.now() - 5 * 1000).toISOString();
+    const dateStr = (details.date && String(details.date).trim()) ? String(details.date).trim() : formatDateInTimeZone(now);
+    const timeStr = (details.time && String(details.time).trim()) ? String(details.time).trim() : formatTimeInTimeZone(now);
+
+    // Resolve any numeric mill / area IDs in details so WhatsApp & In-App alerts always display human names
+    let resolvedMillName = details.external_mill || details.party_name || '';
+    let resolvedAreaName = details.area || details.destination || '';
+    if (['OUTPASS', 'INPASS', 'GRIND', 'PRODUCTION'].includes(modUpper)) {
+      const candidateMill = details.external_mill || details.party_name || details.flour_mill || details.party_id;
+      if (candidateMill && (isNumericId(candidateMill) || isNumericId(resolvedAreaName) || !resolvedAreaName || resolvedAreaName === '-')) {
+        try {
+          const millInfo = await resolveFlourMillInfo(candidateMill, cId, {
+            partyId: details.party_id,
+            destination: details.area || details.destination
+          });
+          if (millInfo.millName && !isNumericId(millInfo.millName)) {
+            resolvedMillName = millInfo.millName;
+          }
+          if (millInfo.areaName && !isNumericId(millInfo.areaName)) {
+            resolvedAreaName = millInfo.areaName;
+          }
+        } catch (_) {}
+      }
+    }
+
+    // Resolve any numeric customer IDs / names into human-readable customer names
+    let resolvedCustomerName = details.customer || details.party_name || details.consignee || details.exporter || '';
+    const custCandidate = details.customer_id || details.customer || details.party_id || details.party_name || details.consignee || details.exporter;
+    if (custCandidate) {
+      try {
+        const custInfo = await resolveCustomerName(custCandidate, cId, { customerId: details.customer_id || details.party_id });
+        if (custInfo.customerName && !isNumericId(custInfo.customerName)) {
+          resolvedCustomerName = custInfo.customerName;
+        }
+      } catch (_) {}
+    }
+
+    const rawAmount = details.amount ?? details.total_amount ?? details.grand_total ?? details.net_amount ?? details.paid_amount;
+    const numericAmount = rawAmount !== undefined && rawAmount !== null && rawAmount !== '' ? Number(rawAmount) : null;
+    const amountDisplay = numericAmount !== null && !Number.isNaN(numericAmount)
+      ? `₹${numericAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+      : (details.amount_display || '-');
+
+    const safePartyName = (resolvedMillName && !isNumericId(resolvedMillName))
+      ? resolvedMillName
+      : (details.party_name || details.worker_name || details.supplier || details.customer || '-');
+    const safeCustomerName = (resolvedCustomerName && !isNumericId(resolvedCustomerName))
+      ? resolvedCustomerName
+      : (details.customer || details.party_name || details.consignee || details.exporter || '-');
+    const safeAreaName = (resolvedAreaName && !isNumericId(resolvedAreaName))
+      ? resolvedAreaName
+      : ((details.area && !isNumericId(details.area)) ? details.area : '-');
 
     const templateData = {
+      company_name: companyName,
+      reference_no: refNum,
       purchase_no: details.purchase_no || refNum,
       sales_no: details.sales_no || refNum,
       outpass_no: details.outpass_no || refNum,
       inpass_no: details.inpass_no || refNum,
-      reference: details.reference || details.reference_no || `REF-${refNum}`,
-      supplier: details.supplier || details.vendor || 'Supplier ABC Traders',
-      customer: details.customer || 'Customer XYZ Foods',
+      reference: details.reference || details.reference_no || (refNum ? `REF-${refNum}` : '-'),
+      supplier: details.supplier || details.vendor || safePartyName || safeCustomerName || '-',
+      customer: safeCustomerName || safePartyName || '-',
       invoice_no: details.invoice_no || details.invNo || refNum,
-      item_name: details.item_name || details.item || 'Material Item',
-      item_summary: details.item_summary || details.item_name || 'Broken Rice (100 Bags)',
-      lot_no: details.lot_no || 'LOT0025',
-      quantity: details.quantity || (details.total_weight ? `${details.total_weight} KG` : '5,000 KG'),
-      bags: details.bags || details.total_qty || '100',
-      total_weight: details.total_weight ? `${details.total_weight} KG` : details.quantity || '5,000 KG',
-      external_mill: details.external_mill || details.party_name || 'ABC Rice Mill',
-      area: details.area || 'Vadipatti',
-      vehicle: details.vehicle || details.vehicle_no || details.lorry_no || 'TN64FF2321',
-      godown: details.godown || details.godown_name || 'Main Godown',
-      receiving_godown: details.receiving_godown || details.to_godown_name || 'Main Godown',
-      purpose: details.purpose || 'Outside Grind',
+      item_name: details.item_name || details.item || details.item_summary || '-',
+      item_summary: details.item_summary || details.item_name || '-',
+      lot_no: details.lot_no || '-',
+      quantity: details.quantity || (details.total_weight ? `${details.total_weight} KG` : '-'),
+      bags: details.bags || details.total_qty || '-',
+      total_weight: details.total_weight ? `${details.total_weight} KG` : (details.quantity || '-'),
+      external_mill: safePartyName || '-',
+      area: safeAreaName || '-',
+      vehicle: details.vehicle || details.vehicle_no || details.lorry_no || '-',
+      godown: details.godown || details.godown_name || details.to_location || '-',
+      receiving_godown: details.receiving_godown || details.to_godown_name || details.godown || '-',
+      purpose: details.purpose || '-',
       expected_return: details.expected_return || details.expected_return_date || dateStr,
       received_date: details.received_date || dateStr,
-      original_input: details.original_input ? `${details.original_input} KG` : '5,000 KG',
-      received_output: details.received_output ? `${details.received_output} KG` : '4,700 KG',
-      by_product: details.by_product ? `${details.by_product} KG` : '200 KG',
-      loss: details.loss ? `${details.loss} KG` : '100 KG',
-      mass_balance: details.mass_balance || (details.discrepancy_weight ? `⚠ ${details.discrepancy_weight} KG DISCREPANCY` : '5,000 KG\n✓ BALANCED'),
+      original_input: details.original_input ? `${details.original_input} KG` : '-',
+      received_output: details.received_output ? `${details.received_output} KG` : '-',
+      by_product: details.by_product ? `${details.by_product} KG` : '-',
+      loss: details.loss ? `${details.loss} KG` : '-',
+      mass_balance: details.mass_balance || (details.discrepancy_weight ? `⚠ ${details.discrepancy_weight} KG DISCREPANCY` : 'BALANCED'),
       qc_status: details.qc_status || 'PENDING',
       iqr_status: details.iqr_status || 'PENDING',
       loading_status: details.loading_status || 'PENDING',
       dispatch_status: details.dispatch_status || 'PENDING',
-      created_by: details.created_by || 'Store / Factory Operator',
-      received_by: details.received_by || details.created_by || 'Store Operator',
-      status: details.status || `${moduleName} CREATED`,
+      created_by: details.updated_by || details.created_by || 'ERP Operator',
+      received_by: details.received_by || details.updated_by || details.created_by || 'Store Operator',
+      status: details.status || `${modUpper.replace(/_/g, ' ')} ${isUpdateEvent ? 'UPDATED' : 'CREATED'}`,
+      action_label: details.action_label || modUpper.replace(/_/g, ' '),
+      module_label: details.module_label || modUpper.replace(/_/g, ' '),
+      remarks: details.remarks || details.narration || details.reason || '-',
       date: dateStr,
       time: timeStr,
-      // Operational Charges & Payments variables
       charge_no: details.charge_no || refNum,
+      source_module: details.source_module || modUpper,
       source_transaction_no: details.source_transaction_no || refNum,
-      party_name: details.party_name || details.worker_name || details.supplier || 'Ramesh & Team',
+      party_name: safePartyName || '-',
       party_category: details.party_category || 'WORKER',
-      driver_name: details.driver_name || details.driver || 'Murugan',
-      from_location: details.from_location || details.from_godown || 'Main Godown',
-      to_location: details.to_location || details.to_godown || 'Godown B',
-      rate: details.rate || '0.50',
+      driver_name: details.driver_name || details.driver || '-',
+      from_location: details.from_location || details.from_godown || '-',
+      to_location: details.to_location || details.to_godown || '-',
+      rate: details.rate || '0.00',
       calc_basis: details.calculation_basis || details.calc_basis || 'PER_KG',
       uom: details.uom || 'KG',
-      amount: details.amount || details.total_amount || '2,500',
+      amount: numericAmount !== null && !Number.isNaN(numericAmount) ? numericAmount.toLocaleString('en-IN') : (details.amount || '0'),
+      amount_display: amountDisplay,
       charge_type: details.charge_type || 'LOADING',
-      charge_summary: details.charge_summary || `Loading: Rs.${details.amount || 2500}`,
+      charge_summary: details.charge_summary || `Charges: ${amountDisplay}`,
       payment_no: details.payment_no || refNum,
-      paid_amount: details.paid_amount || details.amount || '2,500',
+      paid_amount: details.paid_amount || details.amount || '0',
       payment_mode: details.payment_mode || details.payment_method || 'CASH',
       paid_by: details.paid_by || details.created_by || 'Admin',
       allocated_charges: details.allocated_charges || details.charge_no || refNum
     };
 
-    // 2. Fetch templates for channels
-    const whatsappTemplate = await getTemplateBody(evtType, 'WHATSAPP', cId);
-    const smsTemplate = await getTemplateBody(evtType, 'SMS', cId);
-    const emailSubjectTemplate = (DEFAULT_TEMPLATES[evtType] && DEFAULT_TEMPLATES[evtType].EMAIL_SUBJECT) || `BVC ERP: ${evtType} – ${refNum}`;
+    const whatsappTemplate = await getTemplateBody(evtType, 'WHATSAPP', cId, isUpdateEvent);
+    const smsTemplate = await getTemplateBody(evtType, 'SMS', cId, isUpdateEvent);
+    const baseEvt = resolveBaseCreatedEventType(evtType);
+    const rawEmailSubjectTpl = (DEFAULT_TEMPLATES[evtType] && DEFAULT_TEMPLATES[evtType].EMAIL_SUBJECT)
+      || (DEFAULT_TEMPLATES[baseEvt] && DEFAULT_TEMPLATES[baseEvt].EMAIL_SUBJECT)
+      || `${companyName}: ${evtType} – ${refNum}`;
+    const emailSubjectTemplate = isUpdateEvent ? adaptTemplateForUpdate(rawEmailSubjectTpl, 'EMAIL_SUBJECT') : rawEmailSubjectTpl;
 
-    const formattedWhatsAppMsg = renderTemplate(whatsappTemplate, templateData) || message || `BVC ERP: ${moduleName} ${refNum} has been recorded.`;
-    const formattedSmsMsg = renderTemplate(smsTemplate, templateData) || `BVC ERP: ${moduleName} ${refNum} recorded inside factory.`;
+    const actionVerb = isUpdateEvent ? 'updated' : 'recorded';
+    let formattedWhatsAppMsg = renderTemplate(whatsappTemplate, templateData) || message || `${companyName}: ${modUpper.replace(/_/g, ' ')} ${refNum} ${actionVerb} (${templateData.item_summary}).`;
+    if (formattedWhatsAppMsg && !/^time\s*:/mi.test(formattedWhatsAppMsg)) {
+      formattedWhatsAppMsg = `${formattedWhatsAppMsg.trimEnd()}\nTime: ${timeStr}`;
+    }
+
+    const formattedSmsMsg = renderTemplate(smsTemplate, templateData) || `${companyName}: ${modUpper.replace(/_/g, ' ')} ${refNum} ${actionVerb}.`;
     const formattedEmailSubject = renderTemplate(emailSubjectTemplate, templateData);
 
-    const notifTitle = title || `BVC ERP – New ${moduleName} (${refNum})`;
+    const notifTitle = title || `${companyName} – ${modUpper.replace(/_/g, ' ')} ${isUpdateEvent ? 'UPDATED ' : ''}(${refNum})`;
     const notifMsg = message || formattedSmsMsg;
 
-    // 3. Create entry in system_notifications
-    const insRes = await db.run(`
+    const insRes = await compDb.run(`
       INSERT INTO system_notifications (
         alert_type, event_type, title, message, severity,
         reference_module, module_name, reference_id, reference_no,
         company_id, is_read, whatsapp_sent, sms_sent,
         recipients, channel, status, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, 1, 'Owner,Manager,Factory In-charge', 'ERP,WHATSAPP,SMS', 'SENT', datetime('now'))
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, 1, 'Configured Recipients', 'ERP,WHATSAPP,SMS', 'SENT', ?)
     `, [
       evtType, evtType, notifTitle, notifMsg, severity,
-      moduleName, moduleName, refId, refNum, cId
+      modUpper, modUpper, refId, refNum, cId, nowIso
     ]);
 
     const notificationId = insRes.lastID || insRes.lastInsertRowid;
 
-    // 4. Resolve configured recipients for this event
     let recipients = [];
     if (targetRecipientId) {
-      const recRes = await db.query(`
+      const recRes = await compDb.query(`
         SELECT * FROM notification_recipients
         WHERE id = ? AND company_id = ?
       `, [targetRecipientId, cId]);
       recipients = recRes.rows || [];
     } else {
-      let eventColumn = 'notify_purchase';
-      if (moduleName === 'SALES') eventColumn = 'notify_sales';
-      else if (moduleName === 'OUTPASS') eventColumn = 'notify_outpass';
-      else if (moduleName === 'INPASS') eventColumn = 'notify_inpass';
-      else if (moduleName === 'QC') eventColumn = 'notify_qc';
+      const eventColumn = resolveSubscriptionColumn(modUpper);
+      const filterSql = eventColumn === 'notify_all'
+        ? `COALESCE(notify_all, 0) = 1`
+        : `(${eventColumn} = 1 OR COALESCE(notify_all, 0) = 1)`;
 
-      const recRes = await db.query(`
+      const recRes = await compDb.query(`
         SELECT * FROM notification_recipients
-        WHERE company_id = ? AND is_active = 1 AND ${eventColumn} = 1
+        WHERE company_id = ? AND is_active = 1 AND ${filterSql}
       `, [cId]);
       recipients = recRes.rows || [];
     }
 
     const deliveryResults = [];
 
-    // 5. Dispatch to configured recipients across enabled channels with IDEMPOTENCY CHECK
     for (const rec of recipients) {
       const nowEpoch = Date.now();
+      const recipientLabel = rec.description ? `${rec.name} (${rec.description})` : rec.name;
+      const updateSuffix = isUpdateEvent ? `_upd_${Math.floor(nowEpoch / 1000)}` : '';
 
       // A. IN-APP Channel
       if (rec.in_app_enabled) {
-        const inAppKey = isTest || forceDispatch ? `test_${nowEpoch}_${cId}_${evtType}_${refNum}_${rec.id}_IN_APP` : `${cId}_${evtType}_${refNum}_${rec.id}_IN_APP`;
-        
+        const inAppKey = isTest || forceDispatch ? `test_${nowEpoch}_${cId}_${evtType}_${refNum}_${rec.id}_IN_APP` : `${cId}_${evtType}_${refNum}_${rec.id}_IN_APP${updateSuffix}`;
         let shouldSend = true;
         if (!isTest && !forceDispatch) {
-          const dupCheck = await db.query(`
-            SELECT id FROM notification_delivery_logs 
-            WHERE idempotency_key = ? AND delivery_status = 'DELIVERED' 
-            AND created_at >= datetime('now', '-10 minutes')
-          `, [inAppKey]);
-          if (dupCheck.rows && dupCheck.rows.length > 0) shouldSend = false;
+          if (isUpdateEvent) {
+            const dupCheck = await compDb.query(`
+              SELECT id FROM notification_delivery_logs
+              WHERE company_id = ? AND event_type = ? AND reference_no = ? AND recipient_id = ? AND channel = 'IN_APP'
+              AND message_body = ? AND created_at >= ?
+            `, [cId, evtType, refNum, rec.id, notifMsg, fiveSecAgoIso]);
+            if (dupCheck.rows && dupCheck.rows.length > 0) shouldSend = false;
+          } else {
+            const dupCheck = await compDb.query(`
+              SELECT id FROM notification_delivery_logs
+              WHERE idempotency_key = ? AND delivery_status = 'DELIVERED'
+              AND created_at >= ?
+            `, [inAppKey, tenMinAgoIso]);
+            if (dupCheck.rows && dupCheck.rows.length > 0) shouldSend = false;
+          }
         }
 
         if (shouldSend) {
-          await db.run(`
-            INSERT INTO notification_delivery_logs 
+          await compDb.run(`
+            INSERT INTO notification_delivery_logs
             (company_id, notification_id, event_type, module_name, reference_no, reference_id, recipient_id, recipient_name, recipient_role, channel, recipient_contact, message_body, delivery_status, idempotency_key, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'IN_APP', 'ERP Portal', ?, 'DELIVERED', ?, datetime('now'))
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'IN_APP', 'ERP Portal', ?, 'DELIVERED', ?, ?)
           `, [
-            cId, notificationId, evtType, moduleName, refNum, refId,
-            rec.id, rec.name, rec.role, notifMsg, inAppKey
+            cId, notificationId, evtType, modUpper, refNum, refId,
+            rec.id, recipientLabel, rec.role, notifMsg, inAppKey, nowIso
           ]);
-          deliveryResults.push({ channel: 'IN_APP', recipient: rec.name, status: 'DELIVERED' });
+          deliveryResults.push({ channel: 'IN_APP', recipient: rec.name, description: rec.description || '', status: 'DELIVERED' });
         }
       }
 
       // B. WHATSAPP Channel
       if (rec.whatsapp_enabled) {
-        const waKey = isTest || forceDispatch ? `test_${nowEpoch}_${cId}_${evtType}_${refNum}_${rec.id}_WHATSAPP` : `${cId}_${evtType}_${refNum}_${rec.id}_WHATSAPP`;
-        
+        const waKey = isTest || forceDispatch ? `test_${nowEpoch}_${cId}_${evtType}_${refNum}_${rec.id}_WHATSAPP` : `${cId}_${evtType}_${refNum}_${rec.id}_WHATSAPP${updateSuffix}`;
         let shouldSend = true;
         if (!isTest && !forceDispatch) {
-          const dupCheck = await db.query(`
-            SELECT id FROM notification_delivery_logs 
-            WHERE idempotency_key = ? AND delivery_status LIKE 'DELIVERED%' 
-            AND created_at >= datetime('now', '-10 minutes')
-          `, [waKey]);
-          if (dupCheck.rows && dupCheck.rows.length > 0) shouldSend = false;
+          if (isUpdateEvent) {
+            const dupCheck = await compDb.query(`
+              SELECT id FROM notification_delivery_logs
+              WHERE company_id = ? AND event_type = ? AND reference_no = ? AND recipient_id = ? AND channel = 'WHATSAPP'
+              AND message_body = ? AND created_at >= ?
+            `, [cId, evtType, refNum, rec.id, formattedWhatsAppMsg, fiveSecAgoIso]);
+            if (dupCheck.rows && dupCheck.rows.length > 0) shouldSend = false;
+          } else {
+            const dupCheck = await compDb.query(`
+              SELECT id FROM notification_delivery_logs
+              WHERE idempotency_key = ? AND delivery_status LIKE 'DELIVERED%'
+              AND created_at >= ?
+            `, [waKey, tenMinAgoIso]);
+            if (dupCheck.rows && dupCheck.rows.length > 0) shouldSend = false;
+          }
         }
 
         if (shouldSend) {
-          let waBody = formattedWhatsAppMsg;
-          if (rec.role === 'Owner') {
-            waBody = `🔵 *BVC ERP [OWNER SUMMARY]*\n` + formattedWhatsAppMsg;
-          } else if (rec.role === 'Manager') {
-            waBody = `🔵 *[MANAGEMENT REVIEW]*\n` + formattedWhatsAppMsg;
-          }
+          const waBody = formattedWhatsAppMsg;
 
           const waResult = await dispatchWhatsApp({ phone: rec.phone, messageText: waBody, companyId: cId });
-          await db.run(`
-            INSERT INTO notification_delivery_logs 
+          await compDb.run(`
+            INSERT INTO notification_delivery_logs
             (company_id, notification_id, event_type, module_name, reference_no, reference_id, recipient_id, recipient_name, recipient_role, channel, recipient_contact, message_body, delivery_status, provider_message_id, delivery_url, idempotency_key, error_message, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'WHATSAPP', ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'WHATSAPP', ?, ?, ?, ?, ?, ?, ?, ?)
           `, [
-            cId, notificationId, evtType, moduleName, refNum, refId,
-            rec.id, rec.name, rec.role, rec.phone || '+91 98XXX XXXXX', waBody,
-            waResult.status, waResult.providerMessageId || null, waResult.whatsappUrl || null, waKey, waResult.error || null
+            cId, notificationId, evtType, modUpper, refNum, refId,
+            rec.id, recipientLabel, rec.role, rec.phone || '', waBody,
+            waResult.status, waResult.providerMessageId || null, waResult.whatsappUrl || null, waKey, waResult.error || null, nowIso
           ]);
           deliveryResults.push({
             channel: 'WHATSAPP',
             recipient: rec.name,
+            description: rec.description || '',
             phone: rec.phone,
             status: waResult.status,
+            senderPhone: waResult.senderPhone || null,
             message: waBody,
             whatsappUrl: waResult.whatsappUrl
           });
@@ -1054,32 +1441,41 @@ async function emitTransactionEvent({
 
       // C. SMS Channel
       if (rec.sms_enabled) {
-        const smsKey = isTest || forceDispatch ? `test_${nowEpoch}_${cId}_${evtType}_${refNum}_${rec.id}_SMS` : `${cId}_${evtType}_${refNum}_${rec.id}_SMS`;
-        
+        const smsKey = isTest || forceDispatch ? `test_${nowEpoch}_${cId}_${evtType}_${refNum}_${rec.id}_SMS` : `${cId}_${evtType}_${refNum}_${rec.id}_SMS${updateSuffix}`;
         let shouldSend = true;
         if (!isTest && !forceDispatch) {
-          const dupCheck = await db.query(`
-            SELECT id FROM notification_delivery_logs 
-            WHERE idempotency_key = ? AND delivery_status LIKE 'SENT%' 
-            AND created_at >= datetime('now', '-10 minutes')
-          `, [smsKey]);
-          if (dupCheck.rows && dupCheck.rows.length > 0) shouldSend = false;
+          if (isUpdateEvent) {
+            const dupCheck = await compDb.query(`
+              SELECT id FROM notification_delivery_logs
+              WHERE company_id = ? AND event_type = ? AND reference_no = ? AND recipient_id = ? AND channel = 'SMS'
+              AND message_body = ? AND created_at >= ?
+            `, [cId, evtType, refNum, rec.id, formattedSmsMsg, fiveSecAgoIso]);
+            if (dupCheck.rows && dupCheck.rows.length > 0) shouldSend = false;
+          } else {
+            const dupCheck = await compDb.query(`
+              SELECT id FROM notification_delivery_logs
+              WHERE idempotency_key = ? AND delivery_status LIKE 'SENT%'
+              AND created_at >= ?
+            `, [smsKey, tenMinAgoIso]);
+            if (dupCheck.rows && dupCheck.rows.length > 0) shouldSend = false;
+          }
         }
 
         if (shouldSend) {
           const smsResult = await dispatchSMS({ phone: rec.phone, messageText: formattedSmsMsg, companyId: cId });
-          await db.run(`
-            INSERT INTO notification_delivery_logs 
+          await compDb.run(`
+            INSERT INTO notification_delivery_logs
             (company_id, notification_id, event_type, module_name, reference_no, reference_id, recipient_id, recipient_name, recipient_role, channel, recipient_contact, message_body, delivery_status, provider_message_id, delivery_url, idempotency_key, error_message, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'SMS', ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'SMS', ?, ?, ?, ?, ?, ?, ?, ?)
           `, [
-            cId, notificationId, evtType, moduleName, refNum, refId,
-            rec.id, rec.name, rec.role, rec.phone || '+91 98XXX XXXXX', formattedSmsMsg,
-            smsResult.status, smsResult.providerMessageId || null, smsResult.smsUrl || null, smsKey, smsResult.error || null
+            cId, notificationId, evtType, modUpper, refNum, refId,
+            rec.id, recipientLabel, rec.role, rec.phone || '+91 98XXX XXXXX', formattedSmsMsg,
+            smsResult.status, smsResult.providerMessageId || null, smsResult.smsUrl || null, smsKey, smsResult.error || null, nowIso
           ]);
           deliveryResults.push({
             channel: 'SMS',
             recipient: rec.name,
+            description: rec.description || '',
             phone: rec.phone,
             status: smsResult.status,
             message: formattedSmsMsg,
@@ -1088,18 +1484,26 @@ async function emitTransactionEvent({
         }
       }
 
-      // D. EMAIL Channel (if enabled for this contact)
+      // D. EMAIL Channel
       if (rec.email_enabled && rec.email) {
-        const emailKey = isTest || forceDispatch ? `test_${nowEpoch}_${cId}_${evtType}_${refNum}_${rec.id}_EMAIL` : `${cId}_${evtType}_${refNum}_${rec.id}_EMAIL`;
-        
+        const emailKey = isTest || forceDispatch ? `test_${nowEpoch}_${cId}_${evtType}_${refNum}_${rec.id}_EMAIL` : `${cId}_${evtType}_${refNum}_${rec.id}_EMAIL${updateSuffix}`;
         let shouldSend = true;
         if (!isTest && !forceDispatch) {
-          const dupCheck = await db.query(`
-            SELECT id FROM notification_delivery_logs 
-            WHERE idempotency_key = ? AND delivery_status IN ('SENT', 'DELIVERED') 
-            AND created_at >= datetime('now', '-10 minutes')
-          `, [emailKey]);
-          if (dupCheck.rows && dupCheck.rows.length > 0) shouldSend = false;
+          if (isUpdateEvent) {
+            const dupCheck = await compDb.query(`
+              SELECT id FROM notification_delivery_logs
+              WHERE company_id = ? AND event_type = ? AND reference_no = ? AND recipient_id = ? AND channel = 'EMAIL'
+              AND message_body = ? AND created_at >= ?
+            `, [cId, evtType, refNum, rec.id, formattedWhatsAppMsg, fiveSecAgoIso]);
+            if (dupCheck.rows && dupCheck.rows.length > 0) shouldSend = false;
+          } else {
+            const dupCheck = await compDb.query(`
+              SELECT id FROM notification_delivery_logs
+              WHERE idempotency_key = ? AND (delivery_status LIKE 'SENT%' OR delivery_status LIKE 'DELIVERED%')
+              AND created_at >= ?
+            `, [emailKey, tenMinAgoIso]);
+            if (dupCheck.rows && dupCheck.rows.length > 0) shouldSend = false;
+          }
         }
 
         if (shouldSend) {
@@ -1109,21 +1513,21 @@ async function emitTransactionEvent({
             messageText: formattedWhatsAppMsg,
             companyId: cId
           });
-          await db.run(`
-            INSERT INTO notification_delivery_logs 
+          await compDb.run(`
+            INSERT INTO notification_delivery_logs
             (company_id, notification_id, event_type, module_name, reference_no, reference_id, recipient_id, recipient_name, recipient_role, channel, recipient_contact, message_body, delivery_status, provider_message_id, idempotency_key, error_message, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'EMAIL', ?, ?, ?, ?, ?, ?, datetime('now'))
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'EMAIL', ?, ?, ?, ?, ?, ?, ?)
           `, [
-            cId, notificationId, evtType, moduleName, refNum, refId,
-            rec.id, rec.name, rec.role, rec.email, formattedWhatsAppMsg,
-            emailResult.status, emailResult.providerMessageId || null, emailKey, emailResult.error || null
+            cId, notificationId, evtType, modUpper, refNum, refId,
+            rec.id, recipientLabel, rec.role, rec.email, formattedWhatsAppMsg,
+            emailResult.status, emailResult.providerMessageId || null, emailKey, emailResult.error || null, nowIso
           ]);
-          deliveryResults.push({ channel: 'EMAIL', recipient: rec.name, email: rec.email, status: emailResult.status });
+          deliveryResults.push({ channel: 'EMAIL', recipient: rec.name, description: rec.description || '', email: rec.email, status: emailResult.status });
         }
       }
     }
 
-    console.log(`[Notification Engine] Dispatched ${evtType} ${refNum} to ${recipients.length} configured recipients.`);
+    console.log(`[Notification Engine] Dispatched ${evtType} ${refNum} (Company ${cId}) to ${recipients.length} configured recipients.`);
     return {
       success: true,
       notificationId,
@@ -1133,7 +1537,6 @@ async function emitTransactionEvent({
       deliveryResults
     };
   } catch (err) {
-    // Crucial rule: Notification error must NEVER crash or rollback caller ERP transaction
     console.error('[Notification Engine Silent Catch]:', err.message);
     return { success: false, error: err.message };
   }
@@ -1144,7 +1547,11 @@ async function emitTransactionEvent({
  */
 async function retryDeliveryLog(logId, companyId = 1) {
   try {
-    const lRes = await db.query(`SELECT * FROM notification_delivery_logs WHERE id = ?`, [logId]);
+    const cId = parseInt(companyId, 10) || 1;
+    await ensureNotificationEngineTables(cId);
+    const compDb = db.forCompany(cId);
+
+    const lRes = await compDb.query(`SELECT * FROM notification_delivery_logs WHERE id = ? AND company_id = ?`, [logId, cId]);
     if (!lRes.rows || lRes.rows.length === 0) {
       return { success: false, message: 'Delivery log not found' };
     }
@@ -1155,23 +1562,23 @@ async function retryDeliveryLog(logId, companyId = 1) {
 
     let result = { status: 'DELIVERED' };
     if (log.channel === 'WHATSAPP') {
-      result = await dispatchWhatsApp({ phone: log.recipient_contact, messageText: log.message_body, companyId });
+      result = await dispatchWhatsApp({ phone: log.recipient_contact, messageText: log.message_body, companyId: cId });
     } else if (log.channel === 'SMS') {
-      result = await dispatchSMS({ phone: log.recipient_contact, messageText: log.message_body, companyId });
+      result = await dispatchSMS({ phone: log.recipient_contact, messageText: log.message_body, companyId: cId });
     } else if (log.channel === 'EMAIL') {
-      result = await dispatchEmail({ email: log.recipient_contact, messageText: log.message_body, companyId });
+      result = await dispatchEmail({ email: log.recipient_contact, messageText: log.message_body, companyId: cId });
     }
 
-    await db.run(`
-      UPDATE notification_delivery_logs 
+    await compDb.run(`
+      UPDATE notification_delivery_logs
       SET delivery_status = ?,
           retry_count = retry_count + 1,
           provider_message_id = COALESCE(?, provider_message_id),
           error_message = ?
-      WHERE id = ?
-    `, [result.status, result.providerMessageId || null, result.error || null, logId]);
+      WHERE id = ? AND company_id = ?
+    `, [result.status, result.providerMessageId || null, result.error || null, logId, cId]);
 
-    return { success: true, status: result.status, message: `Notification retried successfully via ${log.channel}` };
+    return { success: true, status: result.status, message: `Notification retried via ${log.channel}: ${result.status}` };
   } catch (err) {
     return { success: false, error: err.message };
   }
@@ -1185,5 +1592,7 @@ module.exports = {
   maskPhoneNumber,
   validateAndFormatPhone,
   renderTemplate,
+  resolveSubscriptionColumn,
+  dispatchWhatsApp,
   DEFAULT_TEMPLATES
 };

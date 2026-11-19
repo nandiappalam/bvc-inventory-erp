@@ -1903,6 +1903,7 @@ router.post('/', async (req, res) => {
           item_summary: itemDesc,
           quantity: `${totals.totalWeight || 0} KG`,
           bags: totals.totalQty || 0,
+          amount: parseFloat(totals.grandTotal || totals.netAmount || totals.totalAmount || formData.grand_total || 0),
           vehicle: vehicle_no || 'N/A',
           godown: finalGodownName || 'Main Godown',
           qc_status: 'PENDING',
@@ -2329,6 +2330,42 @@ router.put('/:id', async (req, res) => {
       return { voucherNo: vRes?.voucherNo || existingVoucherNo };
     });
 
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const itemDesc = items && items.length > 0 ? items.map(i => `${i.qty || 0} ${i.item_name || 'Bags'}`).slice(0, 3).join(', ') : 'Raw Material';
+      const purNo = formData.invNo || formData.inv_no || `PUR-${purchaseId}`;
+      const updSupplier = resolvedSupplierName || formData.supplier || 'Vendor';
+      const updVehicle = vehicle_no || formData.vehicle_no || formData.lorry_no || 'N/A';
+      await triggerTransactionNotification({
+        eventType: 'PURCHASE_UPDATED',
+        isUpdate: true,
+        moduleName: 'PURCHASE',
+        referenceNo: purNo,
+        referenceId: purchaseId,
+        companyId: activeCompanyId,
+        title: `✏️ PURCHASE UPDATED – ${purNo}`,
+        message: `Updated Purchase | Supplier: ${updSupplier} | Invoice: ${formData.invNo || formData.inv_no || purNo} | Items: ${itemDesc} | Total: ${totals?.totalQty || 0} Bags (${totals?.totalWeight || 0} KG) | Vehicle: ${updVehicle}`,
+        severity: 'INFO',
+        details: {
+          purchase_no: purNo,
+          date: sanitizedDate,
+          supplier: updSupplier,
+          invoice_no: formData.invNo || formData.inv_no || purNo,
+          item_summary: itemDesc,
+          quantity: `${totals?.totalWeight || 0} KG`,
+          bags: totals?.totalQty || 0,
+          amount: parseFloat(totals?.grandTotal || totals?.netAmount || totals?.totalAmount || formData.grand_total || 0),
+          vehicle: updVehicle,
+          godown: resolvedGodownName || formData.godown || 'Main Godown',
+          updated_by: req.user?.username || 'Store Operator',
+          created_by: req.user?.username || 'Store Operator',
+          status: 'PURCHASE UPDATED'
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Central Notification Warning for Purchase Update:', notifErr.message);
+    }
+
     res.json({ success: true, message: 'Purchase updated successfully!', voucher_no: txResult?.voucherNo || null })
   } catch (error) {
     console.error('Error updating purchase:', error)
@@ -2579,6 +2616,40 @@ router.put('/:id/transport-details', async (req, res) => {
     });
 
     const updated = await findPurchaseRecord(purchaseId, activeCompanyId);
+
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const purNo = updated?.inv_no || `PUR-${purchaseId}`;
+      await triggerTransactionNotification({
+        eventType: 'PURCHASE_UPDATED',
+        isUpdate: true,
+        moduleName: 'PURCHASE',
+        referenceNo: purNo,
+        referenceId: purchaseId,
+        companyId: activeCompanyId,
+        title: `✏️ PURCHASE TRANSPORT UPDATED – ${purNo}`,
+        message: `Supplier: ${updated?.supplier || 'Vendor'} | Transporter: ${finalTransporter || 'N/A'} | Vehicle: ${finalVehicleNo || 'N/A'} | Net Freight: ₹${netTransAmt}`,
+        severity: 'INFO',
+        details: {
+          purchase_no: purNo,
+          date: updated?.date || finalTransportDate,
+          supplier: updated?.supplier || 'Vendor',
+          invoice_no: updated?.inv_no || purNo,
+          item_summary: `Transport Freight Updated (${finalTransporter || 'Self'})`,
+          quantity: `${updated?.total_weight || 0} KG`,
+          bags: updated?.total_qty || 0,
+          amount: netTransAmt,
+          vehicle: finalVehicleNo || 'N/A',
+          godown: updated?.godown || 'Main Godown',
+          updated_by: req.user?.username || 'Transport Desk',
+          created_by: req.user?.username || 'Transport Desk',
+          status: 'TRANSPORT UPDATED'
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Purchase Transport Update):', notifErr.message);
+    }
+
     return res.json({
       success: true,
       message: 'Transport freight details updated successfully!',
@@ -2694,6 +2765,40 @@ router.put('/:id/weight-update', async (req, res) => {
     }
 
     const updatedP = (await db.query('SELECT * FROM purchases WHERE id = ?', [purchaseId])).rows[0];
+
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const purNo = updatedP?.inv_no || oldP?.inv_no || `PUR-${purchaseId}`;
+      await triggerTransactionNotification({
+        eventType: 'PURCHASE_UPDATED',
+        isUpdate: true,
+        moduleName: 'PURCHASE',
+        referenceNo: purNo,
+        referenceId: purchaseId,
+        companyId: activeCompanyId,
+        title: `✏️ PURCHASE WEIGHT UPDATED – ${purNo}`,
+        message: `Supplier: ${updatedP?.supplier || oldP?.supplier || 'Vendor'} | Gross: ${gross} KG | Tare: ${tare} KG | Net: ${net} KG | Status: ${status}`,
+        severity: 'INFO',
+        details: {
+          purchase_no: purNo,
+          date: unloading_date || updatedP?.date,
+          supplier: updatedP?.supplier || oldP?.supplier || 'Vendor',
+          invoice_no: updatedP?.inv_no || purNo,
+          item_summary: `Weighment Update: Gross ${gross} KG, Tare ${tare} KG`,
+          quantity: `${net} KG`,
+          bags: updatedP?.total_qty || 0,
+          amount: parseFloat(updatedP?.grand_total || updatedP?.net_amount || 0),
+          vehicle: updatedP?.vehicle_no || updatedP?.lorry_no || 'N/A',
+          godown: updatedP?.godown || 'Main Godown',
+          updated_by: updated_by || req.user?.username || 'Weighbridge Operator',
+          created_by: updated_by || req.user?.username || 'Weighbridge Operator',
+          status: `WEIGHT ${status}`
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Purchase Weight Update):', notifErr.message);
+    }
+
     res.json({ success: true, message: 'Post-unloading weight details updated successfully!', purchase: updatedP });
   } catch (err) {
     console.error('Error in weight update:', err);

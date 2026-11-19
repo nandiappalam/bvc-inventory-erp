@@ -287,6 +287,36 @@ router.post('/', async (req, res) => {
         }
       }
 
+      try {
+        const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+        const flNo = `FO-${formData.s_no || formData.sNo || flourOutId}`;
+        const itemDesc = activeItems.map(i => `${i.qty || 0} ${i.item_name || i.itemName}`).slice(0, 3).join(', ') || 'Flour';
+        await triggerTransactionNotification({
+          eventType: 'PRODUCTION_CREATED',
+          moduleName: 'PRODUCTION',
+          referenceNo: flNo,
+          referenceId: flourOutId,
+          companyId: req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1),
+          title: `⚙️ FLOUR OUT DISPATCH – ${flNo}`,
+          message: `Papad Company: ${formData.papad_company || formData.papadCompany || 'Mill'} | ${itemDesc} | Weight: ${formData.total_weight || 0} KG`,
+          severity: 'INFO',
+          details: {
+            reference_no: flNo,
+            action_label: 'FLOUR OUT',
+            module_label: 'Flour Out Dispatch',
+            party_name: formData.papad_company || formData.papadCompany || 'Papad Unit',
+            item_summary: itemDesc,
+            quantity: `${formData.total_qty || 0} Bags / ${formData.total_weight || 0} KG`,
+            godown: 'Flour Store',
+            status: 'DISPATCHED',
+            created_by: req.user?.username || 'Production Operator',
+            date: formData.date
+          }
+        });
+      } catch (notifErr) {
+        console.warn('Notification warning (Flour Out):', notifErr.message);
+      }
+
       res.status(201).json({
         success: true,
         message: 'Flour out record saved successfully!',
@@ -374,6 +404,38 @@ router.put('/:id', async (req, res) => {
 
     // Re-deduct stock for the updated items
     await deductFlourOutStock(flourOutId, formData.date, activeItems);
+
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const refNo = `FO-${sNoVal || flourOutId}`;
+      const itemDesc = activeItems.map(i => `${i.qty || 0} ${i.item_name || i.itemName || 'Item'}`).slice(0, 3).join(', ') || 'Flour Issue';
+      await triggerTransactionNotification({
+        eventType: 'PRODUCTION_UPDATED',
+        isUpdate: true,
+        moduleName: 'PRODUCTION',
+        referenceNo: refNo,
+        referenceId: flourOutId,
+        companyId: req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1),
+        title: `✏️ FLOUR OUT UPDATED – ${refNo}`,
+        message: `Updated Flour Out | Unit: ${compVal || 'Papad Unit'} | ${itemDesc} | Total: ${totalQty} Bags (${totalWeight} KG)`,
+        severity: 'INFO',
+        details: {
+          reference_no: refNo,
+          action_label: 'FLOUR OUT',
+          module_label: 'Flour Outward',
+          party_name: compVal || 'Papad Unit',
+          item_summary: itemDesc,
+          quantity: `${totalQty} Bags / ${totalWeight} KG`,
+          godown: 'Flour Store',
+          status: 'UPDATED',
+          updated_by: req.user?.username || 'Production Operator',
+          created_by: req.user?.username || 'Production Operator',
+          date: cleanDate
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Flour Out Update):', notifErr.message);
+    }
 
     res.json({ success: true, message: 'Flour out record updated successfully!' });
   } catch (error) {

@@ -965,6 +965,40 @@ router.post('/', async (req, res) => {
       console.warn('Notice rebuilding stock ledger on purchase return save:', rbErr.message);
     }
 
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const retNo = formData.returnInvNo || formData.return_inv_no || `PR-${txResult.purchaseReturnId}`;
+      const itemDesc = items && items.length > 0
+        ? items.map(i => `${i.qty || 0} ${i.item_name || i.itemName || 'Item'}`).slice(0, 3).join(', ')
+        : 'Returned Goods';
+      const totalWt = parseFloat(totals?.totalWeight ?? totals?.total_weight ?? 0);
+      const totalQty = parseFloat(totals?.totalQty ?? totals?.total_qty ?? 0);
+      const grandAmt = parseFloat(totals?.grandTotal ?? totals?.grand_total ?? totals?.netAmount ?? totals?.totalAmount ?? 0);
+      await triggerTransactionNotification({
+        eventType: 'PURCHASE_RETURN_CREATED',
+        moduleName: 'PURCHASE_RETURN',
+        referenceNo: retNo,
+        referenceId: txResult.purchaseReturnId,
+        companyId: activeCompanyId,
+        title: `🟠 PURCHASE RETURN – ${retNo}`,
+        message: `Supplier: ${formData.supplier || 'Vendor'} | Items: ${itemDesc} | Qty: ${totalQty} (${totalWt} KG) | Amount: ₹${grandAmt}`,
+        severity: 'WARNING',
+        details: {
+          reference_no: retNo,
+          supplier: formData.supplier || 'Vendor',
+          invoice_no: formData.purchaseInvNo || formData.purchase_inv_no || formData.invNo || '-',
+          item_summary: itemDesc,
+          quantity: `${totalQty} Bags / ${totalWt} KG`,
+          amount: grandAmt,
+          remarks: formData.remarks || '-',
+          created_by: req.user?.username || 'Store Operator',
+          date: formData.date
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Purchase Return):', notifErr.message);
+    }
+
     res.status(201).json({
       success: true,
       message: 'Purchase return saved successfully!',
@@ -1194,6 +1228,42 @@ router.put('/:id', async (req, res) => {
       await rebuildStockLedger(activeCompanyId);
     } catch (rbErr) {
       console.warn('Notice rebuilding stock ledger on purchase return update:', rbErr.message);
+    }
+
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const retNo = formData.returnInvNo || formData.return_inv_no || `PR-${purchaseReturnId}`;
+      const itemDesc = items && items.length > 0
+        ? items.map(i => `${i.qty || 0} ${i.item_name || i.itemName || 'Item'}`).slice(0, 3).join(', ')
+        : 'Returned Goods';
+      const totalWt = parseFloat(totals?.totalWeight ?? totals?.total_weight ?? 0);
+      const totalQty = parseFloat(totals?.totalQty ?? totals?.total_qty ?? 0);
+      const grandAmt = parseFloat(totals?.grandTotal ?? totals?.grand_total ?? totals?.netAmount ?? totals?.totalAmount ?? 0);
+      await triggerTransactionNotification({
+        eventType: 'PURCHASE_RETURN_UPDATED',
+        isUpdate: true,
+        moduleName: 'PURCHASE_RETURN',
+        referenceNo: retNo,
+        referenceId: purchaseReturnId,
+        companyId: activeCompanyId,
+        title: `✏️ PURCHASE RETURN UPDATED – ${retNo}`,
+        message: `Updated Return | Supplier: ${formData.supplier || 'Vendor'} | Items: ${itemDesc} | Qty: ${totalQty} (${totalWt} KG) | Amount: ₹${grandAmt}`,
+        severity: 'WARNING',
+        details: {
+          reference_no: retNo,
+          supplier: formData.supplier || 'Vendor',
+          invoice_no: formData.purchaseInvNo || formData.purchase_inv_no || formData.invNo || '-',
+          item_summary: itemDesc,
+          quantity: `${totalQty} Bags / ${totalWt} KG`,
+          amount: grandAmt,
+          remarks: formData.remarks || '-',
+          updated_by: req.user?.username || 'Store Operator',
+          created_by: req.user?.username || 'Store Operator',
+          date: formData.date
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Purchase Return Update):', notifErr.message);
     }
 
     res.json({ success: true, message: 'Purchase return updated successfully!', voucher_no: vRes?.voucherNo || null });

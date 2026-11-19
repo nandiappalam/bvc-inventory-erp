@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
+import http from 'http'
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -28,6 +29,7 @@ export default defineConfig({
         target: 'http://127.0.0.1:3001',
         changeOrigin: true,
         secure: false,
+        agent: new http.Agent({ keepAlive: true, maxSockets: 100 }),
         timeout: 120000,
         proxyTimeout: 120000,
         configure: (proxy, _options) => {

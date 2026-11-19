@@ -275,19 +275,19 @@ const ColdStorageLedger = () => {
           ) : (
             <TableContainer component={Paper} elevation={0} sx={{ overflowX: 'auto' }}>
               <Table size="small" sx={{ minWidth: 1150 }}>
-                <TableHead sx={{ backgroundColor: '#1f4fb2' }}>
+                <TableHead sx={{ '& th, & .MuiTableCell-head': { backgroundColor: '#1f4fb2 !important', color: '#ffffff !important', fontWeight: 'bold', borderColor: '#1d4ed8' } }}>
                   <TableRow>
-                    <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>#</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Date</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Voucher No</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Type</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Item Name</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>CS Lot #</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Purchase Lot #</TableCell>
-                    <TableCell align="right" sx={{ color: '#fff', fontWeight: 'bold' }}>Inward (+)</TableCell>
-                    <TableCell align="right" sx={{ color: '#fff', fontWeight: 'bold' }}>Outward (-)</TableCell>
-                    <TableCell align="right" sx={{ color: '#fff', fontWeight: 'bold' }}>Running Balance</TableCell>
-                    <TableCell sx={{ color: '#fff', fontWeight: 'bold' }}>Remarks</TableCell>
+                    <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>#</TableCell>
+                    <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Date</TableCell>
+                    <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Voucher No</TableCell>
+                    <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Type</TableCell>
+                    <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Item Name</TableCell>
+                    <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>CS Lot #</TableCell>
+                    <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Purchase Lot #</TableCell>
+                    <TableCell align="right" sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Inward (+)</TableCell>
+                    <TableCell align="right" sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Outward (-)</TableCell>
+                    <TableCell align="right" sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Running Balance</TableCell>
+                    <TableCell sx={{ color: '#ffffff !important', fontWeight: 'bold' }}>Remarks</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>

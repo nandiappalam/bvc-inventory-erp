@@ -66,20 +66,20 @@ body {
     border-top: 1px solid #999;
 }
 
-table {
+table:not(.MuiTable-root) {
     width: 100%;
     border-collapse: collapse;
     background: white;
 }
 
-th {
+th:not(.MuiTableCell-root) {
     background: #d6e6ff;
     border: 1px solid #999;
     padding: 6px;
     font-size: 13px;
 }
 
-td {
+td:not(.MuiTableCell-root) {
     border: 1px solid #ccc;
     padding: 5px;
     font-size: 13px;

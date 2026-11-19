@@ -263,6 +263,35 @@ router.post('/', async (req, res) => {
       }
     }
 
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const refNo = formData.bill_no || `EXP-${exportOrderId}`;
+      const itemDesc = validItems.map(i => `${i.qty || 0} ${i.description || 'Item'}`).slice(0, 3).join(', ');
+      await triggerTransactionNotification({
+        eventType: 'ORDER_CREATED',
+        moduleName: 'EXPORT_ORDER',
+        referenceNo: refNo,
+        referenceId: exportOrderId,
+        companyId: req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1),
+        title: isOrderValue === 1 ? `📋 SALES EXPORT ORDER – ${refNo}` : `🔵 EXPORT SALES DISPATCH – ${refNo}`,
+        message: `Consignee: ${formData.consignee || formData.exporter || 'Buyer'} | ${itemDesc} | Qty: ${totalQty} | Amount: ₹${parseFloat(formData.grand_total || formData.total_amt || 0)}`,
+        severity: 'INFO',
+        details: {
+          reference_no: refNo,
+          action_label: isOrderValue === 1 ? 'SALES EXPORT ORDER' : 'EXPORT SALES',
+          party_name: formData.consignee || formData.exporter || 'Export Customer',
+          item_summary: itemDesc,
+          quantity: `${totalQty} Bags / ${formData.net_wt || 0} KG`,
+          amount: parseFloat(formData.grand_total || formData.total_amt || 0),
+          status: isOrderValue === 1 ? 'ORDER CREATED' : 'DISPATCHED',
+          created_by: req.user?.username || 'Export Desk',
+          date: formData.date
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Sales Export):', notifErr.message);
+    }
+
     res.status(201).json({
       success: true,
       message: isOrderValue === 1 ? 'Sales export order saved successfully!' : 'Export Sales saved successfully!',
@@ -333,6 +362,42 @@ router.put('/:id', async (req, res) => {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [exportOrderId, containerNo, kindOfPackage, description, qtyInKg,
            mfdExpDt, lotNo, qty, usdRate, convRate, usdAmt, inrAmt])
+    }
+
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const refNo = formData.billNo || `EXP-${exportOrderId}`;
+      const itemDesc = Array.isArray(items) && items.length > 0
+        ? items.map(i => `${i.qty || 0} ${i.description || 'Item'}`).slice(0, 3).join(', ')
+        : 'Export Goods';
+      await triggerTransactionNotification({
+        eventType: isOrderValue ? 'ORDER_UPDATED' : 'SALES_UPDATED',
+        isUpdate: true,
+        moduleName: 'EXPORT_ORDER',
+        referenceNo: refNo,
+        referenceId: exportOrderId,
+        companyId: req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1),
+        title: `✏️ EXPORT ${isOrderValue ? 'ORDER' : 'INVOICE'} UPDATED – ${refNo}`,
+        message: `Updated Export | Consignee: ${formData.consignee || 'Export Buyer'} | ${itemDesc} | Qty: ${totalQty} | INR: ₹${totalInrAmt}`,
+        severity: 'INFO',
+        details: {
+          reference_no: refNo,
+          sales_no: refNo,
+          action_label: isOrderValue ? 'EXPORT ORDER' : 'EXPORT INVOICE',
+          customer: formData.consignee || 'Export Buyer',
+          party_name: formData.consignee || 'Export Buyer',
+          item_summary: itemDesc,
+          quantity: `${totalQty} Bags / ${formData.netWt || 0} KG`,
+          total_weight: `${formData.netWt || 0} KG`,
+          amount: totalInrAmt,
+          vehicle: formData.lorryNo || formData.vesselFltNo || '-',
+          updated_by: req.user?.username || 'Export Desk',
+          created_by: req.user?.username || 'Export Desk',
+          date: formData.date || undefined
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Export Order Update):', notifErr.message);
     }
 
     res.json({ success: true, message: 'Record updated successfully!' })

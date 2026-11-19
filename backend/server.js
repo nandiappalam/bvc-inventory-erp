@@ -851,6 +851,16 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
   const databaseHealth = require('./services/DatabaseHealthService');
   databaseHealth.setReady(true);
   console.log('✓ BVC ERP Database & Services marked READY (100% operational)');
+
+  // Restore saved Server WhatsApp session asynchronously without delaying HTTP readiness
+  try {
+    const whatsappServerService = require('./services/whatsappServerService');
+    whatsappServerService.initSavedSessionsOnBoot().catch((waErr) => {
+      console.warn('⚠️ WhatsApp boot restore warning:', waErr.message);
+    });
+  } catch (waErr) {
+    console.warn('⚠️ WhatsApp service init warning:', waErr.message);
+  }
 })
 
 server.on('error', (err) => {

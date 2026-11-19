@@ -73,14 +73,14 @@ body{
     font-size:15px;
 }
 
-th{
+th:not(.MuiTableCell-root){
     background:#2f6fd6;
     color:white;
     border:1px solid #6c8f8a;
     height:24px;
 }
 
-td{
+td:not(.MuiTableCell-root){
     border:1px solid #6c8f8a;
     height:22px;
 }

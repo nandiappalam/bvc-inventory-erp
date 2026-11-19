@@ -450,6 +450,19 @@ async function createOrUpdateColdStorageBill({
     billId = existingBill.id;
     billNo = existingBill.bill_no;
 
+    if (Number(existingBill.is_manually_edited) === 1) {
+      return {
+        success: true,
+        billId,
+        billNo,
+        grandTotal: parseFloat(existingBill.grand_total || 0),
+        taxableAmount: parseFloat(existingBill.taxable_amount || 0),
+        totalTax: parseFloat(existingBill.total_tax || 0),
+        variance: parseFloat(existingBill.variance_amount || 0),
+        skippedManualEdit: true
+      };
+    }
+
     await db.run(
       `UPDATE cold_storage_bills SET
         bill_date = ?,

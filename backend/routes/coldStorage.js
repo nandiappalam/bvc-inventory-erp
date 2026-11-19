@@ -803,10 +803,39 @@ router.post('/in', async (req, res) => {
       console.warn('Auto bill generation warning for CS IN:', billErr.message);
     }
 
-    res.json({ 
-      success: true, 
-      message: `Cold Storage IN Voucher ${voucher_no} saved successfully`, 
-      voucher_no, 
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const csCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+      const itemDesc = items.map(i => `${i.quantity || 0} ${i.item_name}`).slice(0, 3).join(', ');
+      await triggerTransactionNotification({
+        eventType: 'COLD_STORAGE_CREATED',
+        moduleName: 'COLD_STORAGE',
+        referenceNo: voucher_no,
+        referenceId: voucher_id,
+        companyId: csCompanyId,
+        title: `❄️ COLD STORAGE IN – ${voucher_no}`,
+        message: `Chamber: ${cold_storage_name} | ${itemDesc} | Total: ${total_qty} Bags (${total_wt} KG)`,
+        severity: 'INFO',
+        details: {
+          reference_no: voucher_no,
+          action_label: 'INWARD (IN)',
+          godown: cold_storage_name,
+          item_summary: itemDesc,
+          quantity: `${total_qty} Bags / ${total_wt} KG`,
+          party_name: operator_name || inward_source_type || 'Factory Godown',
+          remarks: remarks || '-',
+          created_by: createdBy,
+          date: voucher_date || new Date().toISOString().split('T')[0]
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Cold Storage IN):', notifErr.message);
+    }
+
+    res.json({
+      success: true,
+      message: `Cold Storage IN Voucher ${voucher_no} saved successfully`,
+      voucher_no,
       id: voucher_id,
       bill_id: billInfo?.billId || null,
       bill_no: billInfo?.billNo || null,
@@ -921,7 +950,7 @@ router.post('/out', async (req, res) => {
         }
       } catch (_) {}
     }
-    const handling_amount = parseFloat(body.handling_amount || (total_qty * handling_rate));
+    const handling_amount = parseFloat(body.handling_amount || (total_wt * handling_rate));
 
     const voucherRes = await db.query(`
       INSERT INTO cold_storage_vouchers 
@@ -1152,13 +1181,15 @@ router.post('/out', async (req, res) => {
     }
 
     // Update voucher with calculated totals
+    const maxStorageDays = outwardBillItems.reduce((mx, it) => Math.max(mx, parseInt(it.storage_days || 0, 10)), 0) || 1;
     await db.run(`
       UPDATE cold_storage_vouchers SET
+        storage_days = ?,
         storage_charges = ?,
         handling_amount = ?,
         charge_snapshot_json = ?
       WHERE id = ?
-    `, [totalStorageCharges, totalOutwardLoadingCharges, JSON.stringify(tariff), voucher_id], activeCompanyId);
+    `, [maxStorageDays, totalStorageCharges, totalOutwardLoadingCharges, JSON.stringify(tariff), voucher_id], activeCompanyId);
 
     // Link outward loading labour charge to operational_charges
     try {
@@ -1217,6 +1248,7 @@ router.post('/out', async (req, res) => {
         loadmanCharges: totalOutwardLoadingCharges,
         storageCharges: totalStorageCharges,
         handlingCharges: totalOutwardLoadingCharges,
+        storageDays: maxStorageDays,
         totalQty: total_qty,
         totalWeight: total_wt,
         items: outwardBillItems,
@@ -1239,10 +1271,38 @@ router.post('/out', async (req, res) => {
       } catch (_) {}
     }
 
-    res.json({ 
-      success: true, 
-      message: `Cold Storage OUT Voucher ${voucher_no} issued successfully`, 
-      voucher_no, 
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const itemDesc = items.map(i => `${i.quantity || 0} ${i.item_name}`).slice(0, 3).join(', ');
+      await triggerTransactionNotification({
+        eventType: 'COLD_STORAGE_CREATED',
+        moduleName: 'COLD_STORAGE',
+        referenceNo: voucher_no,
+        referenceId: voucher_id,
+        companyId: activeCompanyId,
+        title: `❄️ COLD STORAGE OUT – ${voucher_no}`,
+        message: `From: ${cold_storage_name} ➔ ${outward_dest_type === 'Customer Dispatch' ? (customer_name || 'Customer') : (destination_godown_name || 'Main Godown')} | ${itemDesc} | ${total_qty} Bags (${total_wt} KG)`,
+        severity: 'INFO',
+        details: {
+          reference_no: voucher_no,
+          action_label: 'OUTWARD (OUT)',
+          godown: cold_storage_name,
+          item_summary: itemDesc,
+          quantity: `${total_qty} Bags / ${total_wt} KG`,
+          party_name: outward_dest_type === 'Customer Dispatch' ? (customer_name || 'Customer') : (destination_godown_name || 'Factory Godown'),
+          remarks: remarks || '-',
+          created_by: createdBy,
+          date: voucher_date || new Date().toISOString().split('T')[0]
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Cold Storage OUT):', notifErr.message);
+    }
+
+    res.json({
+      success: true,
+      message: `Cold Storage OUT Voucher ${voucher_no} issued successfully`,
+      voucher_no,
       id: voucher_id,
       bill_id: billInfo?.billId || null,
       bill_no: billInfo?.billNo || null,
@@ -1262,15 +1322,19 @@ router.post('/out', async (req, res) => {
 // GET list of Cold Storage vouchers
 router.get('/vouchers', async (req, res) => {
   try {
-    await syncGodownTransfersToColdStorage();
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    await syncGodownTransfersToColdStorage(activeCompanyId);
     const { voucher_type, date_from, date_to, cold_storage_id } = req.query;
     let query = `
       SELECT 
         csv.*,
         csb.id AS bill_id,
         csb.bill_no,
+        csb.storage_charges AS bill_storage_charges,
+        csb.handling_charges AS bill_handling_charges,
         csb.grand_total AS bill_grand_total,
-        csb.status AS bill_status
+        csb.status AS bill_status,
+        csb.is_manually_edited AS bill_is_manually_edited
       FROM cold_storage_vouchers csv
       LEFT JOIN cold_storage_bills csb ON (csb.voucher_id = csv.id OR csb.voucher_no = csv.voucher_no OR csb.bill_no = ('CSB-' || csv.voucher_no))
       WHERE COALESCE(csv.remarks, '') NOT LIKE 'Auto-sync from Stock Lot CS-%'
@@ -1296,7 +1360,7 @@ router.get('/vouchers', async (req, res) => {
 
     query += ` ORDER BY csv.id DESC`;
 
-    const result = await db.query(query, params);
+    const result = await db.query(query, params, activeCompanyId);
     res.json({ success: true, data: result.rows || [] });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -1306,30 +1370,32 @@ router.get('/vouchers', async (req, res) => {
 // GET single Cold Storage voucher with items, linked bill, and tariff
 router.get('/vouchers/:id', async (req, res) => {
   try {
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
     const { id } = req.params;
-    const vRes = await db.query(`SELECT * FROM cold_storage_vouchers WHERE id = ? OR voucher_no = ?`, [id, id]);
+    const vRes = await db.query(`SELECT * FROM cold_storage_vouchers WHERE id = ? OR voucher_no = ?`, [id, id], activeCompanyId);
     if (!vRes.rows || vRes.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Voucher not found' });
     }
 
     const vData = vRes.rows[0];
     const voucherId = vData.id;
-    const itemsRes = await db.query(`SELECT * FROM cold_storage_items WHERE voucher_id = ?`, [voucherId]);
-    const items = itemsRes.rows || [];
+    const itemsRes = await db.query(`SELECT * FROM cold_storage_items WHERE voucher_id = ?`, [voucherId], activeCompanyId);
+    const rawItems = itemsRes.rows || [];
 
     // Find linked bill if any
     let bill = null;
     try {
       const bRes = await db.query(
         `SELECT * FROM cold_storage_bills WHERE voucher_id = ? OR voucher_no = ? OR bill_no = ? OR bill_no = ? OR remarks LIKE ? ORDER BY id DESC LIMIT 1`,
-        [voucherId, vData.voucher_no, `CSB-${vData.voucher_no}`, vData.voucher_no, `%${vData.voucher_no}%`]
+        [voucherId, vData.voucher_no, `CSB-${vData.voucher_no}`, vData.voucher_no, `%${vData.voucher_no}%`],
+        activeCompanyId
       );
       if (bRes.rows && bRes.rows.length > 0) {
         bill = bRes.rows[0];
         try {
           bill.items = JSON.parse(bill.items_json || '[]');
         } catch (_) {
-          bill.items = items;
+          bill.items = rawItems;
         }
       }
     } catch (_) {}
@@ -1338,15 +1404,106 @@ router.get('/vouchers/:id', async (req, res) => {
     let tariff = null;
     if (vData.cold_storage_id) {
       try {
-        tariff = await getColdStorageTariff(vData.cold_storage_id, req.companyId || 1);
+        tariff = await getColdStorageTariff(vData.cold_storage_id, activeCompanyId);
       } catch (_) {}
+    }
+
+    const billItems = Array.isArray(bill?.items) ? bill.items : [];
+    const baseItems = rawItems.length > 0 ? rawItems : billItems;
+    const enrichedItems = [];
+
+    for (let idx = 0; idx < baseItems.length; idx++) {
+      const it = baseItems[idx];
+      const billItem = billItems[idx] || billItems.find(bi =>
+        (it.cold_storage_lot_no && bi.cold_storage_lot_no === it.cold_storage_lot_no) ||
+        (it.item_name && bi.item_name === it.item_name)
+      );
+
+      let inDate = it.inward_date || billItem?.inward_date || null;
+      let lotBalance = null;
+      try {
+        const lotKey = it.cold_storage_lot_no || it.purchase_lot_no || '';
+        const purKey = it.purchase_lot_no || '';
+        const balRes = await db.query(`
+          SELECT
+            MIN(CASE WHEN csv.voucher_type = 'IN' THEN csv.voucher_date END) AS inward_date,
+            SUM(CASE WHEN csv.voucher_type = 'IN' THEN csi.quantity ELSE 0 END) AS total_in_qty,
+            SUM(CASE WHEN csv.voucher_type = 'IN' THEN csi.total_wt ELSE 0 END) AS total_in_wt,
+            SUM(CASE WHEN csv.voucher_type = 'OUT' THEN csi.quantity ELSE 0 END) AS total_out_qty,
+            SUM(CASE WHEN csv.voucher_type = 'OUT' THEN csi.total_wt ELSE 0 END) AS total_out_wt
+          FROM cold_storage_items csi
+          JOIN cold_storage_vouchers csv ON csi.voucher_id = csv.id
+          WHERE COALESCE(csv.remarks, '') NOT LIKE 'Auto-sync from Stock Lot CS-%'
+            AND (
+              (csi.cold_storage_lot_no != '' AND (LOWER(TRIM(csi.cold_storage_lot_no)) = LOWER(TRIM(?)) OR LOWER(TRIM(csi.cold_storage_lot_no)) = LOWER(TRIM(?))))
+              OR (csi.purchase_lot_no != '' AND LOWER(TRIM(csi.purchase_lot_no)) = LOWER(TRIM(?)))
+            )
+            ${vData.cold_storage_id ? 'AND (csv.cold_storage_id = ? OR CAST(csv.cold_storage_id AS TEXT) = ?)' : ''}
+        `, vData.cold_storage_id
+          ? [lotKey, purKey, purKey || lotKey, vData.cold_storage_id, String(vData.cold_storage_id)]
+          : [lotKey, purKey, purKey || lotKey],
+        activeCompanyId);
+        if (balRes.rows && balRes.rows[0]) {
+          lotBalance = balRes.rows[0];
+          if (!inDate && lotBalance.inward_date) {
+            inDate = lotBalance.inward_date;
+          }
+        }
+      } catch (_) {}
+
+      const qty = parseFloat(it.quantity || 0);
+      const wt = parseFloat(it.weight || 1);
+      const totWt = parseFloat(it.total_wt || (qty * wt));
+      const outDate = it.outward_date || vData.voucher_date;
+      const calcDays = (inDate && outDate)
+        ? calculateStorageDays(inDate, outDate, tariff?.freeDays || 0, tariff?.minDays || 1).calendarDays
+        : 1;
+      const storageDays = parseInt(it.storage_days || it.calendar_days || billItem?.storage_days || vData.storage_days || calcDays || 1, 10) || 1;
+      const storageChargesVal = parseFloat(
+        it.storage_charges ?? it.storage_charge ?? billItem?.storage_charges ?? (baseItems.length === 1 ? (bill?.storage_charges ?? vData.storage_charges ?? 0) : 0)
+      ) || 0;
+      const loadingChargesVal = parseFloat(
+        it.loading_charges ?? it.labour_charge ?? billItem?.handling_charges ?? (baseItems.length === 1 ? (bill?.handling_charges ?? vData.handling_amount ?? 0) : 0)
+      ) || 0;
+
+      const totalInQty = parseFloat(lotBalance?.total_in_qty || 0);
+      const totalOutQty = parseFloat(lotBalance?.total_out_qty || 0);
+      const totalInWt = parseFloat(lotBalance?.total_in_wt || 0);
+      const totalOutWt = parseFloat(lotBalance?.total_out_wt || 0);
+      const remQty = it.remaining_quantity != null
+        ? Math.max(0, parseFloat(it.remaining_quantity))
+        : (lotBalance ? Math.max(0, totalInQty - totalOutQty) : 0);
+      const remWt = it.remaining_weight != null
+        ? Math.max(0, parseFloat(it.remaining_weight))
+        : (lotBalance ? Math.max(0, totalInWt - totalOutWt) : Number((remQty * (wt > 1 ? wt : 1)).toFixed(2)));
+      const normalizedUnit = (!it.unit || String(it.unit).toUpperCase() === 'KG') && wt > 1 ? 'Bags' : (it.unit || 'KG');
+
+      enrichedItems.push({
+        ...it,
+        unit: normalizedUnit,
+        inward_date: inDate || outDate,
+        outward_date: outDate,
+        storage_days: storageDays,
+        calendar_days: storageDays,
+        storage_charge: storageChargesVal,
+        storage_charges: storageChargesVal,
+        labour_charge: loadingChargesVal,
+        loading_charges: loadingChargesVal,
+        total_charges: Number((storageChargesVal + loadingChargesVal).toFixed(2)),
+        original_inward_qty: totalInQty || qty,
+        previously_released_qty: Math.max(0, totalOutQty - qty),
+        remaining_quantity: Number(remQty.toFixed(2)),
+        remaining_weight: Number(remWt.toFixed(2))
+      });
     }
 
     res.json({
       success: true,
       data: {
         ...vData,
-        items,
+        storage_charges: parseFloat(bill?.storage_charges ?? vData.storage_charges ?? 0),
+        handling_amount: parseFloat(bill?.handling_charges ?? vData.handling_amount ?? 0),
+        items: enrichedItems,
         bill,
         tariff
       }
@@ -1785,6 +1942,7 @@ router.post('/calculate-bill', async (req, res) => {
 // POST /bills - Save Cold Storage Operator Bill
 router.post('/bills', async (req, res) => {
   try {
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
     let body = req.body;
     if (typeof body === 'string') {
       try { body = JSON.parse(body); } catch (e) {}
@@ -2176,6 +2334,7 @@ router.put('/bills/:id', async (req, res) => {
         variance_amount = ?,
         remarks = ?,
         items_json = ?,
+        is_manually_edited = 1,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `, [
@@ -2200,9 +2359,62 @@ router.put('/bills/:id', async (req, res) => {
       existing.id
     ], activeCompanyId);
 
+    // Sync edited bill amounts back to the linked Cold Storage Voucher so registers stay consistent
+    if (existing.voucher_id || existing.voucher_no) {
+      try {
+        await db.run(`
+          UPDATE cold_storage_vouchers SET
+            storage_charges = ?,
+            handling_amount = ?,
+            loadman_charges = ?,
+            additional_charges = ?,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE id = ? OR voucher_no = ?
+        `, [
+          storageCharges,
+          handlingCharges,
+          handlingCharges,
+          insuranceCharges + mamoolCharges + otherCharges,
+          existing.voucher_id || -1,
+          existing.voucher_no || ''
+        ], activeCompanyId);
+      } catch (_) {}
+    }
+
     const updatedRes = await db.query('SELECT * FROM cold_storage_bills WHERE id = ?', [existing.id], activeCompanyId);
     const updated = updatedRes.rows?.[0] || {};
     try { updated.items = JSON.parse(updated.items_json || '[]'); } catch (_) { updated.items = []; }
+
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const refNo = updated.bill_no || `CSB-${existing.id}`;
+      await triggerTransactionNotification({
+        eventType: 'COLD_STORAGE_UPDATED',
+        isUpdate: true,
+        moduleName: 'COLD_STORAGE',
+        referenceNo: refNo,
+        referenceId: existing.id,
+        companyId: activeCompanyId,
+        title: `✏️ COLD STORAGE BILL UPDATED – ${refNo}`,
+        message: `Updated Bill | Chamber: ${updated.godown_name || updated.cold_storage_name || 'Cold Storage'} | Amount: ₹${grandTotal}`,
+        severity: 'INFO',
+        details: {
+          reference_no: refNo,
+          action_label: 'COLD STORAGE BILL',
+          godown: updated.godown_name || updated.cold_storage_name || 'Cold Storage',
+          item_summary: `Storage ₹${storageCharges} / Handling ₹${handlingCharges}`,
+          quantity: `${updated.total_qty || 0} Bags / ${updated.total_weight || 0} KG`,
+          party_name: updated.operator_name || 'Cold Storage Operator',
+          amount: grandTotal,
+          remarks: remarks || '-',
+          updated_by: req.user?.username || 'Accounts Operator',
+          created_by: req.user?.username || 'Accounts Operator',
+          date: opInvDate || updated.bill_date || undefined
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Cold Storage Bill Update):', notifErr.message);
+    }
 
     res.json({
       success: true,

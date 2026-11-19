@@ -218,18 +218,18 @@ input {
 }
 
 /* Legacy table styles */
-table {
+table:not(.MuiTable-root) {
   width: 100%;
   border-collapse: collapse;
   background: white;
 }
-th {
+th:not(.MuiTableCell-root) {
   background: #2d64c8;
   color: white;
   border: 1px solid #9bb8f0;
   height: 22px;
 }
-td {
+td:not(.MuiTableCell-root) {
   border: 1px solid #c5d6f8;
   height: 24px;
 }

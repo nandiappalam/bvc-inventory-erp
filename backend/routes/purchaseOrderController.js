@@ -17,6 +17,39 @@ exports.createPurchaseOrder = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Missing form data or items' });
         }
         const newPurchaseOrder = await purchaseOrderService.createPurchaseOrder(formData, items, deductions);
+
+        try {
+            const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+            const poNo = newPurchaseOrder.inv_no || formData.inv_no || formData.invNo || `PO-${newPurchaseOrder.s_no || newPurchaseOrder.id}`;
+            const supplierName = formData.supplier_name || formData.supplierName || formData.supplier || 'Supplier';
+            const itemDesc = items.filter(i => i.item_name || i.itemName).map(i => `${i.qty || 0} ${i.item_name || i.itemName}`).slice(0, 3).join(', ') || 'Ordered Goods';
+            const totalQty = items.reduce((s, i) => s + (parseFloat(i.qty) || 0), 0);
+            const totalAmt = parseFloat(formData.total_amt || formData.totAmt || formData.amount || 0);
+            await triggerTransactionNotification({
+                eventType: 'ORDER_CREATED',
+                moduleName: 'PURCHASE_ORDER',
+                referenceNo: poNo,
+                referenceId: newPurchaseOrder.id,
+                companyId: req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1),
+                title: `📋 PURCHASE ORDER CREATED – ${poNo}`,
+                message: `Supplier: ${supplierName} | ${itemDesc} | Qty: ${totalQty} | Amount: ₹${totalAmt}`,
+                severity: 'INFO',
+                details: {
+                    reference_no: poNo,
+                    action_label: 'PURCHASE ORDER',
+                    party_name: supplierName,
+                    item_summary: itemDesc,
+                    quantity: `${totalQty} Bags`,
+                    amount: totalAmt,
+                    status: 'ISSUED',
+                    created_by: req.user?.username || 'Purchase Desk',
+                    date: formData.po_date || formData.poDate || formData.date
+                }
+            });
+        } catch (notifErr) {
+            console.warn('Notification warning (Purchase Order):', notifErr.message);
+        }
+
         res.status(201).json({ success: true, message: 'Purchase Order created successfully', data: newPurchaseOrder });
     } catch (error) {
         console.error('Error creating Purchase Order:', error);
@@ -54,6 +87,40 @@ exports.updatePurchaseOrder = async (req, res) => {
         if (!updatedPurchaseOrder) {
             return res.status(404).json({ success: false, message: 'Purchase Order not found' });
         }
+        try {
+            const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+            const poNo = updatedPurchaseOrder.inv_no || formData.inv_no || formData.invNo || `PO-${updatedPurchaseOrder.s_no || id}`;
+            const supplierName = formData.supplier_name || formData.supplierName || formData.supplier || 'Supplier';
+            const itemDesc = items.filter(i => i.item_name || i.itemName).map(i => `${i.qty || 0} ${i.item_name || i.itemName}`).slice(0, 3).join(', ') || 'Ordered Goods';
+            const totalQty = items.reduce((s, i) => s + (parseFloat(i.qty) || 0), 0);
+            const totalAmt = parseFloat(formData.total_amt || formData.totAmt || formData.amount || 0);
+            await triggerTransactionNotification({
+                eventType: 'ORDER_UPDATED',
+                isUpdate: true,
+                moduleName: 'PURCHASE_ORDER',
+                referenceNo: poNo,
+                referenceId: updatedPurchaseOrder.id || id,
+                companyId: req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1),
+                title: `✏️ PURCHASE ORDER UPDATED – ${poNo}`,
+                message: `Updated PO | Supplier: ${supplierName} | ${itemDesc} | Qty: ${totalQty} | Amount: ₹${totalAmt}`,
+                severity: 'INFO',
+                details: {
+                    reference_no: poNo,
+                    action_label: 'PURCHASE ORDER',
+                    party_name: supplierName,
+                    item_summary: itemDesc,
+                    quantity: `${totalQty} Bags`,
+                    amount: totalAmt,
+                    status: 'UPDATED',
+                    updated_by: req.user?.username || 'Purchase Desk',
+                    created_by: req.user?.username || 'Purchase Desk',
+                    date: formData.po_date || formData.poDate || formData.date
+                }
+            });
+        } catch (notifErr) {
+            console.warn('Notification warning (Purchase Order Update):', notifErr.message);
+        }
+
         res.status(200).json({ success: true, message: 'Purchase Order updated successfully', data: updatedPurchaseOrder });
     } catch (error) {
         console.error('Error updating Purchase Order:', error);

@@ -184,6 +184,39 @@ router.post('/', async (req, res) => {
       await processPackingStock(packingId, date, items);
     }
 
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const refNo = `PKG-${sNo || packingId}`;
+      const produced = (items || []).filter(i => i.remarks === 'section:to');
+      const summaryList = (produced.length > 0 ? produced : items || []);
+      const itemDesc = summaryList.map(i => `${i.total_packet || i.qty || 0} ${i.item_name || i.itemName || 'Pack'}`).slice(0, 3).join(', ') || 'Packed Goods';
+      const totalWt = summaryList.reduce((s, i) => s + (parseFloat(i.totWt || i.tot_wt) || 0), 0);
+      await triggerTransactionNotification({
+        eventType: 'PRODUCTION_CREATED',
+        moduleName: 'PRODUCTION',
+        referenceNo: refNo,
+        referenceId: packingId,
+        companyId: req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1),
+        title: `⚙️ PACKING COMPLETED – ${refNo}`,
+        message: `Unit: ${papadComp || type} | ${itemDesc} | Weight: ${totalWt} KG`,
+        severity: 'INFO',
+        details: {
+          reference_no: refNo,
+          action_label: 'PACKING',
+          module_label: `Packing (${type})`,
+          party_name: papadComp || 'Packing Department',
+          item_summary: itemDesc,
+          quantity: `${totalWt} KG`,
+          godown: 'Finished Goods Store',
+          status: 'PACKED',
+          created_by: req.user?.username || 'Packing Operator',
+          date
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Packing):', notifErr.message);
+    }
+
     res.json({ success: true, id: packingId, message: 'Packing entry saved successfully' });
   } catch (error) {
     console.error('Error creating packing entry:', error);
@@ -341,6 +374,41 @@ router.put('/:id', async (req, res) => {
         );
       }
       await processPackingStock(id, date, items);
+    }
+
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const refNo = `PKG-${sNo || id}`;
+      const produced = (items || []).filter(i => i.remarks === 'section:to');
+      const summaryList = produced.length > 0 ? produced : (items || []);
+      const itemDesc = summaryList.map(i => `${i.total_packet || i.qty || 0} ${i.item_name || i.itemName || 'Pack'}`).slice(0, 3).join(', ') || 'Packed Goods';
+      const totalWt = summaryList.reduce((s, i) => s + (parseFloat(i.totWt || i.tot_wt) || 0), 0);
+      await triggerTransactionNotification({
+        eventType: 'PRODUCTION_UPDATED',
+        isUpdate: true,
+        moduleName: 'PRODUCTION',
+        referenceNo: refNo,
+        referenceId: id,
+        companyId: req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1),
+        title: `✏️ PACKING UPDATED – ${refNo}`,
+        message: `Updated Packing | Unit: ${papadComp || type} | ${itemDesc} | Weight: ${totalWt} KG`,
+        severity: 'INFO',
+        details: {
+          reference_no: refNo,
+          action_label: 'PACKING',
+          module_label: `Packing (${type})`,
+          party_name: papadComp || 'Packing Department',
+          item_summary: itemDesc,
+          quantity: `${totalWt} KG`,
+          godown: 'Finished Goods Store',
+          status: 'UPDATED',
+          updated_by: req.user?.username || 'Packing Operator',
+          created_by: req.user?.username || 'Packing Operator',
+          date
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Packing Update):', notifErr.message);
     }
 
     res.json({ success: true, message: 'Packing entry updated successfully' });

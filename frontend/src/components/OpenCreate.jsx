@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../services/api';
+import { invalidateMasterCache } from '../services/masterservice.js';
+import { InlineMasterModal, getCreateLabel } from './common/InlineMasterModal.jsx';
 import './OpenCreate.css';
 
 const OpenCreate = () => {
@@ -28,20 +30,31 @@ const OpenCreate = () => {
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState('success');
 
+  const [inlineModalOpen, setInlineModalOpen] = useState(false);
+  const [inlineMasterType, setInlineMasterType] = useState('items');
+  const [inlineRowIndex, setInlineRowIndex] = useState(null);
+
+  const loadMasterLists = async () => {
+    const [itemsRes, compRes, weightRes] = await Promise.all([
+      api('/masters/items'),
+      api('/masters/papad_companies'),
+      api('/masters/weights')
+    ]);
+    const itemsArr = itemsRes ? (Array.isArray(itemsRes) ? itemsRes : itemsRes.data || []) : [];
+    const compArr = compRes ? (Array.isArray(compRes) ? compRes : compRes.data || []) : [];
+    const weightArr = weightRes ? (Array.isArray(weightRes) ? weightRes : weightRes.data || []) : [];
+    setMasterItems(itemsArr);
+    setMasterPapadCompanies(compArr);
+    setMasterWeights(weightArr);
+    return { itemsArr, compArr, weightArr };
+  };
+
   // Fetch all required masters and details
   useEffect(() => {
     const fetchMasters = async () => {
       setLoading(true);
       try {
-        const [itemsRes, compRes, weightRes] = await Promise.all([
-          api('/masters/items'),
-          api('/masters/papad_companies'),
-          api('/masters/weights')
-        ]);
-
-        if (itemsRes) setMasterItems(Array.isArray(itemsRes) ? itemsRes : itemsRes.data || []);
-        if (compRes) setMasterPapadCompanies(Array.isArray(compRes) ? compRes : compRes.data || []);
-        if (weightRes) setMasterWeights(Array.isArray(weightRes) ? weightRes : weightRes.data || []);
+        await loadMasterLists();
         
         if (editId) {
           // Fetch existing record for edit mode
@@ -93,25 +106,46 @@ const OpenCreate = () => {
     fetchMasters();
   }, [editId]);
 
+  const openInlineModal = (masterType, rowIndex = null) => {
+    setInlineMasterType(masterType);
+    setInlineRowIndex(rowIndex);
+    setInlineModalOpen(true);
+  };
+
   const handleChange = (e) => {
     const { name, value } = e.target;
+    if (name === 'papad_comp' && value === '__CREATE_NEW__') {
+      openInlineModal('papad_companies', null);
+      return;
+    }
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const getWeightFactor = (weightName) => {
-    const match = masterWeights.find(w => w.name === weightName || w.printname === weightName);
+  const getWeightFactor = (weightName, weightsSource = masterWeights) => {
+    const match = (weightsSource || []).find(w => w.name === weightName || w.printname === weightName);
     if (match && match.weight !== undefined) return parseFloat(match.weight);
     
     if (!weightName) return 1;
     const num = parseFloat(weightName);
     if (isNaN(num)) return 1;
-    if (weightName.toLowerCase().includes('gm') && !weightName.toLowerCase().includes('kg')) {
+    if (String(weightName).toLowerCase().includes('gm') && !String(weightName).toLowerCase().includes('kg')) {
       return num / 1000;
     }
     return num;
   };
 
   const handleItemChange = (index, field, value) => {
+    if (value === '__CREATE_NEW__') {
+      if (field === 'item_name') {
+        openInlineModal('items', index);
+        return;
+      }
+      if (field === 'weight') {
+        openInlineModal('weights', index);
+        return;
+      }
+    }
+
     const updatedItems = [...items];
     updatedItems[index][field] = value;
 
@@ -123,6 +157,54 @@ const OpenCreate = () => {
     }
 
     setItems(updatedItems);
+  };
+
+  const handleInlineCreated = async (newId, newRecord) => {
+    invalidateMasterCache(inlineMasterType);
+    let refreshed = { itemsArr: masterItems, compArr: masterPapadCompanies, weightArr: masterWeights };
+    try {
+      refreshed = await loadMasterLists();
+    } catch (err) {
+      console.error('Failed to reload masters after inline create:', err);
+    }
+
+    if (inlineMasterType === 'papad_companies') {
+      const found = refreshed.compArr.find(c => String(c.id) === String(newId)) || newRecord;
+      const compName = found?.name || newRecord?.name || '';
+      if (compName) {
+        setFormData(prev => ({ ...prev, papad_comp: compName }));
+      }
+    } else if (inlineMasterType === 'items' && inlineRowIndex !== null) {
+      const found = refreshed.itemsArr.find(mi => String(mi.id) === String(newId)) || newRecord;
+      const itemName = found?.item_name || found?.name || newRecord?.item_name || newRecord?.name || '';
+      if (itemName) {
+        setItems(prev => {
+          const updated = [...prev];
+          if (updated[inlineRowIndex]) {
+            updated[inlineRowIndex] = { ...updated[inlineRowIndex], item_name: itemName };
+          }
+          return updated;
+        });
+      }
+    } else if (inlineMasterType === 'weights' && inlineRowIndex !== null) {
+      const found = refreshed.weightArr.find(w => String(w.id) === String(newId)) || newRecord;
+      const weightLabel = found?.name || found?.printname || newRecord?.name || newRecord?.displayName || '';
+      if (weightLabel) {
+        setItems(prev => {
+          const updated = [...prev];
+          if (updated[inlineRowIndex]) {
+            const qty = parseFloat(updated[inlineRowIndex].qty) || 0;
+            const weightFactor = getWeightFactor(weightLabel, refreshed.weightArr);
+            updated[inlineRowIndex] = {
+              ...updated[inlineRowIndex],
+              weight: weightLabel,
+              tot_wt: qty > 0 ? (qty * weightFactor).toFixed(2) : updated[inlineRowIndex].tot_wt
+            };
+          }
+          return updated;
+        });
+      }
+    }
   };
 
   const addRow = () => {
@@ -274,6 +356,9 @@ const OpenCreate = () => {
                   {masterPapadCompanies.map((c) => (
                     <option key={c.id} value={c.name}>{c.name}</option>
                   ))}
+                  <option value="__CREATE_NEW__" style={{ fontWeight: 'bold', color: '#1e3a8a' }}>
+                    {getCreateLabel('papad_companies')}
+                  </option>
                 </select>
               </div>
             </div>
@@ -343,6 +428,9 @@ const OpenCreate = () => {
                           {masterItems.map((mi) => (
                             <option key={mi.id} value={mi.item_name}>{mi.item_name}</option>
                           ))}
+                          <option value="__CREATE_NEW__" style={{ fontWeight: 'bold', color: '#1e3a8a' }}>
+                            {getCreateLabel('items')}
+                          </option>
                         </select>
                       </td>
 
@@ -355,6 +443,9 @@ const OpenCreate = () => {
                           {masterWeights.map((w) => (
                             <option key={w.id} value={w.name}>{w.name}</option>
                           ))}
+                          <option value="__CREATE_NEW__" style={{ fontWeight: 'bold', color: '#1e3a8a' }}>
+                            {getCreateLabel('weights')}
+                          </option>
                         </select>
                       </td>
 
@@ -455,6 +546,13 @@ const OpenCreate = () => {
           </div>
         </div>
       </div>
+
+      <InlineMasterModal
+        open={inlineModalOpen}
+        onClose={() => setInlineModalOpen(false)}
+        masterType={inlineMasterType}
+        onSuccess={handleInlineCreated}
+      />
     </div>
   );
 };

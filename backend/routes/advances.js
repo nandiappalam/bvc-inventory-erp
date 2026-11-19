@@ -99,6 +99,33 @@ router.post('/', async (req, res) => {
       return { advanceId, voucherNo: vRes?.voucherNo || null };
     });
 
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const refNo = txResult.voucherNo || `ADV-${txResult.advanceId}`;
+      await triggerTransactionNotification({
+        eventType: 'VOUCHER_CREATED',
+        moduleName: 'ADVANCE',
+        referenceNo: refNo,
+        referenceId: txResult.advanceId,
+        companyId: activeCompanyId,
+        title: `💳 ADVANCE ENTRY – ${refNo}`,
+        message: `Company: ${papad_company} | Amount: ₹${amount} (${dr_cr || 'Dr'}) | Mode: ${pay_mode || 'Cash'}`,
+        severity: 'INFO',
+        details: {
+          reference_no: refNo,
+          action_label: `Advance (${dr_cr || 'Dr'})`,
+          party_name: papad_company,
+          payment_mode: pay_mode || 'Cash',
+          amount: parseFloat(amount) || 0,
+          remarks: remarks || '-',
+          created_by: req.user?.username || 'Accounts Operator',
+          date
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Advance):', notifErr.message);
+    }
+
     res.status(201).json({
       success: true,
       message: 'Advance created successfully',
@@ -153,6 +180,35 @@ router.put('/:id', async (req, res) => {
         companyId: activeCompanyId
       });
     });
+
+    try {
+      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const refNo = vRes?.voucherNo || `ADV-${advanceId}`;
+      await triggerTransactionNotification({
+        eventType: 'VOUCHER_UPDATED',
+        isUpdate: true,
+        moduleName: 'ADVANCE',
+        referenceNo: refNo,
+        referenceId: advanceId,
+        companyId: activeCompanyId,
+        title: `✏️ ADVANCE ENTRY UPDATED – ${refNo}`,
+        message: `Updated Advance | Company: ${papad_company} | Amount: ₹${amount} (${dr_cr || 'Dr'}) | Mode: ${pay_mode || 'Cash'}`,
+        severity: 'INFO',
+        details: {
+          reference_no: refNo,
+          action_label: `Advance (${dr_cr || 'Dr'})`,
+          party_name: papad_company,
+          payment_mode: pay_mode || 'Cash',
+          amount: parseFloat(amount) || 0,
+          remarks: remarks || '-',
+          updated_by: req.user?.username || 'Accounts Operator',
+          created_by: req.user?.username || 'Accounts Operator',
+          date
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification warning (Advance Update):', notifErr.message);
+    }
 
     res.json({ success: true, message: 'Advance updated successfully', voucher_no: vRes?.voucherNo || null });
   } catch (error) {

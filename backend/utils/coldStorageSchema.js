@@ -179,6 +179,7 @@ async function ensureSqliteColdStorageSchema(companyId) {
       voucher_no TEXT,
       remarks TEXT,
       items_json TEXT,
+      is_manually_edited INTEGER DEFAULT 0,
       created_by TEXT DEFAULT 'Admin',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -332,7 +333,8 @@ async function ensureSqliteColdStorageSchema(companyId) {
     ['paid_amount', 'REAL DEFAULT 0'],
     ['balance_amount', 'REAL DEFAULT 0'],
     ['payment_status', 'TEXT DEFAULT "Pending"'],
-    ['accounting_voucher_no', 'TEXT']
+    ['accounting_voucher_no', 'TEXT'],
+    ['is_manually_edited', 'INTEGER DEFAULT 0']
   ];
   for (const [col, typeDef] of requiredBillCols) {
     if (!billCols.has(col.toLowerCase())) {
@@ -558,6 +560,7 @@ async function ensurePostgresColdStorageSchema(companyId) {
       voucher_no TEXT,
       remarks TEXT,
       items_json TEXT,
+      is_manually_edited INTEGER DEFAULT 0,
       created_by TEXT DEFAULT 'Admin',
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -604,7 +607,7 @@ async function ensurePostgresColdStorageSchema(companyId) {
     'loadman_name TEXT', 'loadman_charges NUMERIC DEFAULT 0', 'storage_days INTEGER DEFAULT 0',
     'total_qty NUMERIC DEFAULT 0', 'total_weight NUMERIC DEFAULT 0', 'bill_type TEXT DEFAULT \'OUTWARD\'',
     'paid_amount NUMERIC DEFAULT 0', 'balance_amount NUMERIC DEFAULT 0', 'payment_status TEXT DEFAULT \'Pending\'',
-    'accounting_voucher_no TEXT'
+    'accounting_voucher_no TEXT', 'is_manually_edited INTEGER DEFAULT 0'
   ];
   for (const colDef of pgBillCols) {
     try {

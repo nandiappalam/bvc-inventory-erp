@@ -118,6 +118,21 @@ const MASTER_TABLES = [
       name TEXT UNIQUE NOT NULL,
       applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`
+  },
+  {
+    name: 'whatsapp_server_sessions',
+    sql: `CREATE TABLE IF NOT EXISTS whatsapp_server_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_key TEXT UNIQUE NOT NULL,
+      display_name TEXT,
+      phone_number TEXT,
+      status TEXT DEFAULT 'DISCONNECTED',
+      auth_creds_json TEXT,
+      auth_keys_json TEXT,
+      last_connected_at DATETIME,
+      last_error TEXT,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`
   }
 ];
 
@@ -130,7 +145,8 @@ const MASTER_TABLE_NAMES = new Set([
   'user_permissions',
   'user_company_access',
   'login_history',
-  '_master_migrations'
+  '_master_migrations',
+  'whatsapp_server_sessions'
 ]);
 
 module.exports = {
