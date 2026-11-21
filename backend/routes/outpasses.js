@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
 const { rebuildStockLedger } = require('../utils/stockRebuilder');
+const { syncDocumentMovements, deleteDocumentMovements } = require('../services/SourceMovementSync');
 const { ensureMovementPassesSchema } = require('../utils/movementPassesSchema');
 const { resolveFlourMillInfo, enrichRecordsWithMillNames, isNumericId } = require('../utils/millResolver');
 
@@ -437,7 +438,7 @@ router.post('/', async (req, res) => {
     const outpassId = txRes.outpassId;
 
     try {
-      await rebuildStockLedger(activeCompanyId);
+      await syncDocumentMovements(activeCompanyId, 'OUTPASS', outpassId, req.user?.username || 'admin');
     } catch (e) {}
 
     // Create linked operational charges if provided in request
@@ -574,6 +575,10 @@ router.put('/:id', async (req, res) => {
     ], activeCompanyId);
 
     try {
+      await syncDocumentMovements(activeCompanyId, 'OUTPASS', id, req.user?.username || 'admin');
+    } catch (e) {}
+
+    try {
       const { triggerTransactionNotification } = require('../utils/transactionNotifier');
       const updatedRes = await db.query('SELECT * FROM outpasses WHERE id = ? LIMIT 1', [id], activeCompanyId);
       const updatedOp = updatedRes.rows?.[0] || existing;
@@ -662,7 +667,7 @@ router.delete('/:id', async (req, res) => {
     });
 
     try {
-      await rebuildStockLedger(activeCompanyId);
+      await deleteDocumentMovements(activeCompanyId, 'OUTPASS', id, 'Outpass deleted', req.user?.username || 'admin');
     } catch (e) {}
 
     res.json({ success: true, message: 'Outpass deleted and stock restored successfully' });

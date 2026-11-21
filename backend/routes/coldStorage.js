@@ -2,9 +2,16 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
 const { rebuildStockLedger } = require('../utils/stockRebuilder');
+const { syncDocumentMovements, deleteDocumentMovements } = require('../services/SourceMovementSync');
 const recycleBinService = require('../services/RecycleBinService');
 const { calculateStorageDays, calculateSlabStorageCharge, calculateLabourCharge, getColdStorageTariff, calculateBill, createOrUpdateColdStorageBill } = require('../services/ColdStorageBillingService');
 const { syncGodownTransfersToColdStorage } = require('../services/coldStorageTransferSync');
+const {
+  loadPartyDirectory,
+  resolveSupplierFromDirectory,
+  resolveCustomerFromDirectory,
+  resolvePartyFromDirectory
+} = require('../services/PartyNameResolver');
 
 const { ensureColdStorageSchema } = require('../utils/coldStorageSchema');
 
@@ -756,9 +763,10 @@ router.post('/in', async (req, res) => {
     }
 
     try {
-      await rebuildStockLedger();
+      const cIdSync = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+      await syncDocumentMovements(cIdSync, 'COLD_STORAGE', voucher_id, createdBy || 'admin');
     } catch (rErr) {
-      console.warn('Rebuild ledger after CS IN warning:', rErr.message);
+      console.warn('Sync movements after CS IN warning:', rErr.message);
     }
 
     let billInfo = null;
@@ -1224,9 +1232,9 @@ router.post('/out', async (req, res) => {
     }
 
     try {
-      await rebuildStockLedger();
+      await syncDocumentMovements(activeCompanyId, 'COLD_STORAGE', voucher_id, createdBy || 'admin');
     } catch (rErr) {
-      console.warn('Rebuild ledger after CS OUT warning:', rErr.message);
+      console.warn('Sync movements after CS OUT warning:', rErr.message);
     }
 
     let billInfo = null;
@@ -1544,9 +1552,10 @@ router.delete('/vouchers/:id', async (req, res) => {
     await db.query(`DELETE FROM cold_storage_items WHERE voucher_id = ?`, [id]);
     await db.query(`DELETE FROM cold_storage_vouchers WHERE id = ?`, [id]);
     try {
-      await rebuildStockLedger();
+      const cIdSync = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+      await deleteDocumentMovements(cIdSync, 'COLD_STORAGE', id, 'Cold Storage voucher deleted', req.user?.username || 'admin');
     } catch (rErr) {
-      console.warn('Rebuild ledger after CS delete warning:', rErr.message);
+      console.warn('Reverse movements after CS delete warning:', rErr.message);
     }
     res.json({ success: true, message: 'Voucher deleted successfully' });
   } catch (err) {
@@ -1631,174 +1640,382 @@ router.get('/ledger', async (req, res) => {
   }
 });
 
-// GET Complete Lot Traceability across Main Godown, Cold Storage, Vouchers & Production
+// GET Complete Lot Traceability across Main Godown, Cold Storage, Transfers, Milling & Sales
 router.get('/traceability', async (req, res) => {
   try {
-    const { query: searchQuery } = req.query;
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    const runner = db.forCompany(Number.isSafeInteger(activeCompanyId) && activeCompanyId > 0 ? activeCompanyId : 1);
+    const partyDir = await loadPartyDirectory(activeCompanyId, runner);
 
-    if (!searchQuery) {
-      return res.json({ success: true, data: [] });
-    }
+    const searchQuery = String(req.query.query || '').trim();
+    const hasSearch = searchQuery.length > 0;
+    const q = `%${searchQuery}%`;
 
-    const q = `%${searchQuery.trim()}%`;
-
-    // 1. Fetch Purchase Lot Entries safely with fallback
-    let purchaseRes;
+    // Identify Cold Storage godown names dynamically
+    const csGodownNamesSet = new Set();
     try {
-      purchaseRes = await db.query(`
-        SELECT 
-          p.id AS purchase_id,
-          COALESCE(p.voucher_no, CAST(p.id AS TEXT)) AS voucher_no,
-          p.date AS purchase_date,
-          COALESCE(sm.print_name, sm.name, CAST(p.supplier AS TEXT), 'Supplier') AS supplier_name,
-          COALESCE(p.godown, 'Main Godown') AS main_godown,
-          pi.item_name,
-          pi.lot_no AS purchase_lot_no,
-          pi.qty AS purchased_qty,
-          COALESCE(pi.weight, 0) AS per_unit_wt,
-          COALESCE(pi.total_wt, pi.qty * COALESCE(pi.weight, 1), pi.qty) AS purchased_total_wt,
-          COALESCE(pi.unit, 'KG') AS unit
-        FROM purchase_items pi
-        JOIN purchases p ON pi.purchase_id = p.id
-        LEFT JOIN supplier_master sm ON (CAST(sm.id AS TEXT) = CAST(p.supplier AS TEXT) OR sm.name = CAST(p.supplier AS TEXT) OR sm.print_name = CAST(p.supplier AS TEXT))
-        WHERE pi.lot_no LIKE ? OR pi.item_name LIKE ?
-        ORDER BY p.date DESC
-      `, [q, q]);
-    } catch (pErr) {
-      console.warn('Fallback traceability purchase query:', pErr.message);
-      try {
-        purchaseRes = await db.query(`
-          SELECT 
-            p.id AS purchase_id,
-            CAST(p.id AS TEXT) AS voucher_no,
-            p.date AS purchase_date,
-            'Supplier' AS supplier_name,
-            'Main Godown' AS main_godown,
-            pi.item_name,
-            pi.lot_no AS purchase_lot_no,
-            pi.qty AS purchased_qty,
-            0 AS per_unit_wt,
-            pi.qty AS purchased_total_wt,
-            'KG' AS unit
-          FROM purchase_items pi
-          JOIN purchases p ON pi.purchase_id = p.id
-          WHERE pi.lot_no LIKE ? OR pi.item_name LIKE ?
-          ORDER BY p.date DESC
-        `, [q, q]);
-      } catch (pErr2) {
-        purchaseRes = { rows: [] };
+      const gmRes = await runner.query(`SELECT godown_name, godown_type, storage_location FROM godown_master`);
+      for (const g of (gmRes.rows || [])) {
+        const nameLower = String(g.godown_name || '').toLowerCase();
+        const typeLower = String(g.godown_type || '').toLowerCase();
+        const locLower = String(g.storage_location || '').toLowerCase();
+        if (nameLower.includes('cold') || typeLower.includes('cold') || locLower.includes('outside')) {
+          csGodownNamesSet.add(nameLower);
+        }
       }
-    }
+    } catch (_) {}
+    const isColdGodown = (gName) => {
+      const n = String(gName || '').trim().toLowerCase();
+      return n.includes('cold') || csGodownNamesSet.has(n);
+    };
 
-    // 2. Fetch Cold Storage Movements for matching lots
-    const csRes = await db.query(`
-      SELECT 
+    // Build list of available Cold Storage lots for quick chip selection
+    const availableLotsRes = await runner.query(`
+      SELECT
+        csi.cold_storage_lot_no AS lot_no,
+        csi.purchase_lot_no,
+        MAX(csi.item_name) AS item_name,
+        MAX(csv.cold_storage_name) AS cold_storage_name
+      FROM cold_storage_items csi
+      JOIN cold_storage_vouchers csv ON csi.voucher_id = csv.id
+      WHERE COALESCE(csv.remarks, '') NOT LIKE 'Auto-sync from Stock Lot%'
+        AND (csi.cold_storage_lot_no IS NOT NULL OR csi.purchase_lot_no IS NOT NULL)
+      GROUP BY csi.cold_storage_lot_no, csi.purchase_lot_no
+      ORDER BY MAX(csv.id) DESC
+      LIMIT 40
+    `);
+    const availableColdLots = availableLotsRes.rows || [];
+
+    // 1. Fetch Cold Storage voucher movements (excluding auto-sync duplicates)
+    const csRes = await runner.query(`
+      SELECT
+        csv.id AS voucher_id,
         csv.voucher_no,
         csv.voucher_type,
         csv.voucher_date,
         csv.cold_storage_name,
         csv.source_godown_name,
         csv.destination_godown_name,
+        csv.vehicle_no,
+        csv.remarks,
         csi.item_name,
         csi.purchase_lot_no,
         csi.cold_storage_lot_no,
         csi.quantity,
+        csi.weight AS per_bag_wt,
         csi.total_wt,
         csi.unit
       FROM cold_storage_items csi
       JOIN cold_storage_vouchers csv ON csi.voucher_id = csv.id
-      WHERE csi.purchase_lot_no LIKE ? OR csi.cold_storage_lot_no LIKE ? OR csi.item_name LIKE ?
-      ORDER BY csv.voucher_date ASC
-    `, [q, q, q]);
+      WHERE COALESCE(csv.remarks, '') NOT LIKE 'Auto-sync from Stock Lot%'
+        ${hasSearch ? 'AND (UPPER(COALESCE(csi.purchase_lot_no, \'\')) LIKE UPPER(?) OR UPPER(COALESCE(csi.cold_storage_lot_no, \'\')) LIKE UPPER(?) OR UPPER(COALESCE(csi.item_name, \'\')) LIKE UPPER(?))' : ''}
+      ORDER BY csv.voucher_date ASC, csv.id ASC
+    `, hasSearch ? [q, q, q] : []);
 
-    // Build comprehensive traceability maps
+    // Collect purchase lot keys from CS results if no search query, or match purchases directly when searching
+    const csPurchaseLotUppers = new Set();
+    for (const c of (csRes.rows || [])) {
+      if (c.purchase_lot_no) csPurchaseLotUppers.add(String(c.purchase_lot_no).trim().toUpperCase());
+      if (c.cold_storage_lot_no) csPurchaseLotUppers.add(String(c.cold_storage_lot_no).trim().toUpperCase());
+    }
+
+    // Also include direct-to-cold-storage purchases when no search query
+    let purchaseRes = { rows: [] };
+    try {
+      if (hasSearch) {
+        const extraLots = Array.from(csPurchaseLotUppers);
+        const extraPh = extraLots.length ? `OR UPPER(TRIM(pi.lot_no)) IN (${extraLots.map(() => '?').join(',')})` : '';
+        purchaseRes = await runner.query(`
+          SELECT
+            p.id AS purchase_id,
+            COALESCE(NULLIF(p.voucher_no, ''), NULLIF(p.inv_no, ''), CAST(p.s_no AS TEXT), CAST(p.id AS TEXT)) AS voucher_no,
+            SUBSTR(COALESCE(CAST(p.date AS TEXT), ''), 1, 10) AS purchase_date,
+            p.supplier AS raw_supplier,
+            COALESCE(gm.godown_name, p.godown, 'Main Godown') AS main_godown,
+            pi.item_name,
+            pi.lot_no AS purchase_lot_no,
+            pi.qty AS purchased_qty,
+            COALESCE(pi.weight, pi.per_unit_weight, 0) AS per_unit_wt,
+            COALESCE(NULLIF(pi.total_weight, 0), NULLIF(pi.weight, 0), p.total_weight, 0) AS purchased_total_wt,
+            COALESCE(pi.unit, 'KG') AS unit
+          FROM purchase_items pi
+          JOIN purchases p ON pi.purchase_id = p.id
+          LEFT JOIN godown_master gm ON (CAST(gm.id AS TEXT) = CAST(p.godown AS TEXT) OR p.godown = gm.godown_name)
+          WHERE (UPPER(COALESCE(pi.lot_no, '')) LIKE UPPER(?) OR UPPER(COALESCE(pi.item_name, '')) LIKE UPPER(?) ${extraPh})
+          ORDER BY p.date DESC, p.id DESC
+        `, [q, q, ...extraLots]);
+      } else {
+        const extraLots = Array.from(csPurchaseLotUppers);
+        const lotCondition = extraLots.length
+          ? `UPPER(TRIM(pi.lot_no)) IN (${extraLots.map(() => '?').join(',')}) OR LOWER(COALESCE(gm.godown_name, p.godown, '')) LIKE '%cold%'`
+          : `LOWER(COALESCE(gm.godown_name, p.godown, '')) LIKE '%cold%'`;
+        purchaseRes = await runner.query(`
+          SELECT
+            p.id AS purchase_id,
+            COALESCE(NULLIF(p.voucher_no, ''), NULLIF(p.inv_no, ''), CAST(p.s_no AS TEXT), CAST(p.id AS TEXT)) AS voucher_no,
+            SUBSTR(COALESCE(CAST(p.date AS TEXT), ''), 1, 10) AS purchase_date,
+            p.supplier AS raw_supplier,
+            COALESCE(gm.godown_name, p.godown, 'Main Godown') AS main_godown,
+            pi.item_name,
+            pi.lot_no AS purchase_lot_no,
+            pi.qty AS purchased_qty,
+            COALESCE(pi.weight, pi.per_unit_weight, 0) AS per_unit_wt,
+            COALESCE(NULLIF(pi.total_weight, 0), NULLIF(pi.weight, 0), p.total_weight, 0) AS purchased_total_wt,
+            COALESCE(pi.unit, 'KG') AS unit
+          FROM purchase_items pi
+          JOIN purchases p ON pi.purchase_id = p.id
+          LEFT JOIN godown_master gm ON (CAST(gm.id AS TEXT) = CAST(p.godown AS TEXT) OR p.godown = gm.godown_name)
+          WHERE ${lotCondition}
+          ORDER BY p.date DESC, p.id DESC
+          LIMIT 50
+        `, extraLots);
+      }
+    } catch (_) {}
+
+    // Build traceMap keyed by normalized purchase_lot_no (falling back to CS lot)
     const traceMap = {};
-
-    (purchaseRes.rows || []).forEach(p => {
-      const key = `${p.item_name}_${p.purchase_lot_no}`;
+    const ensureTrace = (baseLot, seed = {}) => {
+      const normLot = String(baseLot || '').trim();
+      if (!normLot) return null;
+      const key = normLot.toUpperCase();
       if (!traceMap[key]) {
         traceMap[key] = {
-          item_name: p.item_name,
-          purchase_lot_no: p.purchase_lot_no,
-          supplier_name: p.supplier_name,
-          purchase_voucher: p.voucher_no,
-          purchase_date: p.purchase_date,
-          main_godown: p.main_godown,
+          item_name: seed.item_name || 'Commodity',
+          purchase_lot_no: normLot,
+          supplier_name: seed.supplier_name || 'N/A',
+          purchase_voucher: seed.purchase_voucher || 'N/A',
+          purchase_date: seed.purchase_date || 'N/A',
+          main_godown: seed.main_godown || 'Main Godown',
           purchased_qty: 0,
           purchased_total_wt: 0,
-          unit: p.unit || 'KG',
+          unit: seed.unit || 'KG',
           cold_storage_in_qty: 0,
+          cold_storage_in_wt: 0,
           cold_storage_out_qty: 0,
+          cold_storage_out_wt: 0,
           cold_storage_lots: {},
-          movements: []
+          sibling_lots: new Set([normLot]),
+          movements: [],
+          transfers: [],
+          milling_batches: [],
+          sales_dispatches: [],
+          godown_balances: [],
+          audit_trail: []
         };
       }
-      traceMap[key].purchased_qty += parseFloat(p.purchased_qty || 0);
-      traceMap[key].purchased_total_wt += parseFloat(p.purchased_total_wt || 0);
-    });
+      return traceMap[key];
+    };
 
-    (csRes.rows || []).forEach(c => {
-      const key = `${c.item_name}_${c.purchase_lot_no}`;
-      if (!traceMap[key]) {
-        traceMap[key] = {
-          item_name: c.item_name,
-          purchase_lot_no: c.purchase_lot_no,
-          supplier_name: 'N/A',
-          purchase_voucher: 'N/A',
-          purchase_date: 'N/A',
-          main_godown: c.source_godown_name || 'Main Godown',
-          purchased_qty: 0,
-          purchased_total_wt: 0,
-          unit: c.unit || 'KG',
-          cold_storage_in_qty: 0,
-          cold_storage_out_qty: 0,
-          cold_storage_lots: {},
-          movements: []
-        };
-      }
+    for (const p of (purchaseRes.rows || [])) {
+      // Skip non-cold-storage purchases if empty search and somehow unrelated
+      const supName = resolveSupplierFromDirectory(partyDir, p.raw_supplier, null).name || p.raw_supplier || 'Supplier';
+      const entry = ensureTrace(p.purchase_lot_no, {
+        item_name: p.item_name,
+        supplier_name: supName,
+        purchase_voucher: p.voucher_no,
+        purchase_date: p.purchase_date,
+        main_godown: p.main_godown,
+        unit: p.unit
+      });
+      if (!entry) continue;
+      if (entry.supplier_name === 'N/A') entry.supplier_name = supName;
+      if (entry.purchase_voucher === 'N/A') entry.purchase_voucher = p.voucher_no;
+      if (entry.purchase_date === 'N/A') entry.purchase_date = p.purchase_date;
+      entry.purchased_qty += parseFloat(p.purchased_qty || 0);
+      entry.purchased_total_wt += parseFloat(p.purchased_total_wt || 0);
+    }
+
+    for (const c of (csRes.rows || [])) {
+      const anchorLot = String(c.purchase_lot_no || c.cold_storage_lot_no || '').trim();
+      const entry = ensureTrace(anchorLot, {
+        item_name: c.item_name,
+        main_godown: c.source_godown_name || 'Main Godown',
+        unit: c.unit || 'KG'
+      });
+      if (!entry) continue;
+      if (c.cold_storage_lot_no) entry.sibling_lots.add(String(c.cold_storage_lot_no).trim());
+      if (c.purchase_lot_no) entry.sibling_lots.add(String(c.purchase_lot_no).trim());
 
       const qty = parseFloat(c.quantity || 0);
+      const wt = parseFloat(c.total_wt || 0);
       if (c.voucher_type === 'IN') {
-        traceMap[key].cold_storage_in_qty += qty;
+        entry.cold_storage_in_qty += qty;
+        entry.cold_storage_in_wt += wt;
       } else {
-        traceMap[key].cold_storage_out_qty += qty;
+        entry.cold_storage_out_qty += qty;
+        entry.cold_storage_out_wt += wt;
       }
 
-      // CS Lot breakdown
-      const csLotKey = c.cold_storage_lot_no;
-      if (!traceMap[key].cold_storage_lots[csLotKey]) {
-        traceMap[key].cold_storage_lots[csLotKey] = {
+      const csLotKey = c.cold_storage_lot_no || anchorLot;
+      if (!entry.cold_storage_lots[csLotKey]) {
+        entry.cold_storage_lots[csLotKey] = {
           cold_storage_lot_no: csLotKey,
           cold_storage_name: c.cold_storage_name,
           in_qty: 0,
           out_qty: 0,
-          current_balance: 0
+          in_wt: 0,
+          out_wt: 0,
+          current_balance: 0,
+          current_balance_wt: 0
         };
       }
       if (c.voucher_type === 'IN') {
-        traceMap[key].cold_storage_lots[csLotKey].in_qty += qty;
+        entry.cold_storage_lots[csLotKey].in_qty += qty;
+        entry.cold_storage_lots[csLotKey].in_wt += wt;
       } else {
-        traceMap[key].cold_storage_lots[csLotKey].out_qty += qty;
+        entry.cold_storage_lots[csLotKey].out_qty += qty;
+        entry.cold_storage_lots[csLotKey].out_wt += wt;
       }
-      traceMap[key].cold_storage_lots[csLotKey].current_balance = 
-        traceMap[key].cold_storage_lots[csLotKey].in_qty - traceMap[key].cold_storage_lots[csLotKey].out_qty;
+      entry.cold_storage_lots[csLotKey].current_balance =
+        entry.cold_storage_lots[csLotKey].in_qty - entry.cold_storage_lots[csLotKey].out_qty;
+      entry.cold_storage_lots[csLotKey].current_balance_wt =
+        entry.cold_storage_lots[csLotKey].in_wt - entry.cold_storage_lots[csLotKey].out_wt;
 
-      traceMap[key].movements.push(c);
-    });
+      entry.movements.push(c);
+    }
 
-    const resultList = Object.values(traceMap).map(t => {
-      const csCurrentBal = t.cold_storage_in_qty - t.cold_storage_out_qty;
-      const mainGodownBal = Math.max(0, t.purchased_qty - t.cold_storage_in_qty);
-      return {
+    // Enrich every traced entry with Transfers, Milling, Sales, Live Godown Balances & Audit Trail
+    const resultList = [];
+    for (const t of Object.values(traceMap)) {
+      const lotListUpper = Array.from(t.sibling_lots).map(l => l.toUpperCase());
+      const lotPh = lotListUpper.map(() => 'UPPER(?)').join(',');
+
+      // Godown balances from clean physical stock_movements
+      let mainBal = 0;
+      let csBal = 0;
+      let issuedProdQty = t.cold_storage_out_qty;
+      try {
+        const gbRes = await runner.query(`
+          SELECT godown_name, lot_no,
+                 SUM(CASE WHEN direction = 'IN' THEN qty ELSE -qty END) AS balance_qty,
+                 SUM(CASE WHEN direction = 'IN' THEN COALESCE(weight, 0) ELSE -COALESCE(weight, 0) END) AS balance_wt
+          FROM stock_movements
+          WHERE is_reversed = 0 AND is_reversal = 0 AND is_physical_stock = 1
+            AND UPPER(TRIM(lot_no)) IN (${lotPh})
+          GROUP BY godown_name, lot_no
+          ORDER BY godown_name ASC
+        `, lotListUpper);
+        t.godown_balances = (gbRes.rows || []).map(r => ({
+          godown_name: r.godown_name,
+          lot_no: r.lot_no,
+          balance_qty: Number((parseFloat(r.balance_qty) || 0).toFixed(3)),
+          balance_weight_kg: Number((parseFloat(r.balance_wt) || 0).toFixed(3)),
+          is_cold_storage: isColdGodown(r.godown_name)
+        }));
+        for (const gb of t.godown_balances) {
+          if (gb.is_cold_storage) csBal += gb.balance_qty;
+          else mainBal += gb.balance_qty;
+        }
+      } catch (_) {}
+
+      if (t.godown_balances.length === 0) {
+        csBal = t.cold_storage_in_qty - t.cold_storage_out_qty;
+        mainBal = isColdGodown(t.main_godown) ? 0 : Math.max(0, t.purchased_qty - t.cold_storage_in_qty);
+      }
+
+      // Godown Transfers (item_transfers + godown_transfers)
+      try {
+        const itRes = await runner.query(`
+          SELECT date AS transfer_date, 'Transfer-' || CAST(id AS TEXT) AS ref_no,
+                 from_godown_name, to_godown_name, lot_no, qty, weight, vehicle_no
+          FROM item_transfers
+          WHERE UPPER(TRIM(COALESCE(lot_no, ''))) IN (${lotPh})
+          ORDER BY date ASC, id ASC
+        `, lotListUpper);
+        t.transfers.push(...(itRes.rows || []));
+      } catch (_) {}
+      try {
+        const gtRes = await runner.query(`
+          SELECT transfer_date, COALESCE(transfer_no, 'GT-' || CAST(id AS TEXT)) AS ref_no,
+                 from_godown_name, to_godown_name, lot_no, transfer_qty AS qty, weight, vehicle_no
+          FROM godown_transfers
+          WHERE UPPER(TRIM(COALESCE(lot_no, ''))) IN (${lotPh})
+          ORDER BY transfer_date ASC, id ASC
+        `, lotListUpper);
+        t.transfers.push(...(gtRes.rows || []));
+      } catch (_) {}
+
+      // Milling / Production batches (separate queries per grain_id)
+      try {
+        const mgRes = await runner.query(`
+          SELECT DISTINCT g.id AS grain_id, g.s_no, SUBSTR(CAST(g.date AS TEXT), 1, 10) AS date,
+                 COALESCE(g.work_order_no, 'GRD-' || CAST(g.s_no AS TEXT)) AS batch_no,
+                 COALESCE(fmm.flourmill, g.flour_mill, 'Flour Mill') AS mill_name
+          FROM grains g
+          JOIN grain_input_items gii ON gii.grain_id = g.id
+          LEFT JOIN flour_mill_master fmm ON (CAST(fmm.id AS TEXT) = CAST(g.flour_mill AS TEXT) OR fmm.flourmill = g.flour_mill)
+          WHERE UPPER(TRIM(gii.lot_no)) IN (${lotPh})
+          ORDER BY g.date ASC, g.id ASC
+        `, lotListUpper);
+        let prodInputQty = 0;
+        for (const m of (mgRes.rows || [])) {
+          const inRes = await runner.query(`SELECT item_name, lot_no, qty, total_wt FROM grain_input_items WHERE grain_id = ?`, [m.grain_id]);
+          const outRes = await runner.query(`SELECT item_name, lot_no, qty, total_wt FROM grain_output_items WHERE grain_id = ?`, [m.grain_id]);
+          const myIn = (inRes.rows || []).filter(i => lotListUpper.includes(String(i.lot_no || '').trim().toUpperCase()));
+          prodInputQty += myIn.reduce((s, i) => s + (parseFloat(i.qty) || 0), 0);
+          t.milling_batches.push({
+            batch_no: m.batch_no,
+            date: m.date,
+            mill_name: m.mill_name,
+            inputs: myIn,
+            outputs: outRes.rows || []
+          });
+        }
+        if (prodInputQty > 0) issuedProdQty = prodInputQty;
+      } catch (_) {}
+
+      // Sales dispatches (resolved customer names)
+      try {
+        const slRes = await runner.query(`
+          SELECT COALESCE(NULLIF(s.voucher_no, ''), CAST(s.s_no AS TEXT), CAST(s.id AS TEXT)) AS invoice_no,
+                 SUBSTR(CAST(s.date AS TEXT), 1, 10) AS date,
+                 s.customer, s.customer_id,
+                 si.item_name, si.lot_no, si.qty, si.total_wt
+          FROM sales_items si
+          JOIN sales s ON si.sales_id = s.id
+          WHERE UPPER(TRIM(si.lot_no)) IN (${lotPh})
+          ORDER BY s.date ASC, s.id ASC
+        `, lotListUpper);
+        t.sales_dispatches = (slRes.rows || []).map(sr => ({
+          ...sr,
+          customer_name: resolveCustomerFromDirectory(partyDir, sr.customer, sr.customer_id).name || sr.customer || 'Customer'
+        }));
+      } catch (_) {}
+
+      // Chronological audit trail from clean stock_movements
+      try {
+        const auRes = await runner.query(`
+          SELECT id, movement_date, movement_type, source_module, source_ref_no, godown_name,
+                 lot_no, direction, qty, weight, party_name, supplier_name, remarks
+          FROM stock_movements
+          WHERE is_reversed = 0 AND is_reversal = 0
+            AND (UPPER(TRIM(COALESCE(lot_no, ''))) IN (${lotPh}) OR UPPER(TRIM(COALESCE(parent_lot_no, ''))) IN (${lotPh}))
+          ORDER BY movement_date ASC, id ASC
+        `, [...lotListUpper, ...lotListUpper]);
+        t.audit_trail = (auRes.rows || []).map(m => {
+          const resolved = resolvePartyFromDirectory(partyDir, {
+            supplierName: m.supplier_name,
+            partyName: m.party_name,
+            sourceModule: m.source_module
+          });
+          return {
+            ...m,
+            party_name: resolved.partyName || m.party_name || m.godown_name || '-'
+          };
+        });
+      } catch (_) {}
+
+      resultList.push({
         ...t,
-        main_godown_balance: mainGodownBal,
-        cold_storage_current_balance: csCurrentBal,
-        issued_to_production_qty: t.cold_storage_out_qty,
+        sibling_lots: Array.from(t.sibling_lots),
+        main_godown_balance: mainBal,
+        cold_storage_current_balance: csBal,
+        issued_to_production_qty: issuedProdQty,
         cold_storage_lots_list: Object.values(t.cold_storage_lots)
-      };
-    });
+      });
+    }
 
-    res.json({ success: true, data: resultList });
+    res.json({ success: true, data: resultList, availableColdLots });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

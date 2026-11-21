@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
 const { rebuildStockLedger } = require('../utils/stockRebuilder');
+const { syncDocumentMovements, deleteDocumentMovements } = require('../services/SourceMovementSync');
 const { resolveFlourMillInfo, enrichRecordsWithMillNames, isNumericId } = require('../utils/millResolver');
 
 // Database auto-migration for grains wastage items and lot_no in output items
@@ -1253,17 +1254,25 @@ router.post('/', async (req, res) => {
     }
 
     try {
-      await rebuildStockLedger();
+      await syncDocumentMovements(activeCompanyId, 'GRAIN', grainId, req.user?.username || 'admin');
     } catch (e) {
-      console.error('Error rebuilding stock after saving grains:', e);
+      console.error('Error syncing stock movements after saving grains:', e);
     }
 
     try {
-      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const { triggerTransactionNotification, formatProductionItemSummary, formatNumClean } = require('../utils/transactionNotifier');
       const grindNo = `GRD-${formData.sNo || formData.s_no || grainId}`;
-      const inDesc = activeInputItems.map(i => `${i.qty || 0} ${i.itemName || i.item_name}`).slice(0, 3).join(', ') || 'Raw Grain';
-      const totalOutWt = activeOutputItems.reduce((s, i) => s + (parseFloat(i.totalWt || i.total_wt) || 0), 0);
-      const totalInWt = activeInputItems.reduce((s, i) => s + (parseFloat(i.totalWt || i.total_wt) || 0), 0);
+      const totalInQty = activeInputItems.reduce((s, i) => s + (parseFloat(i.qty) || 0), 0);
+      const totalInWt = activeInputItems.reduce((s, i) => s + (parseFloat(i.totalWt || i.total_wt) || ((parseFloat(i.weight) || 0) * (parseFloat(i.qty) || 0))), 0);
+      const totalOutQty = activeOutputItems.reduce((s, i) => s + (parseFloat(i.qty) || 0), 0);
+      const totalOutWt = activeOutputItems.reduce((s, i) => s + (parseFloat(i.totalWt || i.total_wt) || ((parseFloat(i.weight) || 0) * (parseFloat(i.qty) || 0))), 0);
+      const totalWstWt = activeWastageItems.reduce((s, i) => s + (parseFloat(i.totalWt || i.total_wt) || ((parseFloat(i.weight) || 0) * (parseFloat(i.qty) || 0))), 0);
+      const detailedSummary = formatProductionItemSummary({
+        inputItems: activeInputItems,
+        outputItems: activeOutputItems,
+        wastageItems: activeWastageItems
+      });
+      const qtySummary = `In: ${formatNumClean(totalInQty)} Bags (${formatNumClean(totalInWt)} KG) / Out: ${formatNumClean(totalOutQty)} Bags (${formatNumClean(totalOutWt)} KG)${totalWstWt > 0 ? ` / Wastage: ${formatNumClean(totalWstWt)} KG` : ''}`;
       const displayMill = resolvedMillName || externalMillName || millType;
       await triggerTransactionNotification({
         eventType: 'PRODUCTION_CREATED',
@@ -1272,7 +1281,7 @@ router.post('/', async (req, res) => {
         referenceId: grainId,
         companyId: activeCompanyId,
         title: `⚙️ MILLING / GRIND ENTRY – ${grindNo}`,
-        message: `Mill: ${displayMill}${resolvedMillArea ? ` (${resolvedMillArea})` : ''} | Input: ${inDesc} (${totalInWt} KG) | Output: ${totalOutWt} KG`,
+        message: `Mill: ${displayMill}${resolvedMillArea ? ` (${resolvedMillArea})` : ''} | ${detailedSummary.replace(/\n/g, ' | ')} | ${qtySummary}`,
         severity: 'INFO',
         details: {
           reference_no: grindNo,
@@ -1282,8 +1291,8 @@ router.post('/', async (req, res) => {
           party_name: displayMill || 'Inside Mill',
           external_mill: displayMill || 'Inside Mill',
           area: resolvedMillArea || '-',
-          item_summary: inDesc,
-          quantity: `In: ${totalInWt} KG / Out: ${totalOutWt} KG`,
+          item_summary: detailedSummary,
+          quantity: qtySummary,
           godown: 'Production Floor',
           status: processMode === 'OUTSIDE_MILL' && createdOutpassNo ? `OUTPASSED (${createdOutpassNo})` : 'COMPLETED',
           created_by: req.user?.username || 'Production Operator',
@@ -1431,7 +1440,10 @@ router.post('/:id/generate-outpass', async (req, res) => {
       WHERE id = ?
     `, [outpassId, outpassNo, resolvedMillId, resolvedMillName, estCharges, id]);
 
-    try { await rebuildStockLedger(); } catch (e) {}
+    try {
+      await syncDocumentMovements(activeCompanyId, 'OUTPASS', outpassId, req.user?.username || 'admin');
+      await syncDocumentMovements(activeCompanyId, 'GRAIN', id, req.user?.username || 'admin');
+    } catch (e) {}
 
     // Trigger Central Notification & WhatsApp Alert
     try {
@@ -1703,17 +1715,25 @@ router.put('/:id', async (req, res) => {
     }
 
     try {
-      await rebuildStockLedger();
+      await syncDocumentMovements(activeCompanyId, 'GRAIN', grainId, req.user?.username || 'admin');
     } catch (e) {
-      console.error('Error rebuilding stock after updating grains:', e);
+      console.error('Error syncing stock movements after updating grains:', e);
     }
 
     try {
-      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const { triggerTransactionNotification, formatProductionItemSummary, formatNumClean } = require('../utils/transactionNotifier');
       const grindNo = `GRD-${formData.sNo || formData.s_no || grainId}`;
-      const inDesc = activeInputItems.map(i => `${i.qty || 0} ${i.itemName || i.item_name}`).slice(0, 3).join(', ') || 'Raw Grain';
-      const totalOutWt = activeOutputItems.reduce((s, i) => s + (parseFloat(i.totalWt || i.total_wt) || 0), 0);
-      const totalInWt = activeInputItems.reduce((s, i) => s + (parseFloat(i.totalWt || i.total_wt) || 0), 0);
+      const totalInQty = activeInputItems.reduce((s, i) => s + (parseFloat(i.qty) || 0), 0);
+      const totalInWt = activeInputItems.reduce((s, i) => s + (parseFloat(i.totalWt || i.total_wt) || ((parseFloat(i.weight) || 0) * (parseFloat(i.qty) || 0))), 0);
+      const totalOutQty = activeOutputItems.reduce((s, i) => s + (parseFloat(i.qty) || 0), 0);
+      const totalOutWt = activeOutputItems.reduce((s, i) => s + (parseFloat(i.totalWt || i.total_wt) || ((parseFloat(i.weight) || 0) * (parseFloat(i.qty) || 0))), 0);
+      const totalWstWt = activeWastageItems.reduce((s, i) => s + (parseFloat(i.totalWt || i.total_wt) || ((parseFloat(i.weight) || 0) * (parseFloat(i.qty) || 0))), 0);
+      const detailedSummary = formatProductionItemSummary({
+        inputItems: activeInputItems,
+        outputItems: activeOutputItems,
+        wastageItems: activeWastageItems
+      });
+      const qtySummary = `In: ${formatNumClean(totalInQty)} Bags (${formatNumClean(totalInWt)} KG) / Out: ${formatNumClean(totalOutQty)} Bags (${formatNumClean(totalOutWt)} KG)${totalWstWt > 0 ? ` / Wastage: ${formatNumClean(totalWstWt)} KG` : ''}`;
       const millType = (formData.process_mode || formData.mill_type || '').toUpperCase().includes('OUTSIDE') ? 'Outside Mill' : 'Inside Mill';
       const displayMill = resolvedMillName || millType;
 
@@ -1725,7 +1745,7 @@ router.put('/:id', async (req, res) => {
         referenceId: grainId,
         companyId: activeCompanyId,
         title: `✏️ MILLING / GRIND UPDATED – ${grindNo}`,
-        message: `Mill: ${displayMill}${millInfo.areaName ? ` (${millInfo.areaName})` : ''} | Input: ${inDesc} (${totalInWt} KG) | Output: ${totalOutWt} KG`,
+        message: `Mill: ${displayMill}${millInfo.areaName ? ` (${millInfo.areaName})` : ''} | ${detailedSummary.replace(/\n/g, ' | ')} | ${qtySummary}`,
         severity: 'INFO',
         details: {
           reference_no: grindNo,
@@ -1735,8 +1755,8 @@ router.put('/:id', async (req, res) => {
           party_name: displayMill || 'Inside Mill',
           external_mill: displayMill || 'Inside Mill',
           area: millInfo.areaName || '-',
-          item_summary: inDesc,
-          quantity: `In: ${totalInWt} KG / Out: ${totalOutWt} KG`,
+          item_summary: detailedSummary,
+          quantity: qtySummary,
           godown: 'Production Floor',
           status: 'UPDATED',
           updated_by: req.user?.username || 'Production Operator',
@@ -1775,9 +1795,10 @@ router.delete('/:id', async (req, res) => {
     await db.run('DELETE FROM grains WHERE id = ?', [grainId])
 
     try {
-      await rebuildStockLedger();
+      const cIdSync = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+      await deleteDocumentMovements(cIdSync, 'GRAIN', grainId, 'Grind record deleted', req.user?.username || 'admin');
     } catch (e) {
-      console.error('Error rebuilding stock after deleting grains:', e);
+      console.error('Error reversing stock movements after deleting grains:', e);
     }
 
     res.json({ success: true, message: 'Grains record deleted successfully' })

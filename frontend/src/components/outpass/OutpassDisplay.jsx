@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../../services/api';
 import { printHtml } from '../../utils/printHelper';
 import { printOutpassDocument } from '../../utils/movementPrintTemplates';
@@ -19,6 +19,9 @@ import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 
 const OutpassDisplay = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const highlightId = searchParams.get('highlightId') || '';
+  const highlightRef = searchParams.get('highlightRef') || '';
   const [outpasses, setOutpasses] = useState([]);
   const [summary, setSummary] = useState({});
   const [loading, setLoading] = useState(false);
@@ -76,6 +79,36 @@ const OutpassDisplay = () => {
   useEffect(() => {
     fetchOutpasses();
   }, [statusFilter, purposeFilter]);
+
+  const isRowHighlighted = (row) => {
+    if (!row) return false;
+    if (highlightId && row.id !== undefined && row.id !== null && String(row.id) === String(highlightId)) {
+      return true;
+    }
+    if (!highlightId && highlightRef && row.outpass_no !== undefined && row.outpass_no !== null) {
+      return String(row.outpass_no).trim().toLowerCase() === String(highlightRef).trim().toLowerCase();
+    }
+    return false;
+  };
+
+  useEffect(() => {
+    if ((!highlightId && !highlightRef) || !outpasses.length) return;
+    if (outpasses.some((r) => isRowHighlighted(r))) {
+      if (fromDate) setFromDate('');
+      if (toDate) setToDate('');
+    }
+  }, [highlightId, highlightRef, outpasses]);
+
+  useEffect(() => {
+    if ((!highlightId && !highlightRef) || loading || !outpasses.length) return;
+    const timer = setTimeout(() => {
+      const el = document.querySelector('[data-highlighted="true"]');
+      if (el && typeof el.scrollIntoView === 'function') {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [highlightId, highlightRef, loading, outpasses]);
 
   const handleSearchSubmit = (e) => {
     e.preventDefault();
@@ -360,13 +393,16 @@ const OutpassDisplay = () => {
                 const pendingWt = Math.max(0, totalWt - retWt);
                 const isClosed = row.status === 'CLOSED' || pendingWt <= 0.1;
                 const items = row.items || [];
+                const highlighted = isRowHighlighted(row);
 
                 return (
                   <tr
                     key={row.id}
+                    data-highlighted={highlighted ? 'true' : undefined}
                     style={{
                       borderBottom: '1px solid #e2e8f0',
-                      backgroundColor: idx % 2 === 0 ? '#ffffff' : '#f8fafc'
+                      backgroundColor: highlighted ? '#fef08a' : (idx % 2 === 0 ? '#ffffff' : '#f8fafc'),
+                      boxShadow: highlighted ? 'inset 4px 0 0 #d97706, inset 0 1px 0 #f59e0b, inset 0 -1px 0 #f59e0b' : undefined
                     }}
                   >
                     <td style={{ padding: '8px 10px', border: '1px solid #c0c8da', textAlign: 'center' }}>

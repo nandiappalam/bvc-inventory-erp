@@ -24,7 +24,6 @@ import {
   IconButton,
   Alert,
   CircularProgress,
-  Divider,
   TextField,
   InputAdornment
 } from '@mui/material';
@@ -33,12 +32,10 @@ import BusinessIcon from '@mui/icons-material/Business';
 import StorefrontIcon from '@mui/icons-material/Storefront';
 import CloseIcon from '@mui/icons-material/Close';
 import SearchIcon from '@mui/icons-material/Search';
-import VerifiedUserIcon from '@mui/icons-material/VerifiedUser';
-import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import QrCode2Icon from '@mui/icons-material/QrCode2';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import api from '../../services/api';
 
 export default function PartyIntelligenceCenter() {
   const navigate = useNavigate();
@@ -95,14 +92,14 @@ export default function PartyIntelligenceCenter() {
     setLoading(true);
     try {
       const [sumRes, supRes, custRes] = await Promise.all([
-        axios.get('/api/party-intelligence/dashboard-summary'),
-        axios.get('/api/party-intelligence/suppliers-intelligence'),
-        axios.get('/api/party-intelligence/customers-intelligence')
+        api('/party-intelligence/dashboard-summary'),
+        api('/party-intelligence/suppliers-intelligence'),
+        api('/party-intelligence/customers-intelligence')
       ]);
 
-      if (sumRes.data.success) setSummary(sumRes.data.data);
-      if (supRes.data.success) setSuppliers(supRes.data.data || []);
-      if (custRes.data.success) setCustomers(custRes.data.data || []);
+      if (sumRes?.success) setSummary(sumRes.data);
+      if (supRes?.success) setSuppliers(supRes.data || []);
+      if (custRes?.success) setCustomers(custRes.data || []);
     } catch (err) {
       setErrorMsg(parseError(err));
     } finally {
@@ -115,10 +112,11 @@ export default function PartyIntelligenceCenter() {
     setDossierLoading(true);
     setDossierOpen(true);
     setDossierTab(0);
+    setDossierData(null);
     try {
-      const res = await axios.get(`/api/party-intelligence/supplier-360/${encodeURIComponent(supplierName)}`);
-      if (res.data.success) {
-        setDossierData(res.data.data);
+      const res = await api(`/party-intelligence/supplier-360/${encodeURIComponent(supplierName)}`);
+      if (res?.success) {
+        setDossierData(res.data);
       }
     } catch (err) {
       setErrorMsg(parseError(err));
@@ -132,10 +130,11 @@ export default function PartyIntelligenceCenter() {
     setDossierLoading(true);
     setDossierOpen(true);
     setDossierTab(0);
+    setDossierData(null);
     try {
-      const res = await axios.get(`/api/party-intelligence/customer-360/${encodeURIComponent(customerName)}`);
-      if (res.data.success) {
-        setDossierData(res.data.data);
+      const res = await api(`/party-intelligence/customer-360/${encodeURIComponent(customerName)}`);
+      if (res?.success) {
+        setDossierData(res.data);
       }
     } catch (err) {
       setErrorMsg(parseError(err));
@@ -148,12 +147,17 @@ export default function PartyIntelligenceCenter() {
     return '₹' + (parseFloat(val) || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
   };
 
-  const filteredSuppliers = suppliers.filter(s =>
+  const isPassQcStatus = (val) => {
+    const u = String(val || '').trim().toUpperCase();
+    return u === 'PASSED' || u === 'ACCEPTED' || u === 'APPROVED';
+  };
+
+  const filteredSuppliers = suppliers.filter((s) =>
     (s.name || '').toLowerCase().includes(searchFilter.toLowerCase()) ||
     (s.gstNo || '').toLowerCase().includes(searchFilter.toLowerCase())
   );
 
-  const filteredCustomers = customers.filter(c =>
+  const filteredCustomers = customers.filter((c) =>
     (c.name || '').toLowerCase().includes(searchFilter.toLowerCase()) ||
     (c.gstNo || '').toLowerCase().includes(searchFilter.toLowerCase())
   );
@@ -196,7 +200,7 @@ export default function PartyIntelligenceCenter() {
                 ACTIVE SUPPLIERS
               </Typography>
               <Typography variant="h5" sx={{ fontWeight: 800, mt: 0.5 }}>
-                {summary?.totalSuppliers} Vendors
+                {summary?.totalSuppliers ?? 0} Vendors
               </Typography>
               <Typography variant="caption" color="text.secondary">
                 Purchases: {formatCurr(summary?.totalPurchaseValue)}
@@ -212,7 +216,7 @@ export default function PartyIntelligenceCenter() {
                 ACTIVE CUSTOMERS
               </Typography>
               <Typography variant="h5" sx={{ fontWeight: 800, mt: 0.5, color: '#10b981' }}>
-                {summary?.totalCustomers} Clients
+                {summary?.totalCustomers ?? 0} Clients
               </Typography>
               <Typography variant="caption" color="text.secondary">
                 Sales: {formatCurr(summary?.totalSalesValue)}
@@ -231,7 +235,7 @@ export default function PartyIntelligenceCenter() {
                 {summary?.totalQCTests ?? 0} Tested
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                Avg Pass Rate: {summary?.overallQCPassRate ?? summary?.avgQcScore ?? 98}%
+                Avg Pass Rate: {summary?.overallQCPassRate != null ? `${summary.overallQCPassRate}%` : 'No QC Records'}
               </Typography>
             </CardContent>
           </Card>
@@ -244,10 +248,10 @@ export default function PartyIntelligenceCenter() {
                 OPERATIONAL HEALTH
               </Typography>
               <Typography variant="h5" sx={{ fontWeight: 800, mt: 0.5, color: '#f59e0b' }}>
-                98.4% On-Time
+                {summary?.onTimeDeliveryRate != null ? `${summary.onTimeDeliveryRate}% On-Time` : 'No PO Schedule'}
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                Supplier Delivery Reliability
+                {summary?.linkedPoCount ? `Across ${summary.linkedPoCount} Linked POs` : 'Supplier Delivery Reliability'}
               </Typography>
             </CardContent>
           </Card>
@@ -303,9 +307,9 @@ export default function PartyIntelligenceCenter() {
                       const purVal = s.totalPurchaseValue ?? s.purchaseValue ?? 0;
                       const purQty = s.totalPurchaseQtyMT ?? s.purchaseQtyMT ?? 0;
                       const avgRate = s.averageRatePerKg ?? s.avgRate ?? 0;
-                      const qcRate = s.qcPassRate ?? s.averageQCScore ?? (purVal > 0 ? 98 : 100);
+                      const qcRate = s.qcPassRate ?? s.averageQCScore ?? null;
                       const rejRate = s.rejectionRate ?? s.rejectedQtyPct ?? 0;
-                      const delay = s.deliveryDelayDays ?? s.averageDeliveryDelayDays ?? 0;
+                      const delay = s.deliveryDelayDays ?? s.averageDeliveryDelayDays ?? null;
                       const outst = s.outstandingBalance ?? purVal;
 
                       return (
@@ -317,18 +321,22 @@ export default function PartyIntelligenceCenter() {
                           <TableCell sx={{ fontWeight: 700 }}>{formatCurr(purVal)}</TableCell>
                           <TableCell>{purQty} MT</TableCell>
                           <TableCell>₹{avgRate}</TableCell>
-                          <TableCell sx={{ width: 140 }}>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                              <Box sx={{ width: '100%', mr: 1 }}>
-                                <LinearProgress
-                                  variant="determinate"
-                                  value={Number.isNaN(Number(qcRate)) ? 0 : Math.max(0, Math.min(100, Number(qcRate)))}
-                                  color={Number(qcRate) >= 90 ? 'success' : Number(qcRate) >= 75 ? 'warning' : 'error'}
-                                  sx={{ height: 6, borderRadius: 3 }}
-                                />
+                          <TableCell sx={{ width: 150 }}>
+                            {qcRate == null ? (
+                              <Chip label="No QC" size="small" variant="outlined" sx={{ fontSize: '11px' }} />
+                            ) : (
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                <Box sx={{ width: '100%', mr: 1 }}>
+                                  <LinearProgress
+                                    variant="determinate"
+                                    value={Number.isNaN(Number(qcRate)) ? 0 : Math.max(0, Math.min(100, Number(qcRate)))}
+                                    color={Number(qcRate) >= 90 ? 'success' : Number(qcRate) >= 75 ? 'warning' : 'error'}
+                                    sx={{ height: 6, borderRadius: 3 }}
+                                  />
+                                </Box>
+                                <Typography variant="caption" sx={{ fontWeight: 700 }}>{qcRate}%</Typography>
                               </Box>
-                              <Typography variant="caption" sx={{ fontWeight: 700 }}>{qcRate}%</Typography>
-                            </Box>
+                            )}
                           </TableCell>
                           <TableCell>
                             <Chip
@@ -338,14 +346,16 @@ export default function PartyIntelligenceCenter() {
                               sx={{ fontSize: '11px', fontWeight: 600 }}
                             />
                           </TableCell>
-                          <TableCell>{delay}d</TableCell>
-                          <TableCell sx={{ fontWeight: 700, color: '#ef4444' }}>{formatCurr(outst)}</TableCell>
+                          <TableCell>{delay != null ? `${delay}d` : 'N/A'}</TableCell>
+                          <TableCell sx={{ fontWeight: 700, color: outst > 0 ? '#ef4444' : '#10b981' }}>
+                            {formatCurr(outst)}
+                          </TableCell>
                           <TableCell align="center">
                             <Button
                               size="small"
                               variant="contained"
                               color="primary"
-                              onClick={() => handleOpenSupplier360(s.name)}
+                              onClick={() => handleOpenSupplier360(s.rawName || s.name)}
                               sx={{ textTransform: 'none', fontWeight: 600, py: 0.5 }}
                             >
                               360° Dossier
@@ -392,7 +402,7 @@ export default function PartyIntelligenceCenter() {
                       const sQty = c.salesQtyMT ?? c.totalSalesQtyMT ?? 0;
                       const oCount = c.ordersCount ?? 0;
                       const cDays = c.creditDays ?? 30;
-                      const payDays = c.averagePaymentDays ?? 24;
+                      const payDays = c.averagePaymentDays;
                       const outst = c.outstandingBalance ?? sVal;
 
                       return (
@@ -403,9 +413,14 @@ export default function PartyIntelligenceCenter() {
                           </TableCell>
                           <TableCell sx={{ fontWeight: 700, color: '#10b981' }}>{formatCurr(sVal)}</TableCell>
                           <TableCell>{sQty} MT</TableCell>
-                          <TableCell>{oCount} orders</TableCell>
+                          <TableCell>
+                            {oCount} orders
+                            {c.returnsCount > 0 && (
+                              <Typography variant="caption" color="error" display="block">{c.returnsCount} returns</Typography>
+                            )}
+                          </TableCell>
                           <TableCell>{cDays} Days</TableCell>
-                          <TableCell>{payDays} Days</TableCell>
+                          <TableCell>{payDays != null ? `${payDays} Days` : 'N/A'}</TableCell>
                           <TableCell>{c.lastPurchaseDate || 'N/A'}</TableCell>
                           <TableCell sx={{ fontWeight: 700, color: '#10b981' }}>{formatCurr(outst)}</TableCell>
                           <TableCell align="center">
@@ -413,7 +428,7 @@ export default function PartyIntelligenceCenter() {
                               size="small"
                               variant="contained"
                               color="secondary"
-                              onClick={() => handleOpenCustomer360(c.name)}
+                              onClick={() => handleOpenCustomer360(c.rawName || c.name)}
                               sx={{ textTransform: 'none', fontWeight: 600, py: 0.5 }}
                             >
                               360° Dossier
@@ -441,7 +456,7 @@ export default function PartyIntelligenceCenter() {
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             {dossierType === 'SUPPLIER' ? <BusinessIcon color="primary" /> : <StorefrontIcon color="secondary" />}
             <Typography variant="h6" sx={{ fontWeight: 700 }}>
-              360° {dossierType} Dossier: {dossierData?.profile?.name || 'Party'}
+              360° {dossierType} Dossier: {dossierData?.profile?.print_name || dossierData?.profile?.name || 'Party'}
             </Typography>
           </Box>
           <IconButton size="small" onClick={() => setDossierOpen(false)}><CloseIcon /></IconButton>
@@ -457,7 +472,7 @@ export default function PartyIntelligenceCenter() {
                   <Grid item xs={12} sm={3}>
                     <Typography variant="caption" color="text.secondary">Contact Person</Typography>
                     <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                      {dossierData?.profile?.contact_person || dossierData?.profile?.name || 'Managing Director'}
+                      {dossierData?.profile?.contact_person || dossierData?.profile?.name || 'N/A'}
                     </Typography>
                   </Grid>
                   <Grid item xs={12} sm={3}>
@@ -498,7 +513,8 @@ export default function PartyIntelligenceCenter() {
                         <TableCell sx={{ fontWeight: 700 }}>Date</TableCell>
                         <TableCell sx={{ fontWeight: 700 }}>Voucher #</TableCell>
                         <TableCell sx={{ fontWeight: 700 }}>Commodity</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Qty / Wt</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Qty (Bags)</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Weight (KG)</TableCell>
                         <TableCell sx={{ fontWeight: 700 }}>Rate</TableCell>
                         <TableCell sx={{ fontWeight: 700 }}>Total Amount</TableCell>
                       </TableRow>
@@ -507,13 +523,14 @@ export default function PartyIntelligenceCenter() {
                       {(() => {
                         const invoiceList = (dossierType === 'SUPPLIER' ? dossierData?.purchases : dossierData?.sales) || [];
                         if (invoiceList.length === 0) {
-                          return <TableRow><TableCell colSpan={6} align="center" sx={{ py: 3, color: 'text.secondary' }}>No invoice records found.</TableCell></TableRow>;
+                          return <TableRow><TableCell colSpan={7} align="center" sx={{ py: 3, color: 'text.secondary' }}>No invoice records found.</TableCell></TableRow>;
                         }
                         return invoiceList.map((row, idx) => {
                           const vNo = row.s_no || row.inv_no || row.voucher_no || `REC-${row.id || idx + 1}`;
                           const itemTitle = row.item_name || row.commodity || 'Agro Commodity';
-                          const qVal = row.qty || row.quantity || row.total_weight || row.total_wt || row.total_qty || 0;
-                          const rVal = row.rate || (row.total_weight > 0 ? (row.amount / row.total_weight).toFixed(2) : 0);
+                          const qVal = row.qty || row.quantity || 0;
+                          const wVal = row.total_weight || row.total_wt || 0;
+                          const rVal = row.rate || (wVal > 0 ? (row.amount / wVal).toFixed(2) : 0);
                           const amtVal = row.amount || row.grand_total || row.net_amount || row.total_amount || 0;
                           return (
                             <TableRow key={idx} hover>
@@ -521,6 +538,7 @@ export default function PartyIntelligenceCenter() {
                               <TableCell sx={{ fontFamily: 'monospace', fontWeight: 600 }}>{vNo}</TableCell>
                               <TableCell>{itemTitle}</TableCell>
                               <TableCell>{qVal}</TableCell>
+                              <TableCell>{wVal} KG</TableCell>
                               <TableCell>₹{rVal}</TableCell>
                               <TableCell sx={{ fontWeight: 700 }}>{formatCurr(amtVal)}</TableCell>
                             </TableRow>
@@ -553,8 +571,9 @@ export default function PartyIntelligenceCenter() {
                         }
                         return recordsList.map((item, idx) => {
                           const refNo = item.qc_no || item.inspection_no || item.quote_no || `REF-${item.id || idx + 1}`;
-                          const itemRes = item.result || item.overall_result || item.status || 'PASSED';
-                          const isRejected = String(itemRes).toUpperCase() === 'REJECTED';
+                          const itemRes = item.result || item.overall_result || item.status || 'PENDING';
+                          const isRejected = ['REJECTED', 'FAILED'].includes(String(itemRes).toUpperCase());
+                          const isGood = isPassQcStatus(itemRes) || String(itemRes).toUpperCase() === 'QUOTED' || dossierType === 'CUSTOMER';
                           return (
                             <TableRow key={idx} hover>
                               <TableCell>{item.date || item.inspection_date || item.quote_date || 'N/A'}</TableCell>
@@ -564,10 +583,10 @@ export default function PartyIntelligenceCenter() {
                                 <Chip
                                   label={itemRes}
                                   size="small"
-                                  color={isRejected ? 'error' : 'success'}
+                                  color={isRejected ? 'error' : isGood ? 'success' : 'warning'}
                                 />
                               </TableCell>
-                              <TableCell>{item.notes || item.remarks || item.rejection_reason || '-'}</TableCell>
+                              <TableCell>{item.notes || item.remarks || '-'}</TableCell>
                             </TableRow>
                           );
                         });
@@ -585,8 +604,8 @@ export default function PartyIntelligenceCenter() {
                       <TableRow>
                         <TableCell sx={{ fontWeight: 700 }}>Lot Number</TableCell>
                         <TableCell sx={{ fontWeight: 700 }}>Commodity</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Initial Qty</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Remaining Qty</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>{dossierType === 'SUPPLIER' ? 'Initial Qty' : 'Dispatched Qty'}</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Current Balance</TableCell>
                         <TableCell sx={{ fontWeight: 700 }}>QC Status</TableCell>
                         <TableCell sx={{ fontWeight: 700 }} align="center">360° Action</TableCell>
                       </TableRow>
@@ -600,32 +619,49 @@ export default function PartyIntelligenceCenter() {
                         return lotsList.map((lot, idx) => {
                           const lotNo = lot.lot_no || lot.lotNo || `LOT-${idx + 1}`;
                           const itemName = lot.item_name || lot.itemName || 'Raw Material';
-                          const initQty = lot.quantity || lot.initial_qty || lot.weightKg || 0;
-                          const remQty = lot.remaining_quantity || lot.remaining_qty || initQty;
-                          const qcStat = lot.qc_status || lot.qcStatus || 'PASSED';
-                          const isPass = String(qcStat).toUpperCase() === 'PASSED';
+                          const initKg = lot.weightKg ?? lot.quantity ?? 0;
+                          const initBags = lot.qtyBags ?? lot.dispatchedBags ?? 0;
+                          const remKg = lot.remainingKg ?? lot.remaining_quantity ?? initKg;
+                          const remBags = lot.remainingBags ?? 0;
+                          const qcStat = lot.qc_status || lot.qcStatus || 'QC_PENDING';
+                          const isPass = isPassQcStatus(qcStat);
+                          const isRejected = ['REJECTED', 'FAILED'].includes(String(qcStat).toUpperCase());
                           return (
                             <TableRow key={idx} hover>
                               <TableCell sx={{ fontFamily: 'monospace', fontWeight: 700 }}>{lotNo}</TableCell>
                               <TableCell>{itemName}</TableCell>
-                              <TableCell>{initQty} KG</TableCell>
-                              <TableCell sx={{ fontWeight: 700 }}>{remQty} KG</TableCell>
+                              <TableCell>{initKg} KG{initBags ? ` (${initBags} Bags)` : ''}</TableCell>
+                              <TableCell sx={{ fontWeight: 700 }}>{remKg} KG{remBags ? ` (${remBags} Bags)` : ''}</TableCell>
                               <TableCell>
-                                <Chip label={qcStat} size="small" color={isPass ? 'success' : 'error'} />
+                                <Chip label={qcStat} size="small" color={isPass ? 'success' : isRejected ? 'error' : 'warning'} />
                               </TableCell>
                               <TableCell align="center">
-                                <Button
-                                  size="small"
-                                  variant="outlined"
-                                  startIcon={<QrCode2Icon />}
-                                  onClick={() => {
-                                    setDossierOpen(false);
-                                    navigate(`/barcode-qr?code=LOT-${encodeURIComponent(lotNo)}`);
-                                  }}
-                                  sx={{ textTransform: 'none' }}
-                                >
-                                  Scan 360°
-                                </Button>
+                                <Box sx={{ display: 'flex', gap: 0.75, justifyContent: 'center' }}>
+                                  <Button
+                                    size="small"
+                                    variant="contained"
+                                    startIcon={<AccountTreeIcon />}
+                                    onClick={() => {
+                                      setDossierOpen(false);
+                                      navigate(`/quality/traceability?lot=${encodeURIComponent(lotNo)}`);
+                                    }}
+                                    sx={{ textTransform: 'none' }}
+                                  >
+                                    Trace 360°
+                                  </Button>
+                                  <Button
+                                    size="small"
+                                    variant="outlined"
+                                    startIcon={<QrCode2Icon />}
+                                    onClick={() => {
+                                      setDossierOpen(false);
+                                      navigate(`/barcode-qr?code=LOT-${encodeURIComponent(lotNo)}`);
+                                    }}
+                                    sx={{ textTransform: 'none' }}
+                                  >
+                                    Scan QR
+                                  </Button>
+                                </Box>
                               </TableCell>
                             </TableRow>
                           );

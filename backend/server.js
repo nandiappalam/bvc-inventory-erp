@@ -137,6 +137,7 @@ app.use('/api/papad-returns', require('./routes/papadReturn'))
 app.use('/api/cheque-printing', require('./routes/chequePrinting'))
 
 app.use('/api/stock', stockRouter)
+app.use('/api/stock-reports', require('./routes/stockReports'))
 app.use('/api/godowns', require('./routes/godowns'))
 app.use('/api/cold-storage', require('./routes/coldStorage'))
 app.use('/api/item-transfers', require('./routes/itemTransfers'))
@@ -820,10 +821,14 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
     await ensureVoucherTables()
     console.log('✓ Voucher tables verified successfully on startup')
 
-    // Rebuild and synchronize stock lots and stock ledger
-    const { rebuildStockLedger } = require('./utils/stockRebuilder')
-    await rebuildStockLedger()
-    console.log('✓ Stock lots & stock ledger re-synchronized on startup')
+    // Initialize Stock Register schema cleanly without destructive ledger rebuilds
+    try {
+      const { ensureStockRegisterSchema } = require('./services/StockRegisterSchema');
+      await ensureStockRegisterSchema(1);
+      console.log('✓ Stock Register schema verified non-destructively on startup');
+    } catch (srsErr) {
+      console.warn('⚠️ Stock Register schema startup notice:', srsErr.message);
+    }
 
     // Initialize Operational Charges, Payments & Parties Tables
     try {

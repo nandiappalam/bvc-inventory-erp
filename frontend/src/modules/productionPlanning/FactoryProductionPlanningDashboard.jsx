@@ -79,7 +79,7 @@ const FactoryProductionPlanningDashboard = () => {
   const [materialData, setMaterialData] = useState(null);
   const [cleaningOrders, setCleaningOrders] = useState([]);
   const [traceabilityData, setTraceabilityData] = useState(null);
-  const [traceSearchKey, setTraceSearchKey] = useState('PO-2026-0045');
+  const [traceSearchKey, setTraceSearchKey] = useState('');
 
   // Filters
   const [queueFilterStatus, setQueueFilterStatus] = useState('ALL');
@@ -254,14 +254,24 @@ const FactoryProductionPlanningDashboard = () => {
   };
 
   // Handle Traceability Search
-  const handleTraceSearch = async () => {
+  const handleTraceSearch = useCallback(async (overrideKey) => {
     try {
-      const res = await factoryProductionPlanningService.getTraceability(traceSearchKey);
+      const keyToUse = typeof overrideKey === 'string' ? overrideKey : traceSearchKey;
+      const res = await factoryProductionPlanningService.getTraceability(keyToUse || '');
       setTraceabilityData(res);
+      if (res?.traceKey && !keyToUse) {
+        setTraceSearchKey(res.traceKey);
+      }
     } catch (err) {
       showToast(err.message, 'error');
     }
-  };
+  }, [traceSearchKey]);
+
+  useEffect(() => {
+    if (currentTab === 5 && !traceabilityData) {
+      handleTraceSearch('');
+    }
+  }, [currentTab, traceabilityData, handleTraceSearch]);
 
   // Priority Badge Renderer
   const renderPriorityBadge = (priority, score) => {
@@ -373,10 +383,10 @@ const FactoryProductionPlanningDashboard = () => {
                 Raw Material ATP (Net Available)
               </Typography>
               <Typography variant="h4" sx={{ fontWeight: 800, color: brand.success, my: 0.5 }}>
-                {(matSummary.netAvailableRawATP || 24250).toLocaleString()} <span style={{ fontSize: '16px' }}>KG</span>
+                {(matSummary.netAvailableRawATP ?? 0).toLocaleString()} <span style={{ fontSize: '16px' }}>KG</span>
               </Typography>
               <Typography variant="caption" sx={{ color: '#64748b' }}>
-                {(matSummary.reservedRawStock || 4200).toLocaleString()} KG reserved for active jobs
+                {(matSummary.reservedRawStock ?? 0).toLocaleString()} KG reserved for active jobs
               </Typography>
             </CardContent>
           </Card>
@@ -494,11 +504,11 @@ const FactoryProductionPlanningDashboard = () => {
                   </Grid>
                   <Grid item xs={6} sm={4} md={2}>
                     <Typography variant="caption" sx={{ color: '#64748b' }}>Stock Available (ATP)</Typography>
-                    <Typography variant="h6" sx={{ fontWeight: 700, color: brand.success }}>{spotlight.availableStock || 300} KG</Typography>
+                    <Typography variant="h6" sx={{ fontWeight: 700, color: brand.success }}>{(spotlight.availableStock ?? 0).toLocaleString()} KG</Typography>
                   </Grid>
                   <Grid item xs={6} sm={4} md={2}>
                     <Typography variant="caption" sx={{ color: '#64748b' }}>Required to Produce</Typography>
-                    <Typography variant="h6" sx={{ fontWeight: 700, color: '#ea580c' }}>{spotlight.required_qty || 700} KG</Typography>
+                    <Typography variant="h6" sx={{ fontWeight: 700, color: '#ea580c' }}>{(spotlight.required_qty ?? 0).toLocaleString()} KG</Typography>
                   </Grid>
                   <Grid item xs={6} sm={4} md={2}>
                     <Typography variant="caption" sx={{ color: '#64748b' }}>Assigned Unit</Typography>
@@ -792,19 +802,19 @@ const FactoryProductionPlanningDashboard = () => {
                     <Box sx={{ p: 1.5, bgcolor: '#f8fafc', borderRadius: 1.5 }}>
                       <Typography variant="caption" sx={{ color: '#64748b' }}>Confirmed Customer POs</Typography>
                       <Typography variant="h5" sx={{ fontWeight: 800, color: brand.primary }}>
-                        {(demandData?.summary?.totalConfirmedDemandKg || 3300).toLocaleString()} KG
+                        {(demandData?.summary?.totalConfirmedDemandKg ?? 0).toLocaleString()} KG
                       </Typography>
                     </Box>
                     <Box sx={{ p: 1.5, bgcolor: '#f8fafc', borderRadius: 1.5 }}>
                       <Typography variant="caption" sx={{ color: '#64748b' }}>Quotation Pipeline Demand</Typography>
                       <Typography variant="h5" sx={{ fontWeight: 800, color: brand.purple }}>
-                        {(demandData?.summary?.totalQuotationPipelineKg || 1800).toLocaleString()} KG
+                        {(demandData?.summary?.totalQuotationPipelineKg ?? 0).toLocaleString()} KG
                       </Typography>
                     </Box>
                     <Box sx={{ p: 1.5, bgcolor: '#f8fafc', borderRadius: 1.5 }}>
                       <Typography variant="caption" sx={{ color: '#64748b' }}>Recommended Make-to-Stock (MTS)</Typography>
                       <Typography variant="h5" sx={{ fontWeight: 800, color: brand.warning }}>
-                        {(demandData?.summary?.totalRecommendedMtsKg || 1500).toLocaleString()} KG
+                        {(demandData?.summary?.totalRecommendedMtsKg ?? 0).toLocaleString()} KG
                       </Typography>
                     </Box>
                   </Stack>
@@ -1004,25 +1014,49 @@ const FactoryProductionPlanningDashboard = () => {
       {currentTab === 5 && (
         <Card sx={{ border: '1px solid #e2e8f0', borderRadius: 2 }}>
           <CardContent sx={{ p: 2.5 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2, flexWrap: 'wrap' }}>
               <TextField
                 size="small"
-                label="Enter PO / Order / Lot Number"
+                label="Enter Lot / Work Order / Sales / PO No"
                 value={traceSearchKey}
                 onChange={(e) => setTraceSearchKey(e.target.value)}
-                sx={{ width: 300 }}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleTraceSearch(traceSearchKey); }}
+                sx={{ width: 320 }}
               />
               <Button
                 variant="contained"
                 startIcon={<SearchIcon />}
-                onClick={handleTraceSearch}
+                onClick={() => handleTraceSearch(traceSearchKey)}
                 sx={{ bgcolor: brand.primary, textTransform: 'none', fontWeight: 600 }}
               >
                 Trace Flow
               </Button>
             </Box>
 
-            {traceabilityData?.chain && (
+            {traceabilityData?.availableKeys?.length > 0 && (
+              <Box sx={{ mb: 2.5, display: 'flex', gap: 0.75, flexWrap: 'wrap', alignItems: 'center' }}>
+                <Typography variant="caption" sx={{ fontWeight: 700, color: '#64748b', mr: 0.5 }}>
+                  Live Lots & Orders:
+                </Typography>
+                {traceabilityData.availableKeys.map((item) => (
+                  <Chip
+                    key={`${item.type}-${item.key}`}
+                    label={item.label}
+                    size="small"
+                    clickable
+                    color={traceabilityData.traceKey?.toUpperCase() === item.key.toUpperCase() ? 'primary' : 'default'}
+                    variant={traceabilityData.traceKey?.toUpperCase() === item.key.toUpperCase() ? 'filled' : 'outlined'}
+                    onClick={() => {
+                      setTraceSearchKey(item.key);
+                      handleTraceSearch(item.key);
+                    }}
+                    sx={{ fontSize: '11px', fontWeight: 600 }}
+                  />
+                ))}
+              </Box>
+            )}
+
+            {traceabilityData?.chain && traceabilityData.chain.length > 0 ? (
               <Box sx={{ mt: 2 }}>
                 <Typography variant="subtitle1" sx={{ fontWeight: 800, color: '#0f172a', mb: 2 }}>
                   Traceability Flow for: <span style={{ color: brand.primary }}>{traceabilityData.traceKey}</span>
@@ -1077,6 +1111,10 @@ const FactoryProductionPlanningDashboard = () => {
                     </Box>
                   ))}
                 </Stack>
+              </Box>
+            ) : (
+              <Box sx={{ p: 3, textAlign: 'center', border: '1px dashed #cbd5e1', borderRadius: 2, color: '#64748b' }}>
+                No traceability chain found for "{traceSearchKey || 'selected key'}". Select one of the active lots or orders above.
               </Box>
             )}
           </CardContent>

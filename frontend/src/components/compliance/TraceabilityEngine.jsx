@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { printHtml } from '../../utils/printHelper';
+import { api } from '../../services/api';
 import {
   Box,
   Card,
@@ -42,6 +43,13 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import ClearIcon from '@mui/icons-material/Clear';
 
+const escHtml = (val) => String(val ?? '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
+
 export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const urlLot = searchParams.get('lot') || searchParams.get('lot_no') || '';
@@ -69,9 +77,8 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
     lastQueriedLotRef.current = query;
 
     try {
-      const res = await fetch(`/api/compliance/traceability/${encodeURIComponent(query)}`);
-      const data = await res.json();
-      if (data.success && data.lotNo) {
+      const data = await api(`/compliance/traceability/${encodeURIComponent(query)}`);
+      if (data && data.success && data.lotNo) {
         setTraceData(data);
         const resolved = data.lotNo || query;
         setLotInput(resolved);
@@ -88,13 +95,13 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
         }
       } else {
         setTraceData(null);
-        setAllLots(data.activeLots || []);
-        setError(data.message || `No trace records found for lot "${query}" in this company.`);
+        setAllLots(data?.activeLots || []);
+        setError(data?.message || `No trace records found for lot "${query}" in this company.`);
       }
     } catch (err) {
       console.error('Error tracing lot:', err);
       setTraceData(null);
-      setError('Failed to connect to Traceability Engine.');
+      setError(err?.message || 'Failed to connect to Traceability Engine.');
     } finally {
       setLoading(false);
       isFetchingRef.current = false;
@@ -143,12 +150,13 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
     const coas = traceData.qualityCertificates?.coas || [];
     const dispatches = traceData.forwardTrace?.dispatches || [];
     const purReturns = traceData.purchaseReturns || traceData.backwardTrace?.purchaseReturns || [];
+    const stockMovements = traceData.stockMovements || [];
 
     const printWindowHtml = `
       <!DOCTYPE html>
       <html>
       <head>
-        <title>360° Traceability Certificate - Lot ${lotNo}</title>
+        <title>360° Traceability Certificate - Lot ${escHtml(lotNo)}</title>
         <style>
           @page { size: A4; margin: 12mm; }
           body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 15px; color: #0f172a; font-size: 11px; line-height: 1.4; }
@@ -156,20 +164,16 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
           .company-name { font-size: 22px; font-weight: 900; color: #1f4fb2; letter-spacing: 0.5px; }
           .subtitle { font-size: 10px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
           .cert-title { font-size: 14px; font-weight: 800; color: #0f172a; margin-top: 8px; background: #eff6ff; display: inline-block; padding: 4px 16px; border-radius: 4px; border: 1px solid #bfdbfe; }
-          
           .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
           .meta-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 12px; }
           .meta-box label { font-size: 9px; font-weight: 700; color: #64748b; text-transform: uppercase; display: block; }
           .meta-box val { font-size: 11px; font-weight: 800; color: #0f172a; }
-          
           .section { margin-bottom: 14px; border: 1px solid #cbd5e1; border-radius: 6px; overflow: hidden; page-break-inside: avoid; }
           .section-header { background: #1f4fb2; color: white; font-weight: 800; padding: 6px 12px; font-size: 11px; text-transform: uppercase; }
           .section-body { padding: 10px; background: #ffffff; }
-          
           table { width: 100%; border-collapse: collapse; margin-top: 6px; }
           th, td { border: 1px solid #cbd5e1; padding: 5px 8px; font-size: 10px; text-align: left; }
           th { background: #f1f5f9; font-weight: 700; color: #1e293b; }
-          
           .badge-pass { background: #dcfce7; color: #15803d; font-weight: 800; padding: 2px 6px; border-radius: 3px; font-size: 9px; display: inline-block; }
           .footer-sig { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-top: 25px; padding-top: 15px; border-top: 1px dashed #cbd5e1; text-align: center; }
           .sig-line { border-top: 1px solid #0f172a; margin-top: 25px; padding-top: 4px; font-weight: 700; font-size: 10px; }
@@ -185,19 +189,19 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
         <div class="grid-2">
           <div class="meta-box">
             <label>Target Lot Number</label>
-            <val style="color:#1f4fb2; font-family:monospace; font-size:14px;">${lotNo}</val>
+            <val style="color:#1f4fb2; font-family:monospace; font-size:14px;">${escHtml(lotNo)}</val>
           </div>
           <div class="meta-box">
             <label>Commodity / Item Name</label>
-            <val>${traceData.lotDetails?.item_name || supplier?.item_name || 'Food Grain Commodity'}</val>
+            <val>${escHtml(traceData.lotDetails?.item_name || supplier?.item_name || 'N/A')}</val>
           </div>
           <div class="meta-box">
-            <label>Certificate Ref No</label>
-            <val>TRC-2026-${lotNo}</val>
+            <label>Parent Input Lots</label>
+            <val>${escHtml((traceData.parentLots && traceData.parentLots.length > 0 ? traceData.parentLots.join(', ') : traceData.parentLot) || 'Direct Inward Lot')}</val>
           </div>
           <div class="meta-box">
             <label>Trace Issue Date</label>
-            <val>${new Date().toLocaleDateString('en-GB')}</val>
+            <val>${escHtml(new Date().toLocaleDateString('en-GB'))}</val>
           </div>
         </div>
 
@@ -208,33 +212,33 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
               <table>
                 <tr>
                   <th>Supplier Name</th>
-                  <td><strong>${supplier.name || '—'}</strong></td>
+                  <td><strong>${escHtml(supplier.name || '—')}</strong></td>
                   <th>GSTIN / License</th>
-                  <td>${supplier.gstin || '22BG1DG5R2'}</td>
+                  <td>${escHtml(supplier.gstin || '—')}</td>
                 </tr>
                 <tr>
                   <th>Inward Invoice No</th>
-                  <td><strong>${supplier.invoice_no || '—'}</strong></td>
+                  <td><strong>${escHtml(supplier.invoice_no || '—')}</strong></td>
                   <th>Receiving Date</th>
-                  <td>${supplier.receiving_date || '—'}</td>
+                  <td>${escHtml(supplier.receiving_date || '—')}</td>
                 </tr>
                 <tr>
                   <th>Inward Quantity</th>
-                  <td><strong>${supplier.inward_qty_bags || 0} Bags (${supplier.total_weight_kg || (supplier.inward_qty_bags * 50)} Kg)</strong></td>
+                  <td><strong>${escHtml(supplier.inward_qty_bags || 0)} Bags (${escHtml(supplier.total_weight_kg || 0)} Kg)</strong></td>
                   <th>Godown Location</th>
-                  <td>${supplier.godown_name || ''}</td>
+                  <td>${escHtml(supplier.godown_name || '—')}</td>
                 </tr>
                 <tr>
                   <th>Vehicle Number</th>
-                  <td>${supplier.vehicle_no || 'TN-58-AX-9912'}</td>
+                  <td>${escHtml(supplier.vehicle_no || '—')}</td>
                   <th>Address & Contact</th>
-                  <td>${supplier.address || ''}, ${supplier.area || ''} (Ph: ${supplier.phone || ''})</td>
+                  <td>${escHtml([supplier.address, supplier.area].filter(Boolean).join(', ') || '—')} ${supplier.phone ? `(Ph: ${escHtml(supplier.phone)})` : ''}</td>
                 </tr>
               </table>
-            ` : '<p style="margin:0;">Procurement origin linked through batch transformation record.</p>'}
+            ` : '<p style="margin:0;">No direct procurement invoice linked (produced/converted batch or opening lot).</p>'}
             ${purReturns && purReturns.length > 0 ? `
               <div style="margin-top:8px; padding:6px 10px; background:#fffbeb; border:1px solid #fde68a; border-radius:4px;">
-                <div style="font-weight:800; color:#b45309; font-size:10px; margin-bottom:4px;">⚠️ DEBIT NOTE / PURCHASE RETURN DETAILS:</div>
+                <div style="font-weight:800; color:#b45309; font-size:10px; margin-bottom:4px;">DEBIT NOTE / PURCHASE RETURN DETAILS:</div>
                 <table>
                   <thead>
                     <tr>
@@ -250,13 +254,13 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
                   <tbody>
                     ${purReturns.map(pr => `
                       <tr>
-                        <td><strong>${pr.return_voucher_no || '—'}</strong></td>
-                        <td>${pr.date || '—'}</td>
-                        <td>${pr.supplier_name || '—'}</td>
-                        <td>${pr.item_name || '—'}</td>
-                        <td style="text-align:right; color:#dc2626; font-weight:700;">-${pr.returned_qty || 0}</td>
-                        <td style="text-align:right; color:#dc2626; font-weight:700;">-${pr.returned_total_weight_kg || 0} kg</td>
-                        <td>${pr.return_reason || 'Rejection Return'}</td>
+                        <td><strong>${escHtml(pr.return_voucher_no || '—')}</strong></td>
+                        <td>${escHtml(pr.date || '—')}</td>
+                        <td>${escHtml(pr.supplier_name || '—')}</td>
+                        <td>${escHtml(pr.item_name || '—')}</td>
+                        <td style="text-align:right; color:#dc2626; font-weight:700;">-${escHtml(pr.returned_qty || 0)}</td>
+                        <td style="text-align:right; color:#dc2626; font-weight:700;">-${escHtml(pr.returned_total_weight_kg || 0)} kg</td>
+                        <td>${escHtml(pr.return_reason || 'Rejection Return')}</td>
                       </tr>
                     `).join('')}
                   </tbody>
@@ -272,65 +276,61 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
             ${iqr ? `
               <table>
                 <tr>
-                  <th>IQR Record No</th>
-                  <td><strong>${iqr.record_no || `IQR-${lotNo}`}</strong></td>
+                  <th>IQR / QC Record No</th>
+                  <td><strong>${escHtml(iqr.record_no || iqr.findings?.iqr_no || '—')}</strong></td>
                   <th>Inspection Date</th>
-                  <td>${iqr.record_date || '2026-08-04'}</td>
+                  <td>${escHtml(iqr.record_date || '—')}</td>
                   <th>Inspected By</th>
-                  <td>${iqr.checked_by || 'QA Inspector'}</td>
+                  <td>${escHtml(iqr.checked_by || '—')}</td>
                 </tr>
                 <tr>
                   <th>Moisture Content</th>
-                  <td><strong>${iqr.findings?.moisture || '10.8%'}</strong> (Limit < 12%)</td>
+                  <td><strong>${escHtml(iqr.findings?.moisture || 'N/A')}</strong></td>
                   <th>Foreign Matter</th>
-                  <td><strong>${iqr.findings?.foreign_matter || '0.4%'}</strong></td>
+                  <td><strong>${escHtml(iqr.findings?.foreign_matter || 'N/A')}</strong></td>
                   <th>Broken Grain</th>
-                  <td><strong>${iqr.findings?.broken_grain || '1.2%'}</strong></td>
+                  <td><strong>${escHtml(iqr.findings?.broken_grain || 'N/A')}</strong></td>
                 </tr>
                 <tr>
-                  <th>Weevil / Insect Audit</th>
-                  <td><span class="badge-pass">${iqr.findings?.weevils || '0% Nil'}</span></td>
-                  <th>Overall Quality Decision</th>
-                  <td colspan="3"><span class="badge-pass">${iqr.findings?.decision || 'ACCEPTED FOR PRODUCTION'}</span></td>
+                  <th>Weevil / Pest</th>
+                  <td>${escHtml(iqr.findings?.weevils || 'N/A')}</td>
+                  <th>Overall Decision</th>
+                  <td colspan="3"><span class="badge-pass">${escHtml(iqr.findings?.decision || iqr.status || 'RECORDED')}</span></td>
                 </tr>
               </table>
-            ` : '<p style="margin:0;">Inward RM receiving quality inspection verified and passed.</p>'}
+            ` : '<p style="margin:0;">No incoming quality report logged for this lot yet.</p>'}
           </div>
         </div>
 
         ${grindBatches.length > 0 ? `
           <div class="section">
-            <div class="section-header">3. Milling Transformation & In-Process CCP Audit (P3 / P4)</div>
+            <div class="section-header">3. Milling Transformation & In-Process Audit (P3 / P4)</div>
             <div class="section-body">
               ${grindBatches.map(gb => `
                 <div style="margin-bottom:8px; padding-bottom:8px; border-bottom:1px dashed #cbd5e1;">
                   <div style="font-weight:800; color:#6b21a8; margin-bottom:4px;">
-                    Grind Ref: ${gb.grind_no} | Facility: ${gb.flour_mill} | Yield Efficiency: ${gb.yield_efficiency}
+                    Grind Ref: ${escHtml(gb.grind_no)} | Date: ${escHtml(gb.date || '—')} | Facility: ${escHtml(gb.flour_mill)} | Yield: ${escHtml(gb.yield_efficiency)}
                   </div>
                   <table>
                     <tr>
-                      <th>CCP Check Item</th>
-                      <th>Standard Requirement</th>
-                      <th>Observed Parameter</th>
-                      <th>Audit Status</th>
+                      <th>CCP / Process Check</th>
+                      <th>Logged Value</th>
+                      <th>Status</th>
                     </tr>
                     <tr>
                       <td>CCP-1: Magnetic Separator</td>
-                      <td>Rare Earth Magnet ≥ 10,000 Gauss</td>
-                      <td>${gb.ccp_monitoring?.ccp1_magnet || '10,200 Gauss'}</td>
-                      <td><span class="badge-pass">PASSED</span></td>
+                      <td>${escHtml(gb.ccp_monitoring?.ccp1_magnet || 'Not Logged')}</td>
+                      <td><span class="badge-pass">${escHtml(gb.ccp_monitoring?.status || '—')}</span></td>
                     </tr>
                     <tr>
                       <td>CCP-1: Gravity De-Stoner</td>
-                      <td>Zero Stone Passage (0% Nil)</td>
-                      <td>${gb.ccp_monitoring?.ccp1_destoner || 'Zero stones found'}</td>
-                      <td><span class="badge-pass">PASSED</span></td>
+                      <td>${escHtml(gb.ccp_monitoring?.ccp1_destoner || 'Not Logged')}</td>
+                      <td><span class="badge-pass">${escHtml(gb.ccp_monitoring?.status || '—')}</span></td>
                     </tr>
                     <tr>
                       <td>CCP-2: Stainless Sifter</td>
-                      <td>60 Mesh Wire Screen Intact</td>
-                      <td>${gb.ccp_monitoring?.ccp2_sifter || '100% Intact'}</td>
-                      <td><span class="badge-pass">PASSED</span></td>
+                      <td>${escHtml(gb.ccp_monitoring?.ccp2_sifter || 'Not Logged')}</td>
+                      <td><span class="badge-pass">${escHtml(gb.ccp_monitoring?.status || '—')}</span></td>
                     </tr>
                   </table>
                 </div>
@@ -345,43 +345,72 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
             ${coas.length > 0 ? coas.map(coa => `
               <div style="margin-bottom:8px;">
                 <div style="font-weight:800; color:#0369a1; margin-bottom:4px;">
-                  COA Ref: ${coa.record_no || `COA-${lotNo}`} | Item: ${coa.item_name} | Batch Lot: ${coa.lot_no}
+                  COA Ref: ${escHtml(coa.record_no || '—')} | Item: ${escHtml(coa.item_name)} | Batch Lot: ${escHtml(coa.lot_no)}
                 </div>
-                <table>
-                  <tr>
-                    <th>S.No</th>
-                    <th>Analytical Parameter</th>
-                    <th>Specification Standard</th>
-                    <th>Observed Result</th>
-                    <th>Status</th>
-                  </tr>
-                  ${(coa.findings?.parameters || [
-                    { parameter: 'Moisture Content', standard: 'Max 12.0%', observed: '10.5%', result: 'Pass' },
-                    { parameter: 'Total Ash', standard: 'Max 3.5%', observed: '1.8%', result: 'Pass' },
-                    { parameter: 'Acid Insoluble Ash', standard: 'Max 0.1%', observed: '0.04%', result: 'Pass' },
-                    { parameter: 'Granularity (Mesh 60)', standard: 'Min 98.0%', observed: '99.4%', result: 'Pass' },
-                    { parameter: 'Gluten Test', standard: 'Nil / Negative', observed: 'Negative (Gluten-Free)', result: 'Pass' },
-                    { parameter: 'Total Microbial Plate Count', standard: 'Max 10,000 cfu/g', observed: '850 cfu/g', result: 'Pass' }
-                  ]).map((p, idx) => `
+                ${(coa.findings?.parameters && coa.findings.parameters.length > 0) ? `
+                  <table>
                     <tr>
-                      <td>${idx + 1}</td>
-                      <td>${p.parameter}</td>
-                      <td>${p.standard}</td>
-                      <td><strong>${p.observed}</strong></td>
-                      <td><span class="badge-pass">${p.result || 'PASS'}</span></td>
+                      <th>S.No</th>
+                      <th>Analytical Parameter</th>
+                      <th>Specification Standard</th>
+                      <th>Observed Result</th>
+                      <th>Status</th>
                     </tr>
-                  `).join('')}
-                </table>
+                    ${coa.findings.parameters.map((p, idx) => `
+                      <tr>
+                        <td>${idx + 1}</td>
+                        <td>${escHtml(p.parameter)}</td>
+                        <td>${escHtml(p.standard)}</td>
+                        <td><strong>${escHtml(p.observed)}</strong></td>
+                        <td><span class="badge-pass">${escHtml(p.result || 'PASS')}</span></td>
+                      </tr>
+                    `).join('')}
+                  </table>
+                ` : '<p style="margin:4px 0;">QC clearance logged without parameter breakdown.</p>'}
                 <div style="margin-top:6px; font-weight:800; color:#15803d;">
-                  Decision: ${coa.findings?.decision || 'PASSED & RELEASED FOR SALE'} (Approved By: ${coa.approved_by || 'Quality Head'})
+                  Decision: ${escHtml(coa.findings?.decision || coa.status || 'RECORDED')} ${coa.approved_by ? `(Approved By: ${escHtml(coa.approved_by)})` : ''}
                 </div>
               </div>
-            `).join('') : '<p style="margin:0;">COA certified for packaging and commercial release.</p>'}
+            `).join('') : '<p style="margin:0;">No Certificate of Analysis (P6 / QC) parameters logged for this lot.</p>'}
           </div>
         </div>
 
         <div class="section">
-          <div class="section-header">5. Forward Dispatches & Terminal Inspection (P7)</div>
+          <div class="section-header">5. Chronological Stock, Cold Storage & Godown Transfer Timeline</div>
+          <div class="section-body">
+            ${stockMovements.length > 0 ? `
+              <table>
+                <tr>
+                  <th>Date</th>
+                  <th>Module</th>
+                  <th>Ref No</th>
+                  <th>Godown</th>
+                  <th>Lot</th>
+                  <th>Dir</th>
+                  <th>Qty</th>
+                  <th>Weight (Kg)</th>
+                  <th>Party / Remarks</th>
+                </tr>
+                ${stockMovements.map(m => `
+                  <tr>
+                    <td>${escHtml(m.movement_date || '—')}</td>
+                    <td>${escHtml(m.source_module || m.movement_type || '—')}</td>
+                    <td>${escHtml(m.source_ref_no || '—')}</td>
+                    <td>${escHtml(m.godown_name || '—')}</td>
+                    <td>${escHtml(m.lot_no || '—')}</td>
+                    <td>${escHtml(m.direction || '—')}</td>
+                    <td>${escHtml(m.qty || 0)}</td>
+                    <td>${escHtml(m.weight || 0)}</td>
+                    <td>${escHtml(m.party_name || m.remarks || '—')}</td>
+                  </tr>
+                `).join('')}
+              </table>
+            ` : '<p style="margin:0;">No stock movements recorded.</p>'}
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="section-header">6. Forward Dispatches & Terminal Inspection (P7)</div>
           <div class="section-body">
             ${dispatches.length > 0 ? `
               <table>
@@ -395,16 +424,16 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
                 </tr>
                 ${dispatches.map(d => `
                   <tr>
-                    <td><strong>${d.customer_name}</strong></td>
-                    <td>${d.invoice_no}</td>
-                    <td>${d.date}</td>
-                    <td>${d.sold_qty} Bags (${d.sold_weight_kg || (d.sold_qty * 30)} Kg)</td>
-                    <td>${d.terminal_inspection?.vehicle_no || 'TN-58-AX-9912'}</td>
-                    <td><span class="badge-pass">PASSED</span></td>
+                    <td><strong>${escHtml(d.customer_name || '—')}</strong></td>
+                    <td>${escHtml(d.invoice_no || '—')}</td>
+                    <td>${escHtml(d.date || '—')}</td>
+                    <td>${escHtml(d.sold_qty || 0)} Bags (${escHtml(d.sold_weight_kg || 0)} Kg)</td>
+                    <td>${escHtml(d.terminal_inspection?.vehicle_no || '—')}</td>
+                    <td><span class="badge-pass">${escHtml(d.terminal_inspection?.status || 'Dispatched')}</span></td>
                   </tr>
                 `).join('')}
               </table>
-            ` : '<p style="margin:0;">Stock currently held in factory godowns or reserved for dispatch.</p>'}
+            ` : '<p style="margin:0;">Stock currently held in factory godowns or not yet dispatched to customers.</p>'}
           </div>
         </div>
 
@@ -430,6 +459,7 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
   };
 
   const supplier = traceData?.backwardTrace?.supplier;
+  const parentPurchases = traceData?.backwardTrace?.parentPurchases || [];
   const purchaseReturns = traceData?.purchaseReturns || traceData?.backwardTrace?.purchaseReturns || [];
   const totalReturnedBags = purchaseReturns.reduce((acc, r) => acc + (parseFloat(r.returned_qty) || 0), 0);
   const iqr = traceData?.backwardTrace?.iqr;
@@ -443,7 +473,11 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
     return true;
   });
   const currentStock = traceData?.currentStock || [];
+  const stockMovements = traceData?.stockMovements || [];
   const dispatches = traceData?.forwardTrace?.dispatches || [];
+  const parentLots = (traceData?.parentLots && traceData.parentLots.length > 0)
+    ? traceData.parentLots
+    : (traceData?.parentLot ? [traceData.parentLot] : []);
   const activeLots = (traceData?.activeLots && traceData.activeLots.length > 0) ? traceData.activeLots : allLots;
 
   return (
@@ -592,16 +626,17 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
                   size="small"
                   sx={{ fontWeight: 700, bgcolor: '#e0e7ff', color: '#3730a3' }}
                 />
-                {traceData.parentLot && (
+                {parentLots.map((pLot) => (
                   <Chip
-                    label={`Derived from: ${traceData.parentLot}`}
+                    key={pLot}
+                    label={`Derived from: ${pLot}`}
                     size="small"
                     variant="outlined"
-                    onClick={() => handleTrace(traceData.parentLot)}
+                    onClick={() => handleTrace(pLot)}
                     icon={<SyncAltIcon fontSize="small" />}
                     sx={{ cursor: 'pointer', borderColor: '#8b5cf6', color: '#6d28d9', fontWeight: 600 }}
                   />
-                )}
+                ))}
                 {purchaseReturns.length > 0 && (
                   <Chip
                     label={`Debit Note Return: ${totalReturnedBags} Bags`}
@@ -666,34 +701,54 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
                         <Grid item xs={12} sm={6}>
                           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 700 }}>INWARD QUANTITY</Typography>
                           <Typography variant="body2" sx={{ fontWeight: 800, color: '#059669' }}>
-                            {supplier.inward_qty_bags} Bags ({supplier.total_weight_kg ? `${supplier.total_weight_kg.toLocaleString()} Kg` : `${supplier.inward_qty_bags * 50} Kg`})
+                            {supplier.inward_qty_bags} Bags ({supplier.total_weight_kg ? `${Number(supplier.total_weight_kg).toLocaleString()} Kg` : '—'})
                           </Typography>
                         </Grid>
                         <Grid item xs={12} sm={6}>
                           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 700 }}>RECEIVING DATE</Typography>
-                          <Typography variant="body2">{supplier.receiving_date}</Typography>
+                          <Typography variant="body2">{supplier.receiving_date || '—'}</Typography>
                         </Grid>
                         <Grid item xs={12} sm={6}>
                           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 700 }}>SUPPLIER GSTIN</Typography>
-                          <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>{supplier.gstin || '22BG1DG5R2'}</Typography>
+                          <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>{supplier.gstin || '—'}</Typography>
                         </Grid>
                         <Grid item xs={12} sm={6}>
                           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 700 }}>RECEIVING GODOWN</Typography>
-                          <Typography variant="body2">{supplier.godown_name}</Typography>
+                          <Typography variant="body2">{supplier.godown_name || '—'}</Typography>
                         </Grid>
                         <Grid item xs={12} sm={6}>
                           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 700 }}>TRANSPORT VEHICLE</Typography>
-                          <Typography variant="body2" sx={{ fontWeight: 600 }}>{supplier.vehicle_no}</Typography>
+                          <Typography variant="body2" sx={{ fontWeight: 600 }}>{supplier.vehicle_no || '—'}</Typography>
                         </Grid>
                         <Grid item xs={12} sm={6}>
                           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 700 }}>PURCHASE RATE</Typography>
-                          <Typography variant="body2">₹{supplier.rate_per_unit} / Bag ({supplier.pay_type})</Typography>
+                          <Typography variant="body2">₹{supplier.rate_per_unit || 0} / Unit ({supplier.pay_type || '—'})</Typography>
                         </Grid>
                         <Grid item xs={12}>
                           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 700 }}>SUPPLIER ADDRESS & CONTACT</Typography>
-                          <Typography variant="body2">{supplier.address}, {supplier.area} — Ph: {supplier.phone}</Typography>
+                          <Typography variant="body2">
+                            {[supplier.address, supplier.area].filter(Boolean).join(', ') || '—'}{supplier.phone ? ` — Ph: ${supplier.phone}` : ''}
+                          </Typography>
                         </Grid>
                       </Grid>
+                      {parentPurchases.length > 1 && (
+                        <Box sx={{ mt: 1.5, pt: 1, borderTop: '1px dashed #cbd5e1' }}>
+                          <Typography variant="caption" sx={{ fontWeight: 700, color: '#475569', display: 'block', mb: 0.5 }}>
+                            All Linked Parent Purchases ({parentPurchases.length}):
+                          </Typography>
+                          <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                            {parentPurchases.map((pp, idx) => (
+                              <Chip
+                                key={`pp-${pp.lot_no}-${idx}`}
+                                label={`${pp.lot_no}: ${pp.supplier_name} (${pp.inward_qty_bags} Bags)`}
+                                size="small"
+                                onClick={() => handleTrace(pp.lot_no)}
+                                sx={{ fontSize: '11px', cursor: 'pointer', bgcolor: '#e0f2fe', color: '#0369a1' }}
+                              />
+                            ))}
+                          </Stack>
+                        </Box>
+                      )}
 
                       {purchaseReturns.length > 0 && (
                         <Box sx={{ mt: 2, p: 1.5, bgcolor: '#fffbeb', borderRadius: 1.5, border: '1px solid #fde68a' }}>
@@ -736,62 +791,63 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
                         2. Incoming Quality Report (IQR / P1)
                       </Typography>
                     </Box>
-                    <Chip label="QC ACCEPTED" size="small" sx={{ bgcolor: '#dcfce7', color: '#15803d', fontWeight: 700, fontSize: '10px' }} />
+                    <Chip
+                      label={iqr ? (iqr.findings?.decision || iqr.status || 'QC RECORDED') : 'NO IQR LOGGED'}
+                      size="small"
+                      sx={{
+                        bgcolor: iqr ? '#dcfce7' : '#f1f5f9',
+                        color: iqr ? '#15803d' : '#64748b',
+                        fontWeight: 700,
+                        fontSize: '10px'
+                      }}
+                    />
                   </Box>
 
                   {iqr ? (
                     <Box sx={{ fontSize: '13px', lineHeight: 1.9, bgcolor: '#f0fdf4', p: 2, borderRadius: 1.5, border: '1px solid #bbf7d0' }}>
                       <Grid container spacing={1}>
                         <Grid item xs={12} sm={6}>
-                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 700 }}>IQR RECORD NO</Typography>
+                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 700 }}>IQR / QC RECORD NO</Typography>
                           <Typography variant="body2" sx={{ fontWeight: 700, fontFamily: 'monospace', color: '#059669' }}>
-                            {iqr.record_no || iqr.findings?.iqr_no || `IQR-2026-${traceData.lotNo}`}
+                            {iqr.record_no || iqr.findings?.iqr_no || '—'}
                           </Typography>
                         </Grid>
                         <Grid item xs={12} sm={6}>
                           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 700 }}>INSPECTION DATE</Typography>
-                          <Typography variant="body2">{iqr.record_date || '2026-08-04'}</Typography>
+                          <Typography variant="body2">{iqr.record_date || '—'}</Typography>
                         </Grid>
                         <Grid item xs={6} sm={3}>
                           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 700 }}>MOISTURE</Typography>
-                          <Typography variant="body2" sx={{ fontWeight: 700 }}>{iqr.findings?.moisture || '10.8%'}</Typography>
+                          <Typography variant="body2" sx={{ fontWeight: 700 }}>{iqr.findings?.moisture || 'N/A'}</Typography>
                         </Grid>
                         <Grid item xs={6} sm={3}>
                           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 700 }}>FOREIGN MATTER</Typography>
-                          <Typography variant="body2" sx={{ fontWeight: 700 }}>{iqr.findings?.foreign_matter || '0.4%'}</Typography>
+                          <Typography variant="body2" sx={{ fontWeight: 700 }}>{iqr.findings?.foreign_matter || 'N/A'}</Typography>
                         </Grid>
                         <Grid item xs={6} sm={3}>
                           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 700 }}>BROKEN GRAIN</Typography>
-                          <Typography variant="body2" sx={{ fontWeight: 700 }}>{iqr.findings?.broken_grain || '1.2%'}</Typography>
+                          <Typography variant="body2" sx={{ fontWeight: 700 }}>{iqr.findings?.broken_grain || 'N/A'}</Typography>
                         </Grid>
                         <Grid item xs={6} sm={3}>
                           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 700 }}>WEEVILS / PEST</Typography>
-                          <Typography variant="body2" sx={{ fontWeight: 700, color: '#16a34a' }}>{iqr.findings?.weevils || '0% Nil'}</Typography>
+                          <Typography variant="body2" sx={{ fontWeight: 700, color: '#16a34a' }}>{iqr.findings?.weevils || 'N/A'}</Typography>
                         </Grid>
                         <Grid item xs={12} sm={6}>
                           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 700 }}>INSPECTED BY</Typography>
-                          <Typography variant="body2">{iqr.checked_by || 'QA QC Officer'}</Typography>
+                          <Typography variant="body2">{iqr.checked_by || '—'}</Typography>
                         </Grid>
                         <Grid item xs={12} sm={6}>
                           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 700 }}>DECISION / STATUS</Typography>
                           <Typography variant="body2" sx={{ fontWeight: 800, color: '#15803d' }}>
-                            {iqr.findings?.decision || 'ACCEPTED FOR PRODUCTION'}
+                            {iqr.findings?.decision || iqr.status || 'RECORDED'}
                           </Typography>
-                        </Grid>
-                        <Grid item xs={12}>
-                          <Box sx={{ mt: 0.5, p: 1, bgcolor: '#ffffff', borderRadius: 1, border: '1px solid #dcfce7', display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <CheckCircleOutlineIcon sx={{ color: '#16a34a', fontSize: 18 }} />
-                            <Typography variant="caption" sx={{ color: '#15803d', fontWeight: 600 }}>
-                              Inward raw material meets FSSAI Moisture & Purity specifications. Approved for milling.
-                            </Typography>
-                          </Box>
                         </Grid>
                       </Grid>
                     </Box>
                   ) : (
                     <Box sx={{ p: 2, bgcolor: '#f8fafc', borderRadius: 1.5, border: '1px dashed #cbd5e1' }}>
                       <Typography variant="body2" color="text.secondary">
-                        Standard incoming quality inspection logged on receiving.
+                        No Incoming Quality Report (IQR / P1) or QC inspection logged for this lot yet.
                       </Typography>
                     </Box>
                   )}
@@ -1089,6 +1145,86 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
               </Card>
             </Grid>
 
+            {/* 5.5 COLD STORAGE, GODOWN TRANSFER & STOCK MOVEMENT TIMELINE */}
+            <Grid item xs={12}>
+              <Card sx={{ borderTop: '4px solid #0f766e', border: '1px solid #cbd5e1', borderRadius: 2 }}>
+                <CardContent sx={{ p: 2.5 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <SyncAltIcon sx={{ color: '#0f766e' }} />
+                      <Typography variant="subtitle1" sx={{ fontWeight: 800, color: '#0f172a' }}>
+                        5.5 Chronological Stock Movement, Cold Storage & Godown Transfer Timeline
+                      </Typography>
+                    </Box>
+                    <Chip label={`${stockMovements.length} MOVEMENTS`} size="small" sx={{ bgcolor: '#ccfbf1', color: '#0f766e', fontWeight: 700, fontSize: '10px' }} />
+                  </Box>
+
+                  {stockMovements.length > 0 ? (
+                    <TableContainer component={Paper} variant="outlined" sx={{ bgcolor: 'white' }}>
+                      <Table size="small">
+                        <TableHead sx={{ bgcolor: '#f8fafc' }}>
+                          <TableRow>
+                            <TableCell sx={{ fontWeight: 700 }}>Date</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Module / Type</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Ref No</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Godown</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Lot No</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Dir</TableCell>
+                            <TableCell align="right" sx={{ fontWeight: 700 }}>Qty (Bags)</TableCell>
+                            <TableCell align="right" sx={{ fontWeight: 700 }}>Weight (Kg)</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Party / Remarks</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {stockMovements.map((mv, mIdx) => (
+                            <TableRow key={`${mv.id || mIdx}`} hover>
+                              <TableCell>{mv.movement_date || '—'}</TableCell>
+                              <TableCell>
+                                <Typography variant="caption" sx={{ fontWeight: 700, color: '#0f172a', display: 'block' }}>
+                                  {mv.source_module || mv.movement_type}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">{mv.movement_type}</Typography>
+                              </TableCell>
+                              <TableCell sx={{ fontFamily: 'monospace', fontWeight: 600 }}>{mv.source_ref_no || '—'}</TableCell>
+                              <TableCell>{mv.godown_name || '—'}</TableCell>
+                              <TableCell>
+                                {mv.lot_no ? (
+                                  <Chip
+                                    label={mv.lot_no}
+                                    size="small"
+                                    onClick={() => handleTrace(mv.lot_no)}
+                                    sx={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '11px', cursor: 'pointer', bgcolor: '#e0f2fe', color: '#0369a1' }}
+                                  />
+                                ) : '—'}
+                              </TableCell>
+                              <TableCell>
+                                <Chip
+                                  label={mv.direction}
+                                  size="small"
+                                  color={mv.direction === 'IN' ? 'success' : 'warning'}
+                                  sx={{ fontWeight: 700, fontSize: '10px' }}
+                                />
+                              </TableCell>
+                              <TableCell align="right" sx={{ fontWeight: 700 }}>{Number(mv.qty || 0).toLocaleString()}</TableCell>
+                              <TableCell align="right">{Number(mv.weight || 0).toLocaleString()}</TableCell>
+                              <TableCell>
+                                <Typography variant="caption" sx={{ display: 'block', fontWeight: 600 }}>{mv.party_name || '—'}</Typography>
+                                {mv.remarks && <Typography variant="caption" color="text.secondary">{mv.remarks}</Typography>}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  ) : (
+                    <Typography variant="body2" color="text.secondary">
+                      No movement ledger entries recorded for this lot family.
+                    </Typography>
+                  )}
+                </CardContent>
+              </Card>
+            </Grid>
+
             {/* 6. FORWARD TRACE: SALES & CUSTOMER DISPATCHES */}
             <Grid item xs={12}>
               <Card sx={{ borderTop: '4px solid #ea580c', border: '1px solid #cbd5e1', borderRadius: 2 }}>
@@ -1121,26 +1257,31 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
                           {dispatches.map((d, idx) => (
                             <TableRow key={idx}>
                               <TableCell>
-                                <Typography variant="body2" sx={{ fontWeight: 700 }}>{d.customer_name}</Typography>
-                                <Typography variant="caption" color="text.secondary">{d.customer_city} • Ph: {d.customer_phone}</Typography>
+                                <Typography variant="body2" sx={{ fontWeight: 700 }}>{d.customer_name || '—'}</Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  {[d.customer_city, d.customer_phone ? `Ph: ${d.customer_phone}` : ''].filter(Boolean).join(' • ') || '—'}
+                                </Typography>
                               </TableCell>
-                              <TableCell sx={{ fontFamily: 'monospace', fontWeight: 700, color: '#ea580c' }}>{d.invoice_no}</TableCell>
-                              <TableCell>{d.date}</TableCell>
+                              <TableCell sx={{ fontFamily: 'monospace', fontWeight: 700, color: '#ea580c' }}>{d.invoice_no || '—'}</TableCell>
+                              <TableCell>{d.date || '—'}</TableCell>
                               <TableCell>
                                 <div>{d.item_name}</div>
                                 <Chip
                                   label={d.lot_no}
                                   size="small"
-                                  sx={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '11px', bgcolor: '#fef3c7', color: '#92400e' }}
+                                  onClick={() => handleTrace(d.lot_no)}
+                                  sx={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '11px', cursor: 'pointer', bgcolor: '#fef3c7', color: '#92400e' }}
                                 />
                               </TableCell>
-                              <TableCell sx={{ fontWeight: 700 }}>{d.sold_qty} Bags</TableCell>
-                              <TableCell sx={{ fontWeight: 700, color: '#ea580c' }}>{(d.sold_weight_kg || d.sold_qty * 30).toLocaleString()} Kg</TableCell>
+                              <TableCell sx={{ fontWeight: 700 }}>{d.sold_qty || 0} Bags</TableCell>
+                              <TableCell sx={{ fontWeight: 700, color: '#ea580c' }}>
+                                {d.sold_weight_kg ? `${Number(d.sold_weight_kg).toLocaleString()} Kg` : '—'}
+                              </TableCell>
                               <TableCell>
                                 <Chip
-                                  label={`${d.terminal_inspection?.record_no || 'P7-CLEARED'} (Double Stitch Checked)`}
+                                  label={d.terminal_inspection?.record_no ? `${d.terminal_inspection.record_no} (${d.terminal_inspection.bag_integrity})` : (d.terminal_inspection?.status || 'Dispatched')}
                                   size="small"
-                                  color="success"
+                                  color={d.terminal_inspection?.record_no ? 'success' : 'default'}
                                   sx={{ fontWeight: 600, fontSize: '11px' }}
                                 />
                               </TableCell>

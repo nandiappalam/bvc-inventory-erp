@@ -1,6 +1,36 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
+const { syncDocumentMovements } = require('../services/SourceMovementSync');
+
+async function syncPurchaseFromQc(companyId, purchaseId, lotNo) {
+  const cId = parseInt(companyId, 10);
+  if (!Number.isSafeInteger(cId) || cId <= 0) return;
+  try {
+    let targetPurchaseId = purchaseId ? parseInt(purchaseId, 10) : null;
+    if ((!targetPurchaseId || Number.isNaN(targetPurchaseId)) && lotNo) {
+      const lotRes = await db.query(
+        `SELECT purchase_id FROM stock_lots WHERE LOWER(TRIM(lot_no)) = LOWER(TRIM(?)) AND purchase_id IS NOT NULL ORDER BY id DESC LIMIT 1`,
+        [String(lotNo).trim()],
+        cId
+      );
+      targetPurchaseId = lotRes.rows?.[0]?.purchase_id || null;
+      if (!targetPurchaseId) {
+        const piRes = await db.query(
+          `SELECT purchase_id FROM purchase_items WHERE LOWER(TRIM(lot_no)) = LOWER(TRIM(?)) AND purchase_id IS NOT NULL ORDER BY id DESC LIMIT 1`,
+          [String(lotNo).trim()],
+          cId
+        );
+        targetPurchaseId = piRes.rows?.[0]?.purchase_id || null;
+      }
+    }
+    if (targetPurchaseId) {
+      await syncDocumentMovements(cId, 'PURCHASE', targetPurchaseId);
+    }
+  } catch (syncErr) {
+    console.warn('[QC SyncMovement]', syncErr.message);
+  }
+}
 
 const asyncHandler = (fn) => (req, res, next) => {
   Promise.resolve(fn(req, res, next)).catch(next);
@@ -1203,6 +1233,7 @@ router.post(['/submit', '/purchase-lab-testing'], asyncHandler(async (req, res) 
     }
 
     await connection.commit();
+    await syncPurchaseFromQc(req.companyId, resolvedPurchaseId, lotNo);
     res.status(201).json({ 
       success: true, 
       message: 'QC inspection saved successfully', 
@@ -1605,6 +1636,8 @@ router.post('/unload', asyncHandler(async (req, res) => {
     console.error('Error compiling returnData in /qc/unload:', e);
   }
 
+  await syncPurchaseFromQc(activeCompanyId, returnData?.purchaseId || null, lotNo);
+
   res.json({ 
     success: true, 
     message: `Lot status updated to ${status}.`,
@@ -1808,6 +1841,8 @@ router.post('/confirm-disposal', asyncHandler(async (req, res) => {
     );
   }
 
+  await syncPurchaseFromQc(req.companyId, finalPurchaseId, lotNo);
+
   res.json({ 
     success: true, 
     message: 'Plant disposal and multi-godown unloading verified successfully. Vehicle gate-pass issued (marked UNLOADED).' 
@@ -1842,6 +1877,7 @@ router.post('/override-approve', asyncHandler(async (req, res) => {
     );
 
     await connection.commit();
+    await syncPurchaseFromQc(req.companyId, null, lotNo);
     res.json({ success: true, message: `Lot ${lotNo} successfully approved for unloading.` });
   } catch (error) {
     await connection.rollback();

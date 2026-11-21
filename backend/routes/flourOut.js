@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
 const { deductFlourOutStock, revertFlourOutStock } = require('../utils/stockSync');
+const { syncDocumentMovements, deleteDocumentMovements } = require('../services/SourceMovementSync');
 
 const getCompanyId = (req) => req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
 const _flourOutSchemaEnsured = new Set();
@@ -319,9 +320,16 @@ router.post('/', async (req, res) => {
     });
 
     try {
-      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      await syncDocumentMovements(activeCompanyId, 'FLOUR_OUT', flourOutId, req.user?.username || 'admin');
+    } catch (syncErr) {
+      console.warn('Stock movement sync warning (Flour Out create):', syncErr.message);
+    }
+
+    try {
+      const { triggerTransactionNotification, formatNotificationItems, formatNumClean } = require('../utils/transactionNotifier');
       const flNo = `FO-${sNoVal || flourOutId}`;
-      const itemDesc = activeItems.map(i => `${i.qty || 0} ${i.item_name || i.itemName}`).slice(0, 3).join(', ') || 'Flour';
+      const itemDesc = formatNotificationItems(activeItems, { emptyFallback: 'Flour' });
+      const qtySummary = `${formatNumClean(totalQty)} ${totalQty === 1 ? 'Bag' : 'Bags'} / ${formatNumClean(totalWeight)} KG`;
       await triggerTransactionNotification({
         eventType: 'PRODUCTION_CREATED',
         moduleName: 'PRODUCTION',
@@ -329,7 +337,7 @@ router.post('/', async (req, res) => {
         referenceId: flourOutId,
         companyId: activeCompanyId,
         title: `⚙️ FLOUR OUT DISPATCH – ${flNo}`,
-        message: `Papad Company: ${companyName || 'Mill'} | ${itemDesc} | Weight: ${totalWeight} KG`,
+        message: `Papad Company: ${companyName || 'Mill'} | ${itemDesc} | Qty: ${qtySummary}`,
         severity: 'INFO',
         details: {
           reference_no: flNo,
@@ -337,7 +345,7 @@ router.post('/', async (req, res) => {
           module_label: 'Flour Out Dispatch',
           party_name: companyName || 'Papad Unit',
           item_summary: itemDesc,
-          quantity: `${totalQty} Bags / ${totalWeight} KG`,
+          quantity: qtySummary,
           godown: 'Flour Store',
           status: 'DISPATCHED',
           created_by: req.user?.username || 'Production Operator',
@@ -438,9 +446,16 @@ router.put('/:id', async (req, res) => {
     });
 
     try {
-      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      await syncDocumentMovements(activeCompanyId, 'FLOUR_OUT', flourOutId, req.user?.username || 'admin');
+    } catch (syncErr) {
+      console.warn('Stock movement sync warning (Flour Out update):', syncErr.message);
+    }
+
+    try {
+      const { triggerTransactionNotification, formatNotificationItems, formatNumClean } = require('../utils/transactionNotifier');
       const refNo = `FO-${sNoVal || flourOutId}`;
-      const itemDesc = activeItems.map(i => `${i.qty || 0} ${i.item_name || i.itemName || 'Item'}`).slice(0, 3).join(', ') || 'Flour Issue';
+      const itemDesc = formatNotificationItems(activeItems, { emptyFallback: 'Flour Issue' });
+      const qtySummary = `${formatNumClean(totalQty)} ${totalQty === 1 ? 'Bag' : 'Bags'} / ${formatNumClean(totalWeight)} KG`;
       await triggerTransactionNotification({
         eventType: 'PRODUCTION_UPDATED',
         isUpdate: true,
@@ -449,7 +464,7 @@ router.put('/:id', async (req, res) => {
         referenceId: flourOutId,
         companyId: activeCompanyId,
         title: `✏️ FLOUR OUT UPDATED – ${refNo}`,
-        message: `Updated Flour Out | Unit: ${compVal || 'Papad Unit'} | ${itemDesc} | Total: ${totalQty} Bags (${totalWeight} KG)`,
+        message: `Updated Flour Out | Unit: ${compVal || 'Papad Unit'} | ${itemDesc} | Qty: ${qtySummary}`,
         severity: 'INFO',
         details: {
           reference_no: refNo,
@@ -458,7 +473,7 @@ router.put('/:id', async (req, res) => {
           module_label: 'Flour Outward',
           party_name: compVal || 'Papad Unit',
           item_summary: itemDesc,
-          quantity: `${totalQty} Bags / ${totalWeight} KG`,
+          quantity: qtySummary,
           godown: 'Flour Store',
           status: 'UPDATED',
           updated_by: req.user?.username || 'Production Operator',
@@ -490,6 +505,12 @@ router.delete('/:id', async (req, res) => {
       await compDb.run('DELETE FROM flour_out_items WHERE flour_out_id = ?', [flourOutId]);
       await compDb.run('DELETE FROM flour_out WHERE id = ?', [flourOutId]);
     });
+
+    try {
+      await deleteDocumentMovements(activeCompanyId, 'FLOUR_OUT', flourOutId, 'Flour out deleted', req.user?.username || 'admin');
+    } catch (syncErr) {
+      console.warn('Stock movement reversal warning (Flour Out delete):', syncErr.message);
+    }
 
     res.json({ success: true, message: 'Flour out record deleted successfully' });
   } catch (error) {

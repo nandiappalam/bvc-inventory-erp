@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../services/api';
 import { printHtml } from '../utils/printHelper';
 import { useAuth } from '../context/AuthContext';
@@ -7,6 +7,9 @@ import './OpenDisplay.css';
 
 const OpenDisplay = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const highlightId = searchParams.get('highlightId') || '';
+  const highlightRef = searchParams.get('highlightRef') || '';
   const { isAdmin, hasPermission } = useAuth();
   const canEdit = isAdmin || hasPermission('Open', 'Display', 'can_edit') || hasPermission('Open', 'can_edit');
   const canDelete = isAdmin || hasPermission('Open', 'Display', 'can_delete') || hasPermission('Open', 'can_delete');
@@ -18,8 +21,8 @@ const OpenDisplay = () => {
 
   // Filters
   const todayStr = new Date().toISOString().split('T')[0];
-  const [fromDate, setFromDate] = useState(todayStr);
-  const [toDate, setToDate] = useState(todayStr);
+  const [fromDate, setFromDate] = useState((highlightId || highlightRef) ? '' : todayStr);
+  const [toDate, setToDate] = useState((highlightId || highlightRef) ? '' : todayStr);
   const [searchTerm, setSearchTerm] = useState('');
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
 
@@ -41,6 +44,37 @@ const OpenDisplay = () => {
   useEffect(() => {
     fetchEntries();
   }, []);
+
+  const isRowHighlighted = (parentId, parentSNo) => {
+    if (highlightId && parentId !== undefined && parentId !== null && String(parentId) === String(highlightId)) {
+      return true;
+    }
+    if (!highlightId && highlightRef && parentSNo !== undefined && parentSNo !== null) {
+      return String(parentSNo).trim().toLowerCase() === String(highlightRef).trim().toLowerCase();
+    }
+    return false;
+  };
+
+  useEffect(() => {
+    if ((!highlightId && !highlightRef) || !entries.length) return;
+    const hasMatch = entries.some((entry) => isRowHighlighted(entry.id, entry.s_no));
+    if (hasMatch) {
+      if (fromDate) setFromDate('');
+      if (toDate) setToDate('');
+      if (searchTerm) setSearchTerm('');
+    }
+  }, [highlightId, highlightRef, entries]);
+
+  useEffect(() => {
+    if ((!highlightId && !highlightRef) || loading || !entries.length) return;
+    const timer = setTimeout(() => {
+      const el = document.querySelector('[data-highlighted="true"]');
+      if (el && typeof el.scrollIntoView === 'function') {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [highlightId, highlightRef, loading, entries]);
 
   const handleDelete = async (parentId) => {
     try {
@@ -264,10 +298,14 @@ const OpenDisplay = () => {
                 </tr>
               </thead>
               <tbody>
-                {filteredRows.map((row, index) => (
+                {filteredRows.map((row, index) => {
+                  const highlighted = isRowHighlighted(row.parentId, row.parentSNo);
+                  return (
                   <tr 
                     key={index} 
+                    data-highlighted={highlighted ? 'true' : undefined}
                     className={row.isFirstOfParent ? 'parent-row-start' : ''}
+                    style={highlighted ? { backgroundColor: '#fef08a', boxShadow: 'inset 4px 0 0 #d97706, inset 0 1px 0 #f59e0b, inset 0 -1px 0 #f59e0b' } : undefined}
                   >
                     {/* Parent cell: S.No */}
                     <td className="td-sno">
@@ -364,7 +402,8 @@ const OpenDisplay = () => {
                       ) : null}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           )}

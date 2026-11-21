@@ -2,13 +2,23 @@ const express = require('express');
 const router = express.Router();
 const service = require('../services/factoryProductionPlanningService');
 
+function resolveCompanyId(req) {
+  if (req.companyId) return parseInt(req.companyId, 10) || 1;
+  const hdr = req.headers['x-company-id'];
+  if (hdr) {
+    const parsed = parseInt(hdr, 10);
+    if (Number.isSafeInteger(parsed) && parsed > 0) return parsed;
+  }
+  return 1;
+}
+
 /**
  * GET /api/factory-production-planning/dashboard-summary
  * Answers: "What should the factory work on now?"
  */
 router.get('/dashboard-summary', async (req, res) => {
   try {
-    const data = await service.getProductionDashboardSummary();
+    const data = await service.getProductionDashboardSummary(resolveCompanyId(req));
     res.json(data);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -20,7 +30,7 @@ router.get('/dashboard-summary', async (req, res) => {
  */
 router.get('/queue', async (req, res) => {
   try {
-    const data = await service.getProductionQueue(req.query);
+    const data = await service.getProductionQueue(req.query, resolveCompanyId(req));
     res.json(data);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -32,7 +42,7 @@ router.get('/queue', async (req, res) => {
  */
 router.post('/queue', async (req, res) => {
   try {
-    const data = await service.addToQueue(req.body);
+    const data = await service.addToQueue(req.body, resolveCompanyId(req));
     res.json(data);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -44,7 +54,7 @@ router.post('/queue', async (req, res) => {
  */
 router.get(['/customer-demand', '/demand-forecast'], async (req, res) => {
   try {
-    const data = await service.getCustomerDemandAndForecast();
+    const data = await service.getCustomerDemandAndForecast(resolveCompanyId(req));
     res.json(data);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -60,7 +70,7 @@ router.post(['/approve-mts', '/approve-forecast'], async (req, res) => {
     if (!forecastId) {
       return res.status(400).json({ success: false, error: 'forecastId is required' });
     }
-    const data = await service.approveForecastRecommendation(forecastId, plannerName);
+    const data = await service.approveForecastRecommendation(forecastId, plannerName, resolveCompanyId(req));
     res.json(data);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -72,7 +82,7 @@ router.post(['/approve-mts', '/approve-forecast'], async (req, res) => {
  */
 router.get(['/material-availability', '/material-atp'], async (req, res) => {
   try {
-    const data = await service.getMaterialAvailabilityATP(req.query.productName);
+    const data = await service.getMaterialAvailabilityATP(req.query.productName, resolveCompanyId(req));
     res.json(data);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -84,7 +94,7 @@ router.get(['/material-availability', '/material-atp'], async (req, res) => {
  */
 router.get('/units', async (req, res) => {
   try {
-    const data = await service.getUnitOperations();
+    const data = await service.getUnitOperations(resolveCompanyId(req));
     res.json(data);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -100,7 +110,7 @@ router.post('/advance-job', async (req, res) => {
     if (!queueId || !action) {
       return res.status(400).json({ success: false, error: 'queueId and action are required' });
     }
-    const data = await service.advanceJob(queueId, action, payload || {});
+    const data = await service.advanceJob(queueId, action, payload || {}, resolveCompanyId(req));
     res.json(data);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -112,7 +122,7 @@ router.post('/advance-job', async (req, res) => {
  */
 router.get('/cleaning-orders', async (req, res) => {
   try {
-    const data = await service.getCleaningOrders();
+    const data = await service.getCleaningOrders(resolveCompanyId(req));
     res.json(data);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -124,7 +134,7 @@ router.get('/cleaning-orders', async (req, res) => {
  */
 router.get(['/outputs', '/production-outputs'], async (req, res) => {
   try {
-    const data = await service.getProductionOutputs();
+    const data = await service.getProductionOutputs(resolveCompanyId(req));
     res.json(data);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -136,8 +146,8 @@ router.get(['/outputs', '/production-outputs'], async (req, res) => {
  */
 router.get(['/traceability', '/traceability/:key'], async (req, res) => {
   try {
-    const key = req.params.key || req.query.key || 'PO-2026-0045';
-    const data = await service.getTraceabilityGraph(key);
+    const key = req.params.key || req.query.key || '';
+    const data = await service.getTraceabilityGraph(key, resolveCompanyId(req));
     res.json(data);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

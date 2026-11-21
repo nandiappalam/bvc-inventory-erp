@@ -63,7 +63,7 @@ import { printHtml } from '../utils/printHelper';
 import ColdStorageTransferStatementModal from './coldStorage/ColdStorageTransferStatementModal';
 import ColdStorageReleaseOrderModal from './coldStorage/ColdStorageReleaseOrderModal';
 import { InlineMasterModal } from './common/InlineMasterModal.jsx';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 
 const DEFAULT_MOVEMENT_METHODS = [
   'Hand Trolley',
@@ -76,7 +76,10 @@ const DEFAULT_MOVEMENT_METHODS = [
 
 const GodownTransfer = ({ initialView = 'create' }) => {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState(initialView === 'display' ? 'display' : 'create');
+  const [searchParams] = useSearchParams();
+  const highlightId = searchParams.get('highlightId') || '';
+  const highlightRef = searchParams.get('highlightRef') || '';
+  const [activeTab, setActiveTab] = useState((initialView === 'display' || highlightId || highlightRef) ? 'display' : 'create');
   const [godowns, setGodowns] = useState([]);
   const [godownItems, setGodownItems] = useState([]);
   const [workersList, setWorkersList] = useState([]);
@@ -124,10 +127,12 @@ const GodownTransfer = ({ initialView = 'create' }) => {
   const [rowsPerPage, setRowsPerPage] = useState(25);
 
   useEffect(() => {
-    if (initialView) {
+    if (highlightId || highlightRef) {
+      setActiveTab('display');
+    } else if (initialView) {
       setActiveTab(initialView === 'display' ? 'display' : 'create');
     }
-  }, [initialView]);
+  }, [initialView, highlightId, highlightRef]);
 
   // Modal State for Cold Storage Bill Statement
   const [openBillModal, setOpenBillModal] = useState(false);
@@ -846,6 +851,26 @@ const GodownTransfer = ({ initialView = 'create' }) => {
     printHtml(printContent, 'Godown_Transfers_Report');
   };
 
+  const isTransferHighlighted = (t) => {
+    if (!t) return false;
+    if (highlightId && t.id !== undefined && t.id !== null && String(t.id) === String(highlightId)) {
+      return true;
+    }
+    if (!highlightId && highlightRef && t.s_no !== undefined && t.s_no !== null) {
+      const target = String(highlightRef).trim().toLowerCase();
+      const s = String(t.s_no).trim().toLowerCase();
+      return s === target || `gt-${s}` === target;
+    }
+    return false;
+  };
+
+  useEffect(() => {
+    if ((!highlightId && !highlightRef) || !transfers.length) return;
+    if (transfers.some((t) => isTransferHighlighted(t))) {
+      if (searchTerm) setSearchTerm('');
+    }
+  }, [highlightId, highlightRef, transfers]);
+
   const filteredTransfers = transfers.filter(t => {
     const term = searchTerm.toLowerCase();
     return (
@@ -860,6 +885,24 @@ const GodownTransfer = ({ initialView = 'create' }) => {
       (t.vehicle_no || '').toLowerCase().includes(term)
     );
   });
+
+  useEffect(() => {
+    if ((!highlightId && !highlightRef) || activeTab !== 'display' || !filteredTransfers.length) return;
+    const matchIndex = filteredTransfers.findIndex((t) => isTransferHighlighted(t));
+    if (matchIndex >= 0) {
+      const targetPage = Math.floor(matchIndex / rowsPerPage);
+      if (page !== targetPage) {
+        setPage(targetPage);
+      }
+      const timer = setTimeout(() => {
+        const el = document.querySelector('[data-highlighted="true"]');
+        if (el && typeof el.scrollIntoView === 'function') {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 150);
+      return () => clearTimeout(timer);
+    }
+  }, [highlightId, highlightRef, activeTab, filteredTransfers.length, rowsPerPage, page]);
 
   const resolvedFromName = formData.from_godown_name || godowns.find(g => String(g.id) === String(formData.from_godown_id))?.godown_name || '';
   const sidebarFromGodown = fromGodownManual
@@ -1916,9 +1959,19 @@ const GodownTransfer = ({ initialView = 'create' }) => {
                     filteredTransfers.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((item) => {
                       const isCS = checkIsColdStorage(item.from_godown_name, item.from_godown_id) || checkIsColdStorage(item.to_godown_name, item.to_godown_id);
                       const isInternal = item.transfer_mode === 'INTERNAL_UNIT' || (!item.vehicle_no && !item.driver_name);
+                      const highlighted = isTransferHighlighted(item);
 
                       return (
-                        <TableRow key={item.id} hover sx={{ '&:hover': { bgcolor: '#f8fafc' } }}>
+                        <TableRow
+                          key={item.id}
+                          hover
+                          data-highlighted={highlighted ? 'true' : undefined}
+                          sx={{
+                            bgcolor: highlighted ? '#fef08a' : undefined,
+                            boxShadow: highlighted ? 'inset 4px 0 0 #d97706, inset 0 1px 0 #f59e0b, inset 0 -1px 0 #f59e0b' : undefined,
+                            '&:hover': { bgcolor: highlighted ? '#fef08a' : '#f8fafc' }
+                          }}
+                        >
                           <TableCell align="center" sx={{ fontWeight: 800, fontFamily: 'monospace' }}>{item.s_no}</TableCell>
                           <TableCell sx={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>{item.transfer_date}</TableCell>
                           <TableCell sx={{ fontWeight: 700, color: '#1e3a8a' }}>

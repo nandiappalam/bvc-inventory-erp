@@ -54,6 +54,7 @@ import CcpMonitoringReport from './CcpMonitoringReport';
 import OprpMonitoringReport from './OprpMonitoringReport';
 import TerminalInspectionReport from './TerminalInspectionReport';
 import VehicleInspectionReport from './VehicleInspectionReport';
+import StockRegisterPanel from './StockRegisterPanel';
 import { printHtml } from '../../utils/printHelper';
 import api from '../../services/api.js';
 
@@ -61,8 +62,12 @@ const CATEGORY_CONFIGS = {
   stock: {
     title: 'Stock Reports',
     badge: 'Inventory & Godown Status',
-    defaultSub: 'group-wise',
+    defaultSub: 'current',
     subReports: [
+      { id: 'opening', label: 'Daily Opening Stock Register' },
+      { id: 'current', label: 'Current / Live Stock Report' },
+      { id: 'closing', label: 'Daily Closing Stock Register' },
+      { id: 'reconciliation', label: 'Stock Ledger Reconciliation' },
       { id: 'group-wise', label: 'Item Group Wise Stock Status' },
       { id: 'godown-wise', label: 'Godown Wise Stock Status' },
       { id: 'urad', label: 'Urad Stock Status' },
@@ -1359,6 +1364,10 @@ const CategoryReportPage = () => {
     if (categoryKey !== 'stock') return config.subReports;
 
     const baseList = [
+      { id: 'opening', label: 'Daily Opening Stock Register' },
+      { id: 'current', label: 'Current / Live Stock Report' },
+      { id: 'closing', label: 'Daily Closing Stock Register' },
+      { id: 'reconciliation', label: 'Stock Ledger Reconciliation' },
       { id: 'group-wise', label: 'Item Group Wise Stock Status' },
       { id: 'godown-wise', label: 'Godown Wise Stock Status' }
     ];
@@ -1479,6 +1488,9 @@ const CategoryReportPage = () => {
   };
 
   const fetchReportRows = async () => {
+    if (categoryKey === 'stock' && ['opening', 'current', 'closing', 'reconciliation'].includes(currentSubReport)) {
+      return;
+    }
     setLoading(true);
     try {
       const qParams = new URLSearchParams({
@@ -1757,7 +1769,11 @@ const CategoryReportPage = () => {
         </Box>
       </Paper>
 
-      {categoryKey === 'production' && ['ccp', 'oprp', 'terminal-inspection', 'vehicle-inspection', 'daily', 'yield', 'wastage', 'summary'].includes(currentSubReport) ? (
+      {categoryKey === 'stock' && ['opening', 'current', 'closing', 'reconciliation'].includes(currentSubReport) ? (
+        <Box sx={{ mt: 1 }}>
+          <StockRegisterPanel mode={currentSubReport} hideHeader />
+        </Box>
+      ) : categoryKey === 'production' && ['ccp', 'oprp', 'terminal-inspection', 'vehicle-inspection', 'daily', 'yield', 'wastage', 'summary'].includes(currentSubReport) ? (
         <Box sx={{ mt: 1 }}>
           {currentSubReport === 'ccp' && <CcpMonitoringReport hideHeader />}
           {currentSubReport === 'oprp' && <OprpMonitoringReport hideHeader />}

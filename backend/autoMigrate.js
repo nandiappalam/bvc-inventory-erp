@@ -2033,22 +2033,8 @@ module.exports = async function autoMigrate() {
     console.log('Notice creating manufacturing & traceability tables in autoMigrate:', schemaErr.message);
   }
 
-  // Sync Flour Out & Papad In stock
-  try {
-    if (typeof syncFlourOutAndPapadInStock === 'function') {
-      await syncFlourOutAndPapadInStock();
-    } else {
-      const stockSyncModule = require('./utils/stockSync');
-      if (typeof stockSyncModule?.syncFlourOutAndPapadInStock === 'function') {
-        await stockSyncModule.syncFlourOutAndPapadInStock();
-      }
-    }
-  } catch (syncErr) {
-    console.log('Notice in autoMigrate stock sync:', syncErr.message);
-  }
-
-  // Sync Item Transfers Stock
-  await syncItemTransfersStock();
+  // Legacy unscoped startup stock mutations disabled to preserve company-scoped stock & lot ledgers.
+  // Non-destructive movement backfill is handled via BackfillAndReconciliationService per company.
 
   // Ensure Accounting Audit Columns & voucher_counters
   try {

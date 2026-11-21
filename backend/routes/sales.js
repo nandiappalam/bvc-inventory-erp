@@ -4,6 +4,7 @@ const db = require('../config/database');
 const recycleBinService = require('../services/RecycleBinService');
 const { createSalesLedgerEntries, deleteLedgerEntries } = require('../utils/ledgerHelper');
 const { rebuildStockLedger } = require('../utils/stockRebuilder');
+const { syncDocumentMovements, deleteDocumentMovements } = require('../services/SourceMovementSync');
 const { resolveCustomerName } = require('../utils/customerResolver');
 
 const getCompanyId = (req) => req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
@@ -419,11 +420,11 @@ router.post('/', async (req, res) => {
       return { salesId, voucherNo };
     });
 
-    // Rebuild stock ledger & trigger notifications AFTER transaction commits
+    // Sync stock movements & rebuild ledger AFTER transaction commits
     try {
-      await rebuildStockLedger(activeCompanyId);
+      await syncDocumentMovements(activeCompanyId, 'SALES', txResult.salesId, req.user?.username || 'admin');
     } catch (e) {
-      console.error('Error rebuilding stock after sale:', e);
+      console.error('Error syncing stock movements after sale:', e);
     }
 
     try {
@@ -706,9 +707,9 @@ router.put('/:id', async (req, res) => {
     });
 
     try {
-      await rebuildStockLedger(activeCompanyId);
+      await syncDocumentMovements(activeCompanyId, 'SALES', salesId, req.user?.username || 'admin');
     } catch (e) {
-      console.error('Error rebuilding stock after updating sale:', e);
+      console.error('Error syncing stock movements after updating sale:', e);
     }
 
     try {
@@ -802,9 +803,9 @@ router.delete('/:id', async (req, res) => {
     });
 
     try {
-      await rebuildStockLedger(activeCompanyId);
+      await deleteDocumentMovements(activeCompanyId, 'SALES', salesId, 'Sales record deleted', req.user?.username || 'admin');
     } catch (e) {
-      console.error('Error rebuilding stock after deleting sale:', e);
+      console.error('Error reversing stock movements after deleting sale:', e);
     }
 
     res.json({ success: true, message: 'Sales record deleted successfully' });
@@ -826,6 +827,349 @@ router.get('/:id/charges', async (req, res) => {
     res.json({ success: true, charges: result.charges || [], traceability: result });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/sales/:id/ledger-statement - Complete Sales-wise Transaction Ledger Statement
+router.get('/:id/ledger-statement', async (req, res) => {
+  try {
+    const activeCompanyId = getCompanyId(req);
+    const runner = db.forCompany(activeCompanyId);
+    const rawId = String(req.params.id || '').trim();
+
+    let saleRes = await runner.query('SELECT * FROM sales WHERE id = ? LIMIT 1', [rawId]);
+    if (!saleRes.rows || saleRes.rows.length === 0) {
+      saleRes = await runner.query(
+        'SELECT * FROM sales WHERE UPPER(TRIM(COALESCE(voucher_no, \'\'))) = UPPER(TRIM(?)) OR CAST(s_no AS TEXT) = ? LIMIT 1',
+        [rawId, rawId]
+      );
+    }
+    const sale = saleRes.rows && saleRes.rows[0];
+    if (!sale) {
+      return res.status(404).json({ success: false, message: 'Sales record not found' });
+    }
+    const salesId = sale.id;
+
+    let items = [];
+    try {
+      const iRes = await runner.query('SELECT * FROM sales_items WHERE sales_id = ? ORDER BY id ASC', [salesId]);
+      items = iRes.rows || [];
+    } catch (_) {}
+
+    // Resolve official customer details
+    let customerName = sale.customer_name || sale.customer || 'Customer';
+    let customerPhone = sale.phone || '';
+    let customerGstin = '';
+    if (sale.customer_id || sale.customer) {
+      try {
+        const cKey = String(sale.customer_id || sale.customer).trim();
+        const cRes = await runner.query(
+          `SELECT id, name, print_name, mobile1, phone_off, gst_number
+           FROM customer_master
+           WHERE TRIM(CAST(id AS TEXT)) = ? OR LOWER(TRIM(name)) = LOWER(?) OR LOWER(TRIM(COALESCE(print_name, ''))) = LOWER(?)
+           LIMIT 1`,
+          [cKey, String(sale.customer || '').trim(), String(sale.customer || '').trim()]
+        );
+        if (cRes.rows && cRes.rows[0]) {
+          customerName = cRes.rows[0].print_name || cRes.rows[0].name || customerName;
+          customerPhone = customerPhone || cRes.rows[0].mobile1 || cRes.rows[0].phone_off || '';
+          customerGstin = cRes.rows[0].gst_number || '';
+        }
+      } catch (_) {}
+    }
+
+    if (/^\d+$/.test(String(customerName).trim())) {
+      try {
+        const resolved = await resolveCustomerName(sale.customer_id || sale.customer, activeCompanyId);
+        if (resolved) customerName = resolved;
+      } catch (_) {}
+    }
+
+    let transporterName = sale.pur_trans || 'Transport / Logistics';
+    if (sale.pur_trans && /^\d+$/.test(String(sale.pur_trans).trim())) {
+      try {
+        const tRes = await runner.query(
+          'SELECT name, print_name FROM transport_master WHERE TRIM(CAST(id AS TEXT)) = ? LIMIT 1',
+          [String(sale.pur_trans).trim()]
+        );
+        if (tRes.rows && tRes.rows[0]) {
+          transporterName = tRes.rows[0].print_name || tRes.rows[0].name || transporterName;
+        }
+      } catch (_) {}
+    }
+
+    let loadmanName = sale.loadman_name || 'Loadman Team';
+    if (sale.loadman_worker_id) {
+      try {
+        const lmRes = await runner.query(
+          'SELECT name, worker_name FROM operational_parties WHERE TRIM(CAST(id AS TEXT)) = ? LIMIT 1',
+          [String(sale.loadman_worker_id).trim()]
+        );
+        if (lmRes.rows && lmRes.rows[0]) {
+          loadmanName = lmRes.rows[0].name || lmRes.rows[0].worker_name || loadmanName;
+        }
+      } catch (_) {}
+    }
+
+    let voucherNo = sale.voucher_no || `SAL-${String(sale.s_no || salesId).padStart(5, '0')}`;
+    let voucherId = null;
+    let rawVEntries = [];
+
+    try {
+      const vRes = await runner.query(
+        `SELECT * FROM voucher
+         WHERE COALESCE(is_reversed, 0) = 0
+           AND (
+             (LOWER(COALESCE(source_module, '')) = 'sales' AND source_id = ?)
+             OR (UPPER(TRIM(COALESCE(voucher_no, ''))) = UPPER(TRIM(?)) AND ? != '')
+             OR (reference_no IN (?, ?) AND voucher_type IN ('Sales', 'SAL'))
+           )
+         ORDER BY id DESC LIMIT 1`,
+        [Number(salesId), String(sale.voucher_no || ''), String(sale.voucher_no || ''), String(salesId), `SAL-${salesId}`]
+      );
+      if (vRes.rows && vRes.rows[0]) {
+        voucherId = vRes.rows[0].id;
+        voucherNo = vRes.rows[0].voucher_no || voucherNo;
+        const veRes = await runner.query('SELECT * FROM voucher_entry WHERE voucher_id = ? ORDER BY id ASC', [voucherId]);
+        rawVEntries = veRes.rows || [];
+      }
+    } catch (vErr) {
+      console.warn('Notice checking voucher for sales ledger-statement:', vErr.message);
+    }
+
+    const computedBaseFromItems = items.reduce((s, it) => s + (Number(it.qty || 0) * Number(it.rate || 0)), 0);
+    const computedTaxFromItems = items.reduce((s, it) => {
+      const lineAmt = Number(it.total_amt || 0);
+      const qtyRate = Number(it.qty || 0) * Number(it.rate || 0);
+      return s + (Number(it.cgst_amount || 0) + Number(it.sgst_amount || 0) + Number(it.igst_amount || 0) || Math.max(0, lineAmt - qtyRate));
+    }, 0);
+
+    const baseAmount = Number(sale.base_amt || sale.bill_amt || computedBaseFromItems || 0);
+    const taxAmount = Number(sale.tax_amt || sale.tax_amount || computedTaxFromItems || 0);
+    const isInterstate = String(sale.tax_type || '').toLowerCase().includes('inter') || Number(sale.igst_amt || sale.igst_amount || 0) > 0;
+    const rawCgst = Number(sale.cgst_amt || sale.cgst_amount || 0);
+    const rawSgst = Number(sale.sgst_amt || sale.sgst_amount || 0);
+    const rawIgst = Number(sale.igst_amt || sale.igst_amount || 0);
+    const cgstAmount = rawCgst > 0 ? rawCgst : (isInterstate ? 0 : Number((taxAmount / 2).toFixed(2)));
+    const sgstAmount = rawSgst > 0 ? rawSgst : (isInterstate ? 0 : Number((taxAmount - cgstAmount).toFixed(2)));
+    const igstAmount = rawIgst > 0 ? rawIgst : (isInterstate ? taxAmount : 0);
+
+    const deductions = normalizeSalesDeductions(sale.deductions_json, sale);
+    const addDeductionsTotal = deductions.filter((d) => d.type === 'ADD').reduce((s, d) => s + Number(d.amount || 0), 0);
+    const lessDeductionsTotal = deductions.filter((d) => d.type === 'LESS').reduce((s, d) => s + Number(d.amount || 0), 0);
+
+    const grandTotal = Number(
+      (sale.grand_total && Number(sale.grand_total) > 0)
+        ? Number(sale.grand_total)
+        : (sale.total_amt && Number(sale.total_amt) > 0)
+          ? Number(sale.total_amt)
+          : (baseAmount + taxAmount + addDeductionsTotal - lessDeductionsTotal).toFixed(2)
+    );
+
+    const classifyAccountHead = (ledgerName, veType) => {
+      const l = String(ledgerName || '').toLowerCase();
+      if (l === String(customerName).toLowerCase()) return 'Sundry Debtors (Customer)';
+      if (l.includes('sales')) return 'Direct Income / Sales';
+      if (l.includes('cgst') || l.includes('sgst') || l.includes('igst') || l.includes('tcs') || l.includes('gst')) return 'Duties & Taxes';
+      if (l.includes('round')) return 'Indirect Expense / Income';
+      return veType === 'Dr' ? 'Debit Account' : 'Credit Account';
+    };
+
+    let journalEntries = [];
+    if (rawVEntries.length > 0) {
+      journalEntries = rawVEntries.map((ve, idx) => {
+        const lName = /^\d+$/.test(String(ve.ledger_name || '').trim()) ? customerName : (ve.ledger_name || 'Ledger Account');
+        return {
+          no: idx + 1,
+          ledger_name: lName,
+          account_head: classifyAccountHead(lName, ve.type),
+          debit: Number(ve.debit || 0),
+          credit: Number(ve.credit || 0),
+          particulars: ve.remarks || `${voucherNo}`
+        };
+      });
+    } else {
+      let idx = 1;
+      journalEntries.push({
+        no: idx++,
+        ledger_name: customerName,
+        account_head: 'Sundry Debtors (Customer)',
+        debit: grandTotal,
+        credit: 0,
+        particulars: `Sales Invoice ${voucherNo}`
+      });
+      if (baseAmount > 0) {
+        journalEntries.push({
+          no: idx++,
+          ledger_name: 'Sales Account',
+          account_head: 'Direct Income / Sales',
+          debit: 0,
+          credit: baseAmount,
+          particulars: `${customerName} taxable sales`
+        });
+      }
+      if (cgstAmount > 0) {
+        journalEntries.push({ no: idx++, ledger_name: 'Output CGST', account_head: 'Duties & Taxes', debit: 0, credit: cgstAmount, particulars: `CGST on ${voucherNo}` });
+      }
+      if (sgstAmount > 0) {
+        journalEntries.push({ no: idx++, ledger_name: 'Output SGST', account_head: 'Duties & Taxes', debit: 0, credit: sgstAmount, particulars: `SGST on ${voucherNo}` });
+      }
+      if (igstAmount > 0) {
+        journalEntries.push({ no: idx++, ledger_name: 'Output IGST', account_head: 'Duties & Taxes', debit: 0, credit: igstAmount, particulars: `IGST on ${voucherNo}` });
+      }
+      for (const d of deductions) {
+        journalEntries.push({
+          no: idx++,
+          ledger_name: d.name,
+          account_head: d.type === 'ADD' ? 'Duties / Additional Charges' : 'Sales Deductions / Rebates',
+          debit: d.type === 'LESS' ? Number(d.amount) : 0,
+          credit: d.type === 'ADD' ? Number(d.amount) : 0,
+          particulars: `${d.name} on ${voucherNo}`
+        });
+      }
+    }
+
+    const debitTotal = Number(journalEntries.reduce((s, j) => s + Number(j.debit || 0), 0).toFixed(2));
+    const creditTotal = Number(journalEntries.reduce((s, j) => s + Number(j.credit || 0), 0).toFixed(2));
+    const isBalanced = Math.abs(debitTotal - creditTotal) < 0.01;
+
+    // Check customer receipts against this invoice
+    let customerReceipts = 0;
+    let receiptRows = [];
+    try {
+      const recRes = await runner.query(
+        `SELECT date, voucher_no, particulars, credit
+         FROM ledger_entries
+         WHERE COALESCE(is_reversed, 0) = 0
+           AND voucher_type IN ('Receipt', 'Bank Receipt', 'Cash Receipt', 'Advance')
+           AND LOWER(TRIM(ledger_name)) = LOWER(TRIM(?))
+           AND (reference_id = ? OR particulars LIKE ?)`,
+        [customerName, String(salesId), `%${voucherNo}%`]
+      );
+      receiptRows = recRes.rows || [];
+      customerReceipts = receiptRows.reduce((s, r) => s + Number(r.credit || 0), 0);
+    } catch (_) {}
+
+    const customerOutstanding = Number((grandTotal - customerReceipts).toFixed(2));
+    const loadmanCharges = Number(sale.loadman_charges || 0);
+
+    const individualLedgers = {
+      customer: {
+        title: `Customer Ledger – ${customerName}`,
+        ledger_name: customerName,
+        category: 'Sundry Debtors',
+        rows: [
+          { date: sale.date, particulars: `Sales invoice ${voucherNo}`, voucher: voucherNo, debit: grandTotal, credit: 0 },
+          ...receiptRows.map((rr) => ({
+            date: rr.date,
+            particulars: rr.particulars || 'Receipt received',
+            voucher: rr.voucher_no || voucherNo,
+            debit: 0,
+            credit: Number(rr.credit || 0)
+          }))
+        ],
+        closing_balance: Math.abs(customerOutstanding),
+        closing_balance_type: customerOutstanding >= 0 ? 'Dr' : 'Cr'
+      },
+      sales_account: {
+        title: 'Sales Account Ledger',
+        ledger_name: 'Sales Account',
+        category: 'Direct Income / Revenue',
+        rows: [
+          { date: sale.date, particulars: `Sales to ${customerName}`, voucher: voucherNo, debit: 0, credit: baseAmount }
+        ],
+        closing_balance: baseAmount,
+        closing_balance_type: 'Cr'
+      },
+      gst_output: {
+        title: 'GST Output Tax Ledgers',
+        category: 'Duties & Taxes (Current Liabilities)',
+        rows: isInterstate ? (
+          igstAmount > 0 ? [{ date: sale.date, ledger: 'Output IGST', particulars: `Sales ${voucherNo}`, voucher: voucherNo, debit: 0, credit: igstAmount }] : []
+        ) : [
+          ...(cgstAmount > 0 ? [{ date: sale.date, ledger: 'Output CGST', particulars: `Sales ${voucherNo}`, voucher: voucherNo, debit: 0, credit: cgstAmount }] : []),
+          ...(sgstAmount > 0 ? [{ date: sale.date, ledger: 'Output SGST', particulars: `Sales ${voucherNo}`, voucher: voucherNo, debit: 0, credit: sgstAmount }] : [])
+        ],
+        total_output_tax: Number((cgstAmount + sgstAmount + igstAmount).toFixed(2)),
+        closing_balance: Number((cgstAmount + sgstAmount + igstAmount).toFixed(2)),
+        closing_balance_type: 'Cr'
+      },
+      deductions_charges: {
+        title: 'TCS / Charges & Deductions',
+        category: 'Statutory / Sales Adjustments',
+        rows: deductions.map((d) => ({
+          date: sale.date,
+          ledger: d.name,
+          particulars: d.remarks || `${d.name} (${d.type})`,
+          voucher: voucherNo,
+          debit: d.type === 'LESS' ? Number(d.amount) : 0,
+          credit: d.type === 'ADD' ? Number(d.amount) : 0
+        })),
+        closing_balance: Math.abs(addDeductionsTotal - lessDeductionsTotal),
+        closing_balance_type: addDeductionsTotal >= lessDeductionsTotal ? 'Cr' : 'Dr'
+      },
+      loadman: {
+        title: `Loadman Details – ${loadmanName}`,
+        ledger_name: loadmanName,
+        category: 'Loading / Dispatch Handling',
+        rows: loadmanCharges > 0 ? [
+          { date: sale.date, particulars: `Loading charges on ${voucherNo}`, voucher: voucherNo, debit: 0, credit: loadmanCharges }
+        ] : [],
+        closing_balance: loadmanCharges,
+        closing_balance_type: 'Cr'
+      }
+    };
+
+    res.json({
+      success: true,
+      data: {
+        sales: {
+          ...sale,
+          customer_name: customerName,
+          customer_phone: customerPhone,
+          customer_gstin: customerGstin,
+          transporter_name: transporterName,
+          loadman_name: loadmanName,
+          voucher_no: voucherNo,
+          net_receivable: grandTotal
+        },
+        voucher: {
+          voucher_no: voucherNo,
+          voucher_type: sale.is_order ? 'Sales Order' : 'Sales',
+          date: sale.date,
+          s_no: sale.s_no,
+          customer: customerName
+        },
+        items,
+        journal_entries: journalEntries,
+        totals: {
+          debit_total: debitTotal,
+          credit_total: creditTotal,
+          is_balanced: isBalanced
+        },
+        party_balances: {
+          customer: {
+            name: customerName,
+            invoice_debit: grandTotal,
+            receipts_credit: customerReceipts,
+            outstanding: customerOutstanding
+          },
+          transporter: {
+            name: transporterName,
+            vehicle_no: sale.lorry_no || ''
+          },
+          loadman: {
+            name: loadmanName,
+            loadman_charges: loadmanCharges
+          },
+          total_receivable: customerOutstanding
+        },
+        individual_ledgers: individualLedgers
+      }
+    });
+  } catch (error) {
+    console.error('Error generating sales ledger statement:', error);
+    res.status(500).json({ success: false, message: 'Error generating sales ledger statement', error: error.message });
   }
 });
 

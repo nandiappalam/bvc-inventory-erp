@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../utils/api.js'
 import { printHtml, printElement } from '../utils/printHelper.js'
 import './WeightConversionDisplay.css'
 
 const WeightConversionDisplay = () => {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const highlightId = searchParams.get('highlightId') || ''
+  const highlightRef = searchParams.get('highlightRef') || ''
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [records, setRecords] = useState([])
@@ -24,6 +27,38 @@ const WeightConversionDisplay = () => {
       window.removeEventListener('erp_stock_updated', handleStockUpdate)
     }
   }, [])
+
+  const isRowHighlighted = (record) => {
+    if (!record) return false;
+    if (highlightId && record.id !== undefined && record.id !== null && String(record.id) === String(highlightId)) {
+      return true;
+    }
+    if (!highlightId && highlightRef && record.s_no !== undefined && record.s_no !== null) {
+      const target = String(highlightRef).trim().toLowerCase();
+      const s = String(record.s_no).trim().toLowerCase();
+      return s === target || `wc-${s}` === target;
+    }
+    return false;
+  };
+
+  useEffect(() => {
+    if ((!highlightId && !highlightRef) || !records.length) return;
+    if (records.some((r) => isRowHighlighted(r))) {
+      if (dateFrom) setDateFrom('');
+      if (dateTo) setDateTo('');
+    }
+  }, [highlightId, highlightRef, records]);
+
+  useEffect(() => {
+    if ((!highlightId && !highlightRef) || loading || !records.length) return;
+    const timer = setTimeout(() => {
+      const el = document.querySelector('[data-highlighted="true"]');
+      if (el && typeof el.scrollIntoView === 'function') {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [highlightId, highlightRef, loading, records]);
 
   const loadWeightConversions = async () => {
     try {
@@ -288,8 +323,17 @@ const WeightConversionDisplay = () => {
                 const isRemainder = record.item_type === 'remainder';
                 const isOutput = record.item_type === 'output';
 
+                const highlighted = isRowHighlighted(record);
+
                 return (
-                  <tr key={record.item_id || record.id || index} style={{ background: isFirstInGroup ? '#fff' : (isRemainder ? '#fffdf5' : '#fcfdfe') }}>
+                  <tr
+                    key={record.item_id || record.id || index}
+                    data-highlighted={highlighted ? 'true' : undefined}
+                    style={{
+                      background: highlighted ? '#fef08a' : (isFirstInGroup ? '#fff' : (isRemainder ? '#fffdf5' : '#fcfdfe')),
+                      boxShadow: highlighted ? 'inset 4px 0 0 #d97706, inset 0 1px 0 #f59e0b, inset 0 -1px 0 #f59e0b' : undefined
+                    }}
+                  >
                     <td style={{ fontWeight: isFirstInGroup ? 'bold' : 'normal', color: '#1e4fa8' }}>{isFirstInGroup ? record.s_no || index + 1 : ""}</td>
                     <td>{isFirstInGroup ? formatDate(record.date) : ""}</td>
                     <td style={{ fontWeight: isRemainder ? '600' : 'normal' }}>{record.item_name}</td>

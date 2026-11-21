@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
+const { syncDocumentMovements, deleteDocumentMovements } = require('../services/SourceMovementSync');
 
 // Ensure tables exist
 async function initTables() {
@@ -185,12 +186,21 @@ router.post('/', async (req, res) => {
     }
 
     try {
-      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const { triggerTransactionNotification, formatProductionItemSummary, formatNotificationItems, formatNumClean } = require('../utils/transactionNotifier');
       const refNo = `PKG-${sNo || packingId}`;
+      const fromItems = (items || []).filter(i => i.remarks === 'section:from');
       const produced = (items || []).filter(i => i.remarks === 'section:to');
-      const summaryList = (produced.length > 0 ? produced : items || []);
-      const itemDesc = summaryList.map(i => `${i.total_packet || i.qty || 0} ${i.item_name || i.itemName || 'Pack'}`).slice(0, 3).join(', ') || 'Packed Goods';
+      const summaryList = produced.length > 0 ? produced : (items || []);
+      const itemDesc = (fromItems.length > 0 && produced.length > 0)
+        ? formatProductionItemSummary({
+            inputItems: fromItems,
+            outputItems: produced,
+            outputOptions: { singularUnit: 'Pkt', pluralUnit: 'Pkts' }
+          })
+        : formatNotificationItems(summaryList, { singularUnit: 'Pkt', pluralUnit: 'Pkts', emptyFallback: 'Packed Goods' });
       const totalWt = summaryList.reduce((s, i) => s + (parseFloat(i.totWt || i.tot_wt) || 0), 0);
+      const totalPkts = summaryList.reduce((s, i) => s + (parseFloat(i.total_packet || i.qty) || 0), 0);
+      const qtySummary = `${formatNumClean(totalPkts)} Pkts / ${formatNumClean(totalWt)} KG`;
       await triggerTransactionNotification({
         eventType: 'PRODUCTION_CREATED',
         moduleName: 'PRODUCTION',
@@ -198,7 +208,7 @@ router.post('/', async (req, res) => {
         referenceId: packingId,
         companyId: req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1),
         title: `⚙️ PACKING COMPLETED – ${refNo}`,
-        message: `Unit: ${papadComp || type} | ${itemDesc} | Weight: ${totalWt} KG`,
+        message: `Unit: ${papadComp || type} | ${itemDesc.replace(/\n/g, ' | ')} | Qty: ${qtySummary}`,
         severity: 'INFO',
         details: {
           reference_no: refNo,
@@ -206,7 +216,7 @@ router.post('/', async (req, res) => {
           module_label: `Packing (${type})`,
           party_name: papadComp || 'Packing Department',
           item_summary: itemDesc,
-          quantity: `${totalWt} KG`,
+          quantity: qtySummary,
           godown: 'Finished Goods Store',
           status: 'PACKED',
           created_by: req.user?.username || 'Packing Operator',
@@ -215,6 +225,13 @@ router.post('/', async (req, res) => {
       });
     } catch (notifErr) {
       console.warn('Notification warning (Packing):', notifErr.message);
+    }
+
+    try {
+      const cId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+      await syncDocumentMovements(cId, 'PACKING', packingId, req.user?.username || 'admin');
+    } catch (syncErr) {
+      console.warn('Stock movement sync warning (Packing create):', syncErr.message);
     }
 
     res.json({ success: true, id: packingId, message: 'Packing entry saved successfully' });
@@ -377,12 +394,21 @@ router.put('/:id', async (req, res) => {
     }
 
     try {
-      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const { triggerTransactionNotification, formatProductionItemSummary, formatNotificationItems, formatNumClean } = require('../utils/transactionNotifier');
       const refNo = `PKG-${sNo || id}`;
+      const fromItems = (items || []).filter(i => i.remarks === 'section:from');
       const produced = (items || []).filter(i => i.remarks === 'section:to');
       const summaryList = produced.length > 0 ? produced : (items || []);
-      const itemDesc = summaryList.map(i => `${i.total_packet || i.qty || 0} ${i.item_name || i.itemName || 'Pack'}`).slice(0, 3).join(', ') || 'Packed Goods';
+      const itemDesc = (fromItems.length > 0 && produced.length > 0)
+        ? formatProductionItemSummary({
+            inputItems: fromItems,
+            outputItems: produced,
+            outputOptions: { singularUnit: 'Pkt', pluralUnit: 'Pkts' }
+          })
+        : formatNotificationItems(summaryList, { singularUnit: 'Pkt', pluralUnit: 'Pkts', emptyFallback: 'Packed Goods' });
       const totalWt = summaryList.reduce((s, i) => s + (parseFloat(i.totWt || i.tot_wt) || 0), 0);
+      const totalPkts = summaryList.reduce((s, i) => s + (parseFloat(i.total_packet || i.qty) || 0), 0);
+      const qtySummary = `${formatNumClean(totalPkts)} Pkts / ${formatNumClean(totalWt)} KG`;
       await triggerTransactionNotification({
         eventType: 'PRODUCTION_UPDATED',
         isUpdate: true,
@@ -391,7 +417,7 @@ router.put('/:id', async (req, res) => {
         referenceId: id,
         companyId: req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1),
         title: `✏️ PACKING UPDATED – ${refNo}`,
-        message: `Updated Packing | Unit: ${papadComp || type} | ${itemDesc} | Weight: ${totalWt} KG`,
+        message: `Updated Packing | Unit: ${papadComp || type} | ${itemDesc.replace(/\n/g, ' | ')} | Qty: ${qtySummary}`,
         severity: 'INFO',
         details: {
           reference_no: refNo,
@@ -399,7 +425,7 @@ router.put('/:id', async (req, res) => {
           module_label: `Packing (${type})`,
           party_name: papadComp || 'Packing Department',
           item_summary: itemDesc,
-          quantity: `${totalWt} KG`,
+          quantity: qtySummary,
           godown: 'Finished Goods Store',
           status: 'UPDATED',
           updated_by: req.user?.username || 'Packing Operator',
@@ -409,6 +435,13 @@ router.put('/:id', async (req, res) => {
       });
     } catch (notifErr) {
       console.warn('Notification warning (Packing Update):', notifErr.message);
+    }
+
+    try {
+      const cId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+      await syncDocumentMovements(cId, 'PACKING', id, req.user?.username || 'admin');
+    } catch (syncErr) {
+      console.warn('Stock movement sync warning (Packing update):', syncErr.message);
     }
 
     res.json({ success: true, message: 'Packing entry updated successfully' });
@@ -425,6 +458,12 @@ router.delete('/:id', async (req, res) => {
     await revertPackingStock(id);
     await db.run('DELETE FROM packing_items WHERE packing_id = ?', [id]);
     await db.run('DELETE FROM packing WHERE id = ?', [id]);
+    try {
+      const cId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+      await deleteDocumentMovements(cId, 'PACKING', id, 'Packing entry deleted', req.user?.username || 'admin');
+    } catch (syncErr) {
+      console.warn('Stock movement reversal warning (Packing delete):', syncErr.message);
+    }
     res.json({ success: true, message: 'Packing entry deleted successfully' });
   } catch (error) {
     console.error('Error deleting packing entry:', error);

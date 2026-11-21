@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
+const { loadPartyDirectory, resolveSupplierFromDirectory, resolveCustomerFromDirectory, resolvePartyFromDirectory } = require('../services/PartyNameResolver');
 const currentDateExpression = db.isPostgres ? 'CURRENT_DATE::text' : "DATE('now')";
 
 // ============================================================================
@@ -1814,24 +1815,34 @@ router.get('/master-entities', async (req, res) => {
 // ============================================================================
 router.get('/traceability/:lotNo', async (req, res) => {
   try {
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    const runner = db.forCompany(Number.isSafeInteger(activeCompanyId) && activeCompanyId > 0 ? activeCompanyId : 1);
+    const partyDir = await loadPartyDirectory(activeCompanyId, runner);
+
     let lotNo = (req.params.lotNo || '').trim();
 
-    // Traceability inspection
-    // If 'latest' or empty, resolve the most recent active lot from real purchases or grain runs
+    // If 'latest' or empty, resolve the most recent traceable lot (prefer milled FG or purchase lot)
     if (!lotNo || lotNo.toLowerCase() === 'latest' || lotNo.toLowerCase() === 'default') {
-      const latestPurRes = await db.query(`
-        SELECT pi.lot_no FROM purchase_items pi
-        JOIN purchases p ON p.id = pi.purchase_id
-        WHERE pi.lot_no IS NOT NULL AND TRIM(pi.lot_no) != ''
-        ORDER BY p.id DESC, pi.id DESC LIMIT 1
+      const latestGoRes = await runner.query(`
+        SELECT lot_no FROM grain_output_items WHERE lot_no IS NOT NULL AND TRIM(lot_no) != '' ORDER BY id DESC LIMIT 1
       `);
-      if (latestPurRes.rows && latestPurRes.rows[0]?.lot_no) {
-        lotNo = latestPurRes.rows[0].lot_no;
+      if (latestGoRes.rows && latestGoRes.rows[0]?.lot_no) {
+        lotNo = latestGoRes.rows[0].lot_no;
       } else {
-        const latestGoRes = await db.query(`
-          SELECT lot_no FROM grain_output_items WHERE lot_no IS NOT NULL AND TRIM(lot_no) != '' ORDER BY id DESC LIMIT 1
+        const latestPurRes = await runner.query(`
+          SELECT pi.lot_no FROM purchase_items pi
+          JOIN purchases p ON p.id = pi.purchase_id
+          WHERE pi.lot_no IS NOT NULL AND TRIM(pi.lot_no) != ''
+          ORDER BY p.id DESC, pi.id DESC LIMIT 1
         `);
-        lotNo = latestGoRes.rows && latestGoRes.rows[0]?.lot_no ? latestGoRes.rows[0].lot_no : null;
+        if (latestPurRes.rows && latestPurRes.rows[0]?.lot_no) {
+          lotNo = latestPurRes.rows[0].lot_no;
+        } else {
+          const latestMvRes = await runner.query(`
+            SELECT lot_no FROM stock_movements WHERE is_reversed = 0 AND is_reversal = 0 AND lot_no IS NOT NULL AND TRIM(lot_no) != '' ORDER BY id DESC LIMIT 1
+          `);
+          lotNo = latestMvRes.rows?.[0]?.lot_no || null;
+        }
       }
     }
 
@@ -1841,30 +1852,32 @@ router.get('/traceability/:lotNo', async (req, res) => {
         lotNo: null,
         lotDetails: null,
         parentLot: null,
+        parentLots: [],
         activeLots: [],
-        backwardTrace: { purchase: null, supplier: null, iqr: null, allIQRs: [] },
-        productionHistory: { grindBatches: [] },
+        backwardTrace: { purchase: null, parentPurchases: [], supplier: null, iqr: null, allIQRs: [], purchaseReturns: [] },
+        productionHistory: { grindBatches: [], weightConversions: [], outpassInpass: [] },
         qualityCertificates: { coas: [] },
         currentStock: [],
+        stockMovements: [],
         forwardTrace: { dispatches: [], affectedCustomers: [] },
         message: 'No lots found for the active company.'
       });
     }
 
-    // 1. Find Lot in stock_lots with godown info
-    const lotRes = await db.query(`
+    // 1. Resolve lot across stock_lots, purchase_items, grain_output_items, cold_storage_items, open_items, weight_conversion_items, inpass_items, stock_movements
+    let lot = null;
+    const lotRes = await runner.query(`
       SELECT sl.*, COALESCE(gm.godown_name, sl.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name
       FROM stock_lots sl
       LEFT JOIN godown_master gm ON sl.godown_id = gm.id
       WHERE UPPER(sl.lot_no) = UPPER(?) OR UPPER(sl.lot_no) LIKE UPPER(?)
       ORDER BY CASE WHEN UPPER(sl.lot_no) = UPPER(?) THEN 0 ELSE 1 END, sl.id DESC
     `, [lotNo, `%${lotNo}%`, lotNo]);
-    let lot = lotRes.rows && lotRes.rows[0] ? lotRes.rows[0] : null;
+    lot = lotRes.rows?.[0] || null;
 
-    // If not found in stock_lots, look up in purchase_items or grain_output_items or stock
     if (!lot) {
-      const piFallback = await db.query(`
-        SELECT pi.lot_no, pi.item_name, pi.qty as quantity, pi.rate, 'Raw Material' as type,
+      const piFallback = await runner.query(`
+        SELECT pi.lot_no, pi.item_name, pi.qty as quantity, pi.rate, pi.weight as per_unit_weight, pi.total_weight, 'Raw Material' as type,
                pi.purchase_id, COALESCE(gm.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name
         FROM purchase_items pi
         LEFT JOIN purchases p ON p.id = pi.purchase_id
@@ -1872,26 +1885,49 @@ router.get('/traceability/:lotNo', async (req, res) => {
         WHERE UPPER(pi.lot_no) = UPPER(?) OR UPPER(pi.lot_no) LIKE UPPER(?)
         ORDER BY CASE WHEN UPPER(pi.lot_no) = UPPER(?) THEN 0 ELSE 1 END, pi.id DESC LIMIT 1
       `, [lotNo, `%${lotNo}%`, lotNo]);
-      if (piFallback.rows && piFallback.rows[0]) {
-        lot = piFallback.rows[0];
-      }
+      if (piFallback.rows?.[0]) lot = piFallback.rows[0];
     }
 
     if (!lot) {
-      const goFallback = await db.query(`
+      const goFallback = await runner.query(`
         SELECT go.lot_no, go.item_name, go.qty as quantity, go.weight as per_unit_weight, go.total_wt as total_weight, 'Finished Goods' as type,
                COALESCE((SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1), 'PJ') as godown_name
         FROM grain_output_items go
         WHERE UPPER(go.lot_no) = UPPER(?) OR UPPER(go.lot_no) LIKE UPPER(?)
         ORDER BY CASE WHEN UPPER(go.lot_no) = UPPER(?) THEN 0 ELSE 1 END, go.id DESC LIMIT 1
       `, [lotNo, `%${lotNo}%`, lotNo]);
-      if (goFallback.rows && goFallback.rows[0]) {
-        lot = goFallback.rows[0];
-      }
+      if (goFallback.rows?.[0]) lot = goFallback.rows[0];
     }
 
     if (!lot) {
-      const stFallback = await db.query(`
+      try {
+        const csFallback = await runner.query(`
+          SELECT csi.cold_storage_lot_no as lot_no, csi.purchase_lot_no, csi.item_name, csi.quantity, csi.weight as per_unit_weight, csi.total_wt as total_weight,
+                 'Cold Storage' as type, COALESCE(csv.cold_storage_name, 'Cold Storage') as godown_name
+          FROM cold_storage_items csi
+          JOIN cold_storage_vouchers csv ON csv.id = csi.voucher_id
+          WHERE UPPER(csi.cold_storage_lot_no) = UPPER(?) OR UPPER(csi.purchase_lot_no) = UPPER(?)
+          ORDER BY csi.id DESC LIMIT 1
+        `, [lotNo, lotNo]);
+        if (csFallback.rows?.[0]) lot = csFallback.rows[0];
+      } catch (_) {}
+    }
+
+    if (!lot) {
+      try {
+        const mvFallback = await runner.query(`
+          SELECT lot_no, item_name, qty as quantity, unit_weight as per_unit_weight, weight as total_weight, stock_category as type, godown_name
+          FROM stock_movements
+          WHERE is_reversed = 0 AND is_reversal = 0
+            AND (UPPER(lot_no) = UPPER(?) OR UPPER(fg_lot_no) = UPPER(?) OR UPPER(rm_lot_no) = UPPER(?))
+          ORDER BY id DESC LIMIT 1
+        `, [lotNo, lotNo, lotNo]);
+        if (mvFallback.rows?.[0]) lot = mvFallback.rows[0];
+      } catch (_) {}
+    }
+
+    if (!lot) {
+      const stFallback = await runner.query(`
         SELECT s.lot_no, s.item_name, s.qty as quantity, s.rate, 'Stock' as type,
                COALESCE(gm.godown_name, s.godown, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name
         FROM stock s
@@ -1899,171 +1935,226 @@ router.get('/traceability/:lotNo', async (req, res) => {
         WHERE UPPER(s.lot_no) = UPPER(?) OR UPPER(s.lot_no) LIKE UPPER(?)
         ORDER BY CASE WHEN UPPER(s.lot_no) = UPPER(?) THEN 0 ELSE 1 END, s.id DESC LIMIT 1
       `, [lotNo, `%${lotNo}%`, lotNo]);
-      if (stFallback.rows && stFallback.rows[0]) {
-        lot = stFallback.rows[0];
-      }
+      if (stFallback.rows?.[0]) lot = stFallback.rows[0];
     }
 
-    // Use canonical lot name if resolved
     const canonicalLotNo = lot?.lot_no || lotNo;
 
-    // 2. Backward Trace: Purchase & Supplier
-    let purchaseInfo = null;
-    let supplierInfo = null;
-    let parentInputLot = null;
-
-    // Search direct purchase item
-    const purByItemRes = await db.query(`
-      SELECT p.*, pi.item_name, pi.qty as inward_qty, pi.per_unit_weight, pi.total_weight, pi.rate, pi.amount, pi.lot_no, 
-             COALESCE(s.name, s.print_name, p.supplier) as supplier_name, 
-             COALESCE(s.phone_off, s.mobile1, p.phone, '') as supplier_phone,
-             COALESCE(s.address1, p.address, '') as supplier_address,
-             COALESCE(s.gst_number, p.gst_no, '') as supplier_gstin,
-             COALESCE(s.area, p.area, '') as supplier_area,
-             COALESCE(p.inv_no, CAST(p.s_no AS TEXT), CAST(p.id AS TEXT)) as invoice_no,
-             COALESCE(gm.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name
-      FROM purchases p
-      JOIN purchase_items pi ON p.id = pi.purchase_id
-      LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(p.supplier AS TEXT) OR p.supplier = s.name OR p.supplier = s.print_name)
-      LEFT JOIN godown_master gm ON (CAST(gm.id AS TEXT) = CAST(p.godown AS TEXT) OR p.godown = gm.godown_name)
-      WHERE UPPER(pi.lot_no) = UPPER(?) OR UPPER(pi.lot_no) LIKE UPPER(?)
-      ORDER BY CASE WHEN UPPER(pi.lot_no) = UPPER(?) THEN 0 ELSE 1 END, p.id DESC
-    `, [canonicalLotNo, `%${canonicalLotNo}%`, canonicalLotNo]);
-
-    if (purByItemRes.rows && purByItemRes.rows[0]) {
-      purchaseInfo = purByItemRes.rows[0];
-    }
-
-    // 3. In-Process & Production Transformation (Grains / Milling Batches)
-    // Check if lot is an input OR an output
-    const grainAsInput = await db.query(`
-      SELECT g.*, gi.item_name as input_item, gi.lot_no as input_lot, gi.qty as input_qty, gi.total_wt as input_weight,
-             COALESCE(fm.flourmill, 'Premium Flour Mill (Line 1)') as mill_name, fm.area as mill_area
-      FROM grains g
-      JOIN grain_input_items gi ON g.id = gi.grain_id
-      LEFT JOIN flour_mill_master fm ON (CAST(fm.id AS TEXT) = CAST(g.flour_mill AS TEXT) OR g.flour_mill = fm.flourmill)
-      WHERE UPPER(gi.lot_no) = UPPER(?) OR UPPER(gi.lot_no) LIKE UPPER(?)
-    `, [canonicalLotNo, `%${canonicalLotNo}%`]);
-
-    const grainAsOutput = await db.query(`
-      SELECT g.*, go.item_name as output_item, go.lot_no as output_lot, go.qty as output_qty, go.total_wt as output_weight,
-             gi.item_name as parent_item, gi.lot_no as parent_lot, gi.qty as parent_qty, gi.total_wt as parent_weight,
-             COALESCE(fm.flourmill, 'Premium Flour Mill (Line 1)') as mill_name, fm.area as mill_area
-      FROM grains g
-      JOIN grain_output_items go ON g.id = go.grain_id
-      LEFT JOIN grain_input_items gi ON g.id = gi.grain_id
-      LEFT JOIN flour_mill_master fm ON (CAST(fm.id AS TEXT) = CAST(g.flour_mill AS TEXT) OR g.flour_mill = fm.flourmill)
-      WHERE UPPER(go.lot_no) = UPPER(?) OR UPPER(go.lot_no) LIKE UPPER(?)
-    `, [canonicalLotNo, `%${canonicalLotNo}%`]);
-
-    // If queried lot is an output (Finished Good) and we didn't find direct purchase, trace through parent input lot!
-    if (!purchaseInfo && grainAsOutput.rows && grainAsOutput.rows.length > 0) {
-      parentInputLot = grainAsOutput.rows[0].parent_lot;
-      if (parentInputLot) {
-        const parentPurRes = await db.query(`
-          SELECT p.*, pi.item_name, pi.qty as inward_qty, pi.per_unit_weight, pi.total_weight, pi.rate, pi.amount, pi.lot_no, 
-                 COALESCE(s.name, s.print_name, p.supplier) as supplier_name, 
-                 COALESCE(s.phone_off, s.mobile1, p.phone, '') as supplier_phone,
-                 COALESCE(s.address1, p.address, '') as supplier_address,
-                 COALESCE(s.gst_number, p.gst_no, '') as supplier_gstin,
-                 COALESCE(s.area, p.area, '') as supplier_area,
-                 COALESCE(p.inv_no, CAST(p.s_no AS TEXT), CAST(p.id AS TEXT)) as invoice_no,
-                 COALESCE(gm.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name
-          FROM purchases p
-          JOIN purchase_items pi ON p.id = pi.purchase_id
-          LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(p.supplier AS TEXT) OR p.supplier = s.name OR p.supplier = s.print_name)
-          LEFT JOIN godown_master gm ON (CAST(gm.id AS TEXT) = CAST(p.godown AS TEXT) OR p.godown = gm.godown_name)
-          WHERE UPPER(pi.lot_no) = UPPER(?) OR UPPER(pi.lot_no) LIKE UPPER(?)
-        `, [parentInputLot, `%${parentInputLot}%`]);
-        if (parentPurRes.rows && parentPurRes.rows[0]) {
-          purchaseInfo = parentPurRes.rows[0];
+    // 2. Discover Cold Storage aliases (CS-LOT* <-> purchase_lot_no)
+    const csAliasLots = new Set();
+    let linkedPurchaseLotFromCS = null;
+    try {
+      const csAliasRes = await runner.query(`
+        SELECT DISTINCT purchase_lot_no, cold_storage_lot_no
+        FROM cold_storage_items
+        WHERE UPPER(purchase_lot_no) = UPPER(?) OR UPPER(cold_storage_lot_no) = UPPER(?)
+      `, [canonicalLotNo, canonicalLotNo]);
+      for (const r of (csAliasRes.rows || [])) {
+        if (r.purchase_lot_no) {
+          csAliasLots.add(r.purchase_lot_no);
+          if (r.cold_storage_lot_no && r.cold_storage_lot_no.toUpperCase() === canonicalLotNo.toUpperCase()) {
+            linkedPurchaseLotFromCS = r.purchase_lot_no;
+          }
         }
+        if (r.cold_storage_lot_no) csAliasLots.add(r.cold_storage_lot_no);
       }
-    } else if (!purchaseInfo && lot && lot.purchase_id) {
-      const purRes = await db.query(`
-        SELECT p.*, 
-               COALESCE(s.name, s.print_name, p.supplier) as supplier_name, 
-               COALESCE(s.phone_off, s.mobile1, p.phone, '') as supplier_phone, 
-               COALESCE(s.address1, p.address, '') as supplier_address, 
-               COALESCE(s.gst_number, p.gst_no, '') as supplier_gstin, 
-               COALESCE(s.area, p.area, '') as supplier_area, 
-               COALESCE(p.inv_no, CAST(p.s_no AS TEXT), CAST(p.id AS TEXT)) as invoice_no, 
-               COALESCE(gm.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name
-        FROM purchases p
-        LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(p.supplier AS TEXT) OR p.supplier = s.name OR p.supplier = s.print_name)
-        LEFT JOIN godown_master gm ON (CAST(gm.id AS TEXT) = CAST(p.godown AS TEXT) OR p.godown = gm.godown_name)
-        WHERE p.id = ?
-      `, [lot.purchase_id]);
-      if (purRes.rows && purRes.rows[0]) {
-        purchaseInfo = purRes.rows[0];
-      }
-    }
+    } catch (_) {}
 
-    // Build rich Grind Transformation List
-    const allGrainIds = new Set();
-    (grainAsInput.rows || []).forEach(r => allGrainIds.add(r.id));
-    (grainAsOutput.rows || []).forEach(r => allGrainIds.add(r.id));
+    // 3. Milling / Grinding Transformation Batches (NO Cartesian join!)
+    const seedLotsForGrind = Array.from(new Set([canonicalLotNo, linkedPurchaseLotFromCS].filter(Boolean))).map(l => l.toUpperCase());
+    const seedGrindPh = seedLotsForGrind.map(() => 'UPPER(?)').join(',');
+    const grainIdSet = new Set();
+    try {
+      const gInIds = await runner.query(`SELECT DISTINCT grain_id FROM grain_input_items WHERE UPPER(lot_no) IN (${seedGrindPh})`, seedLotsForGrind);
+      (gInIds.rows || []).forEach(r => grainIdSet.add(r.grain_id));
+      const gOutIds = await runner.query(`SELECT DISTINCT grain_id FROM grain_output_items WHERE UPPER(lot_no) IN (${seedGrindPh})`, seedLotsForGrind);
+      (gOutIds.rows || []).forEach(r => grainIdSet.add(r.grain_id));
+    } catch (_) {}
 
     const grindBatches = [];
-    for (const gid of allGrainIds) {
-      const gHeader = await db.query(`
-        SELECT g.*, COALESCE(fm.flourmill, 'Premium Flour Mill (Line 1)') as mill_name, fm.area as mill_area
+    const parentLotNames = new Set();
+    if (linkedPurchaseLotFromCS && linkedPurchaseLotFromCS.toUpperCase() !== canonicalLotNo.toUpperCase()) {
+      parentLotNames.add(linkedPurchaseLotFromCS);
+    }
+
+    for (const gid of grainIdSet) {
+      const gHeader = await runner.query(`
+        SELECT g.*, COALESCE(fm.flourmill, g.flour_mill, 'Factory Mill') as mill_name, fm.area as mill_area
         FROM grains g
         LEFT JOIN flour_mill_master fm ON (CAST(fm.id AS TEXT) = CAST(g.flour_mill AS TEXT) OR g.flour_mill = fm.flourmill)
         WHERE g.id = ?
       `, [gid]);
-      const inputs = await db.query(`SELECT * FROM grain_input_items WHERE grain_id = ?`, [gid]);
-      const outputs = await db.query(`SELECT * FROM grain_output_items WHERE grain_id = ?`, [gid]);
+      const inputs = await runner.query(`SELECT * FROM grain_input_items WHERE grain_id = ?`, [gid]);
+      const outputs = await runner.query(`SELECT * FROM grain_output_items WHERE grain_id = ?`, [gid]);
 
-      const gRow = gHeader.rows && gHeader.rows[0] ? gHeader.rows[0] : {};
-      const totalInputKg = (inputs.rows || []).reduce((sum, i) => sum + (i.total_wt || (i.qty * (i.weight || 50))), 0);
-      const totalOutputKg = (outputs.rows || []).reduce((sum, o) => sum + (o.total_wt || (o.qty * (o.weight || 30))), 0);
-      const yieldEfficiency = totalInputKg > 0 ? ((totalOutputKg / totalInputKg) * 100).toFixed(1) + '%' : '99.7%';
+      const gRow = gHeader.rows?.[0] || {};
+      const mappedInputs = (inputs.rows || []).map(i => ({
+        item_name: i.item_name,
+        lot_no: i.lot_no,
+        qty_bags: parseFloat(i.qty) || 0,
+        bag_weight: parseFloat(i.weight) || 50,
+        total_weight_kg: parseFloat(i.total_wt) || ((parseFloat(i.qty) || 0) * (parseFloat(i.weight) || 50))
+      }));
+      const mappedOutputs = (outputs.rows || []).map(o => ({
+        item_name: o.item_name,
+        lot_no: o.lot_no,
+        qty_bags: parseFloat(o.qty) || 0,
+        bag_weight: parseFloat(o.weight) || 30,
+        total_weight_kg: parseFloat(o.total_wt) || ((parseFloat(o.qty) || 0) * (parseFloat(o.weight) || 30))
+      }));
+
+      // If canonicalLotNo is an output in this batch, register ALL inputs as parent lots
+      const isOutputInBatch = mappedOutputs.some(o => String(o.lot_no || '').toUpperCase() === canonicalLotNo.toUpperCase());
+      if (isOutputInBatch) {
+        mappedInputs.forEach(i => i.lot_no && parentLotNames.add(i.lot_no));
+      }
+
+      const totalInputKg = mappedInputs.reduce((sum, i) => sum + i.total_weight_kg, 0);
+      const totalOutputKg = mappedOutputs.reduce((sum, o) => sum + o.total_weight_kg, 0);
+      const yieldEfficiency = totalInputKg > 0 ? ((totalOutputKg / totalInputKg) * 100).toFixed(1) + '%' : 'N/A';
+
+      // Look for real P3/P4 compliance records if logged
+      let p3Rec = null;
+      let p4Rec = null;
+      try {
+        const compRes = await runner.query(`
+          SELECT * FROM compliance_production_records
+          WHERE record_code IN ('P3', 'P4') AND UPPER(lot_no) IN (${mappedInputs.concat(mappedOutputs).map(() => 'UPPER(?)').join(',') || "''"})
+          ORDER BY id DESC
+        `, mappedInputs.concat(mappedOutputs).map(x => String(x.lot_no || '')));
+        for (const cr of (compRes.rows || [])) {
+          let f = {};
+          try { f = typeof cr.findings_json === 'string' ? JSON.parse(cr.findings_json) : (cr.findings_json || {}); } catch (_) {}
+          if (cr.record_code === 'P3' && !p3Rec) p3Rec = { ...cr, findings: f };
+          if (cr.record_code === 'P4' && !p4Rec) p4Rec = { ...cr, findings: f };
+        }
+      } catch (_) {}
 
       grindBatches.push({
         grain_id: gid,
-        grind_no: `GRD-${String(gRow.s_no || gid).padStart(4, '0')}`,
+        grind_no: gRow.work_order_no || `GRD-${String(gRow.s_no || gid).padStart(4, '0')}`,
+        mode: gRow.mode || 'Inside Mill',
         date: gRow.date || '',
         flour_mill: gRow.mill_name,
         mill_area: gRow.mill_area || 'Factory Milling Floor',
-        inputs: (inputs.rows || []).map(i => ({
-          item_name: i.item_name,
-          lot_no: i.lot_no,
-          qty_bags: i.qty,
-          bag_weight: i.weight || 50,
-          total_weight_kg: i.total_wt || (i.qty * (i.weight || 50))
-        })),
-        outputs: (outputs.rows || []).map(o => ({
-          item_name: o.item_name,
-          lot_no: o.lot_no,
-          qty_bags: o.qty,
-          bag_weight: o.weight || 30,
-          total_weight_kg: o.total_wt || (o.qty * (o.weight || 30))
-        })),
+        inputs: mappedInputs,
+        outputs: mappedOutputs,
         total_input_kg: totalInputKg,
         total_output_kg: totalOutputKg,
         milling_loss_kg: Math.max(0, totalInputKg - totalOutputKg),
         yield_efficiency: yieldEfficiency,
-        in_process_checklist: {
-          mesh_size: '60 Mesh Wire Screen - Intact & Verified',
-          sieve_integrity: 'Passed / Zero Perforations',
-          milling_temperature: '38°C (Max Critical Limit <45°C)',
-          foreign_matter_audit: '0% Nil / Clean',
-          operator: 'Senior Miller Incharge'
+        in_process_checklist: p3Rec ? {
+          record_no: p3Rec.record_no,
+          mesh_size: p3Rec.findings?.mesh_size || p3Rec.findings?.sieve_mesh || 'Logged in P3',
+          sieve_integrity: p3Rec.findings?.sieve_integrity || p3Rec.status || 'VERIFIED',
+          milling_temperature: p3Rec.findings?.milling_temperature || p3Rec.findings?.temperature || 'Logged',
+          foreign_matter_audit: p3Rec.findings?.foreign_matter || 'Logged',
+          operator: p3Rec.checked_by || 'QA / Operator'
+        } : {
+          record_no: null,
+          mesh_size: 'Standard Production Run (P3 Not Logged)',
+          sieve_integrity: 'N/A',
+          milling_temperature: 'N/A',
+          foreign_matter_audit: 'N/A',
+          operator: gRow.created_by || 'Production Floor'
         },
-        ccp_monitoring: {
-          ccp1_magnet: 'Rare Earth Magnet: 10,200 Gauss (Limit ≥ 10,000 Gauss - PASSED)',
-          ccp1_destoner: 'Destoner Gravity Chamber: 0% Stone Pass (PASSED)',
-          ccp2_sifter: 'Flour Sifter Screen Mesh 60: 100% Intact (PASSED)',
-          monitoring_frequency: '2-Hourly Continuous Monitor',
-          status: 'COMPLIANT & WITHIN CRITICAL LIMITS'
+        ccp_monitoring: p4Rec ? {
+          record_no: p4Rec.record_no,
+          ccp1_magnet: p4Rec.findings?.ccp1_magnet || p4Rec.findings?.magnet || 'Verified',
+          ccp1_destoner: p4Rec.findings?.ccp1_destoner || p4Rec.findings?.destoner || 'Verified',
+          ccp2_sifter: p4Rec.findings?.ccp2_sifter || p4Rec.findings?.sifter || 'Verified',
+          status: p4Rec.status || 'COMPLIANT'
+        } : {
+          record_no: null,
+          ccp1_magnet: 'Not Logged (P4)',
+          ccp1_destoner: 'Not Logged (P4)',
+          ccp2_sifter: 'Not Logged (P4)',
+          status: 'PENDING_P4_LOG'
         }
       });
     }
 
-    // Collect all associated child lots produced from this lot
-    const associatedLots = new Set([canonicalLotNo]);
-    if (parentInputLot) associatedLots.add(parentInputLot);
+    // Check weight_conversion & inpass_items for additional parent links
+    try {
+      const wcRes = await runner.query(`
+        SELECT wc.id, wc.s_no, wc.date, wc.type as conv_type, wci_in.lot_no as parent_lot
+        FROM weight_conversion_items wci_out
+        JOIN weight_conversion wc ON CAST(wc.id AS TEXT) = CAST(wci_out.weight_conversion_id AS TEXT)
+        JOIN weight_conversion_items wci_in ON CAST(wci_in.weight_conversion_id AS TEXT) = CAST(wc.id AS TEXT) AND wci_in.type = 'input'
+        WHERE wci_out.type = 'output' AND UPPER(wci_out.lot_no) = UPPER(?)
+      `, [canonicalLotNo]);
+      (wcRes.rows || []).forEach(r => r.parent_lot && parentLotNames.add(r.parent_lot));
+    } catch (_) {}
+
+    try {
+      const ipRes = await runner.query(`
+        SELECT original_lot_no FROM inpass_items WHERE UPPER(lot_no) = UPPER(?) AND original_lot_no IS NOT NULL
+      `, [canonicalLotNo]);
+      (ipRes.rows || []).forEach(r => r.original_lot_no && parentLotNames.add(r.original_lot_no));
+    } catch (_) {}
+
+    try {
+      const lgRes = await runner.query(`SELECT parent_lot_no FROM lot_genealogy WHERE UPPER(child_lot_no) = UPPER(?)`, [canonicalLotNo]);
+      (lgRes.rows || []).forEach(r => r.parent_lot_no && parentLotNames.add(r.parent_lot_no));
+    } catch (_) {}
+
+    const parentInputLot = Array.from(parentLotNames)[0] || null;
+    const parentLotsList = Array.from(parentLotNames);
+
+    // 4. Backward Trace: Fetch Purchase Info for Direct Lot AND/OR All Parent Lots
+    const purchaseLookupLots = Array.from(new Set([canonicalLotNo, ...parentLotsList])).map(l => l.toUpperCase());
+    const purPh = purchaseLookupLots.map(() => 'UPPER(?)').join(',');
+    const purRes = await runner.query(`
+      SELECT p.*, pi.item_name, pi.qty as inward_qty, pi.weight as pi_weight, pi.per_unit_weight, pi.total_weight, pi.rate, pi.amount, pi.lot_no,
+             s.name as master_supplier_name, s.print_name as master_supplier_print,
+             COALESCE(s.phone_off, s.mobile1, s.phone_res, p.phone, '') as supplier_phone,
+             COALESCE(s.address1, p.address, '') as supplier_address,
+             COALESCE(s.gst_number, p.gst_no, '') as supplier_gstin,
+             COALESCE(s.area, p.area, '') as supplier_area,
+             COALESCE(NULLIF(p.inv_no, ''), NULLIF(p.voucher_no, ''), CAST(p.s_no AS TEXT), CAST(p.id AS TEXT)) as invoice_no,
+             COALESCE(gm.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name
+      FROM purchases p
+      JOIN purchase_items pi ON p.id = pi.purchase_id
+      LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(p.supplier AS TEXT) OR LOWER(TRIM(p.supplier)) = LOWER(TRIM(s.name)) OR LOWER(TRIM(p.supplier)) = LOWER(TRIM(s.print_name)))
+      LEFT JOIN godown_master gm ON (CAST(gm.id AS TEXT) = CAST(p.godown AS TEXT) OR p.godown = gm.godown_name)
+      WHERE UPPER(pi.lot_no) IN (${purPh})
+      ORDER BY CASE WHEN UPPER(pi.lot_no) = UPPER(?) THEN 0 ELSE 1 END, p.id DESC
+    `, [...purchaseLookupLots, canonicalLotNo]);
+
+    const enrichedPurchases = (purRes.rows || []).map(row => {
+      const resolvedSup = resolveSupplierFromDirectory(partyDir, row.supplier, null);
+      return {
+        ...row,
+        supplier_name: resolvedSup.name || row.master_supplier_print || row.master_supplier_name || row.supplier || 'Supplier'
+      };
+    });
+
+    let purchaseInfo = enrichedPurchases[0] || null;
+    if (!purchaseInfo && lot && lot.purchase_id) {
+      const pById = await runner.query(`
+        SELECT p.*,
+               s.name as master_supplier_name, s.print_name as master_supplier_print,
+               COALESCE(s.phone_off, s.mobile1, s.phone_res, p.phone, '') as supplier_phone,
+               COALESCE(s.address1, p.address, '') as supplier_address,
+               COALESCE(s.gst_number, p.gst_no, '') as supplier_gstin,
+               COALESCE(s.area, p.area, '') as supplier_area,
+               COALESCE(NULLIF(p.inv_no, ''), NULLIF(p.voucher_no, ''), CAST(p.s_no AS TEXT), CAST(p.id AS TEXT)) as invoice_no,
+               COALESCE(gm.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name
+        FROM purchases p
+        LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(p.supplier AS TEXT) OR LOWER(TRIM(p.supplier)) = LOWER(TRIM(s.name)))
+        LEFT JOIN godown_master gm ON (CAST(gm.id AS TEXT) = CAST(p.godown AS TEXT) OR p.godown = gm.godown_name)
+        WHERE p.id = ?
+      `, [lot.purchase_id]);
+      if (pById.rows?.[0]) {
+        const row = pById.rows[0];
+        const resolvedSup = resolveSupplierFromDirectory(partyDir, row.supplier, null);
+        purchaseInfo = { ...row, supplier_name: resolvedSup.name || row.master_supplier_print || row.master_supplier_name || row.supplier || 'Supplier' };
+        enrichedPurchases.push(purchaseInfo);
+      }
+    }
+
+    // Collect ALL associated lots in the family (canonical, CS aliases, parents, children)
+    const associatedLots = new Set([canonicalLotNo, ...Array.from(csAliasLots), ...parentLotsList]);
     grindBatches.forEach(g => {
       g.inputs.forEach(i => i.lot_no && associatedLots.add(i.lot_no));
       g.outputs.forEach(o => o.lot_no && associatedLots.add(o.lot_no));
@@ -2071,27 +2162,25 @@ router.get('/traceability/:lotNo', async (req, res) => {
 
     const lotList = Array.from(associatedLots);
     const lotListUpper = lotList.map(l => String(l).trim().toUpperCase());
-    const lotPlaceholders = lotList.length > 0 ? lotList.map(() => '?').join(',') : "''";
     const lotPlaceholdersUpper = lotListUpper.length > 0 ? lotListUpper.map(() => 'UPPER(?)').join(',') : "''";
 
-    // Purchase Returns Trace (Debit Notes / Supplier Rejections & RMA)
+    // Purchase Returns Trace
     let purchaseReturnsList = [];
     try {
-      const purReturnsRes = await db.query(`
+      const purReturnsRes = await runner.query(`
         SELECT pr.*, pri.item_name, pri.qty as returned_qty, pri.weight as returned_weight, pri.total_wt as returned_total_weight,
                pri.rate as return_rate, pri.amount as return_amount, pri.lot_no, pri.reason as return_reason,
-               COALESCE(s.name, s.print_name, pr.supplier) as supplier_name,
                COALESCE(s.phone_off, s.mobile1, '') as supplier_phone,
                COALESCE(s.gst_number, '') as supplier_gstin,
                COALESCE(pr.return_inv_no, CAST(pr.s_no AS TEXT), CAST(pr.id AS TEXT)) as return_voucher_no,
                COALESCE(gm.godown_name, pr.godown, 'Main Godown') as godown_name
         FROM purchase_returns pr
         JOIN purchase_return_items pri ON pr.id = pri.purchase_return_id
-        LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(pr.supplier AS TEXT) OR pr.supplier = s.name OR pr.supplier = s.print_name)
+        LEFT JOIN supplier_master s ON (CAST(s.id AS TEXT) = CAST(pr.supplier AS TEXT) OR LOWER(TRIM(pr.supplier)) = LOWER(TRIM(s.name)))
         LEFT JOIN godown_master gm ON (CAST(gm.id AS TEXT) = CAST(pr.godown AS TEXT) OR pr.godown = gm.godown_name)
-        WHERE UPPER(TRIM(pri.lot_no)) = UPPER(TRIM(?))
+        WHERE UPPER(TRIM(pri.lot_no)) IN (${lotPlaceholdersUpper})
         ORDER BY pr.id DESC
-      `, [canonicalLotNo]);
+      `, lotListUpper);
 
       const seenPRKeys = new Set();
       purchaseReturnsList = (purReturnsRes.rows || []).filter(r => {
@@ -2103,7 +2192,7 @@ router.get('/traceability/:lotNo', async (req, res) => {
         purchase_return_id: r.id,
         return_voucher_no: r.return_voucher_no,
         date: r.date,
-        supplier_name: r.supplier_name,
+        supplier_name: resolveSupplierFromDirectory(partyDir, r.supplier, null).name || r.supplier || 'Supplier',
         supplier_phone: r.supplier_phone,
         supplier_gstin: r.supplier_gstin,
         item_name: r.item_name,
@@ -2120,259 +2209,260 @@ router.get('/traceability/:lotNo', async (req, res) => {
       console.warn('Notice querying purchase returns in traceability:', e.message);
     }
 
-    // Ensure compliance records table is populated
+    // 5. Real Inward Quality Report (P1 / qc_inspections / incoming_quality_reports)
+    let iqrList = [];
     try {
-      const checkRecordsCount = await db.query(`SELECT COUNT(*) as cnt FROM compliance_production_records`);
-      if (!checkRecordsCount.rows || parseInt(checkRecordsCount.rows[0].cnt || 0, 10) === 0) {
-        await syncAllProductionRecords();
-      }
-    } catch (e) {
-      console.error('Auto-sync check error:', e);
-    }
+      const iqrRecordsRes = await runner.query(`
+        SELECT * FROM compliance_production_records 
+        WHERE record_code = 'P1' AND (UPPER(lot_no) IN (${lotPlaceholdersUpper}) OR purchase_id = ?)
+        ORDER BY id DESC
+      `, [...lotListUpper, purchaseInfo ? purchaseInfo.id : -1]);
 
-    // 4. Inward Quality Reports (IQR / P1)
-    const iqrRecordsRes = await db.query(`
-      SELECT * FROM compliance_production_records 
-      WHERE record_code = 'P1' AND (UPPER(lot_no) IN (${lotPlaceholdersUpper}) OR purchase_id = ?)
-    `, [...lotListUpper, purchaseInfo ? purchaseInfo.id : -1]);
+      iqrList = (iqrRecordsRes.rows || []).map(r => {
+        let findings = {};
+        try { findings = typeof r.findings_json === 'string' ? JSON.parse(r.findings_json) : (r.findings_json || {}); } catch (_) {}
+        return { ...r, findings };
+      });
+    } catch (_) {}
 
-    let iqrList = (iqrRecordsRes.rows || []).map(r => {
-      let findings = {};
-      try { findings = typeof r.findings_json === 'string' ? JSON.parse(r.findings_json) : (r.findings_json || {}); } catch(e) {}
-      return { ...r, findings };
-    });
+    // Also pull from real qc_inspections + qc_inspection_params + incoming_quality_reports
+    let realQcRows = [];
+    try {
+      const purIdList = enrichedPurchases.map(p => p.id).filter(Boolean);
+      const qRes = await runner.query(`
+        SELECT qi.*, iqr.iqr_no
+        FROM qc_inspections qi
+        LEFT JOIN incoming_quality_reports iqr ON iqr.qc_id = qi.id
+        WHERE UPPER(COALESCE(qi.rm_lot_no, '')) IN (${lotPlaceholdersUpper})
+           ${purIdList.length ? `OR qi.purchase_id IN (${purIdList.map(() => '?').join(',')})` : ''}
+        ORDER BY qi.id DESC
+      `, [...lotListUpper, ...purIdList]);
+      realQcRows = qRes.rows || [];
 
-    // Deduplicate IQR records
-    const seenIqrKeys = new Set();
-    iqrList = iqrList.filter(r => {
-      const k = r.record_no || r.findings?.iqr_no || r.lot_no;
-      if (!k || seenIqrKeys.has(k)) return false;
-      seenIqrKeys.add(k);
-      return true;
-    });
-
-    // Default IQR if not found
-    let primaryIQR = iqrList[0] || (purchaseInfo ? {
-      record_no: `P1-${canonicalLotNo}`,
-      record_date: purchaseInfo.inv_date || purchaseInfo.date || '2026-08-04',
-      status: 'COMPLETED',
-      checked_by: 'QA QC Officer',
-      findings: {
-        iqr_no: `IQR-${canonicalLotNo}`,
-        moisture: '10.8%',
-        foreign_matter: '0.4%',
-        broken_grain: '1.2%',
-        weevils: '0%',
-        decision: 'ACCEPTED FOR PRODUCTION',
-        inward_bags: purchaseInfo.inward_qty || purchaseInfo.total_qty || (lot ? lot.quantity : 0),
-        bag_weight_kg: purchaseInfo.per_unit_weight || 50,
-        total_weight_kg: purchaseInfo.total_weight || ((purchaseInfo.inward_qty || (lot ? lot.quantity : 0)) * (purchaseInfo.per_unit_weight || 50))
-      }
-    } : {
-      record_no: `P1-${canonicalLotNo}`,
-      record_date: '2026-08-04',
-      status: 'COMPLETED',
-      checked_by: 'QA QC Officer',
-      findings: {
-        iqr_no: `IQR-${canonicalLotNo}`,
-        moisture: '10.8%',
-        foreign_matter: '0.4%',
-        broken_grain: '1.2%',
-        weevils: '0%',
-        decision: 'ACCEPTED FOR PRODUCTION',
-        inward_bags: 100,
-        bag_weight_kg: 50,
-        total_weight_kg: 5000
-      }
-    });
-
-    if (iqrList.length === 0 && primaryIQR) {
-      iqrList.push(primaryIQR);
-    }
-
-    // 5. Certificate of Analysis (COA / P6)
-    const coaRecordsRes = await db.query(`
-      SELECT * FROM compliance_production_records 
-      WHERE record_code = 'P6' AND UPPER(lot_no) IN (${lotPlaceholdersUpper})
-    `, lotListUpper);
-
-    let coaList = (coaRecordsRes.rows || []).map(r => {
-      let findings = {};
-      try { findings = typeof r.findings_json === 'string' ? JSON.parse(r.findings_json) : (r.findings_json || {}); } catch(e) {}
-      return { ...r, findings };
-    });
-
-    // Deduplicate COA records
-    const seenCoaKeys = new Set();
-    coaList = coaList.filter(r => {
-      const k = r.record_no || r.findings?.coa_no || r.lot_no;
-      if (!k || seenCoaKeys.has(k)) return false;
-      seenCoaKeys.add(k);
-      return true;
-    });
-
-    // If no COA found in records for associated lots, fetch actual QC inspection or generate COA records
-    if (coaList.length === 0) {
-      const coaItemName = lot?.item_name || (grindBatches.length > 0 && grindBatches[0].outputs && grindBatches[0].outputs[0] ? grindBatches[0].outputs[0].item_name : 'Broken Rice / Grain Flour');
-      const coaLotNo = canonicalLotNo;
-
-      // Look for real QC Inspection in qc_inspections table
-      const realQcRes = await db.query(`
-        SELECT qi.* FROM qc_inspections qi
-        WHERE UPPER(qi.rm_lot_no) IN (${lotPlaceholdersUpper}) OR UPPER(qi.qc_no) LIKE UPPER(?)
-        ORDER BY qi.id DESC LIMIT 1
-      `, [...lotListUpper, `%${coaLotNo}%`]);
-
-      let actualCoaParams = [];
-      let qcInspector = 'QA Chemist';
-      let qcDecision = 'PASSED & RELEASED FOR PACKAGING / DISPATCH';
-
-      if (realQcRes.rows && realQcRes.rows[0]) {
-        const qRow = realQcRes.rows[0];
-        qcInspector = qRow.inspector || 'QA Chemist';
-        qcDecision = qRow.overall_result ? `${qRow.overall_result} & RELEASED FOR DISPATCH` : qcDecision;
-
-        const pRes = await db.query(`SELECT param_key, param_value FROM qc_inspection_params WHERE qc_id = ?`, [qRow.id]);
-        (pRes.rows || []).forEach(row => {
+      for (const qRow of realQcRows) {
+        const pRes = await runner.query(`SELECT param_key, param_value FROM qc_inspection_params WHERE qc_id = ?`, [qRow.id]);
+        qRow._params = (pRes.rows || []).map(row => {
           try {
             const parsed = typeof row.param_value === 'string' ? JSON.parse(row.param_value) : row.param_value;
-            actualCoaParams.push({
+            return {
               parameter: parsed.parameterName || row.param_key,
-              standard: parsed.specification || (parsed.max !== undefined ? `Max ${parsed.max}${parsed.unit || '%'}` : 'Compliant'),
+              standard: parsed.specification || (parsed.max !== undefined ? `Max ${parsed.max}${parsed.unit || '%'}` : 'Standard'),
               observed: `${parsed.actualResult !== undefined ? parsed.actualResult : row.param_value}${parsed.unit ? ` ${parsed.unit}` : ''}`,
               result: parsed.status || 'Pass'
-            });
-          } catch (e) {
-            actualCoaParams.push({ parameter: row.param_key, standard: 'Standard', observed: String(row.param_value), result: 'Pass' });
+            };
+          } catch (_) {
+            return { parameter: row.param_key, standard: 'Standard', observed: String(row.param_value), result: 'Pass' };
           }
         });
       }
+    } catch (_) {}
 
-      if (actualCoaParams.length === 0) {
-        actualCoaParams = [
-          { parameter: 'Moisture Content', standard: 'Max 12.0%', observed: '10.8%', result: 'Pass' },
-          { parameter: 'Total Ash (Dry Basis)', standard: 'Max 3.5%', observed: '1.8%', result: 'Pass' },
-          { parameter: 'Acid Insoluble Ash', standard: 'Max 0.1%', observed: '0.04%', result: 'Pass' },
-          { parameter: 'Granularity (Mesh 60)', standard: 'Min 98.0%', observed: '99.4%', result: 'Pass' },
-          { parameter: 'Gluten Test', standard: 'Negative / Nil', observed: 'Negative (Gluten-Free)', result: 'Pass' },
-          { parameter: 'Total Plate Count', standard: 'Max 10,000 cfu/g', observed: '850 cfu/g', result: 'Pass' },
-          { parameter: 'Yeast & Mold Count', standard: 'Max 100 cfu/g', observed: '<30 cfu/g', result: 'Pass' },
-          { parameter: 'E. coli & Salmonella', standard: 'Absent in 25g', observed: 'Absent', result: 'Pass' }
-        ];
-      }
-
-      const generatedCOA = {
-        record_code: 'P6',
-        record_no: `COA-2026-${coaLotNo}`,
-        record_date: new Date().toISOString().split('T')[0],
-        item_name: coaItemName,
-        lot_no: coaLotNo,
-        status: 'COMPLETED',
-        checked_by: qcInspector,
-        approved_by: 'Quality Assurance Head',
+    if (iqrList.length === 0 && realQcRows.length > 0) {
+      const q0 = realQcRows[0];
+      const findParam = (kw) => q0._params?.find(p => String(p.parameter || '').toLowerCase().includes(kw))?.observed || null;
+      iqrList.push({
+        record_no: q0.iqr_no || q0.qc_no,
+        record_date: q0.inspection_date || purchaseInfo?.date || '',
+        status: q0.overall_result || 'ACCEPTED',
+        checked_by: q0.inspector || 'QA Inspector',
         findings: {
-          coa_no: `COA-2026-${coaLotNo}`,
-          item_name: coaItemName,
-          batch_lot_no: coaLotNo,
-          batch_qty: '232 Bags (6,960 Kg)',
-          parameters: actualCoaParams,
-          decision: qcDecision
+          iqr_no: q0.iqr_no || q0.qc_no,
+          moisture: findParam('moist') || 'N/A',
+          foreign_matter: findParam('foreign') || 'N/A',
+          broken_grain: findParam('broken') || 'N/A',
+          weevils: findParam('weevil') || findParam('pest') || 'N/A',
+          decision: q0.overall_result || 'ACCEPTED',
+          parameters: q0._params || []
         }
-      };
-      coaList.push(generatedCOA);
+      });
     }
 
-    // 6. Current Inventory Balances for this lot and related lots
-    const stockLotsRes = await db.query(`
-      SELECT sl.*, COALESCE(gm.godown_name, sl.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name
-      FROM stock_lots sl
-      LEFT JOIN godown_master gm ON sl.godown_id = gm.id
-      WHERE sl.lot_no IN (${lotPlaceholders})
-    `, lotList);
+    const primaryIQR = iqrList[0] || null;
 
-    // 7. Forward Trace: Sales & Customer Dispatches
-    const salesRes = await db.query(`
-      SELECT s.*, si.item_name, si.qty as sold_qty, si.rate as sold_rate, si.total_amt as sold_amount, si.lot_no,
-             COALESCE(c.name, c.print_name, s.customer) as customer_name, 
-             COALESCE(c.phone_off, c.mobile1, s.phone, '') as customer_phone, 
-             COALESCE(c.address1, s.address, '') as customer_address, 
+    // 6. Real Certificate of Analysis (COA / P6 + qc_inspections params)
+    let coaList = [];
+    try {
+      const coaRecordsRes = await runner.query(`
+        SELECT * FROM compliance_production_records 
+        WHERE record_code = 'P6' AND UPPER(lot_no) IN (${lotPlaceholdersUpper})
+        ORDER BY id DESC
+      `, lotListUpper);
+      coaList = (coaRecordsRes.rows || []).map(r => {
+        let findings = {};
+        try { findings = typeof r.findings_json === 'string' ? JSON.parse(r.findings_json) : (r.findings_json || {}); } catch (_) {}
+        return { ...r, findings };
+      });
+    } catch (_) {}
+
+    if (coaList.length === 0 && realQcRows.length > 0) {
+      const q0 = realQcRows[0];
+      coaList.push({
+        record_code: 'P6',
+        record_no: q0.qc_no || `QC-${canonicalLotNo}`,
+        record_date: q0.inspection_date || '',
+        item_name: lot?.item_name || purchaseInfo?.item_name || 'Commodity',
+        lot_no: q0.rm_lot_no || canonicalLotNo,
+        status: q0.overall_result || 'ACCEPTED',
+        checked_by: q0.inspector || 'QA Inspector',
+        approved_by: q0.inspector || 'QA Team',
+        findings: {
+          coa_no: q0.qc_no || `QC-${canonicalLotNo}`,
+          item_name: lot?.item_name || purchaseInfo?.item_name || '',
+          batch_lot_no: q0.rm_lot_no || canonicalLotNo,
+          parameters: q0._params || [],
+          decision: q0.overall_result || 'ACCEPTED'
+        }
+      });
+    }
+
+    // 7. Current Inventory Balances per Godown from clean stock_movements (fallback to stock_lots)
+    let currentStockList = [];
+    try {
+      const mvBalRes = await runner.query(`
+        SELECT lot_no, MAX(item_name) as item_name, godown_name,
+               SUM(CASE WHEN direction = 'IN' THEN qty ELSE -qty END) as remaining_quantity,
+               SUM(CASE WHEN direction = 'IN' THEN COALESCE(weight, 0) ELSE -COALESCE(weight, 0) END) as remaining_weight_kg
+        FROM stock_movements
+        WHERE is_reversed = 0 AND is_reversal = 0 AND is_physical_stock = 1
+          AND (UPPER(lot_no) IN (${lotPlaceholdersUpper}) OR UPPER(fg_lot_no) IN (${lotPlaceholdersUpper}))
+        GROUP BY lot_no, godown_name
+        HAVING ABS(SUM(CASE WHEN direction = 'IN' THEN qty ELSE -qty END)) > 0.001
+        ORDER BY lot_no ASC, godown_name ASC
+      `, [...lotListUpper, ...lotListUpper]);
+      currentStockList = mvBalRes.rows || [];
+    } catch (_) {}
+
+    if (currentStockList.length === 0) {
+      const stockLotsRes = await runner.query(`
+        SELECT sl.*, COALESCE(gm.godown_name, sl.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name
+        FROM stock_lots sl
+        LEFT JOIN godown_master gm ON sl.godown_id = gm.id
+        WHERE UPPER(sl.lot_no) IN (${lotPlaceholdersUpper})
+      `, lotListUpper);
+      currentStockList = stockLotsRes.rows || [];
+    }
+
+    // 8. Chronological Stock Movement Audit Trail (Purchase -> Cold Storage -> Transfers -> Production -> Sales)
+    let stockMovementsList = [];
+    try {
+      const mvTimelineRes = await runner.query(`
+        SELECT id, movement_date, movement_type, source_module, source_ref_no, godown_name,
+               lot_no, rm_lot_no, fg_lot_no, parent_lot_no, item_name, direction, qty, weight,
+               party_name, supplier_name, supplier_invoice_no, nav_route, remarks
+        FROM stock_movements
+        WHERE is_reversed = 0 AND is_reversal = 0
+          AND (UPPER(lot_no) IN (${lotPlaceholdersUpper})
+               OR UPPER(rm_lot_no) IN (${lotPlaceholdersUpper})
+               OR UPPER(fg_lot_no) IN (${lotPlaceholdersUpper})
+               OR UPPER(parent_lot_no) IN (${lotPlaceholdersUpper}))
+        ORDER BY movement_date ASC, id ASC
+      `, [...lotListUpper, ...lotListUpper, ...lotListUpper, ...lotListUpper]);
+      stockMovementsList = (mvTimelineRes.rows || []).map(m => {
+        const resolved = resolvePartyFromDirectory(partyDir, {
+          supplierName: m.supplier_name,
+          partyName: m.party_name,
+          sourceModule: m.source_module
+        });
+        return {
+          ...m,
+          party_name: resolved.partyName || m.party_name || m.godown_name || '-'
+        };
+      });
+    } catch (_) {}
+
+    // 9. Forward Trace: Sales & Customer Dispatches (with PartyNameResolver + real weight!)
+    const salesRes = await runner.query(`
+      SELECT s.*, si.item_name, si.qty as sold_qty, si.weight as per_bag_wt, si.total_wt as sold_total_wt,
+             si.rate as sold_rate, COALESCE(NULLIF(si.total_amt, 0), si.amount, 0) as sold_amount, si.lot_no,
+             COALESCE(c.phone_off, c.mobile1, c.phone_res, s.phone, '') as customer_phone,
+             COALESCE(c.address1, s.address, '') as customer_address,
              COALESCE(c.area, '') as customer_city,
              COALESCE(c.gst_number, '') as customer_gstin,
-             COALESCE(p7.record_no, 'P7-2026-001') as terminal_inspection_no,
-             COALESCE(CAST(s.s_no AS TEXT), s.p_o_no, CAST(s.id AS TEXT)) as invoice_no
+             p7.record_no as terminal_inspection_no,
+             COALESCE(NULLIF(s.voucher_no, ''), CAST(s.s_no AS TEXT), CAST(s.id AS TEXT)) as invoice_no
       FROM sales s
       JOIN sales_items si ON s.id = si.sales_id
-      LEFT JOIN customer_master c ON (s.customer_id = c.id OR s.customer = c.name OR s.customer = c.print_name)
+      LEFT JOIN customer_master c ON (s.customer_id = c.id OR CAST(c.id AS TEXT) = CAST(s.customer AS TEXT) OR LOWER(TRIM(s.customer)) = LOWER(TRIM(c.name)) OR LOWER(TRIM(s.customer)) = LOWER(TRIM(c.print_name)))
       LEFT JOIN compliance_production_records p7 ON (p7.record_code = 'P7' AND p7.sales_id = s.id)
-      WHERE si.lot_no IN (${lotPlaceholders})
-    `, lotList);
+      WHERE UPPER(si.lot_no) IN (${lotPlaceholdersUpper})
+    `, lotListUpper);
 
-    const dispatches = (salesRes.rows || []).map(s => ({
-      sales_id: s.id,
-      invoice_no: s.invoice_no,
-      date: s.date,
-      customer_name: s.customer_name || 'Customer Records',
-      customer_phone: s.customer_phone || '',
-      customer_city: s.customer_city || 'Regional Distribution',
-      customer_gstin: s.customer_gstin || '',
-      item_name: s.item_name,
-      lot_no: s.lot_no,
-      sold_qty: s.sold_qty,
-      sold_weight_kg: (s.sold_qty || 0) * 30,
-      sold_rate: s.sold_rate,
-      sold_amount: s.sold_amount,
-      terminal_inspection: {
-        record_no: s.terminal_inspection_no,
-        vehicle_no: s.vehicle_no || s.lorry_no || s.transport || '',
-        bag_integrity: 'Verified Double Stitch',
-        seal_no: s.seal_no || '',
-        status: 'Pre-Shipment QA Cleared'
-      }
-    }));
+    const dispatches = (salesRes.rows || []).map(s => {
+      const resolvedCust = resolveCustomerFromDirectory(partyDir, s.customer, s.customer_id);
+      const soldQty = parseFloat(s.sold_qty) || 0;
+      const bagWt = parseFloat(s.per_bag_wt) || 0;
+      const soldWt = parseFloat(s.sold_total_wt) || (soldQty * bagWt);
+      return {
+        sales_id: s.id,
+        invoice_no: s.invoice_no,
+        date: s.date,
+        customer_name: resolvedCust.name || s.customer || 'Customer',
+        customer_phone: s.customer_phone || '',
+        customer_city: s.customer_city || '',
+        customer_gstin: s.customer_gstin || '',
+        item_name: s.item_name,
+        lot_no: s.lot_no,
+        sold_qty: soldQty,
+        sold_weight_kg: soldWt,
+        sold_rate: parseFloat(s.sold_rate) || 0,
+        sold_amount: parseFloat(s.sold_amount) || 0,
+        terminal_inspection: {
+          record_no: s.terminal_inspection_no || null,
+          vehicle_no: s.vehicle_no || s.lorry_no || s.transport || '',
+          bag_integrity: s.terminal_inspection_no ? 'Verified Double Stitch' : 'Standard Dispatch',
+          seal_no: s.seal_no || '',
+          status: s.terminal_inspection_no ? 'Pre-Shipment QA Cleared' : 'Dispatched'
+        }
+      };
+    });
 
-    // 8. Fetch list of all active lots across real purchases and grain outputs for quick switching
-    const activeLotsRes = await db.query(`
+    // 10. All Active Lots across Purchases, Grain Outputs, Cold Storage, Weight Conversion, Inpass, Stock Lots
+    const activeLotsRes = await runner.query(`
       SELECT lot_no, MAX(item_name) as item_name, SUM(initial_qty) as initial_qty, SUM(remaining_quantity) as remaining_quantity, MAX(godown_name) as godown_name
       FROM (
-        SELECT pi.lot_no, pi.item_name, pi.qty as initial_qty, COALESCE(sl.remaining_quantity, pi.qty) as remaining_quantity, COALESCE(gm.godown_name, sl.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name
+        SELECT pi.lot_no, pi.item_name, pi.qty as initial_qty, COALESCE(sl.remaining_quantity, pi.qty) as remaining_quantity, COALESCE(gm.godown_name, sl.godown_name, 'PJ') as godown_name
         FROM purchase_items pi
         JOIN purchases p ON p.id = pi.purchase_id
         LEFT JOIN stock_lots sl ON sl.lot_no = pi.lot_no
         LEFT JOIN godown_master gm ON (CAST(gm.id AS TEXT) = CAST(p.godown AS TEXT) OR p.godown = gm.godown_name OR CAST(gm.id AS TEXT) = CAST(sl.godown_id AS TEXT))
         WHERE pi.lot_no IS NOT NULL AND TRIM(pi.lot_no) != ''
         UNION ALL
-        SELECT go.lot_no, go.item_name, go.qty as initial_qty, COALESCE(sl.remaining_quantity, go.qty) as remaining_quantity, COALESCE(sl.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name
+        SELECT go.lot_no, go.item_name, go.qty as initial_qty, COALESCE(sl.remaining_quantity, go.qty) as remaining_quantity, COALESCE(sl.godown_name, 'PJ') as godown_name
         FROM grain_output_items go
         LEFT JOIN stock_lots sl ON sl.lot_no = go.lot_no
         WHERE go.lot_no IS NOT NULL AND TRIM(go.lot_no) != ''
         UNION ALL
-        SELECT wci.lot_no, wci.item_name, wci.qty as initial_qty, COALESCE(sl.remaining_quantity, wci.qty) as remaining_quantity, COALESCE(sl.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name
+        SELECT csi.cold_storage_lot_no as lot_no, csi.item_name, csi.quantity as initial_qty, csi.quantity as remaining_quantity, COALESCE(csv.cold_storage_name, 'Cold Storage') as godown_name
+        FROM cold_storage_items csi
+        JOIN cold_storage_vouchers csv ON csv.id = csi.voucher_id
+        WHERE csi.cold_storage_lot_no IS NOT NULL AND TRIM(csi.cold_storage_lot_no) != '' AND csv.voucher_type = 'IN'
+        UNION ALL
+        SELECT wci.lot_no, wci.item_name, wci.qty as initial_qty, COALESCE(sl.remaining_quantity, wci.qty) as remaining_quantity, COALESCE(sl.godown_name, 'PJ') as godown_name
         FROM weight_conversion_items wci
         LEFT JOIN stock_lots sl ON sl.lot_no = wci.lot_no
         WHERE wci.lot_no IS NOT NULL AND TRIM(wci.lot_no) != ''
         UNION ALL
-        SELECT sl.lot_no, sl.item_name, sl.quantity as initial_qty, sl.remaining_quantity, COALESCE(sl.godown_name, gm.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name
+        SELECT sl.lot_no, sl.item_name, sl.quantity as initial_qty, sl.remaining_quantity, COALESCE(sl.godown_name, gm.godown_name, 'PJ') as godown_name
         FROM stock_lots sl
         LEFT JOIN godown_master gm ON CAST(gm.id AS TEXT) = CAST(sl.godown_id AS TEXT)
         WHERE sl.lot_no IS NOT NULL AND TRIM(sl.lot_no) != ''
       ) combined_lots
       GROUP BY lot_no
       ORDER BY lot_no ASC
-      LIMIT 100
+      LIMIT 150
     `);
 
-    // Prepare normalized Supplier Data
+    // 11. Normalized Supplier Details
     let supplierDetails = null;
     if (purchaseInfo) {
-      const inwardBags = purchaseInfo.inward_qty || purchaseInfo.total_qty || (lot ? lot.quantity : 100);
-      const perBagWt = purchaseInfo.per_unit_weight || 50;
-      const inwardWeightKg = purchaseInfo.total_weight || (inwardBags * perBagWt);
-
-      const primaryGodownRes = await db.query(`SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1`);
+      const inwardBags = parseFloat(purchaseInfo.inward_qty || purchaseInfo.total_qty || (lot ? lot.quantity : 0)) || 0;
+      const perBagWt = parseFloat(purchaseInfo.per_unit_weight || purchaseInfo.pi_weight || 50) || 50;
+      const inwardWeightKg = parseFloat(purchaseInfo.total_weight) || (inwardBags * perBagWt);
+      const primaryGodownRes = await runner.query(`SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1`);
       const defaultGodownName = primaryGodownRes.rows?.[0]?.godown_name || 'PJ';
 
       supplierDetails = {
-        name: purchaseInfo.supplier_name || 'Direct Supplier',
+        name: purchaseInfo.supplier_name || 'Supplier',
         phone: purchaseInfo.supplier_phone || '',
         address: purchaseInfo.supplier_address || '',
         area: purchaseInfo.supplier_area || '',
@@ -2383,36 +2473,54 @@ router.get('/traceability/:lotNo', async (req, res) => {
         inward_qty_bags: inwardBags,
         per_unit_weight_kg: perBagWt,
         total_weight_kg: inwardWeightKg,
-        rate_per_unit: purchaseInfo.rate || (lot ? lot.rate : 0),
-        pay_type: purchaseInfo.pay_type || 'Cash',
+        rate_per_unit: parseFloat(purchaseInfo.rate || (lot ? lot.rate : 0)) || 0,
+        pay_type: purchaseInfo.pay_type || 'Credit',
         godown_name: purchaseInfo.godown_name || lot?.godown_name || defaultGodownName,
-        vehicle_no: purchaseInfo.lorry_no || purchaseInfo.transport || ''
+        vehicle_no: purchaseInfo.lorry_no || purchaseInfo.vehicle_no || purchaseInfo.transport || ''
       };
     }
+
+    const parentPurchases = enrichedPurchases.map(p => {
+      const bags = parseFloat(p.inward_qty || p.total_qty || 0) || 0;
+      const bagWt = parseFloat(p.per_unit_weight || p.pi_weight || 50) || 50;
+      return {
+        lot_no: p.lot_no,
+        item_name: p.item_name,
+        supplier_name: p.supplier_name,
+        invoice_no: p.invoice_no,
+        receiving_date: p.date || p.inv_date || '',
+        inward_qty_bags: bags,
+        total_weight_kg: parseFloat(p.total_weight) || (bags * bagWt),
+        godown_name: p.godown_name
+      };
+    });
 
     res.json({
       success: true,
       lotNo: canonicalLotNo,
       lotDetails: lot,
       parentLot: parentInputLot,
+      parentLots: parentLotsList,
       activeLots: activeLotsRes.rows || [],
       purchaseReturns: purchaseReturnsList,
       backwardTrace: {
         purchase: purchaseInfo,
+        parentPurchases,
         supplier: supplierDetails,
         purchaseReturns: purchaseReturnsList,
         iqr: primaryIQR,
         allIQRs: iqrList
       },
       productionHistory: {
-        grindBatches: grindBatches
+        grindBatches
       },
       qualityCertificates: {
         coas: coaList
       },
-      currentStock: stockLotsRes.rows || [],
+      currentStock: currentStockList,
+      stockMovements: stockMovementsList,
       forwardTrace: {
-        dispatches: dispatches,
+        dispatches,
         affectedCustomers: dispatches.map(d => ({
           customer_name: d.customer_name,
           invoice_no: d.invoice_no,
@@ -2437,45 +2545,61 @@ router.get('/traceability/:lotNo', async (req, res) => {
 // ============================================================================
 router.post('/recall/simulate', async (req, res) => {
   try {
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    const runner = db.forCompany(Number.isSafeInteger(activeCompanyId) && activeCompanyId > 0 ? activeCompanyId : 1);
+    const partyDir = await loadPartyDirectory(activeCompanyId, runner);
+
     const { item_name, lot_no } = req.body;
     if (!lot_no) {
       return res.status(400).json({ success: false, message: 'Lot number is required for recall simulation' });
     }
 
-    // 1. Inward Purchase info
-    const purRes = await db.query(`
-      SELECT p.id, COALESCE(p.inv_no, CAST(p.s_no AS TEXT), CAST(p.id AS TEXT)) as invoice_no, p.date, 
-             COALESCE(p.supplier, 'Supplier Records') as supplier_name, 
-             pi.item_name, pi.qty as inward_qty, pi.lot_no
+    const purRes = await runner.query(`
+      SELECT p.id, COALESCE(NULLIF(p.inv_no, ''), CAST(p.s_no AS TEXT), CAST(p.id AS TEXT)) as invoice_no, p.date, 
+             p.supplier as raw_supplier, pi.item_name, pi.qty as inward_qty, pi.lot_no
       FROM purchases p
       JOIN purchase_items pi ON p.id = pi.purchase_id
-      WHERE pi.lot_no LIKE ?
+      WHERE UPPER(pi.lot_no) LIKE UPPER(?)
     `, [`%${lot_no}%`]);
-    const purchase = purRes.rows && purRes.rows[0] ? purRes.rows[0] : null;
+    const purchase = purRes.rows?.[0] || null;
+    const supplierName = purchase ? (resolveSupplierFromDirectory(partyDir, purchase.raw_supplier, null).name || purchase.raw_supplier) : 'Supplier Records';
 
-    // 2. Current In-House Stock
-    const stockRes = await db.query(`
-      SELECT item_name, godown, lot_no, SUM(qty) as available_qty
-      FROM stock
-      WHERE lot_no LIKE ?
-      GROUP BY item_name, godown, lot_no
-    `, [`%${lot_no}%`]);
-    const currentStockList = stockRes.rows || [];
-    const totalCurrentStock = currentStockList.reduce((sum, s) => sum + (parseFloat(s.available_qty) || 0), 0);
+    // Current In-House Stock from clean stock_movements
+    let currentStockList = [];
+    try {
+      const mvRes = await runner.query(`
+        SELECT item_name, godown_name as godown, lot_no,
+               SUM(CASE WHEN direction = 'IN' THEN qty ELSE -qty END) as available_qty
+        FROM stock_movements
+        WHERE is_reversed = 0 AND is_reversal = 0 AND is_physical_stock = 1
+          AND UPPER(lot_no) LIKE UPPER(?)
+        GROUP BY item_name, godown_name, lot_no
+      `, [`%${lot_no}%`]);
+      currentStockList = mvRes.rows || [];
+    } catch (_) {
+      const stockRes = await runner.query(`
+        SELECT item_name, godown, lot_no, SUM(qty) as available_qty
+        FROM stock
+        WHERE UPPER(lot_no) LIKE UPPER(?)
+        GROUP BY item_name, godown, lot_no
+      `, [`%${lot_no}%`]);
+      currentStockList = stockRes.rows || [];
+    }
+    const totalCurrentStock = currentStockList.reduce((sum, s) => sum + Math.max(0, parseFloat(s.available_qty) || 0), 0);
 
-    // 3. Sold Stock & Customers
-    const salesRes = await db.query(`
-      SELECT s.id, COALESCE(CAST(s.s_no AS TEXT), s.p_o_no, CAST(s.id AS TEXT)) as invoice_no, s.date, 
-             COALESCE(s.customer, 'Customer Records') as customer_name, 
-             si.item_name, si.qty as sold_qty, si.lot_no
+    const salesRes = await runner.query(`
+      SELECT s.id, COALESCE(NULLIF(s.voucher_no, ''), CAST(s.s_no AS TEXT), s.p_o_no, CAST(s.id AS TEXT)) as invoice_no, s.date, 
+             s.customer as raw_customer, s.customer_id, si.item_name, si.qty as sold_qty, si.lot_no
       FROM sales s
       JOIN sales_items si ON s.id = si.sales_id
-      WHERE si.lot_no LIKE ?
+      WHERE UPPER(si.lot_no) LIKE UPPER(?)
     `, [`%${lot_no}%`]);
-    const salesList = salesRes.rows || [];
+    const salesList = (salesRes.rows || []).map(r => ({
+      ...r,
+      customer_name: resolveCustomerFromDirectory(partyDir, r.raw_customer, r.customer_id).name || r.raw_customer || 'Customer'
+    }));
     const totalSoldQty = salesList.reduce((sum, s) => sum + (parseFloat(s.sold_qty) || 0), 0);
-
-    const totalInwardQty = purchase ? purchase.inward_qty : (totalCurrentStock + totalSoldQty);
+    const totalInwardQty = purchase ? parseFloat(purchase.inward_qty || 0) : (totalCurrentStock + totalSoldQty);
 
     res.json({
       success: true,
@@ -2483,7 +2607,7 @@ router.post('/recall/simulate', async (req, res) => {
         lot_no,
         item_name: item_name || (purchase ? purchase.item_name : (currentStockList[0]?.item_name || 'Item')),
         inward_qty: totalInwardQty,
-        supplier_name: purchase ? purchase.supplier_name : 'Supplier Records',
+        supplier_name: supplierName,
         purchase_invoice: purchase ? purchase.invoice_no : 'N/A',
         current_inhouse_stock: totalCurrentStock,
         godown_breakdown: currentStockList,
@@ -2491,8 +2615,8 @@ router.post('/recall/simulate', async (req, res) => {
         affected_customers: salesList,
         reconciliation_percentage: totalInwardQty > 0 ? (((totalCurrentStock + totalSoldQty) / totalInwardQty) * 100).toFixed(1) : 100,
         suggested_actions: [
-          `Place immediate quarantine hold on ${totalCurrentStock} Kg in factory godowns`,
-          `Issue urgent recall notice to ${salesList.length} customer(s) who received ${totalSoldQty} Kg`,
+          `Place immediate quarantine hold on ${totalCurrentStock} Bags in factory godowns`,
+          `Issue urgent recall notice to ${salesList.length} customer(s) who received ${totalSoldQty} Bags`,
           `Notify Designated Food Safety Officer (FSSAI) within 24 hours under Food Recall Regulations`
         ]
       }

@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../config/database');
 const { syncGodownTransfersToColdStorage } = require('../services/coldStorageTransferSync');
 const { rebuildStockLedger } = require('../utils/stockRebuilder');
+const { syncDocumentMovements, deleteDocumentMovements } = require('../services/SourceMovementSync');
 
 // Ensure godown_transfers table exists per company
 const initializedCompanies = new Set();
@@ -457,7 +458,7 @@ router.post('/', async (req, res) => {
     let coldStorageSyncWarning;
     try {
       await syncGodownTransfersToColdStorage(activeCompanyId);
-      await rebuildStockLedger(activeCompanyId);
+      await syncDocumentMovements(activeCompanyId, 'GODOWN_TRANSFER', transferId, req.user?.username || 'admin');
     } catch (syncError) {
       coldStorageSyncWarning = syncError.message;
       console.error('Godown transfer saved, but cold-storage voucher sync failed:', syncError);
@@ -609,7 +610,7 @@ router.put('/:id', async (req, res) => {
 
     try {
       await syncGodownTransfersToColdStorage(activeCompanyId);
-      await rebuildStockLedger(activeCompanyId);
+      await syncDocumentMovements(activeCompanyId, 'GODOWN_TRANSFER', id, req.user?.username || 'admin');
     } catch (syncErr) {
       console.warn('Sync notice after transfer update:', syncErr.message);
     }
@@ -694,7 +695,11 @@ router.delete('/:id', async (req, res) => {
       }
     });
 
-    await rebuildStockLedger(activeCompanyId);
+    try {
+      await deleteDocumentMovements(activeCompanyId, 'GODOWN_TRANSFER', id, 'Godown transfer deleted', req.user?.username || 'admin');
+    } catch (syncErr) {
+      console.warn('Stock movement reversal warning (Godown transfer delete):', syncErr.message);
+    }
     res.json({ success: true, message: 'Godown transfer deleted successfully' });
   } catch (err) {
     console.error('Error deleting godown transfer:', err);

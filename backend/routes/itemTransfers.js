@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../config/database');
 const { rebuildStockLedger } = require('../utils/stockRebuilder');
 const { syncGodownTransfersToColdStorage } = require('../services/coldStorageTransferSync');
+const { syncDocumentMovements, deleteDocumentMovements } = require('../services/SourceMovementSync');
 
 // Initialize item_transfers tables per company
 const initializedCompanies = new Set();
@@ -604,7 +605,11 @@ router.post('/', async (req, res) => {
       return ids;
     });
 
-    await rebuildStockLedger(activeCompanyId);
+    for (const cTrfId of (createdIds || [])) {
+      try {
+        await syncDocumentMovements(activeCompanyId, 'ITEM_TRANSFER', cTrfId, req.user?.username || 'admin');
+      } catch (_) {}
+    }
 
     let coldStorageSyncWarning;
     try {
@@ -736,7 +741,9 @@ router.put('/:id', async (req, res) => {
       };
     });
 
-    await rebuildStockLedger(activeCompanyId);
+    try {
+      await syncDocumentMovements(activeCompanyId, 'ITEM_TRANSFER', id, req.user?.username || 'admin');
+    } catch (_) {}
     try {
       await syncGodownTransfersToColdStorage(activeCompanyId);
     } catch (syncErr) {
@@ -837,7 +844,9 @@ router.delete('/:id', async (req, res) => {
       return trf;
     });
 
-    await rebuildStockLedger(activeCompanyId);
+    try {
+      await deleteDocumentMovements(activeCompanyId, 'ITEM_TRANSFER', id, 'Item transfer deleted', req.user?.username || 'admin');
+    } catch (_) {}
     res.json({ success: true, message: `Item transfer ${deletedTrf.transfer_no} deleted and stock rebuilt successfully` });
   } catch (err) {
     console.error('Error deleting item transfer:', err);

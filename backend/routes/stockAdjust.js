@@ -2,6 +2,7 @@ const express = require('express')
 const router = express.Router()
 const db = require('../config/database')
 const { rebuildStockLedger } = require('../utils/stockRebuilder')
+const { syncDocumentMovements, deleteDocumentMovements } = require('../services/SourceMovementSync')
 
 // GET next S.No for stock adjustments
 router.get('/next-sno', async (req, res) => {
@@ -118,28 +119,38 @@ router.post('/', async (req, res) => {
 
     // Apply the inventory changes
     await applyStockAdjustments(adjustmentId, formData.date, items)
-    await rebuildStockLedger();
+    const cIdSync = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    await syncDocumentMovements(cIdSync, 'STOCK_ADJUST', adjustmentId, req.user?.username || 'admin');
 
     try {
-      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const { triggerTransactionNotification, formatNotificationItems, formatNumClean } = require('../utils/transactionNotifier');
+      const { resolveFlourMillInfo } = require('../utils/millResolver');
+      const cId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
       const refNo = `SA-${formData.sNo || adjustmentId}`;
-      const itemDesc = items.map(i => `${i.qty || 0} ${i.item_name || 'Item'}`).slice(0, 3).join(', ');
-      const totalWt = items.reduce((s, i) => s + (parseFloat(i.totWt || i.total_wt) || 0), 0);
+      const itemDesc = formatNotificationItems(items, { emptyFallback: 'Stock Items' });
+      const totalQty = items.reduce((s, i) => s + (parseFloat(i.qty) || 0), 0);
+      const totalWt = items.reduce((s, i) => s + (parseFloat(i.totWt || i.total_wt) || ((parseFloat(i.weight) || 0) * (parseFloat(i.qty) || 0))), 0);
+      let resolvedLocation = formData.papadComp || '';
+      if (!resolvedLocation && formData.flourMill) {
+        const mInfo = await resolveFlourMillInfo(formData.flourMill, cId);
+        resolvedLocation = (mInfo.millName && !/^\d+$/.test(String(mInfo.millName))) ? mInfo.millName : formData.flourMill;
+      }
+      const qtySummary = `${formatNumClean(totalQty)} ${totalQty === 1 ? 'Bag' : 'Bags'} / ${formatNumClean(totalWt)} KG`;
       await triggerTransactionNotification({
         eventType: 'STOCK_ADJUST_CREATED',
         moduleName: 'STOCK_ADJUST',
         referenceNo: refNo,
         referenceId: adjustmentId,
-        companyId: req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1),
+        companyId: cId,
         title: `📊 STOCK ADJUSTMENT – ${refNo}`,
-        message: `Type: ${formData.type || 'Adjustment'} | Items: ${itemDesc} | Total Wt: ${totalWt} KG`,
+        message: `Type: ${formData.type || 'Adjustment'} | Items: ${itemDesc} | Qty: ${qtySummary}`,
         severity: 'WARNING',
         details: {
           reference_no: refNo,
           action_label: formData.type || 'Stock Adjustment',
-          godown: formData.papadComp || formData.flourMill || 'Main Godown',
+          godown: resolvedLocation || 'Main Godown',
           item_summary: itemDesc,
-          quantity: `${totalWt} KG`,
+          quantity: qtySummary,
           remarks: formData.remarks || '-',
           created_by: req.user?.username || 'Store Operator',
           date: formData.date
@@ -198,20 +209,23 @@ router.put('/:id', async (req, res) => {
 
     // Apply the new inventory changes
     await applyStockAdjustments(adjustmentId, formData.date, items)
-    await rebuildStockLedger();
+    const cIdSync = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    await syncDocumentMovements(cIdSync, 'STOCK_ADJUST', adjustmentId, req.user?.username || 'admin');
 
     try {
-      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const { triggerTransactionNotification, formatNotificationItems, formatNumClean } = require('../utils/transactionNotifier');
       const { resolveFlourMillInfo } = require('../utils/millResolver');
       const cId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
       const refNo = `SA-${formData.sNo || adjustmentId}`;
-      const itemDesc = items.map(i => `${i.qty || 0} ${i.item_name || 'Item'}`).slice(0, 3).join(', ');
-      const totalWt = items.reduce((s, i) => s + (parseFloat(i.totWt || i.total_wt) || 0), 0);
+      const itemDesc = formatNotificationItems(items, { emptyFallback: 'Stock Items' });
+      const totalQty = items.reduce((s, i) => s + (parseFloat(i.qty) || 0), 0);
+      const totalWt = items.reduce((s, i) => s + (parseFloat(i.totWt || i.total_wt) || ((parseFloat(i.weight) || 0) * (parseFloat(i.qty) || 0))), 0);
       let resolvedLocation = formData.papadComp || '';
       if (!resolvedLocation && formData.flourMill) {
         const mInfo = await resolveFlourMillInfo(formData.flourMill, cId);
-        resolvedLocation = mInfo.millName || formData.flourMill;
+        resolvedLocation = (mInfo.millName && !/^\d+$/.test(String(mInfo.millName))) ? mInfo.millName : formData.flourMill;
       }
+      const qtySummary = `${formatNumClean(totalQty)} ${totalQty === 1 ? 'Bag' : 'Bags'} / ${formatNumClean(totalWt)} KG`;
       await triggerTransactionNotification({
         eventType: 'STOCK_ADJUST_UPDATED',
         isUpdate: true,
@@ -220,14 +234,14 @@ router.put('/:id', async (req, res) => {
         referenceId: adjustmentId,
         companyId: cId,
         title: `✏️ STOCK ADJUSTMENT UPDATED – ${refNo}`,
-        message: `Updated Adjustment | Type: ${formData.type || 'Adjustment'} | Items: ${itemDesc} | Total Wt: ${totalWt} KG`,
+        message: `Updated Adjustment | Type: ${formData.type || 'Adjustment'} | Items: ${itemDesc} | Qty: ${qtySummary}`,
         severity: 'WARNING',
         details: {
           reference_no: refNo,
           action_label: formData.type || 'Stock Adjustment',
           godown: resolvedLocation || 'Main Godown',
           item_summary: itemDesc,
-          quantity: `${totalWt} KG`,
+          quantity: qtySummary,
           remarks: formData.remarks || '-',
           updated_by: req.user?.username || 'Store Operator',
           created_by: req.user?.username || 'Store Operator',
@@ -255,7 +269,8 @@ router.delete('/:id', async (req, res) => {
 
     await db.run('DELETE FROM stock_adjustment_items WHERE stock_adjustment_id = ?', [adjustmentId])
     await db.run('DELETE FROM stock_adjustments WHERE id = ?', [adjustmentId])
-    await rebuildStockLedger();
+    const cIdSync = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    await deleteDocumentMovements(cIdSync, 'STOCK_ADJUST', adjustmentId, 'Stock adjustment deleted', req.user?.username || 'admin');
 
     res.json({ success: true, message: 'Stock adjustment record deleted successfully' })
   } catch (error) {
@@ -377,21 +392,5 @@ const reverseStockAdjustments = async (adjustmentId) => {
     console.error('Error reversing stock adjustments:', err);
   }
 };
-
-// Auto-repair existing stock adjustments in database
-setTimeout(async () => {
-  try {
-    const allAdjustments = await db.query('SELECT id, date FROM stock_adjustments');
-    for (const adj of allAdjustments.rows) {
-      const itemsRes = await db.query('SELECT * FROM stock_adjustment_items WHERE stock_adjustment_id = ?', [adj.id]);
-      if (itemsRes.rows.length > 0) {
-        await reverseStockAdjustments(adj.id);
-        await applyStockAdjustments(adj.id, adj.date, itemsRes.rows);
-      }
-    }
-  } catch (err) {
-    console.error('Error syncing legacy stock adjustments:', err);
-  }
-}, 1000);
 
 module.exports = router;

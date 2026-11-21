@@ -46,6 +46,8 @@ const EntryDisplay = ({
   const canCreate = isAdmin || hasPermission(effectiveModule, 'Display', 'can_create') || hasPermission(effectiveModule, 'Create', 'can_create') || hasPermission(effectiveModule, 'can_create');
   const [searchParams] = useSearchParams();
   const initialSearch = searchParams.get("search") || "";
+  const highlightId = searchParams.get("highlightId") || "";
+  const highlightRef = searchParams.get("highlightRef") || "";
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -295,6 +297,51 @@ const EntryDisplay = ({
     });
   };
 
+  const isRowHighlighted = (row) => {
+    if (!row) return false;
+    if (highlightId && row.id !== undefined && row.id !== null && String(row.id) === String(highlightId)) {
+      return true;
+    }
+    if (!highlightId && highlightRef) {
+      const target = String(highlightRef).trim().toLowerCase();
+      const candidates = [
+        row.inv_no,
+        row.invoice_no,
+        row.bill_no,
+        row.s_no,
+        row.doc_no,
+        row.voucher_no,
+        row.grn_no,
+        row.order_no,
+        row.return_no,
+        row.ref_no
+      ];
+      return candidates.some((c) => c !== undefined && c !== null && String(c).trim().toLowerCase() === target);
+    }
+    return false;
+  };
+
+  useEffect(() => {
+    if ((!highlightId && !highlightRef) || !data.length) return;
+    const hasMatch = data.some((row) => isRowHighlighted(row));
+    if (hasMatch) {
+      if (fromDate) setFromDate('');
+      if (toDate) setToDate('');
+      if (searchTerm) setSearchTerm('');
+    }
+  }, [highlightId, highlightRef, data]);
+
+  useEffect(() => {
+    if ((!highlightId && !highlightRef) || loading || !data.length) return;
+    const timer = setTimeout(() => {
+      const el = document.querySelector('[data-highlighted="true"]');
+      if (el && typeof el.scrollIntoView === 'function') {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [highlightId, highlightRef, loading, data]);
+
   const filteredData = data.filter(row => {
     const matchesSearch = !searchTerm || Object.values(row).some(val => 
       String(val).toLowerCase().includes(searchTerm.toLowerCase())
@@ -317,6 +364,10 @@ const EntryDisplay = ({
       <style>{`
         .entry-display-row:hover {
           background-color: #f1f5f9 !important;
+        }
+        .entry-display-row[data-highlighted="true"],
+        .entry-display-row[data-highlighted="true"]:hover {
+          background-color: #fef08a !important;
         }
       `}</style>
       <div style={styles.header}>
@@ -448,11 +499,18 @@ const EntryDisplay = ({
                 </td>
               </tr>
             ) : (
-              filteredData.map((row, idx) => (
+              filteredData.map((row, idx) => {
+                const highlighted = isRowHighlighted(row);
+                return (
                 <tr 
                   key={`${row.id ?? 'row'}-${idx}`}
+                  data-highlighted={highlighted ? 'true' : undefined}
                   className="entry-display-row"
-                  style={{ cursor: (onRowClick || (canEdit && onEdit)) ? 'pointer' : 'default' }}
+                  style={{
+                    cursor: (onRowClick || (canEdit && onEdit)) ? 'pointer' : 'default',
+                    backgroundColor: highlighted ? '#fef08a' : undefined,
+                    boxShadow: highlighted ? 'inset 4px 0 0 #d97706, inset 0 1px 0 #f59e0b, inset 0 -1px 0 #f59e0b' : undefined
+                  }}
                   onClick={(e) => {
                     if (e.target.tagName === 'BUTTON' || e.target.closest('button') || e.target.closest('a')) {
                       return;
@@ -506,7 +564,8 @@ const EntryDisplay = ({
                     )}
                   </td>
                 </tr>
-              ))
+                );
+              })
             )}
           </tbody>
         </table>

@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from "../services/api.js";
 import { printHtml, printElement } from '../utils/printHelper';
 import './StockAdjustDisplay.css';
 
 const StockAdjustDisplay = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const highlightId = searchParams.get('highlightId') || '';
+  const highlightRef = searchParams.get('highlightRef') || '';
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [records, setRecords] = useState([]);
@@ -35,6 +38,37 @@ const StockAdjustDisplay = () => {
   useEffect(() => {
     loadStockAdjustments();
   }, []);
+
+  const isRowHighlighted = (id, sNo) => {
+    if (highlightId && id !== undefined && id !== null && String(id) === String(highlightId)) {
+      return true;
+    }
+    if (!highlightId && highlightRef && sNo !== undefined && sNo !== null) {
+      const target = String(highlightRef).trim().toLowerCase();
+      const s = String(sNo).trim().toLowerCase();
+      return s === target || `sa-${s}` === target;
+    }
+    return false;
+  };
+
+  useEffect(() => {
+    if ((!highlightId && !highlightRef) || !records.length) return;
+    if (records.some((r) => isRowHighlighted(r.id, r.s_no || r.sNo))) {
+      if (dateFrom) setDateFrom('');
+      if (dateTo) setDateTo('');
+    }
+  }, [highlightId, highlightRef, records]);
+
+  useEffect(() => {
+    if ((!highlightId && !highlightRef) || loading || !records.length) return;
+    const timer = setTimeout(() => {
+      const el = document.querySelector('[data-highlighted="true"]');
+      if (el && typeof el.scrollIntoView === 'function') {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [highlightId, highlightRef, loading, records]);
 
   const handlePrintEntry = (adjustRecord) => {
     const rowsHtml = (adjustRecord.items || []).map((item, idx) => `
@@ -198,8 +232,14 @@ const StockAdjustDisplay = () => {
                   <td colSpan="11" style={{ textAlign: 'center', padding: '20px' }}>No records found</td>
                 </tr>
               ) : (
-                flattenedRows.map((row, idx) => (
-                  <tr key={`${row.id}-${idx}`}>
+                flattenedRows.map((row, idx) => {
+                  const highlighted = isRowHighlighted(row.id, row.s_no);
+                  return (
+                  <tr
+                    key={`${row.id}-${idx}`}
+                    data-highlighted={highlighted ? 'true' : undefined}
+                    style={highlighted ? { backgroundColor: '#fef08a', boxShadow: 'inset 4px 0 0 #d97706, inset 0 1px 0 #f59e0b, inset 0 -1px 0 #f59e0b' } : undefined}
+                  >
                     <td>{row.isFirstRow ? row.s_no : ''}</td>
                     <td>{row.isFirstRow ? row.date : ''}</td>
                     <td>{row.isFirstRow ? row.papad_company : ''}</td>
@@ -239,7 +279,8 @@ const StockAdjustDisplay = () => {
                       )}
                     </td>
                   </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
           </table>

@@ -205,9 +205,11 @@ router.post('/', async (req, res) => {
     }
 
     try {
-      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const { triggerTransactionNotification, formatNotificationItems, formatNumClean } = require('../utils/transactionNotifier');
       const refNo = `FOR-${sNo || flourOutReturnId}`;
-      const itemDesc = items.filter(i => i.itemName || i.item_name).map(i => `${i.qty || 0} ${i.itemName || i.item_name}`).slice(0, 3).join(', ') || 'Flour Return';
+      const activeRetItems = (items || []).filter(i => i.itemName || i.item_name);
+      const itemDesc = formatNotificationItems(activeRetItems, { emptyFallback: 'Flour Return' });
+      const qtySummary = `${formatNumClean(totals.totalQty || 0)} Bags / ${formatNumClean(totals.totalWeight || 0)} KG`;
       await triggerTransactionNotification({
         eventType: 'PRODUCTION_CREATED',
         moduleName: 'PRODUCTION',
@@ -215,7 +217,7 @@ router.post('/', async (req, res) => {
         referenceId: flourOutReturnId,
         companyId: req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1),
         title: `⚙️ FLOUR OUT RETURN – ${refNo}`,
-        message: `Papad Company: ${papadCompany || 'Unit'} | ${itemDesc} | Weight: ${totals.totalWeight || 0} KG`,
+        message: `Papad Company: ${papadCompany || 'Unit'} | ${itemDesc} | Qty: ${qtySummary}`,
         severity: 'INFO',
         details: {
           reference_no: refNo,
@@ -223,7 +225,7 @@ router.post('/', async (req, res) => {
           module_label: 'Flour Out Return',
           party_name: papadCompany || 'Papad Unit',
           item_summary: itemDesc,
-          quantity: `${totals.totalQty || 0} Bags / ${totals.totalWeight || 0} KG`,
+          quantity: qtySummary,
           godown: 'Flour Store',
           status: 'RETURNED',
           created_by: req.user?.username || 'Production Operator',
@@ -295,9 +297,11 @@ router.put('/:id', async (req, res) => {
     }
 
     try {
-      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const { triggerTransactionNotification, formatNotificationItems, formatNumClean } = require('../utils/transactionNotifier');
       const refNo = `FR-${sNo || flourOutReturnId}`;
-      const itemDesc = (items || []).map(i => `${i.qty || 0} ${i.itemName || i.item_name || 'Item'}`).slice(0, 3).join(', ') || 'Flour Return';
+      const activeRetItems = (items || []).filter(i => i.itemName || i.item_name);
+      const itemDesc = formatNotificationItems(activeRetItems, { emptyFallback: 'Flour Return' });
+      const qtySummary = `${formatNumClean(totals.totalQty || 0)} Bags / ${formatNumClean(totals.totalWeight || 0)} KG`;
       await triggerTransactionNotification({
         eventType: 'PRODUCTION_UPDATED',
         isUpdate: true,
@@ -306,7 +310,7 @@ router.put('/:id', async (req, res) => {
         referenceId: flourOutReturnId,
         companyId: req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1),
         title: `✏️ FLOUR OUT RETURN UPDATED – ${refNo}`,
-        message: `Updated Flour Return | Unit: ${papadCompany || 'Papad Unit'} | ${itemDesc} | Total Wt: ${totals.totalWeight || 0} KG`,
+        message: `Updated Flour Return | Unit: ${papadCompany || 'Papad Unit'} | ${itemDesc} | Qty: ${qtySummary}`,
         severity: 'INFO',
         details: {
           reference_no: refNo,
@@ -314,7 +318,7 @@ router.put('/:id', async (req, res) => {
           module_label: 'Flour Out Return',
           party_name: papadCompany || 'Papad Unit',
           item_summary: itemDesc,
-          quantity: `${totals.totalQty || 0} Bags / ${totals.totalWeight || 0} KG`,
+          quantity: qtySummary,
           godown: 'Flour Store',
           status: 'UPDATED',
           updated_by: req.user?.username || 'Production Operator',

@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../config/database');
 const { createPurchaseReturnVoucherChain, deletePurchaseReturnVoucherChain } = require('../utils/ledgerHelper');
 const { rebuildStockLedger } = require('../utils/stockRebuilder');
+const { syncDocumentMovements, deleteDocumentMovements } = require('../services/SourceMovementSync');
 
 const getCompanyId = (req) => req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
 const _prSchemaEnsured = new Set();
@@ -960,9 +961,9 @@ router.post('/', async (req, res) => {
     });
 
     try {
-      await rebuildStockLedger(activeCompanyId);
+      await syncDocumentMovements(activeCompanyId, 'PURCHASE_RETURN', txResult.purchaseReturnId, req.user?.username || 'admin');
     } catch (rbErr) {
-      console.warn('Notice rebuilding stock ledger on purchase return save:', rbErr.message);
+      console.warn('Notice syncing stock movements on purchase return save:', rbErr.message);
     }
 
     try {
@@ -1225,9 +1226,9 @@ router.put('/:id', async (req, res) => {
     });
 
     try {
-      await rebuildStockLedger(activeCompanyId);
+      await syncDocumentMovements(activeCompanyId, 'PURCHASE_RETURN', purchaseReturnId, req.user?.username || 'admin');
     } catch (rbErr) {
-      console.warn('Notice rebuilding stock ledger on purchase return update:', rbErr.message);
+      console.warn('Notice syncing stock movements on purchase return update:', rbErr.message);
     }
 
     try {
@@ -1307,9 +1308,9 @@ router.delete('/:id', async (req, res) => {
     });
 
     try {
-      await rebuildStockLedger(activeCompanyId);
+      await deleteDocumentMovements(activeCompanyId, 'PURCHASE_RETURN', returnId, 'Purchase return deleted', req.user?.username || 'admin');
     } catch (rbErr) {
-      console.warn('Notice rebuilding stock ledger on purchase return delete:', rbErr.message);
+      console.warn('Notice reversing stock movements on purchase return delete:', rbErr.message);
     }
 
     res.json({ success: true, message: 'Purchase return deleted successfully' });

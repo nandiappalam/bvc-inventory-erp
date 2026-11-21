@@ -400,7 +400,8 @@ const TENANT_BUSINESS_TABLES = new Set([
   'outpasses', 'outpass_items', 'inpasses', 'inpass_items',
   'operational_parties', 'operational_rates', 'operational_rate_masters', 'operational_charges',
   'operational_charge_lines', 'operational_payments', 'operational_payment_allocations', 'operational_audit_logs', 'operational_settings',
-  'system_notifications', 'notification_recipients', 'notification_templates', 'notification_delivery_logs', 'notification_channel_settings'
+  'system_notifications', 'notification_recipients', 'notification_templates', 'notification_delivery_logs', 'notification_channel_settings',
+  'stock_movements', 'daily_stock_opening', 'daily_stock_closing', 'daily_stock_closing_lines', 'physical_stock_verification', 'physical_stock_verification_items', 'stock_audit_logs'
 ]);
 
 // Master tables MUST NEVER be included in TENANT_BUSINESS_TABLES
@@ -1202,6 +1203,9 @@ function applySqliteCompanyMigrations(instance) {
       'ALTER TABLE grains ADD COLUMN discrepancy_reason TEXT',
       'ALTER TABLE stock_lots ADD COLUMN outside_processing_qty REAL DEFAULT 0',
       "ALTER TABLE stock_lots ADD COLUMN custody_status TEXT DEFAULT 'AVAILABLE'",
+      'ALTER TABLE stock_lots ADD COLUMN parent_lot_no TEXT',
+      'ALTER TABLE stock_lots ADD COLUMN bag_breakdown_json TEXT',
+      'ALTER TABLE item_master ADD COLUMN stock_category TEXT',
       'ALTER TABLE purchases ADD COLUMN gross_weight REAL DEFAULT 0',
       'ALTER TABLE purchases ADD COLUMN tare_weight REAL DEFAULT 0',
       'ALTER TABLE purchases ADD COLUMN net_weight REAL DEFAULT 0',
@@ -1424,6 +1428,14 @@ async function postRestoreSyncCompany(cId) {
     }
   } catch (syncErr) {
     console.warn(`[RestoreSync] Post-restore accounting sync notice for company ${cId}:`, syncErr.message);
+  }
+  try {
+    const StockRegisterSchema = require('../services/StockRegisterSchema');
+    StockRegisterSchema.invalidateSchemaCache(cId);
+    const compRunner = module.exports.forCompany(cId);
+    await StockRegisterSchema.ensureStockRegisterSchema(cId, compRunner, { force: true });
+  } catch (srsErr) {
+    console.warn(`[RestoreSync] Post-restore stock schema notice for company ${cId}:`, srsErr.message);
   }
 }
 
@@ -2036,12 +2048,7 @@ async function restoreDatabase(tempFilePath, companyId = 1) {
         }
         await resyncPostgresSequences(client, schemaName);
 
-        try {
-          const { rebuildStockLedger } = require('../utils/stockRebuilder');
-          if (typeof rebuildStockLedger === 'function') {
-            await rebuildStockLedger();
-          }
-        } catch (e) {}
+        // Existing restored stock & stock_lots rows are preserved strictly non-destructively.
       }
 
       await postRestoreSyncCompany(cId);
@@ -2769,6 +2776,20 @@ class PgDbConnection {
     return this.query(text, params);
   }
 
+  async all(text, params = []) {
+    const res = await this.query(text, params);
+    return res.rows || [];
+  }
+
+  async get(text, params = []) {
+    const res = await this.query(text, params);
+    return (res.rows && res.rows.length > 0) ? res.rows[0] : null;
+  }
+
+  async withTransaction(fn) {
+    return fn(this);
+  }
+
   async release() {
     if (this.client) {
       const client = this.client;
@@ -2872,6 +2893,20 @@ class SqliteDbConnection {
 
   run(text, params = []) {
     return runOnSqlite(this.db, text, params);
+  }
+
+  async all(text, params = []) {
+    const res = await this.query(text, params);
+    return res.rows || [];
+  }
+
+  async get(text, params = []) {
+    const res = await this.query(text, params);
+    return (res.rows && res.rows.length > 0) ? res.rows[0] : null;
+  }
+
+  async withTransaction(fn) {
+    return fn(this);
   }
 
   release() {
@@ -3047,12 +3082,7 @@ async function restoreFromJsonData(jsonData, companyId = 1) {
       }
       await resyncPostgresSequences(client, schemaName);
 
-      try {
-        const { rebuildStockLedger } = require('../utils/stockRebuilder');
-        if (typeof rebuildStockLedger === 'function') {
-          await rebuildStockLedger();
-        }
-      } catch (e) {}
+      // Existing restored stock & stock_lots rows are preserved strictly non-destructively.
 
       await postRestoreSyncCompany(targetCompanyId);
       return { success: true, message: `Database restored successfully into PostgreSQL schema ${schemaName}.` };
@@ -3158,12 +3188,7 @@ async function restoreFromJsonData(jsonData, companyId = 1) {
     companyDbPool.set(targetCompanyId, freshDb);
     await postRestoreSyncCompany(targetCompanyId);
 
-    try {
-      const { rebuildStockLedger } = require('../utils/stockRebuilder');
-      if (typeof rebuildStockLedger === 'function') {
-        await rebuildStockLedger();
-      }
-    } catch (e) {}
+    // Existing restored stock & stock_lots rows are preserved strictly non-destructively.
 
     return { success: true, message: 'Database restored successfully from JSON backup!' };
   }

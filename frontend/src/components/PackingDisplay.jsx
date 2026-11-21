@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../services/api';
 import { printHtml, printElement } from '../utils/printHelper';
 import { useAuth } from '../context/AuthContext';
@@ -7,6 +7,9 @@ import './PackingDisplay.css';
 
 const PackingDisplay = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const highlightId = searchParams.get('highlightId') || '';
+  const highlightRef = searchParams.get('highlightRef') || '';
   const { isAdmin, hasPermission } = useAuth();
   const canEdit = isAdmin || hasPermission('Packing', 'Display', 'can_edit') || hasPermission('Packing', 'can_edit');
   const canDelete = isAdmin || hasPermission('Packing', 'Display', 'can_delete') || hasPermission('Packing', 'can_delete');
@@ -39,6 +42,40 @@ const PackingDisplay = () => {
   useEffect(() => {
     fetchEntries();
   }, []);
+
+  const isRowHighlighted = (entry) => {
+    if (!entry) return false;
+    if (highlightId && entry.id !== undefined && entry.id !== null && String(entry.id) === String(highlightId)) {
+      return true;
+    }
+    if (!highlightId && highlightRef && entry.s_no !== undefined && entry.s_no !== null) {
+      const target = String(highlightRef).trim().toLowerCase();
+      const s = String(entry.s_no).trim().toLowerCase();
+      return s === target || `pkg-${s}` === target;
+    }
+    return false;
+  };
+
+  useEffect(() => {
+    if ((!highlightId && !highlightRef) || !entries.length) return;
+    const match = entries.find((e) => isRowHighlighted(e));
+    if (match && match.date) {
+      const d = String(match.date).substring(0, 10);
+      if (startDate && d < startDate) setStartDate('');
+      if (endDate && d > endDate) setEndDate('');
+    }
+  }, [highlightId, highlightRef, entries]);
+
+  useEffect(() => {
+    if ((!highlightId && !highlightRef) || loading || !entries.length) return;
+    const timer = setTimeout(() => {
+      const el = document.querySelector('[data-highlighted="true"]');
+      if (el && typeof el.scrollIntoView === 'function') {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [highlightId, highlightRef, loading, entries]);
 
   const handleDeleteConfirm = async () => {
     if (!deleteConfirmId) return;
@@ -188,7 +225,9 @@ const PackingDisplay = () => {
   const filteredEntries = entries.filter(e => {
     if (!e.date) return true;
     const d = e.date.substring(0, 10);
-    return d >= startDate && d <= endDate;
+    if (startDate && d < startDate) return false;
+    if (endDate && d > endDate) return false;
+    return true;
   });
 
   return (
@@ -245,8 +284,17 @@ const PackingDisplay = () => {
                 const grandTotalPacket = toItems.reduce((acc, i) => acc + (parseFloat(i.total_packet || i.qty) || 0), 0);
                 const totalWages = toItems.reduce((acc, i) => acc + (parseFloat(i.tot_wt) || 0), 0);
 
+                const highlighted = isRowHighlighted(entry);
+
                 return (
-                  <tr key={entry.id || idx} style={{ background: idx % 2 === 0 ? '#ffffff' : '#f0f4f9' }}>
+                  <tr
+                    key={entry.id || idx}
+                    data-highlighted={highlighted ? 'true' : undefined}
+                    style={{
+                      background: highlighted ? '#fef08a' : (idx % 2 === 0 ? '#ffffff' : '#f0f4f9'),
+                      boxShadow: highlighted ? 'inset 4px 0 0 #d97706, inset 0 1px 0 #f59e0b, inset 0 -1px 0 #f59e0b' : undefined
+                    }}
+                  >
                     <td style={{ padding: '6px', border: '1px solid #cbd5e1', textAlign: 'center', fontWeight: 'bold' }}>{entry.s_no || entry.id}</td>
                     <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>{entry.date ? entry.date.substring(0, 10) : ''}</td>
                     <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>{fromStr}</td>

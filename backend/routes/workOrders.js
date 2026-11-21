@@ -547,25 +547,55 @@ router.post('/', async (req, res) => {
     }
 
     try {
-      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
-      const inDesc = (rawItems || []).map(i => `${i.qty || 0} ${i.item_name || i.itemName || 'RM'}`).slice(0, 3).join(', ') || product;
+      const { triggerTransactionNotification, formatProductionItemSummary, formatNumClean } = require('../utils/transactionNotifier');
+      const { resolveFlourMillInfo } = require('../utils/millResolver');
+      const cId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+      const millInfo = await resolveFlourMillInfo(flour_mill_id || work_unit, cId, { partyId: flour_mill_id });
+      const resolvedUnit = (millInfo.millName && !/^\d+$/.test(String(millInfo.millName))) ? millInfo.millName : work_unit;
+
+      const activeInputList = (rawItems || []).filter(i => i.item_name || i.itemName || i.lot_no);
+      const activeOutputList = (finalOutputItems || []).filter(o => o.output_item || o.item_name || o.fg_lot_no || parseFloat(o.expected_qty || o.qty || o.output_kgs || 0) > 0);
+      const activeWastageList = (finalWastageItems || []).filter(w => parseFloat(w.total_wt || w.qty) > 0);
+      if (activeWastageList.length === 0) {
+        if (rejWt > 0) activeWastageList.push({ category: 'Rejection', item_name: 'Rejection Waste', lot_no: 'REJ-01', total_wt: rejWt });
+        if (eleWt > 0) activeWastageList.push({ category: 'Elevator', item_name: 'Elevator Waste', lot_no: 'ELE-01', total_wt: eleWt });
+        if (wfWt > 0) activeWastageList.push({ category: 'Waste Flour', item_name: 'Waste Flour', lot_no: 'WF-01', total_wt: wfWt });
+        if (sfWt > 0) activeWastageList.push({ category: 'Sieve Flour', item_name: 'Sieve Flour', lot_no: 'SF-01', total_wt: sfWt });
+        if (othWt > 0) activeWastageList.push({ category: 'Other Wastage', item_name: 'Other Wastage', lot_no: 'WST-01', total_wt: othWt });
+      }
+
+      const totalInBags = activeInputList.reduce((s, i) => s + (parseFloat(i.input_qty ?? i.qty) || 0), 0);
+      const totalInKgs = activeInputList.reduce((s, i) => s + (parseFloat(i.kgs || i.total_wt) || ((parseFloat(i.weight) || 0) * (parseFloat(i.input_qty ?? i.qty) || 0))), 0);
+      const totalWastageKgs = activeWastageList.reduce((s, w) => s + (parseFloat(w.total_wt) || ((parseFloat(w.weight) || 1) * (parseFloat(w.qty) || 0))), 0);
+
+      const detailedSummary = formatProductionItemSummary({
+        targetProduct: product,
+        inputItems: activeInputList,
+        outputItems: activeOutputList,
+        wastageItems: activeWastageList,
+        fallbackOutputQty: calcOutputQty,
+        fallbackOutputWt: calcOutputWt
+      });
+
+      const qtySummary = `In: ${formatNumClean(totalInBags)} Bags (${formatNumClean(totalInKgs)} KG) | Exp Out: ${formatNumClean(calcOutputQty)} Bags (${formatNumClean(calcOutputWt)} KG)${totalWastageKgs > 0 ? ` | Wastage: ${formatNumClean(totalWastageKgs)} KG` : ''}`;
+
       await triggerTransactionNotification({
         eventType: 'PRODUCTION_CREATED',
         moduleName: 'WORK_ORDER',
         referenceNo: woNumber,
         referenceId: workOrderId,
-        companyId: req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1),
+        companyId: cId,
         title: `⚙️ WORK ORDER CREATED – ${woNumber}`,
-        message: `Unit: ${work_unit} | Product: ${product} | Input: ${inDesc} | Expected Out: ${calcOutputWt} KG`,
+        message: `Unit: ${resolvedUnit} | ${detailedSummary.replace(/\n/g, ' | ')} | ${qtySummary}`,
         severity: 'INFO',
         details: {
           reference_no: woNumber,
           action_label: 'WORK ORDER',
-          module_label: `Work Order (${work_unit})`,
-          party_name: work_unit,
-          item_summary: `${product} (${inDesc})`,
-          quantity: `${calcOutputQty} Bags / ${calcOutputWt} KG`,
-          godown: work_unit,
+          module_label: `Work Order (${resolvedUnit})`,
+          party_name: resolvedUnit,
+          item_summary: detailedSummary,
+          quantity: qtySummary,
+          godown: resolvedUnit,
           status,
           created_by: req.user?.username || 'Production Planner',
           date: date || new Date().toISOString().slice(0, 10)
@@ -815,30 +845,73 @@ router.put('/:id', async (req, res) => {
     }
 
     try {
-      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
+      const { triggerTransactionNotification, formatProductionItemSummary, formatNumClean } = require('../utils/transactionNotifier');
       const { resolveFlourMillInfo } = require('../utils/millResolver');
       const cId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
       const millInfo = await resolveFlourMillInfo(flour_mill_id || work_unit, cId, { partyId: flour_mill_id });
-      const resolvedUnit = millInfo.millName || work_unit || 'Production Mill';
+      const resolvedUnit = (millInfo.millName && !/^\d+$/.test(String(millInfo.millName))) ? millInfo.millName : (work_unit || 'Production Mill');
       const refNo = work_order_no || `WO-${id}`;
+
+      let activeInputList = (rawItems || []).filter(i => i.item_name || i.itemName || i.lot_no);
+      if (activeInputList.length === 0) {
+        const dbIn = await db.query('SELECT * FROM work_order_items WHERE work_order_id = ? ORDER BY id ASC', [id]);
+        activeInputList = dbIn.rows || [];
+      }
+      let activeOutputList = (finalOutputItems || []).filter(o => o.output_item || o.item_name || o.fg_lot_no || parseFloat(o.expected_qty || o.qty || o.output_kgs || 0) > 0);
+      if (activeOutputList.length === 0) {
+        const dbOut = await db.query('SELECT * FROM work_order_outputs WHERE work_order_id = ? ORDER BY id ASC', [id]);
+        activeOutputList = dbOut.rows || [];
+      }
+      let activeWastageList = (finalWastageItems || []).filter(w => parseFloat(w.total_wt || w.qty) > 0);
+      if (activeWastageList.length === 0) {
+        const dbWst = await db.query('SELECT * FROM work_order_wastages WHERE work_order_id = ? ORDER BY id ASC', [id]);
+        activeWastageList = (dbWst.rows || []).filter(w => parseFloat(w.total_wt || w.qty) > 0);
+      }
+      if (activeWastageList.length === 0) {
+        if (rejWt > 0) activeWastageList.push({ category: 'Rejection', item_name: 'Rejection Waste', lot_no: 'REJ-01', total_wt: rejWt });
+        if (eleWt > 0) activeWastageList.push({ category: 'Elevator', item_name: 'Elevator Waste', lot_no: 'ELE-01', total_wt: eleWt });
+        if (wfWt > 0) activeWastageList.push({ category: 'Waste Flour', item_name: 'Waste Flour', lot_no: 'WF-01', total_wt: wfWt });
+        if (sfWt > 0) activeWastageList.push({ category: 'Sieve Flour', item_name: 'Sieve Flour', lot_no: 'SF-01', total_wt: sfWt });
+        if (othWt > 0) activeWastageList.push({ category: 'Other Wastage', item_name: 'Other Wastage', lot_no: 'WST-01', total_wt: othWt });
+      }
+
+      const totalInBags = activeInputList.reduce((s, i) => s + (parseFloat(i.input_qty ?? i.qty) || 0), 0);
+      const totalInKgs = activeInputList.reduce((s, i) => s + (parseFloat(i.kgs || i.total_wt) || ((parseFloat(i.weight) || 0) * (parseFloat(i.input_qty ?? i.qty) || 0))), 0);
+      const effectiveOutQty = calcOutputQty || activeOutputList.reduce((s, o) => s + (parseFloat(o.expected_qty || o.qty || o.output_qty) || 0), 0);
+      const effectiveOutWt = calcOutputWt || activeOutputList.reduce((s, o) => s + (parseFloat(o.output_kgs || o.total_wt) || ((parseFloat(o.weight) || 0) * (parseFloat(o.expected_qty || o.qty || o.output_qty) || 0))), 0);
+      const totalWastageKgs = activeWastageList.reduce((s, w) => s + (parseFloat(w.total_wt) || ((parseFloat(w.weight) || 1) * (parseFloat(w.qty) || 0))), 0);
+
+      const detailedSummary = formatProductionItemSummary({
+        targetProduct: product || 'Work Order',
+        inputItems: activeInputList,
+        outputItems: activeOutputList,
+        wastageItems: activeWastageList,
+        fallbackOutputQty: effectiveOutQty,
+        fallbackOutputWt: effectiveOutWt
+      });
+
+      const qtySummary = `In: ${formatNumClean(totalInBags)} Bags (${formatNumClean(totalInKgs)} KG) | Exp Out: ${formatNumClean(effectiveOutQty)} Bags (${formatNumClean(effectiveOutWt)} KG)${totalWastageKgs > 0 ? ` | Wastage: ${formatNumClean(totalWastageKgs)} KG` : ''}`;
+
       await triggerTransactionNotification({
-        eventType: 'ORDER_UPDATED',
+        eventType: 'PRODUCTION_UPDATED',
         isUpdate: true,
         moduleName: 'WORK_ORDER',
         referenceNo: refNo,
         referenceId: id,
         companyId: cId,
         title: `✏️ WORK ORDER UPDATED – ${refNo}`,
-        message: `Updated Work Order | Mill: ${resolvedUnit} | Product: ${product || 'Output'} | Expected: ${calcOutputQty} Bags (${calcOutputWt} KG) | Status: ${status || 'UPDATED'}`,
+        message: `Updated Work Order | Mill: ${resolvedUnit} | ${detailedSummary.replace(/\n/g, ' | ')} | ${qtySummary} | Status: ${status || 'UPDATED'}`,
         severity: 'INFO',
         details: {
           reference_no: refNo,
           action_label: 'WORK ORDER',
+          module_label: `Work Order (${resolvedUnit})`,
           party_name: resolvedUnit,
           external_mill: resolvedUnit,
           area: millInfo.areaName || '-',
-          item_summary: product || 'Work Order Items',
-          quantity: `${calcOutputQty} Bags / ${calcOutputWt} KG`,
+          item_summary: detailedSummary,
+          quantity: qtySummary,
+          godown: resolvedUnit,
           status: status || 'UPDATED',
           remarks: remarks || '-',
           updated_by: req.user?.username || 'Production Operator',

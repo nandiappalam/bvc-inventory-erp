@@ -51,11 +51,15 @@ import {
   Close as CloseIcon
 } from '@mui/icons-material';
 import * as XLSX from 'xlsx';
+import { useSearchParams } from 'react-router-dom';
 import { printHtml } from '../utils/printHelper';
 import ColdStorageTransferStatementModal from './coldStorage/ColdStorageTransferStatementModal';
 
 const ItemTransfer = ({ initialView = 'create' }) => {
-  const [activeTab, setActiveTab] = useState(initialView === 'display' ? 'display' : 'create');
+  const [searchParams] = useSearchParams();
+  const highlightId = searchParams.get('highlightId') || '';
+  const highlightRef = searchParams.get('highlightRef') || '';
+  const [activeTab, setActiveTab] = useState((initialView === 'display' || highlightId || highlightRef) ? 'display' : 'create');
 
   // Godowns list & source items
   const [godowns, setGodowns] = useState([]);
@@ -526,10 +530,45 @@ const ItemTransfer = ({ initialView = 'create' }) => {
   };
 
   useEffect(() => {
+    if (highlightId || highlightRef) {
+      setActiveTab('display');
+    }
+  }, [highlightId, highlightRef]);
+
+  useEffect(() => {
     if (activeTab === 'display') {
       fetchTransfers();
     }
   }, [activeTab]);
+
+  const isTransferRowHighlighted = (row) => {
+    if (!row) return false;
+    if (highlightId && row.id !== undefined && row.id !== null && String(row.id) === String(highlightId)) {
+      return true;
+    }
+    if (!highlightId && highlightRef && row.transfer_no !== undefined && row.transfer_no !== null) {
+      return String(row.transfer_no).trim().toLowerCase() === String(highlightRef).trim().toLowerCase();
+    }
+    return false;
+  };
+
+  useEffect(() => {
+    if ((!highlightId && !highlightRef) || activeTab !== 'display' || loadingTransfers || !transfersList.length) return;
+    const matchIndex = transfersList.findIndex((row) => isTransferRowHighlighted(row));
+    if (matchIndex >= 0) {
+      const targetPage = Math.floor(matchIndex / rowsPerPage);
+      if (page !== targetPage) {
+        setPage(targetPage);
+      }
+      const timer = setTimeout(() => {
+        const el = document.querySelector('[data-highlighted="true"]');
+        if (el && typeof el.scrollIntoView === 'function') {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 150);
+      return () => clearTimeout(timer);
+    }
+  }, [highlightId, highlightRef, activeTab, loadingTransfers, transfersList, rowsPerPage, page]);
 
   // Handle Delete Transfer
   const handleDeleteTransfer = async (id) => {
@@ -1341,9 +1380,19 @@ const ItemTransfer = ({ initialView = 'create' }) => {
                           const totalWt = (trfQty * unitWt).toFixed(2);
                           const amt = parseFloat(row.amount || (trfQty * (row.rate || 0))).toFixed(2);
                           const isCS = checkIsColdStorage(row.from_godown_name, row.from_godown_id) || checkIsColdStorage(row.to_godown_name, row.to_godown_id);
+                          const highlighted = isTransferRowHighlighted(row);
 
                           return (
-                            <TableRow key={row.id || idx} hover>
+                            <TableRow
+                              key={row.id || idx}
+                              hover
+                              data-highlighted={highlighted ? 'true' : undefined}
+                              sx={{
+                                bgcolor: highlighted ? '#fef08a' : undefined,
+                                boxShadow: highlighted ? 'inset 4px 0 0 #d97706, inset 0 1px 0 #f59e0b, inset 0 -1px 0 #f59e0b' : undefined,
+                                '&:hover': { bgcolor: highlighted ? '#fef08a' : undefined }
+                              }}
+                            >
                               <TableCell align="center" sx={{ color: '#94a3b8', fontSize: '11px' }}>
                                 {page * rowsPerPage + idx + 1}
                               </TableCell>
@@ -1386,13 +1435,13 @@ const ItemTransfer = ({ initialView = 'create' }) => {
                                       <Button
                                         size="small"
                                         variant="outlined"
-                                        color="sky"
+                                        color="info"
                                         onClick={() => {
                                           setSelectedTransferRow(row);
                                           setOpenBillModal(true);
                                         }}
                                         startIcon={<ColdStorageIcon sx={{ fontSize: 16 }} />}
-                                        sx={{ minWidth: 'auto', px: 1, py: 0.25, fontSize: '11px', fontWeight: 800, textTransform: 'none', borderRadius: 1.5 }}
+                                        sx={{ minWidth: 'auto', px: 1, py: 0.25, fontSize: '11px', fontWeight: 800, textTransform: 'none', borderRadius: 1.5, color: '#0284c7', borderColor: '#38bdf8' }}
                                       >
                                         CS Bill
                                       </Button>

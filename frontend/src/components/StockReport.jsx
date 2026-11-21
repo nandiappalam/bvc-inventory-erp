@@ -29,7 +29,6 @@ const StockReport = () => {
   // Custom enhanced states
   const [selectedCategory, setSelectedCategory] = useState('All') // 'All', 'RM', 'FG', 'Wastage'
   const [selectedFY, setSelectedFY] = useState('All')
-  const [purging, setPurging] = useState(false)
   const [expandedLot, setExpandedLot] = useState(null)
   const [selectedLotNoFilter, setSelectedLotNoFilter] = useState('')
 
@@ -223,25 +222,6 @@ const StockReport = () => {
     fetchReport()
   }
 
-  const handlePurgeLegacyData = async () => {
-    if (!window.confirm("Are you sure you want to purge old legacy Tauri test records (prior to April 2025) and recalculate stock balances? This will clear stale historical data.")) {
-      return;
-    }
-    setPurging(true);
-    try {
-      const res = await axios.post('/api/stock/purge-legacy-data', { cutoffDate: '2025-04-01' });
-      alert(res.data?.message || 'Legacy Tauri records purged successfully.');
-      setSelectedFY('All');
-      setFromDate('');
-      setToDate('');
-      fetchReport();
-    } catch (err) {
-      alert('Failed to purge legacy data: ' + (err.response?.data?.message || err.message));
-    } finally {
-      setPurging(false);
-    }
-  };
-
   const handlePrint = () => {
     const el = document.getElementById('stock-report-printable') || document.querySelector('.erp-container') || document.querySelector('table');
     if (el) {
@@ -429,19 +409,6 @@ const StockReport = () => {
           )}
 
           <button onClick={handleRefresh} style={styles.searchBtn}>Search</button>
-          <button
-            onClick={handlePurgeLegacyData}
-            disabled={purging}
-            title="Purge legacy test data from previous Tauri environment and recalculate live stock"
-            style={{
-              ...styles.searchBtn,
-              backgroundColor: '#dc2626',
-              color: '#ffffff',
-              marginLeft: '6px'
-            }}
-          >
-            {purging ? 'Purging...' : 'Purge Old Tauri Data'}
-          </button>
         </div>
       </div>
 

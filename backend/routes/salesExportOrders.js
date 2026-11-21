@@ -1,7 +1,8 @@
 const express = require('express')
 const router = express.Router()
 const db = require('../config/database')
-const rebuildStockLedger = require('../utils/stockRebuilder')
+const { rebuildStockLedger } = require('../utils/stockRebuilder')
+const { syncDocumentMovements, deleteDocumentMovements } = require('../services/SourceMovementSync')
 
 // Ensure is_order column exists in sales_export_orders
 async function ensureExportColumns() {
@@ -257,9 +258,10 @@ router.post('/', async (req, res) => {
       }
 
       try {
-        await rebuildStockLedger();
+        const cIdSync = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+        await syncDocumentMovements(cIdSync, 'SALES_EXPORT_ORDER', exportOrderId, req.user?.username || 'admin');
       } catch (stkErr) {
-        console.warn('Notice rebuilding stock ledger on export sale:', stkErr.message);
+        console.warn('Notice syncing stock movements on export sale:', stkErr.message);
       }
     }
 
@@ -365,6 +367,13 @@ router.put('/:id', async (req, res) => {
     }
 
     try {
+      const cIdSync = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+      await syncDocumentMovements(cIdSync, 'SALES_EXPORT_ORDER', exportOrderId, req.user?.username || 'admin');
+    } catch (stkErr) {
+      console.warn('Notice syncing stock movements on export order update:', stkErr.message);
+    }
+
+    try {
       const { triggerTransactionNotification } = require('../utils/transactionNotifier');
       const refNo = formData.billNo || `EXP-${exportOrderId}`;
       const itemDesc = Array.isArray(items) && items.length > 0
@@ -412,6 +421,12 @@ router.delete('/:id', async (req, res) => {
   try {
     await db.run('DELETE FROM sales_export_order_items WHERE sales_export_order_id = ?', [req.params.id])
     await db.run('DELETE FROM sales_export_orders WHERE id = ?', [req.params.id])
+    try {
+      const cIdSync = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+      await deleteDocumentMovements(cIdSync, 'SALES_EXPORT_ORDER', req.params.id, 'Export order deleted', req.user?.username || 'admin');
+    } catch (stkErr) {
+      console.warn('Notice reversing stock movements on export order delete:', stkErr.message);
+    }
     res.json({ success: true, message: 'Record deleted successfully' })
   } catch (error) {
     console.error('Error deleting record:', error)

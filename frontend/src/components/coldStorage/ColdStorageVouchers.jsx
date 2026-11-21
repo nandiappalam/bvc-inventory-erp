@@ -36,13 +36,16 @@ import {
   Refresh as RefreshIcon,
   ReceiptLong as ReceiptIcon
 } from '@mui/icons-material';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../../services/api';
 import { printHtml } from '../../utils/printHelper';
 import ColdStorageReleaseOrderModal from './ColdStorageReleaseOrderModal';
 
 const ColdStorageVouchers = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const highlightId = searchParams.get('highlightId') || '';
+  const highlightRef = searchParams.get('highlightRef') || '';
   const [loading, setLoading] = useState(false);
   const [vouchers, setVouchers] = useState([]);
   const [coldStorages, setColdStorages] = useState([]);
@@ -67,6 +70,35 @@ const ColdStorageVouchers = () => {
     fetchColdStorages();
     fetchVouchers();
   }, [activeTab, selectedCs, dateFrom, dateTo]);
+
+  const isVoucherHighlighted = (v) => {
+    if (!v) return false;
+    if (highlightId && v.id !== undefined && v.id !== null && String(v.id) === String(highlightId)) {
+      return true;
+    }
+    if (!highlightId && highlightRef && v.voucher_no !== undefined && v.voucher_no !== null) {
+      return String(v.voucher_no).trim().toLowerCase() === String(highlightRef).trim().toLowerCase();
+    }
+    return false;
+  };
+
+  useEffect(() => {
+    if ((!highlightId && !highlightRef) || !vouchers.length) return;
+    if (vouchers.some((v) => isVoucherHighlighted(v)) && search) {
+      setSearch('');
+    }
+  }, [highlightId, highlightRef, vouchers]);
+
+  useEffect(() => {
+    if ((!highlightId && !highlightRef) || loading || !vouchers.length) return;
+    const timer = setTimeout(() => {
+      const el = document.querySelector('[data-highlighted="true"]');
+      if (el && typeof el.scrollIntoView === 'function') {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [highlightId, highlightRef, loading, vouchers]);
 
   const fetchColdStorages = async () => {
     try {
@@ -454,8 +486,18 @@ const ColdStorageVouchers = () => {
                 <TableBody>
                   {filteredVouchers.map((row, idx) => {
                     const isIn = row.voucher_type === 'IN';
+                    const highlighted = isVoucherHighlighted(row);
                     return (
-                      <TableRow key={row.id} hover sx={{ '&:nth-of-type(even)': { backgroundColor: '#f8fafc' } }}>
+                      <TableRow
+                        key={row.id}
+                        hover
+                        data-highlighted={highlighted ? 'true' : undefined}
+                        sx={{
+                          '&:nth-of-type(even)': { backgroundColor: highlighted ? '#fef08a' : '#f8fafc' },
+                          backgroundColor: highlighted ? '#fef08a !important' : undefined,
+                          boxShadow: highlighted ? 'inset 4px 0 0 #d97706, inset 0 1px 0 #f59e0b, inset 0 -1px 0 #f59e0b' : undefined
+                        }}
+                      >
                         <TableCell>{idx + 1}</TableCell>
                         <TableCell sx={{ fontWeight: 'bold', color: isIn ? '#1f4fb2' : '#d97706' }}>
                           {row.voucher_no}

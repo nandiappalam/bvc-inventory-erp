@@ -5,6 +5,7 @@ import { printHtml } from '../utils/printHelper';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api.js';
 import DigitalDocumentModal from './documents/DigitalDocumentModal';
+import SalesLedgerDetailsModal from './sales/SalesLedgerDetailsModal';
 
 import { printFormalSalesBill } from '../utils/formalBillPrinter';
 
@@ -51,6 +52,7 @@ const SalesDisplayPage = () => {
   const isOrder = window.location.pathname.includes('order');
   const { isAdmin, hasPermission, selectedCompany } = useAuth();
   const [activeDoc, setActiveDoc] = useState(null);
+  const [ledgerModal, setLedgerModal] = useState({ open: false, salesId: null, salesData: null });
 
   const moduleName = isOrder ? 'Sales Order' : 'Sales';
   const canEdit = isAdmin || hasPermission(moduleName, 'Display', 'can_edit') || hasPermission(moduleName, 'can_edit');
@@ -145,6 +147,14 @@ const SalesDisplayPage = () => {
 
     return (
       <div style={{ display: 'flex', gap: '5px', justifyContent: 'center', flexWrap: 'wrap', alignItems: 'center' }}>
+        <button
+          className="action-btn"
+          style={{ backgroundColor: '#4338ca', color: '#ffffff', border: 'none', padding: '5px 11px', borderRadius: '4px', fontWeight: 700, fontSize: '12px', cursor: 'pointer' }}
+          onClick={() => setLedgerModal({ open: true, salesId: row.id, salesData: row })}
+          title="View Sales Transaction Ledger Statement (Double-Entry)"
+        >
+          📑 Ledger
+        </button>
         <button 
           className="action-btn" 
           style={{ backgroundColor: '#0f172a', color: '#ffffff', border: 'none', padding: '5px 11px', borderRadius: '4px', fontWeight: 700, fontSize: '12px', cursor: 'pointer' }}
@@ -236,6 +246,12 @@ const SalesDisplayPage = () => {
           status={activeDoc.status}
         />
       )}
+      <SalesLedgerDetailsModal
+        isOpen={ledgerModal.open}
+        onClose={() => setLedgerModal({ open: false, salesId: null, salesData: null })}
+        salesId={ledgerModal.salesId}
+        salesData={ledgerModal.salesData}
+      />
     </>
   );
 };

@@ -103,18 +103,26 @@ async function runAllPendingMigrations() {
           [comp.id, db.isPostgres ? 'postgres' : 'sqlite', comp.database_name || (db.isPostgres ? `company_${comp.id}` : `company_${comp.id}.db`), 'Active']
         );
 
+        // Ensure Stock Register schema & indexes exist for this company
+        try {
+          const { ensureStockRegisterSchema } = require('../services/StockRegisterSchema');
+          await ensureStockRegisterSchema(comp.id, compDb);
+        } catch (srsErr) {
+          console.warn(`⚠️ [MIGRATIONS] StockRegisterSchema notice for company ${comp.id}:`, srsErr.message);
+        }
+
         // Ensure default financial year exists for this company
         try {
           const fyRes = await compDb.query('SELECT id FROM financial_years LIMIT 1');
           if (!fyRes.rows || fyRes.rows.length === 0) {
             const currentYear = new Date().getFullYear();
             const nextYearShort = String(currentYear + 1).slice(-2);
-            const fyName = `${currentYear}-${nextYearShort}`;
+            const fyName = `${currentYear}-${currentYear + 1}`;
             const startDate = `${currentYear}-04-01`;
             const endDate = `${currentYear + 1}-03-31`;
             await compDb.run(
-              `INSERT INTO financial_years (year_name, start_date, end_date, is_active, is_closed) VALUES (?, ?, ?, 1, 0)`,
-              [fyName, startDate, endDate]
+              `INSERT INTO financial_years (company_id, financial_year, year_name, start_date, end_date, status, is_active, is_current, is_locked) VALUES (?, ?, ?, ?, ?, 'Active', 1, 1, 0)`,
+              [comp.id, fyName, `${currentYear}-${nextYearShort}`, startDate, endDate]
             );
           }
         } catch (fyErr) {

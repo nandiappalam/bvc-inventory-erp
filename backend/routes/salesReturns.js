@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../config/database');
 const { createSalesReturnVoucherChain, deleteSalesReturnVoucherChain } = require('../utils/ledgerHelper');
 const { rebuildStockLedger } = require('../utils/stockRebuilder');
+const { syncDocumentMovements, deleteDocumentMovements } = require('../services/SourceMovementSync');
 
 const getCompanyId = (req) => req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
 const _srSchemaEnsured = new Set();
@@ -265,9 +266,9 @@ router.post('/', async (req, res) => {
     });
 
     try {
-      await rebuildStockLedger(activeCompanyId);
+      await syncDocumentMovements(activeCompanyId, 'SALES_RETURN', txResult.salesReturnId, req.user?.username || 'admin');
     } catch (stkErr) {
-      console.warn('Notice rebuilding stock ledger on sales return save:', stkErr.message);
+      console.warn('Notice syncing stock movements on sales return save:', stkErr.message);
     }
 
     try {
@@ -426,9 +427,9 @@ router.put('/:id', async (req, res) => {
     });
 
     try {
-      await rebuildStockLedger(activeCompanyId);
+      await syncDocumentMovements(activeCompanyId, 'SALES_RETURN', id, req.user?.username || 'admin');
     } catch (stkErr) {
-      console.warn('Notice rebuilding stock ledger on sales return update:', stkErr.message);
+      console.warn('Notice syncing stock movements on sales return update:', stkErr.message);
     }
 
     try {
@@ -502,9 +503,9 @@ router.delete('/:id', async (req, res) => {
     });
 
     try {
-      await rebuildStockLedger(activeCompanyId);
+      await deleteDocumentMovements(activeCompanyId, 'SALES_RETURN', id, 'Sales return deleted', req.user?.username || 'admin');
     } catch (stkErr) {
-      console.warn('Notice rebuilding stock ledger on sales return delete:', stkErr.message);
+      console.warn('Notice reversing stock movements on sales return delete:', stkErr.message);
     }
 
     res.json({ success: true, message: 'Sales return deleted successfully' });

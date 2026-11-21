@@ -211,7 +211,7 @@ const LotGenealogyDashboard = () => {
             </Typography>
             <Autocomplete
               options={lotOptions}
-              getOptionLabel={(option) => `${option.lotNo} — ${option.itemName} (${option.currentQuantity || option.quantity || 0} KG)`}
+              getOptionLabel={(option) => `${option.lotNo} — ${option.itemName} (${option.currentQuantity ?? option.quantity ?? 0} Bags / ${option.currentWeightKg ?? 0} KG)`}
               value={lotOptions.find(o => o.lotNo === selectedLotNo) || null}
               onChange={(e, val) => {
                 if (val) setSelectedLotNo(val.lotNo);
@@ -220,6 +220,32 @@ const LotGenealogyDashboard = () => {
                 <TextField {...params} size="small" placeholder="Search by Lot #, Grain or Output..." />
               )}
             />
+            {((lotDetails?.parentLots?.length > 0) || (lotDetails?.coldStorageSiblings?.length > 0)) && (
+              <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
+                {lotDetails.parentLots?.map((pLot) => (
+                  <Chip
+                    key={`p-${pLot}`}
+                    label={`Parent: ${pLot}`}
+                    size="small"
+                    color="secondary"
+                    variant="outlined"
+                    onClick={() => setSelectedLotNo(pLot)}
+                    sx={{ fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}
+                  />
+                ))}
+                {lotDetails.coldStorageSiblings?.map((csLot) => (
+                  <Chip
+                    key={`cs-${csLot}`}
+                    label={`CS Link: ${csLot}`}
+                    size="small"
+                    color="info"
+                    variant="outlined"
+                    onClick={() => setSelectedLotNo(csLot)}
+                    sx={{ fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}
+                  />
+                ))}
+              </Stack>
+            )}
           </Paper>
         </Grid>
 
@@ -227,10 +253,12 @@ const LotGenealogyDashboard = () => {
           <Paper elevation={0} sx={{ p: 2, borderRadius: '10px', border: '1px solid #e2e8f0', bgcolor: '#f8fafc' }}>
             <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600 }}>CURRENT STOCK</Typography>
             <Typography variant="h6" sx={{ fontWeight: 800, color: '#0f172a' }}>
-              {lotDetails?.remainingQuantity ?? '0'} <span style={{ fontSize: '13px', fontWeight: 500 }}>KG</span>
+              {lotDetails?.remainingQuantity ?? '0'} <span style={{ fontSize: '13px', fontWeight: 500 }}>Bags</span>
             </Typography>
             <Typography variant="caption" sx={{ color: lotDetails?.totalReturnedQty > 0 ? '#b91c1c' : '#059669', fontWeight: 600, display: 'block' }}>
-              {lotDetails?.totalReturnedQty > 0 ? `Returned: ${lotDetails.totalReturnedQty} Bags (${lotDetails.totalReturnedWeight || lotDetails.totalReturnedQty * 50} KG)` : `Original: ${lotDetails?.quantity ?? 0} KG`}
+              {lotDetails?.totalReturnedQty > 0
+                ? `Returned: ${lotDetails.totalReturnedQty} Bags (${lotDetails.totalReturnedWeight || 0} KG)`
+                : `${Number(lotDetails?.currentWeightKg || 0).toLocaleString()} KG | Orig: ${lotDetails?.quantity ?? 0} Bags`}
             </Typography>
           </Paper>
         </Grid>
@@ -268,19 +296,21 @@ const LotGenealogyDashboard = () => {
               {lotDetails?.godown || '-'}
             </Typography>
             <Typography variant="caption" sx={{ color: '#64748b' }}>
-              Unit: {lotDetails?.unit || 'KG'}
+              {lotDetails?.godownBalances?.length > 1
+                ? `${lotDetails.godownBalances.length} Godown Locations`
+                : `Unit: ${lotDetails?.unit || 'KG'}`}
             </Typography>
           </Paper>
         </Grid>
 
         <Grid item xs={6} md={2}>
           <Paper elevation={0} sx={{ p: 2, borderRadius: '10px', border: '1px solid #e2e8f0', bgcolor: '#f8fafc' }}>
-            <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600 }}>AUDIT COMPLIANCE</Typography>
+            <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600 }}>MOVEMENTS & DISPATCH</Typography>
             <Typography variant="body1" sx={{ fontWeight: 700, color: '#0284c7', mt: 0.5 }}>
-              100% Trackable
+              {lotDetails?.movementsTimeline?.length || 0} Events
             </Typography>
             <Typography variant="caption" sx={{ color: '#059669', fontWeight: 600 }}>
-              FSSAI Recall Ready
+              {lotDetails?.salesDispatches?.length || 0} Sales Dispatches
             </Typography>
           </Paper>
         </Grid>
@@ -485,7 +515,8 @@ const LotGenealogyDashboard = () => {
                                       label={`→ Output Lot #${wo.output_lot_no} (${wo.output_weight || wo.input_qty} KG)`}
                                       size="small"
                                       color="primary"
-                                      sx={{ mt: 0.8, fontWeight: 600, fontSize: '11px' }}
+                                      onClick={() => setSelectedLotNo(wo.output_lot_no)}
+                                      sx={{ mt: 0.8, fontWeight: 600, fontSize: '11px', cursor: 'pointer' }}
                                     />
                                   )}
                                 </Box>
@@ -506,13 +537,17 @@ const LotGenealogyDashboard = () => {
                                   <Typography variant="caption" sx={{ color: '#14532d', display: 'block' }}>
                                     Produced: <strong>{mo.output_kgs} KG</strong> {mo.finished_product}
                                   </Typography>
-                                  {mo.input_lot_no && (
-                                    <Chip
-                                      label={`Milled From Raw Lot #${mo.input_lot_no}`}
-                                      size="small"
-                                      sx={{ mt: 0.8, fontWeight: 600, fontSize: '11px', bgcolor: '#dbeafe', color: '#1e40af' }}
-                                    />
-                                  )}
+                                  <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.8 }}>
+                                    {(mo.inputs && mo.inputs.length > 0 ? mo.inputs : (mo.input_lot_no ? [{ lot_no: mo.input_lot_no, item_name: mo.input_item }] : [])).map((inp, j) => (
+                                      <Chip
+                                        key={`mo-inp-${j}`}
+                                        label={`← Input #${inp.lot_no} (${inp.item_name || ''})`}
+                                        size="small"
+                                        onClick={() => setSelectedLotNo(inp.lot_no)}
+                                        sx={{ fontWeight: 600, fontSize: '11px', bgcolor: '#dbeafe', color: '#1e40af', cursor: 'pointer' }}
+                                      />
+                                    ))}
+                                  </Stack>
                                 </Box>
                               ))}
                             </Box>
@@ -526,19 +561,42 @@ const LotGenealogyDashboard = () => {
                       </Card>
                     </Grid>
 
-                    {/* Step 3: Jobwork & Customer Sales */}
+                    {/* Step 3: Jobwork, Cold Storage, Transfers & Customer Sales */}
                     <Grid item xs={12} md={4}>
                       <Card variant="outlined" sx={{ borderRadius: '10px', height: '100%', borderColor: '#cbd5e1' }}>
                         <CardContent>
                           <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>
                             <AssignmentIcon sx={{ color: '#059669' }} />
                             <Typography variant="subtitle1" sx={{ fontWeight: 700, color: '#0f172a' }}>
-                              3. Jobwork & Distribution
+                              3. Transfers, Jobwork & Sales Dispatch
                             </Typography>
                           </Stack>
                           <Divider sx={{ mb: 1.5 }} />
-                          {lotDetails?.salesDispatches?.length > 0 || lotDetails?.jobworkMovements?.length > 0 || lotDetails?.purchaseReturns?.length > 0 ? (
+                          {(lotDetails?.salesDispatches?.length > 0 || lotDetails?.jobworkMovements?.length > 0 || lotDetails?.purchaseReturns?.length > 0 || lotDetails?.coldStorageMovements?.length > 0 || lotDetails?.godownTransfers?.length > 0) ? (
                             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                              {lotDetails.coldStorageMovements?.map((cs, i) => (
+                                <Box key={`cs-${i}`} sx={{ p: 1, bgcolor: '#eff6ff', borderRadius: '6px', border: '1px solid #bfdbfe' }}>
+                                  <Stack direction="row" justifyContent="space-between" alignItems="center">
+                                    <Typography variant="body2" sx={{ fontWeight: 700, color: '#1e40af' }}>
+                                      Cold Storage {cs.voucher_type} #{cs.voucher_no}
+                                    </Typography>
+                                    <Chip label={cs.cold_storage_lot_no} size="small" color="info" onClick={() => setSelectedLotNo(cs.cold_storage_lot_no)} sx={{ fontSize: '10px', height: '20px', fontWeight: 700, cursor: 'pointer' }} />
+                                  </Stack>
+                                  <Typography variant="caption" sx={{ color: '#1e3a8a', display: 'block', mt: 0.25 }}>
+                                    {cs.source_godown_name || cs.cold_storage_name} → {cs.voucher_type === 'IN' ? cs.cold_storage_name : cs.destination_godown_name} | {cs.quantity} Bags ({cs.total_wt || 0} KG) | {cs.voucher_date}
+                                  </Typography>
+                                </Box>
+                              ))}
+                              {lotDetails.godownTransfers?.map((gt, i) => (
+                                <Box key={`gt-${i}`} sx={{ p: 1, bgcolor: '#f5f3ff', borderRadius: '6px', border: '1px solid #ddd6fe' }}>
+                                  <Typography variant="body2" sx={{ fontWeight: 700, color: '#5b21b6' }}>
+                                    Transfer #{gt.ref_no}: {gt.from_godown_name} → {gt.to_godown_name}
+                                  </Typography>
+                                  <Typography variant="caption" sx={{ color: '#6d28d9' }}>
+                                    Qty: {gt.qty} Bags ({gt.weight || 0} KG) | {gt.transfer_date}
+                                  </Typography>
+                                </Box>
+                              ))}
                               {lotDetails.purchaseReturns?.map((pr, i) => (
                                 <Box key={`pr-${i}`} sx={{ p: 1, bgcolor: '#fef2f2', borderRadius: '6px', border: '1px solid #fecaca' }}>
                                   <Stack direction="row" justifyContent="space-between" alignItems="center">
@@ -551,7 +609,7 @@ const LotGenealogyDashboard = () => {
                                     Supplier: <strong>{pr.supplier_name}</strong> | Ret Inv: <strong>#{pr.return_inv_no || pr.return_s_no}</strong>
                                   </Typography>
                                   <Typography variant="caption" sx={{ color: '#b91c1c', display: 'block' }}>
-                                    Returned Qty: <strong>{pr.qty} Bags ({pr.total_wt || pr.qty * 50} KG)</strong> | Date: <strong>{pr.return_date}</strong>
+                                    Returned Qty: <strong>{pr.qty} Bags ({pr.total_wt || 0} KG)</strong> | Date: <strong>{pr.return_date}</strong>
                                   </Typography>
                                   {pr.reason && (
                                     <Typography variant="caption" sx={{ color: '#7f1d1d', display: 'block', fontStyle: 'italic', mt: 0.25 }}>
@@ -568,8 +626,10 @@ const LotGenealogyDashboard = () => {
                               ))}
                               {lotDetails.salesDispatches?.map((sd, i) => (
                                 <Box key={`sd-${i}`} sx={{ p: 1, bgcolor: '#f0fdf4', borderRadius: '6px', border: '1px solid #bbf7d0' }}>
-                                  <Typography variant="body2" sx={{ fontWeight: 600 }}>Customer: {sd.customer_name}</Typography>
-                                  <Typography variant="caption" sx={{ color: '#64748b' }}>Invoice #{sd.bill_no} | Qty: {sd.qty} KG</Typography>
+                                  <Typography variant="body2" sx={{ fontWeight: 700, color: '#166534' }}>Customer: {sd.customer_name}</Typography>
+                                  <Typography variant="caption" sx={{ color: '#334155', display: 'block' }}>
+                                    Invoice #{sd.bill_no} | Date: {sd.invoice_date} | <strong>{sd.qty} Bags ({Number(sd.total_wt || 0).toLocaleString()} KG)</strong>
+                                  </Typography>
                                 </Box>
                               ))}
                             </Box>
@@ -582,6 +642,77 @@ const LotGenealogyDashboard = () => {
                       </Card>
                     </Grid>
                   </Grid>
+
+                  {/* Godown Balances & Chronological Movement Audit Trail */}
+                  {(lotDetails?.godownBalances?.length > 0 || lotDetails?.movementsTimeline?.length > 0) && (
+                    <Box sx={{ mt: 3 }}>
+                      {lotDetails.godownBalances?.length > 0 && (
+                        <Box sx={{ mb: 2, p: 2, bgcolor: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                          <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#0f172a', mb: 1 }}>
+                            Per-Godown Live Stock Balances (Non-Reversed Physical Ledger)
+                          </Typography>
+                          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                            {lotDetails.godownBalances.map((gb, idx) => (
+                              <Chip
+                                key={`gb-${idx}`}
+                                label={`${gb.godownName}: ${gb.balanceQty} Bags (${Number(gb.balanceWeightKg || 0).toLocaleString()} KG) [In: ${gb.inQty} / Out: ${gb.outQty}]`}
+                                size="small"
+                                color={gb.balanceQty > 0 ? 'success' : 'default'}
+                                variant={gb.balanceQty > 0 ? 'filled' : 'outlined'}
+                                sx={{ fontWeight: 700 }}
+                              />
+                            ))}
+                          </Stack>
+                        </Box>
+                      )}
+
+                      {lotDetails.movementsTimeline?.length > 0 && (
+                        <Box>
+                          <Typography variant="subtitle1" sx={{ fontWeight: 700, color: '#1e293b', mb: 1 }}>
+                            Chronological Movement Audit Trail ({lotDetails.movementsTimeline.length} Events)
+                          </Typography>
+                          <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: '8px' }}>
+                            <Table size="small">
+                              <TableHead sx={{ bgcolor: '#f8fafc' }}>
+                                <TableRow>
+                                  <TableCell sx={{ fontWeight: 700 }}>Date</TableCell>
+                                  <TableCell sx={{ fontWeight: 700 }}>Module / Type</TableCell>
+                                  <TableCell sx={{ fontWeight: 700 }}>Ref No</TableCell>
+                                  <TableCell sx={{ fontWeight: 700 }}>Godown</TableCell>
+                                  <TableCell sx={{ fontWeight: 700 }}>Dir</TableCell>
+                                  <TableCell align="right" sx={{ fontWeight: 700 }}>Qty (Bags)</TableCell>
+                                  <TableCell align="right" sx={{ fontWeight: 700 }}>Weight (KG)</TableCell>
+                                  <TableCell sx={{ fontWeight: 700 }}>Party / Remarks</TableCell>
+                                </TableRow>
+                              </TableHead>
+                              <TableBody>
+                                {lotDetails.movementsTimeline.map((mv, mIdx) => (
+                                  <TableRow key={`mv-${mv.id || mIdx}`} hover>
+                                    <TableCell>{mv.movement_date || '-'}</TableCell>
+                                    <TableCell>
+                                      <Typography variant="caption" sx={{ fontWeight: 700, display: 'block' }}>{mv.source_module}</Typography>
+                                      <Typography variant="caption" color="text.secondary">{mv.movement_type}</Typography>
+                                    </TableCell>
+                                    <TableCell sx={{ fontFamily: 'monospace', fontWeight: 600 }}>{mv.source_ref_no || '-'}</TableCell>
+                                    <TableCell>{mv.godown_name || '-'}</TableCell>
+                                    <TableCell>
+                                      <Chip label={mv.direction} size="small" color={mv.direction === 'IN' ? 'success' : 'warning'} sx={{ fontWeight: 700, fontSize: '10px' }} />
+                                    </TableCell>
+                                    <TableCell align="right" sx={{ fontWeight: 700 }}>{mv.qty}</TableCell>
+                                    <TableCell align="right">{Number(mv.weight || 0).toLocaleString()}</TableCell>
+                                    <TableCell>
+                                      <Typography variant="caption" sx={{ fontWeight: 600, display: 'block' }}>{mv.party_name || '-'}</Typography>
+                                      {mv.remarks && <Typography variant="caption" color="text.secondary">{mv.remarks}</Typography>}
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          </TableContainer>
+                        </Box>
+                      )}
+                    </Box>
+                  )}
                 </Box>
               )}
 
@@ -641,23 +772,33 @@ const LotGenealogyDashboard = () => {
                           </TableRow>
                         ))}
 
-                        {/* 2. Parent Raw Grain from Milling */}
-                        {lotDetails?.millingOutputs?.filter(mo => mo.input_lot_no).map((mo, idx) => (
-                          <TableRow key={`back-raw-${idx}`}>
-                            <TableCell>
-                              <Chip label="Raw Material Parent" size="small" color="primary" sx={{ fontWeight: 600 }} />
-                            </TableCell>
-                            <TableCell sx={{ fontWeight: 600 }}>
-                              Input Lot #{mo.input_lot_no} {lotDetails?.purchase?.supplierName ? `(Supplier: ${lotDetails.purchase.supplierName})` : ''}
-                            </TableCell>
-                            <TableCell>{mo.input_item || 'Raw Grain'}</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>{mo.output_kgs} KG</TableCell>
-                            <TableCell>
-                              <Chip label={lotDetails?.qcStatus || 'ACCEPTED'} size="small" color="success" sx={{ fontWeight: 600 }} />
-                            </TableCell>
-                            <TableCell>{mo.work_order_date || 'N/A'}</TableCell>
-                          </TableRow>
-                        ))}
+                        {/* 2. ALL Parent Raw Grain / Input Lots from Milling */}
+                        {lotDetails?.millingOutputs?.flatMap((mo, moIdx) => {
+                          const inps = (mo.inputs && mo.inputs.length > 0)
+                            ? mo.inputs
+                            : (mo.input_lot_no ? [{ lot_no: mo.input_lot_no, item_name: mo.input_item, total_wt: mo.output_kgs }] : []);
+                          return inps.map((inp, idx) => (
+                            <TableRow key={`back-raw-${moIdx}-${idx}`}>
+                              <TableCell>
+                                <Chip label="Raw Material Parent" size="small" color="primary" sx={{ fontWeight: 600 }} />
+                              </TableCell>
+                              <TableCell sx={{ fontWeight: 600 }}>
+                                <Chip
+                                  label={`Input Lot #${inp.lot_no}`}
+                                  size="small"
+                                  onClick={() => setSelectedLotNo(inp.lot_no)}
+                                  sx={{ fontWeight: 700, cursor: 'pointer', mr: 1, bgcolor: '#e0f2fe', color: '#0369a1' }}
+                                />
+                              </TableCell>
+                              <TableCell>{inp.item_name || 'Raw Grain'}</TableCell>
+                              <TableCell sx={{ fontWeight: 700 }}>{inp.total_wt || mo.output_kgs} KG</TableCell>
+                              <TableCell>
+                                <Chip label={lotDetails?.qcStatus || 'ACCEPTED'} size="small" color="success" sx={{ fontWeight: 600 }} />
+                              </TableCell>
+                              <TableCell>{mo.work_order_date || 'N/A'}</TableCell>
+                            </TableRow>
+                          ));
+                        })}
 
                         {/* 3. Purchase Return / Debit Note Stage */}
                         {lotDetails?.purchaseReturns?.map((pr, idx) => (
@@ -670,7 +811,7 @@ const LotGenealogyDashboard = () => {
                             </TableCell>
                             <TableCell>{pr.item_name || lotDetails?.itemName}</TableCell>
                             <TableCell sx={{ fontWeight: 700, color: '#dc2626' }}>
-                              -{pr.total_wt || pr.qty * 50} KG ({pr.qty} Bags)
+                              -{pr.total_wt || 0} KG ({pr.qty} Bags)
                             </TableCell>
                             <TableCell>
                               <Chip label={pr.return_status || 'RETURNED'} size="small" color="error" sx={{ fontWeight: 600 }} />
@@ -679,25 +820,25 @@ const LotGenealogyDashboard = () => {
                           </TableRow>
                         ))}
 
-                        {/* 4. Inward Purchase Stage */}
-                        {lotDetails?.purchase && (
-                          <TableRow key="back-pur">
+                        {/* 4. Inward Purchase Stage (All Parent / Direct Purchases) */}
+                        {(lotDetails?.parentPurchases?.length > 0 ? lotDetails.parentPurchases : (lotDetails?.purchase ? [lotDetails.purchase] : [])).map((pur, pIdx) => (
+                          <TableRow key={`back-pur-${pIdx}`}>
                             <TableCell>
                               <Chip label="Inward Ingestion" size="small" color="info" sx={{ fontWeight: 600 }} />
                             </TableCell>
                             <TableCell sx={{ fontWeight: 600 }}>
-                              Supplier: {lotDetails.purchase.supplierName} | Voucher #{lotDetails.purchase.voucherNo || lotDetails.purchase.invNo || 'N/A'} {lotDetails.purchase.vehicleNo !== 'N/A' ? `(Vehicle: ${lotDetails.purchase.vehicleNo})` : ''}
+                              Supplier: {pur.supplierName} | Voucher #{pur.voucherNo || pur.invNo || 'N/A'} {pur.parentLotNo ? `(Lot ${pur.parentLotNo})` : ''} {pur.vehicleNo && pur.vehicleNo !== 'N/A' ? `(Vehicle: ${pur.vehicleNo})` : ''}
                             </TableCell>
-                            <TableCell>{lotDetails.purchase.itemName || lotDetails.itemName}</TableCell>
+                            <TableCell>{pur.itemName || lotDetails.itemName}</TableCell>
                             <TableCell sx={{ fontWeight: 700 }}>
-                              {lotDetails.purchase.totalWeight || (lotDetails.purchase.qty ? lotDetails.purchase.qty * 50 : lotDetails.quantity)} KG
+                              {pur.totalWeight || pur.qty || 0} KG
                             </TableCell>
                             <TableCell>
                               <Chip label={lotDetails.qc?.overall_result || lotDetails.qcStatus || 'ACCEPTED'} size="small" color="success" sx={{ fontWeight: 600 }} />
                             </TableCell>
-                            <TableCell>{lotDetails.purchase.purchaseDate || 'N/A'}</TableCell>
+                            <TableCell>{pur.purchaseDate || 'N/A'}</TableCell>
                           </TableRow>
-                        )}
+                        ))}
 
                         {/* Fallback if no purchase, return, or milling records exist */}
                         {!lotDetails?.purchase && (!lotDetails?.purchaseReturns || lotDetails.purchaseReturns.length === 0) && (!lotDetails?.millingOutputs || lotDetails.millingOutputs.length === 0) && (
@@ -860,7 +1001,7 @@ const LotGenealogyDashboard = () => {
                       <TableRow>
                         <TableCell sx={{ fontWeight: 700 }}>Lot Number</TableCell>
                         <TableCell sx={{ fontWeight: 700 }}>Item Name</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Current Stock (KG)</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Current Stock (Bags / KG)</TableCell>
                         <TableCell sx={{ fontWeight: 700 }}>Location</TableCell>
                         <TableCell sx={{ fontWeight: 700 }}>QC Status</TableCell>
                         <TableCell sx={{ fontWeight: 700 }}>Action</TableCell>
@@ -871,13 +1012,13 @@ const LotGenealogyDashboard = () => {
                         <TableRow key={`reg-${lot.lotNo}-${idx}`} hover selected={lot.lotNo === selectedLotNo}>
                           <TableCell sx={{ fontWeight: 700, color: '#0284c7' }}>{lot.lotNo}</TableCell>
                           <TableCell>{lot.itemName}</TableCell>
-                          <TableCell>{lot.currentQuantity || lot.quantity || 0} KG</TableCell>
+                          <TableCell>{lot.currentQuantity ?? lot.quantity ?? 0} Bags ({Number(lot.currentWeightKg || 0).toLocaleString()} KG)</TableCell>
                           <TableCell>{lot.location || '-'}</TableCell>
                           <TableCell>
-                            <Chip label={lot.qcStatus || 'ACCEPTED'} size="small" color={lot.qcStatus === 'REJECTED' ? 'error' : 'success'} sx={{ fontWeight: 600 }} />
+                            <Chip label={lot.qcStatus || 'ACCEPTED'} size="small" color={lot.qcStatus === 'REJECTED' || lot.qcStatus === 'RETURNED' ? 'error' : 'success'} sx={{ fontWeight: 600 }} />
                           </TableCell>
                           <TableCell>
-                            <Button size="small" variant="text" onClick={() => setSelectedLotNo(lot.lotNo)} sx={{ textTransform: 'none', fontWeight: 600 }}>
+                            <Button size="small" variant="text" onClick={() => { setSelectedLotNo(lot.lotNo); setActiveTab(0); }} sx={{ textTransform: 'none', fontWeight: 600 }}>
                               Inspect
                             </Button>
                           </TableCell>

@@ -3,6 +3,7 @@ const router = express.Router()
 const db = require('../config/database')
 const { reserveNextLotNumber, recordLotNumber } = require('../utils/lotHelper')
 const { rebuildStockLedger } = require('../utils/stockRebuilder')
+const { syncDocumentMovements, deleteDocumentMovements } = require('../services/SourceMovementSync')
 
 // Revert stock changes for a weight conversion record
 const revertWeightConversionStock = async (conversionId, companyId = 1) => {
@@ -624,7 +625,7 @@ router.post('/', async (req, res) => {
     // Process stock update
     const companyId = req.companyId || req.headers?.['x-company-id'] || 1;
     await processWeightConversionStock(weightConversionId, formData.date, items, companyId);
-    await rebuildStockLedger();
+    await syncDocumentMovements(companyId, 'WEIGHT_CONVERSION', weightConversionId, req.user?.username || 'admin');
 
     res.status(201).json({
       message: 'Weight conversion record saved successfully!',
@@ -686,7 +687,7 @@ router.put('/:id', async (req, res) => {
 
     // Process updated stock
     await processWeightConversionStock(weightConversionId, formData.date, items, companyId);
-    await rebuildStockLedger();
+    await syncDocumentMovements(companyId, 'WEIGHT_CONVERSION', weightConversionId, req.user?.username || 'admin');
 
     res.json({ success: true, message: 'Weight conversion record updated successfully!' });
   } catch (error) {
@@ -702,7 +703,7 @@ router.delete('/:id', async (req, res) => {
     await revertWeightConversionStock(req.params.id, companyId);
     await db.run('DELETE FROM weight_conversion_items WHERE CAST(weight_conversion_id AS TEXT) = CAST(? AS TEXT)', [req.params.id], companyId);
     await db.run('DELETE FROM weight_conversion WHERE CAST(id AS TEXT) = CAST(? AS TEXT)', [req.params.id], companyId);
-    await rebuildStockLedger();
+    await deleteDocumentMovements(companyId, 'WEIGHT_CONVERSION', req.params.id, 'Weight conversion deleted', req.user?.username || 'admin');
     res.json({ success: true, message: 'Weight conversion record deleted successfully' });
   } catch (error) {
     console.error('Error deleting weight conversion:', error);

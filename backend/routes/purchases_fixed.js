@@ -15,6 +15,7 @@ const { getColdStorageTariff, calculateLabourCharge, createOrUpdateColdStorageBi
 const { ensureColdStorageSchema } = require('../utils/coldStorageSchema')
 const OpChargeEngine = require('../services/operationalChargeEngine')
 const AccountingEngine = require('../services/AccountingEngine')
+const { syncDocumentMovements, deleteDocumentMovements } = require('../services/SourceMovementSync')
 
 async function ensurePurchasesTableSchema(companyId = null) {
   try {
@@ -1916,6 +1917,12 @@ router.post('/', async (req, res) => {
       console.warn('Central Notification Warning for Purchase:', notifErr.message);
     }
 
+    try {
+      await syncDocumentMovements(activeCompanyId, 'PURCHASE', purchaseId, req.user?.username || 'admin');
+    } catch (syncErr) {
+      console.warn('Stock movement sync warning (Purchase create):', syncErr.message);
+    }
+
     res.status(201).json({ success: true, message: 'Purchase saved successfully!', id: purchaseId, voucher_no: createdVoucherNo })
   } catch (error) {
     console.error('Error saving purchase:', error)
@@ -2366,6 +2373,12 @@ router.put('/:id', async (req, res) => {
       console.warn('Central Notification Warning for Purchase Update:', notifErr.message);
     }
 
+    try {
+      await syncDocumentMovements(activeCompanyId, 'PURCHASE', purchaseId, req.user?.username || 'admin');
+    } catch (syncErr) {
+      console.warn('Stock movement sync warning (Purchase update):', syncErr.message);
+    }
+
     res.json({ success: true, message: 'Purchase updated successfully!', voucher_no: txResult?.voucherNo || null })
   } catch (error) {
     console.error('Error updating purchase:', error)
@@ -2444,6 +2457,12 @@ router.delete('/:id', async (req, res) => {
       await db.run('DELETE FROM purchase_items WHERE purchase_id = ?', [purchaseId], activeCompanyId);
       await db.run('DELETE FROM purchases WHERE id = ?', [purchaseId], activeCompanyId);
     });
+
+    try {
+      await deleteDocumentMovements(activeCompanyId, 'PURCHASE', purchaseId, 'Purchase deleted', req.user?.username || 'admin');
+    } catch (syncErr) {
+      console.warn('Stock movement reversal warning (Purchase delete):', syncErr.message);
+    }
 
     res.json({ success: true, message: 'Purchase deleted successfully' })
   } catch (error) {

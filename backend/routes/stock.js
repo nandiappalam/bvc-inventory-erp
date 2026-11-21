@@ -1783,6 +1783,14 @@ router.delete('/:id', async (req, res) => {
 // and rebuilds the stock ledger & lots.
 // ============================================================================
 router.post('/purge-legacy-data', async (req, res) => {
+  return res.status(403).json({
+    success: false,
+    message: 'Purge Legacy Data has been disabled to protect historical stock, lot genealogy, and transaction ledgers.'
+  });
+});
+
+// Legacy handler retained below only as disabled reference
+router.post('/purge-legacy-data-disabled', async (req, res) => {
   try {
     const { cutoffDate = '2025-04-01' } = req.body;
     let deletedCounts = {};

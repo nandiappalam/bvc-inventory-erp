@@ -688,9 +688,14 @@ const Navigation = () => {
     {
       groupTitle: 'Inventory',
       items: [
-        { name: 'Inventory Intelligence', path: '/inventory-intelligence', permission: 'Stock Report' },
-        { name: 'Stock Reports', path: '/reports/category/stock', permission: 'Stock Report' },
+        { name: 'Daily Opening Stock Report', path: '/reports/category/stock?type=opening', permission: 'Stock Report' },
+        { name: 'Current / Live Stock Report', path: '/reports/category/stock?type=current', permission: 'Stock Report' },
+        { name: 'Daily Closing Stock Report', path: '/reports/category/stock?type=closing', permission: 'Stock Report' },
         { name: 'Godown Wise Stock Report', path: '/reports/godown-stock', permission: 'Godown Stock Report' },
+        { name: 'Lot History & Genealogy', path: '/reports/lot-history', permission: 'Stock Report' },
+        { name: 'Stock Ledger Reconciliation', path: '/reports/category/stock?type=reconciliation', permission: 'Stock Report' },
+        { name: 'Stock Reports (Legacy Divisions)', path: '/reports/category/stock?type=group-wise', permission: 'Stock Report' },
+        { name: 'Inventory Intelligence', path: '/inventory-intelligence', permission: 'Stock Report' },
         { name: 'Stock Alert & Reorder Report', path: '/features/stock-alert-dashboard', permission: 'Stock Report' }
       ]
     },
@@ -1641,7 +1646,11 @@ const Navigation = () => {
                   <React.Fragment key={group.groupTitle}>
                     <NavSubGroupHeader title={group.groupTitle} />
                     {visibleItems.map((report) => {
-                      const isReportActive = location.pathname === report.path;
+                      const [rPath, rQuery] = report.path.split('?');
+                      const isReportActive = rQuery
+                        ? `${location.pathname}${location.search}` === report.path ||
+                          (location.pathname === rPath && !location.search && rQuery === 'type=current')
+                        : location.pathname === report.path;
                       return (
                         <ListItemButton 
                           key={report.name} 

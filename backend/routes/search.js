@@ -94,6 +94,11 @@ const SYSTEM_MODULES = [
   { name: 'Stock Alerts & Thresholds', category: 'Intelligence', group: 'Inventory', path: '/stock-alerts', permission: 'Stock Alerts', keywords: 'stock alert reorder level minimum critical low stock' },
 
   // Reports
+  { name: 'Daily Opening Stock Report', category: 'Reports', group: 'Stock', path: '/reports/category/stock?type=opening', permission: 'Stock Reports', keywords: 'daily opening stock register start of day carried forward rm fg bag vacuum' },
+  { name: 'Current / Live Stock Report', category: 'Reports', group: 'Stock', path: '/reports/category/stock?type=current', permission: 'Stock Reports', keywords: 'current live stock position as of time reserved available balance rm fg' },
+  { name: 'Daily Closing Stock Report', category: 'Reports', group: 'Stock', path: '/reports/category/stock?type=closing', permission: 'Stock Reports', keywords: 'daily closing stock register physical verification count lock approve end of day' },
+  { name: 'Stock Ledger Reconciliation', category: 'Reports', group: 'Stock', path: '/reports/category/stock?type=reconciliation', permission: 'Stock Reports', keywords: 'stock reconciliation shadow comparison variance ledger audit' },
+  { name: 'Lot History & Genealogy Report', category: 'Reports', group: 'Stock', path: '/reports/lot-history', permission: 'Stock Reports', keywords: 'lot history genealogy rm fg parent lot traceability' },
   { name: 'Stock Reports (Summary & Lots)', category: 'Reports', group: 'Stock', path: '/report/stock-report', permission: 'Stock Reports', keywords: 'stock report balance inventory lot breakdown valuation' },
   { name: 'Godown Wise Stock Report', category: 'Reports', group: 'Stock', path: '/reports/godown-stock', permission: 'Godown Wise Stock Report', keywords: 'godown stock report warehouse inventory pj bts cold storage' },
   { name: 'Category Stock Reports', category: 'Reports', group: 'Stock', path: '/reports/category/stock', permission: 'Stock Reports', keywords: 'category stock report group wise godown wise' },

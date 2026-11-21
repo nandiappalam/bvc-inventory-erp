@@ -1,6 +1,7 @@
 const express = require('express')
 const router = express.Router()
 const db = require('../config/database')
+const { syncDocumentMovements, deleteDocumentMovements } = require('../services/SourceMovementSync')
 
 // GET next S.No
 router.get('/next-sno', async (req, res) => {
@@ -118,6 +119,13 @@ router.post('/', async (req, res) => {
       }
     }
 
+    try {
+      const cId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+      await syncDocumentMovements(cId, 'OPEN', open_id, req.user?.username || 'admin');
+    } catch (syncErr) {
+      console.warn('Stock movement sync warning (Open create):', syncErr.message);
+    }
+
     res.status(201).json({
       success: true,
       message: 'Open entry created successfully',
@@ -197,6 +205,13 @@ router.put('/:id', async (req, res) => {
       }
     }
 
+    try {
+      const cId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+      await syncDocumentMovements(cId, 'OPEN', open_id, req.user?.username || 'admin');
+    } catch (syncErr) {
+      console.warn('Stock movement sync warning (Open update):', syncErr.message);
+    }
+
     res.json({ success: true, message: 'Open entry updated successfully' })
   } catch (error) {
     console.error('Error updating open entry:', error)
@@ -216,6 +231,12 @@ router.delete('/:id', async (req, res) => {
     const result = await db.run('DELETE FROM open WHERE id = ?', [open_id])
 
     if (result.changes > 0) {
+      try {
+        const cId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+        await deleteDocumentMovements(cId, 'OPEN', open_id, 'Opening entry deleted', req.user?.username || 'admin');
+      } catch (syncErr) {
+        console.warn('Stock movement reversal warning (Open delete):', syncErr.message);
+      }
       res.json({ success: true, message: 'Open entry deleted successfully' })
     } else {
       res.status(404).json({ success: false, message: 'Open entry not found' })
