@@ -56,7 +56,7 @@ ensureQuotationColumns();
 // GET next Bill No for quotations - sequences automatically starting from 1
 const getNextQuotationBillNo = async (req, res) => {
   try {
-    const maxBillNo = await db.query('SELECT MAX(CAST(bill_no AS INTEGER)) as max_bill_no FROM quotations WHERE bill_no IS NOT NULL AND bill_no != ""')
+    const maxBillNo = await db.query("SELECT MAX(CAST(bill_no AS INTEGER)) as max_bill_no FROM quotations WHERE bill_no IS NOT NULL AND TRIM(CAST(bill_no AS TEXT)) != ''")
     const maxVal = maxBillNo.rows[0]?.max_bill_no;
     const next_bill_no = (!maxVal || maxVal < 1) ? 1 : maxVal + 1;
     res.json({ 
@@ -208,7 +208,7 @@ router.post('/', async (req, res) => {
     // Ensure sequential bill_no starting from 1
     let finalBillNo = bill_no;
     if (!finalBillNo || String(finalBillNo).trim() === '' || isNaN(Number(finalBillNo))) {
-      const maxRes = await connection.query('SELECT MAX(CAST(bill_no AS INTEGER)) as max_bill_no FROM quotations WHERE bill_no IS NOT NULL AND bill_no != ""');
+      const maxRes = await connection.query("SELECT MAX(CAST(bill_no AS INTEGER)) as max_bill_no FROM quotations WHERE bill_no IS NOT NULL AND TRIM(CAST(bill_no AS TEXT)) != ''");
       const maxVal = maxRes.rows[0]?.max_bill_no;
       finalBillNo = (!maxVal || maxVal < 1) ? '1' : String(maxVal + 1);
     } else {
@@ -221,7 +221,7 @@ router.post('/', async (req, res) => {
       parseFloat(tax_percent) || 0, parseFloat(bill_amt) || 0, parseFloat(tax_amt) || 0,
       parseFloat(total_amt) || 0, parseFloat(deduction) || 0, parseFloat(percent) || 0,
       parseFloat(deduction_amount) || 0, deduction_remarks || '',
-      loadman_name || '', loadman_worker_id || null, parseFloat(loadman_rate_per_kg) || 0.50, parseFloat(loadman_charges) || 0,
+      loadman_name || '', /^\d+$/.test(String(loadman_worker_id || '').trim()) ? parseInt(loadman_worker_id, 10) : null, parseFloat(loadman_rate_per_kg) || 0.50, parseFloat(loadman_charges) || 0,
       stock_type || 'RM'
     ])
 
@@ -387,7 +387,7 @@ router.put('/:id', async (req, res) => {
       parseFloat(tax_percent) || 0, parseFloat(bill_amt) || 0, parseFloat(tax_amt) || 0,
       parseFloat(total_amt) || 0, parseFloat(deduction) || 0, parseFloat(percent) || 0,
       parseFloat(deduction_amount) || 0, deduction_remarks || '',
-      loadman_name || '', loadman_worker_id || null, parseFloat(loadman_rate_per_kg) || 0.50, parseFloat(loadman_charges) || 0,
+      loadman_name || '', /^\d+$/.test(String(loadman_worker_id || '').trim()) ? parseInt(loadman_worker_id, 10) : null, parseFloat(loadman_rate_per_kg) || 0.50, parseFloat(loadman_charges) || 0,
       stock_type || 'RM',
       id
     ]);

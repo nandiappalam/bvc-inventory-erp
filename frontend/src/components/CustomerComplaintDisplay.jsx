@@ -395,7 +395,7 @@ const CustomerComplaintDisplay = () => {
               <div style={{ fontWeight: 800, fontSize: '15px' }}>
                 Complaint Dossier · {dossierModal.data.complaint_no} ({dossierModal.data.customer_name})
               </div>
-              <button type="button" onClick={() => setDossierModal({ open: false, loading: false, data: null })} style={{ background: 'none', border: 'none', color: '#fff', fontSize: '18px', fontWeight: 700, cursor: 'pointer' }}>
+              <button type="button" onClick={() => setDossierModal({ open: false, loading: false, data: null })} style={{ backgroundColor: 'rgba(255, 255, 255, 0.25)', border: '1px solid rgba(255, 255, 255, 0.4)', borderRadius: '6px', color: '#fff', fontSize: '16px', fontWeight: 900, width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} title="Close">
                 ✕
               </button>
             </div>

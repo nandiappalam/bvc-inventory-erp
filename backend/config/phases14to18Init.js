@@ -106,6 +106,135 @@ async function initPhases14To18Tables() {
       )
     `);
 
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS customer_complaint_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        complaint_id INTEGER NOT NULL,
+        original_sales_id INTEGER,
+        original_sales_item_id INTEGER,
+        item_id INTEGER,
+        item_name TEXT NOT NULL,
+        product_code TEXT,
+        lot_no TEXT,
+        mfg_date TEXT,
+        exp_date TEXT,
+        uom TEXT DEFAULT 'Bags',
+        weight_per_unit REAL DEFAULT 50,
+        invoice_qty REAL DEFAULT 0,
+        complaint_qty REAL DEFAULT 0,
+        complaint_weight REAL DEFAULT 0,
+        issue_notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS capa_documents (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        capa_no TEXT UNIQUE NOT NULL,
+        capa_date TEXT NOT NULL,
+        capa_source TEXT DEFAULT 'Customer Complaint',
+        complaint_id INTEGER,
+        complaint_no TEXT,
+        sales_return_id INTEGER,
+        sales_return_no TEXT,
+        original_sales_id INTEGER,
+        original_invoice_no TEXT,
+        customer_id INTEGER,
+        customer_name TEXT,
+        customer_complaint_ref TEXT,
+        reported_problem TEXT,
+        complaint_category TEXT,
+        complaint_date TEXT,
+        affected_condition TEXT,
+        evidence_json TEXT DEFAULT '[]',
+        customer_communication TEXT,
+        investigation_findings TEXT,
+        qc_inspection_results TEXT,
+        batch_traceability_json TEXT DEFAULT '[]',
+        identified_root_cause TEXT,
+        rca_method TEXT DEFAULT '5 Why',
+        rca_details TEXT,
+        immediate_containment TEXT,
+        existing_problem_correction TEXT,
+        corrective_action_desc TEXT,
+        corrective_dept TEXT,
+        corrective_person TEXT,
+        corrective_target_date TEXT,
+        corrective_completion_date TEXT,
+        corrective_evidence TEXT,
+        corrective_status TEXT DEFAULT 'Pending',
+        preventive_action_desc TEXT,
+        process_improvement TEXT,
+        training_required INTEGER DEFAULT 0,
+        training_details TEXT,
+        inspection_testing_improvement TEXT,
+        preventive_person TEXT,
+        preventive_target_date TEXT,
+        preventive_completion_date TEXT,
+        preventive_status TEXT DEFAULT 'Pending',
+        verification_method TEXT,
+        verification_date TEXT,
+        followup_inspection_results TEXT,
+        effectiveness_evidence TEXT,
+        effectiveness_status TEXT DEFAULT 'Pending',
+        further_action_required INTEGER DEFAULT 0,
+        further_action_notes TEXT,
+        capa_status TEXT DEFAULT 'Open',
+        prepared_by TEXT,
+        quality_manager TEXT,
+        production_manager TEXT,
+        approved_by TEXT,
+        approved_at TEXT,
+        closure_date TEXT,
+        final_remarks TEXT,
+        waived_verification INTEGER DEFAULT 0,
+        waiver_reason TEXT,
+        waived_by TEXT,
+        company_id INTEGER DEFAULT 1,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS capa_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        capa_id INTEGER NOT NULL,
+        complaint_item_id INTEGER,
+        sales_return_item_id INTEGER,
+        item_id INTEGER,
+        product_name TEXT NOT NULL,
+        product_code TEXT,
+        lot_no TEXT,
+        mfg_date TEXT,
+        exp_date TEXT,
+        invoice_qty REAL DEFAULT 0,
+        complaint_qty REAL DEFAULT 0,
+        returned_qty REAL DEFAULT 0,
+        uom TEXT DEFAULT 'Bags',
+        batch_no TEXT,
+        rm_lot_nos TEXT,
+        qc_summary TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    await db.run(`
+      CREATE TABLE IF NOT EXISTS capa_audit_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        capa_id INTEGER NOT NULL,
+        capa_no TEXT,
+        action TEXT NOT NULL,
+        old_status TEXT,
+        new_status TEXT,
+        performed_by TEXT,
+        remarks TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     // 6. Recalls (Phase 16)
     await db.run(`
       CREATE TABLE IF NOT EXISTS recalls (

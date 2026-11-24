@@ -7,10 +7,14 @@ const {
   sanitizeEvidenceList,
   resolveBatchAndRmTraceability
 } = require('../services/complaintTraceabilityHelper');
+const { ensureSalesSchema } = require('../services/SalesService');
 
-const getCompanyId = (req) =>
-  req.companyId ||
-  (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : (req.user?.company_id || 1));
+const getCompanyId = (req) => {
+  const raw =
+    req.companyId ||
+    (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : (req.user?.company_id || 1));
+  return parseInt(raw, 10) || 1;
+};
 
 const _capaSchemaEnsured = new Set();
 
@@ -20,9 +24,23 @@ const CAPA_STATUSES = ['Open', 'In Progress', 'Verification', 'Closed'];
 const EFFECTIVENESS_STATUSES = ['Pending', 'Effective', 'Not Effective'];
 
 async function ensureCapaTables(companyId) {
-  if (_capaSchemaEnsured.has(companyId)) return;
+  const cId = parseInt(companyId, 10) || 1;
+  const runner = db.forCompany(cId);
 
-  await db.run(
+  await ensureSalesSchema(cId);
+
+  if (_capaSchemaEnsured.has(cId)) {
+    try {
+      await runner.query(`SELECT 1 FROM capa_documents LIMIT 1`);
+      await runner.query(`SELECT 1 FROM capa_items LIMIT 1`);
+      await runner.query(`SELECT 1 FROM capa_audit_logs LIMIT 1`);
+      return;
+    } catch (_) {
+      _capaSchemaEnsured.delete(cId);
+    }
+  }
+
+  await runner.run(
     `CREATE TABLE IF NOT EXISTS capa_documents (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       capa_no TEXT UNIQUE NOT NULL,
@@ -89,12 +107,10 @@ async function ensureCapaTables(companyId) {
       created_by TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )`,
-    [],
-    companyId
+    )`
   );
 
-  await db.run(
+  await runner.run(
     `CREATE TABLE IF NOT EXISTS capa_items (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       capa_id INTEGER NOT NULL,
@@ -114,12 +130,10 @@ async function ensureCapaTables(companyId) {
       rm_lot_nos TEXT,
       qc_summary TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )`,
-    [],
-    companyId
+    )`
   );
 
-  await db.run(
+  await runner.run(
     `CREATE TABLE IF NOT EXISTS capa_audit_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       capa_id INTEGER NOT NULL,
@@ -130,12 +144,10 @@ async function ensureCapaTables(companyId) {
       performed_by TEXT,
       remarks TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )`,
-    [],
-    companyId
+    )`
   );
 
-  _capaSchemaEnsured.add(companyId);
+  _capaSchemaEnsured.add(cId);
 }
 
 router.use(async (req, _res, next) => {

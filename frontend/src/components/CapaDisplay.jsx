@@ -83,6 +83,7 @@ const CapaDisplay = () => {
   const [filterEffectiveness, setFilterEffectiveness] = useState('');
   const [filterSource, setFilterSource] = useState('');
 
+  const [printingId, setPrintingId] = useState(null);
   const [viewModal, setViewModal] = useState({ open: false, loading: false, data: null });
   const [approveModal, setApproveModal] = useState({
     open: false,
@@ -148,14 +149,18 @@ const CapaDisplay = () => {
   };
 
   const handlePrintFormalRow = async (row) => {
+    if (!row || printingId === row.id) return;
+    setPrintingId(row.id);
     try {
       const res = await api(`/capa/${row.id}`);
-      const fullDoc = res?.data || row;
+      const fullDoc = res?.success !== false && res?.data ? res.data : row;
       const html = buildFormalCapaPrintHtml(fullDoc, selectedCompany?.name || 'BVC Exports Pvt Ltd');
-      printHtml(html, { title: `CAPA Report - ${fullDoc.capa_no}` });
+      printHtml(html, `CAPA Report - ${fullDoc.capa_no || row.capa_no || 'Document'}`);
     } catch (_) {
       const html = buildFormalCapaPrintHtml(row, selectedCompany?.name || 'BVC Exports Pvt Ltd');
-      printHtml(html, { title: `CAPA Report - ${row.capa_no}` });
+      printHtml(html, `CAPA Report - ${row.capa_no || 'Document'}`);
+    } finally {
+      setTimeout(() => setPrintingId(null), 600);
     }
   };
 
@@ -267,7 +272,7 @@ const CapaDisplay = () => {
           <tbody>${trs}</tbody>
         </table>
       </div>`,
-      { title: 'CAPA Display Register' }
+      'CAPA Display Register'
     );
   };
 
@@ -473,8 +478,8 @@ const CapaDisplay = () => {
                           <button type="button" onClick={() => navigate(`/entry/capa-create?id=${row.id}`)} style={{ backgroundColor: '#1f4fb2', color: '#fff', border: 'none', borderRadius: '4px', padding: '4px 8px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
                             Update
                           </button>
-                          <button type="button" onClick={() => handlePrintFormalRow(row)} style={{ backgroundColor: '#0284c7', color: '#fff', border: 'none', borderRadius: '4px', padding: '4px 8px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
-                            Print
+                          <button type="button" disabled={printingId === row.id} onClick={() => handlePrintFormalRow(row)} style={{ backgroundColor: printingId === row.id ? '#94a3b8' : '#0284c7', color: '#fff', border: 'none', borderRadius: '4px', padding: '4px 8px', fontSize: '11px', fontWeight: 700, cursor: printingId === row.id ? 'wait' : 'pointer' }}>
+                            {printingId === row.id ? 'Printing...' : 'Print'}
                           </button>
                           {row.capa_status !== 'Closed' && canApprove && (
                             <button type="button" onClick={() => handleOpenApprove(row)} style={{ backgroundColor: '#10b981', color: '#fff', border: 'none', borderRadius: '4px', padding: '4px 8px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
@@ -506,7 +511,7 @@ const CapaDisplay = () => {
                   Source: {viewModal.data.capa_source} · Status: {viewModal.data.capa_status} · Effectiveness: {viewModal.data.effectiveness_status}
                 </div>
               </div>
-              <button type="button" onClick={() => setViewModal({ open: false, loading: false, data: null })} style={{ background: 'none', border: 'none', color: '#fff', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+              <button type="button" onClick={() => setViewModal({ open: false, loading: false, data: null })} style={{ backgroundColor: 'rgba(255, 255, 255, 0.25)', border: '1px solid rgba(255, 255, 255, 0.4)', borderRadius: '6px', color: '#fff', fontSize: '16px', fontWeight: 900, width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} title="Close">✕</button>
             </div>
             <div style={{ padding: '16px', fontSize: '12px' }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '10px', marginBottom: '12px' }}>
@@ -562,7 +567,7 @@ const CapaDisplay = () => {
             <div style={{ padding: '10px 18px', backgroundColor: '#f8fafc', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
               <button type="button" onClick={() => navigate(`/entry/capa-create?id=${viewModal.data.id}`)} style={{ padding: '6px 14px', borderRadius: '5px', border: 'none', backgroundColor: '#1f4fb2', color: '#fff', fontWeight: 700, cursor: 'pointer' }}>Open Full Form</button>
               <button type="button" onClick={() => handlePrintFormalRow(viewModal.data)} style={{ padding: '6px 14px', borderRadius: '5px', border: 'none', backgroundColor: '#0284c7', color: '#fff', fontWeight: 700, cursor: 'pointer' }}>Print Formal CAPA</button>
-              <button type="button" onClick={() => setViewModal({ open: false, loading: false, data: null })} style={{ padding: '6px 14px', borderRadius: '5px', border: '1px solid #cbd5e1', backgroundColor: '#fff', fontWeight: 700, cursor: 'pointer' }}>Close</button>
+              <button type="button" onClick={() => setViewModal({ open: false, loading: false, data: null })} style={{ padding: '6px 14px', borderRadius: '5px', border: '1px solid #1577ef', backgroundColor: '#4585e4', fontWeight: 700, cursor: 'pointer' }}>Close</button>
             </div>
           </div>
         </div>
@@ -574,7 +579,7 @@ const CapaDisplay = () => {
           <div style={{ backgroundColor: '#fff', borderRadius: '8px', width: '100%', maxWidth: '540px', overflow: 'hidden', boxShadow: '0 20px 35px rgba(0,0,0,0.28)' }}>
             <div style={{ padding: '12px 18px', backgroundColor: '#1f4fb2', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ fontWeight: 800, fontSize: '15px' }}>Approve &amp; Close · {approveModal.row.capa_no}</span>
-              <button type="button" onClick={() => setApproveModal((p) => ({ ...p, open: false }))} style={{ background: 'none', border: 'none', color: '#fff', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+              <button type="button" onClick={() => setApproveModal((p) => ({ ...p, open: false }))} style={{ backgroundColor: 'rgba(255, 255, 255, 0.25)', border: '1px solid rgba(255, 255, 255, 0.4)', borderRadius: '6px', color: '#fff', fontSize: '16px', fontWeight: 900, width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} title="Close">✕</button>
             </div>
             <div style={{ padding: '16px', fontSize: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {approveModal.error && (

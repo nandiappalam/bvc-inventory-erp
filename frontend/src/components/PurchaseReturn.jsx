@@ -69,7 +69,7 @@ const PurchaseReturn = () => {
       { ...formData, items, deductions: selectedDeductions, evidence },
       selectedCompany || {}
     );
-    printHtml(html, { title: `Purchase Return Debit Note - ${formData.returnInvNo || 'Draft'}` });
+    printHtml(html, `Purchase Return Debit Note - ${formData.returnInvNo || 'Draft'}`);
   };
 
   // Unified Workflow State: Two Entry Sources

@@ -97,16 +97,45 @@ export function buildFormalCapaPrintHtml(doc, companyName = 'BVC Exports Pvt Ltd
   const evidenceHtml =
     evidenceList.length > 0
       ? evidenceList
-          .map(
-            (ev, idx) => `
-          <div style="border:1px solid #cbd5e1;padding:6px 8px;margin-bottom:6px;border-radius:4px;background:#f8fafc;">
-            <div style="font-weight:700;color:#1e3a8a;">#${idx + 1} · ${escHtml(ev.name || 'Reference File')} <span style="font-size:10px;color:#64748b;font-weight:normal;">(${escHtml(ev.mime_type || 'file')})</span></div>
-            ${ev.notes ? '<div style="font-size:11px;color:#334155;margin-top:2px;">Notes: ' + escHtml(ev.notes) + '</div>' : ''}
-            ${String(ev.mime_type || '').startsWith('image/') ? '<div style="margin-top:6px;"><img src="' + escHtml(ev.url) + '" style="max-width:200px;max-height:150px;object-fit:cover;border:1px solid #cbd5e1;border-radius:4px;" /></div>' : ''}
-            ${String(ev.mime_type || '').startsWith('video/') ? '<div style="margin-top:6px;"><video src="' + escHtml(ev.url) + '" controls style="max-width:240px;max-height:160px;border:1px solid #cbd5e1;border-radius:4px;"></video></div>' : ''}
-            ${!String(ev.mime_type || '').startsWith('image/') && !String(ev.mime_type || '').startsWith('video/') ? '<div style="margin-top:4px;font-size:11px;"><a href="' + escHtml(ev.url) + '" target="_blank" style="color:#2563eb;word-break:break-all;">' + escHtml(ev.url) + '</a></div>' : ''}
-          </div>`
-          )
+          .map((ev, idx) => {
+            const urlStr = String(ev?.url || '').trim();
+            const mimeStr = String(ev?.mime_type || ev?.mime || ev?.type || '').toLowerCase();
+            const kindStr = String(ev?.kind || '').toLowerCase();
+            const nameStr = String(ev?.name || 'Reference File');
+            const isDataUri = urlStr.startsWith('data:');
+            const isImg =
+              kindStr === 'image' ||
+              mimeStr.startsWith('image/') ||
+              urlStr.startsWith('data:image/') ||
+              /\.(png|jpe?g|webp|gif|svg)$/i.test(nameStr);
+            const isVid =
+              !isImg &&
+              (kindStr === 'video' ||
+                mimeStr.startsWith('video/') ||
+                urlStr.startsWith('data:video/') ||
+                /\.(mp4|webm|mov|ogg)$/i.test(nameStr));
+            const typeLabel = mimeStr || (isImg ? 'image' : isVid ? 'video' : 'document');
+            const safeExternalUrl = !isDataUri && urlStr ? urlStr : '';
+
+            return `
+          <div style="border:1px solid #cbd5e1;padding:6px 8px;margin-bottom:6px;border-radius:4px;background:#f8fafc;page-break-inside:avoid;">
+            <div style="font-weight:700;color:#1e3a8a;">#${idx + 1} · ${escHtml(nameStr)} <span style="font-size:10px;color:#64748b;font-weight:normal;">(${escHtml(typeLabel)})</span></div>
+            ${ev?.notes ? '<div style="font-size:11px;color:#334155;margin-top:2px;">Notes: ' + escHtml(ev.notes) + '</div>' : ''}
+            ${
+              isImg && urlStr
+                ? '<div style="margin-top:6px;"><img src="' + escHtml(urlStr) + '" alt="' + escHtml(nameStr) + '" style="max-width:220px;max-height:150px;object-fit:contain;border:1px solid #cbd5e1;border-radius:4px;background:#fff;" /></div>'
+                : isVid
+                ? '<div style="margin-top:5px;padding:6px 8px;background:#eff6ff;border:1px dashed #93c5fd;border-radius:4px;font-size:11px;color:#1e3a8a;"><strong>Video Reference Attached</strong>' +
+                  (safeExternalUrl ? ` — <a href="${escHtml(safeExternalUrl)}" target="_blank" rel="noreferrer" style="color:#2563eb;word-break:break-all;">${escHtml(safeExternalUrl)}</a>` : ' (Stored in BVC ERP Quality Dossier)') +
+                  '</div>'
+                : '<div style="margin-top:5px;padding:5px 8px;background:#ffffff;border:1px dashed #cbd5e1;border-radius:4px;font-size:11px;color:#334155;">' +
+                  (safeExternalUrl
+                    ? `<a href="${escHtml(safeExternalUrl)}" target="_blank" rel="noreferrer" style="color:#2563eb;word-break:break-all;">${escHtml(safeExternalUrl)}</a>`
+                    : 'Attached Document Reference (Stored in BVC ERP Quality Dossier)') +
+                  '</div>'
+            }
+          </div>`;
+          })
           .join('')
       : '<div style="font-size:11px;color:#64748b;">No reference images or videos attached.</div>';
 
@@ -116,7 +145,7 @@ export function buildFormalCapaPrintHtml(doc, companyName = 'BVC Exports Pvt Ltd
         <div style="display:flex;justify-content:space-between;align-items:center;">
           <div>
             <div style="font-size:11px;font-weight:700;color:#1e3a8a;letter-spacing:0.8px;">${escHtml(companyName)}</div>
-            <h1 style="margin:2px 0;font-size:16px;color:#0f172a;letter-spacing:0.3px;">VAK / BVC QUALITY MANAGEMENT — CORRECTIVE AND PREVENTIVE ACTION REPORT</h1>
+            <h1 style="margin:2px 0;font-size:16px;color:#0f172a;letter-spacing:0.3px;">BVC QUALITY MANAGEMENT — CORRECTIVE AND PREVENTIVE ACTION REPORT</h1>
           </div>
           <div style="text-align:right;font-size:11px;">
             <div><strong>CAPA No:</strong> ${escHtml(doc.capa_no)}</div>
@@ -715,10 +744,10 @@ const CapaCreate = () => {
 
   const handlePrintFormalCapa = () => {
     const html = buildFormalCapaPrintHtml(
-      { ...formData, items, batch_traceability: batchTraceability },
+      { ...formData, items, evidence, batch_traceability: batchTraceability },
       selectedCompany?.name || 'BVC Exports Pvt Ltd'
     );
-    printHtml(html, { title: `CAPA Report - ${formData.capa_no || 'Draft'}` });
+    printHtml(html, `CAPA Report - ${formData.capa_no || 'Draft'}`);
   };
 
   const showSec = (k) => activeSection === 'all' || activeSection === k;
@@ -1133,20 +1162,28 @@ const CapaCreate = () => {
               )}
               {evidence.length > 0 && (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '10px' }}>
-                  {evidence.map((ev, idx) => (
-                    <div key={idx} style={{ backgroundColor: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '8px', fontSize: '12px' }}>
-                      {String(ev.mime_type || '').startsWith('image/') && String(ev.url || '').startsWith('data:image/') && (
-                        <img src={ev.url} alt={ev.name} style={{ width: '100%', height: '100px', objectFit: 'cover', borderRadius: '4px', marginBottom: '6px' }} />
-                      )}
-                      <div style={{ fontWeight: 700, wordBreak: 'break-word' }}>{ev.name}</div>
-                      <div style={{ fontSize: '11px', color: '#64748b' }}>{ev.notes || ev.mime_type}</div>
-                      {!isClosed && (
-                        <button type="button" onClick={() => setEvidence((p) => p.filter((_, i) => i !== idx))} style={{ marginTop: '4px', backgroundColor: '#fee2e2', color: '#991b1b', border: 'none', borderRadius: '4px', padding: '2px 8px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
-                          Remove
-                        </button>
-                      )}
-                    </div>
-                  ))}
+                  {evidence.map((ev, idx) => {
+                    const mimeVal = String(ev.mime_type || ev.mime || '').toLowerCase();
+                    const isImg = mimeVal.startsWith('image/') || ev.kind === 'image' || String(ev.url || '').startsWith('data:image/');
+                    const isVid = !isImg && (mimeVal.startsWith('video/') || ev.kind === 'video' || String(ev.url || '').startsWith('data:video/'));
+                    return (
+                      <div key={idx} style={{ backgroundColor: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '8px', fontSize: '12px' }}>
+                        {isImg && ev.url && (
+                          <img src={ev.url} alt={ev.name} style={{ width: '100%', height: '100px', objectFit: 'cover', borderRadius: '4px', marginBottom: '6px' }} />
+                        )}
+                        {isVid && ev.url && (
+                          <video src={ev.url} controls style={{ width: '100%', height: '100px', borderRadius: '4px', marginBottom: '6px', backgroundColor: '#0f172a' }} />
+                        )}
+                        <div style={{ fontWeight: 700, wordBreak: 'break-word' }}>{ev.name}</div>
+                        <div style={{ fontSize: '11px', color: '#64748b' }}>{ev.notes || ev.mime_type || ev.mime || ev.kind || 'Attachment'}</div>
+                        {!isClosed && (
+                          <button type="button" onClick={() => setEvidence((p) => p.filter((_, i) => i !== idx))} style={{ marginTop: '4px', backgroundColor: '#fee2e2', color: '#991b1b', border: 'none', borderRadius: '4px', padding: '2px 8px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

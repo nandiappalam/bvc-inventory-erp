@@ -472,16 +472,35 @@ export function generatePurchasePrintHtml(purchase = {}, company = {}) {
 
           return evidenceList.length > 0
             ? evidenceList
-                .map(
-                  (ev, idx) => `
-                <div style="border:1px solid #cbd5e1;padding:6px 8px;margin-bottom:6px;border-radius:4px;background:#ffffff;">
-                  <div style="font-weight:700;color:#1e3a8a;">#${idx + 1} · ${ev.name || 'Reference File'} <span style="font-size:10px;color:#64748b;font-weight:normal;">(${ev.mime_type || 'file'})</span></div>
-                  ${ev.notes ? '<div style="font-size:11px;color:#334155;margin-top:2px;">Notes: ' + ev.notes + '</div>' : ''}
-                  ${String(ev.mime_type || '').startsWith('image/') ? '<div style="margin-top:6px;"><img src="' + ev.url + '" style="max-width:200px;max-height:150px;object-fit:cover;border:1px solid #cbd5e1;border-radius:4px;" /></div>' : ''}
-                  ${String(ev.mime_type || '').startsWith('video/') ? '<div style="margin-top:6px;"><video src="' + ev.url + '" controls style="max-width:240px;max-height:160px;border:1px solid #cbd5e1;border-radius:4px;"></video></div>' : ''}
-                  ${!String(ev.mime_type || '').startsWith('image/') && !String(ev.mime_type || '').startsWith('video/') ? '<div style="margin-top:4px;font-size:11px;"><a href="' + ev.url + '" target="_blank" style="color:#2563eb;word-break:break-all;">' + ev.url + '</a></div>' : ''}
-                </div>`
-                )
+                .map((ev, idx) => {
+                  const urlStr = String(ev?.url || '').trim();
+                  const mimeStr = String(ev?.mime_type || ev?.mime || ev?.type || '').toLowerCase();
+                  const kindStr = String(ev?.kind || '').toLowerCase();
+                  const nameStr = String(ev?.name || 'Reference File');
+                  const isDataUri = urlStr.startsWith('data:');
+                  const isImg = kindStr === 'image' || mimeStr.startsWith('image/') || urlStr.startsWith('data:image/') || /\.(png|jpe?g|webp|gif|svg)$/i.test(nameStr);
+                  const isVid = !isImg && (kindStr === 'video' || mimeStr.startsWith('video/') || urlStr.startsWith('data:video/') || /\.(mp4|webm|mov|ogg)$/i.test(nameStr));
+                  const safeExternalUrl = !isDataUri && urlStr ? urlStr : '';
+                  const safeEsc = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+                  return `
+                <div style="border:1px solid #cbd5e1;padding:6px 8px;margin-bottom:6px;border-radius:4px;background:#ffffff;page-break-inside:avoid;">
+                  <div style="font-weight:700;color:#1e3a8a;">#${idx + 1} · ${safeEsc(nameStr)} <span style="font-size:10px;color:#64748b;font-weight:normal;">(${safeEsc(mimeStr || kindStr || 'file')})</span></div>
+                  ${ev?.notes ? '<div style="font-size:11px;color:#334155;margin-top:2px;">Notes: ' + safeEsc(ev.notes) + '</div>' : ''}
+                  ${
+                    isImg && urlStr
+                      ? '<div style="margin-top:6px;"><img src="' + safeEsc(urlStr) + '" alt="' + safeEsc(nameStr) + '" style="max-width:220px;max-height:150px;object-fit:contain;border:1px solid #cbd5e1;border-radius:4px;" /></div>'
+                      : isVid
+                      ? '<div style="margin-top:5px;padding:6px 8px;background:#eff6ff;border:1px dashed #93c5fd;border-radius:4px;font-size:11px;color:#1e3a8a;"><strong>Video Reference Attached</strong>' +
+                        (safeExternalUrl ? ` — <a href="${safeEsc(safeExternalUrl)}" target="_blank" rel="noreferrer" style="color:#2563eb;word-break:break-all;">${safeEsc(safeExternalUrl)}</a>` : ' (Stored in BVC ERP)') +
+                        '</div>'
+                      : '<div style="margin-top:4px;font-size:11px;">' +
+                        (safeExternalUrl
+                          ? '<a href="' + safeEsc(safeExternalUrl) + '" target="_blank" rel="noreferrer" style="color:#2563eb;word-break:break-all;">' + safeEsc(safeExternalUrl) + '</a>'
+                          : 'Attached Document Reference (Stored in BVC ERP)') +
+                        '</div>'
+                  }
+                </div>`;
+                })
                 .join('')
             : '<div style="font-size:11px;color:#64748b;">No reference images or videos attached.</div>';
         })()}

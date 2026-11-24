@@ -292,27 +292,46 @@ const SalesCreate = () => {
         api('/sales/form-lookups'),
         api('/sales/available-lots')
       ]);
-      const data = lkRes?.data || lkRes;
-      if (data) {
-        setLookups(data);
-        if (!editId) {
-          const defGodown = data.godowns?.[0];
-          const nextSno = isOrder ? data.nextOrderNo : data.nextSalesNo;
-          const cashBank = data.cashBankLedgers?.[0];
-          setFormData((prev) => ({
-            ...prev,
-            s_no: String(nextSno || prev.s_no || '1'),
-            outpass_no: isOrder ? '' : (prev.outpass_no || data.nextOutpassNo || 'OP-00001'),
-            dispatch_status: isOrder ? 'Sales Order' : (prev.dispatch_status === 'Sales Order' ? 'Loaded' : prev.dispatch_status),
-            godown_from_id: prev.godown_from_id || (defGodown?.id ? String(defGodown.id) : ''),
-            godown_from_name: prev.godown_from_name || defGodown?.godown_name || '',
-            loading_location: prev.loading_location || defGodown?.godown_name || 'Main Godown',
-            bank_account_id: prev.bank_account_id || (cashBank?.id ? String(cashBank.id) : ''),
-            bank_account_name: prev.bank_account_name || cashBank?.name || ''
-          }));
+      if (lkRes && lkRes.success !== false) {
+        const raw = lkRes.data || lkRes;
+        if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+          const normalized = {
+            company: raw.company || { name: 'BVC Exports Pvt Ltd', state: 'Tamil Nadu', state_code: '33', gst_number: '' },
+            customers: Array.isArray(raw.customers) ? raw.customers : [],
+            items: Array.isArray(raw.items) ? raw.items : [],
+            godowns: Array.isArray(raw.godowns) ? raw.godowns : [],
+            transports: Array.isArray(raw.transports) ? raw.transports : [],
+            workers: Array.isArray(raw.workers) ? raw.workers : [],
+            weights: Array.isArray(raw.weights) ? raw.weights : [],
+            cashBankLedgers: Array.isArray(raw.cashBankLedgers) ? raw.cashBankLedgers : [],
+            deductions: Array.isArray(raw.deductions) ? raw.deductions : [],
+            nextOutpassNo: raw.nextOutpassNo || 'OP-00001',
+            nextSalesNo: raw.nextSalesNo || '1',
+            nextOrderNo: raw.nextOrderNo || '1'
+          };
+          setLookups(normalized);
+          if (!editId) {
+            const defGodown = normalized.godowns[0];
+            const nextSno = isOrder ? normalized.nextOrderNo : normalized.nextSalesNo;
+            const cashBank = normalized.cashBankLedgers[0];
+            setFormData((prev) => ({
+              ...prev,
+              s_no: String(nextSno || prev.s_no || '1'),
+              outpass_no: isOrder ? '' : (prev.outpass_no || normalized.nextOutpassNo || 'OP-00001'),
+              dispatch_status: isOrder ? 'Sales Order' : (prev.dispatch_status === 'Sales Order' ? 'Loaded' : prev.dispatch_status),
+              godown_from_id: prev.godown_from_id || (defGodown?.id ? String(defGodown.id) : ''),
+              godown_from_name: prev.godown_from_name || defGodown?.godown_name || '',
+              loading_location: prev.loading_location || defGodown?.godown_name || 'Main Godown',
+              bank_account_id: prev.bank_account_id || (cashBank?.id ? String(cashBank.id) : ''),
+              bank_account_name: prev.bank_account_name || cashBank?.name || ''
+            }));
+          }
         }
+      } else if (lkRes?.message) {
+        setError(lkRes.message);
       }
-      if (lotsRes?.data) {
+
+      if (lotsRes && lotsRes.success !== false && Array.isArray(lotsRes.data)) {
         setAvailableLots(lotsRes.data);
       }
     } catch (err) {
@@ -333,7 +352,10 @@ const SalesCreate = () => {
       setError('');
       try {
         const data = await api(`/sales/${editId}`);
-        if (!mounted || !data) return;
+        if (!mounted || !data || data.success === false) {
+          if (mounted && data?.message) setError(data.message);
+          return;
+        }
 
         const saleDate = data.date ? String(data.date).substring(0, 10) : todayIso;
         setFormData((prev) => ({
@@ -499,7 +521,7 @@ const SalesCreate = () => {
       setInlineModal({ open: true, masterType: 'customers', rowIdx: null });
       return;
     }
-    const matched = lookups.customers.find((c) => String(c.id) === String(custKey) || c.name === custKey);
+    const matched = (lookups.customers || []).find((c) => String(c.id) === String(custKey) || c.name === custKey);
     const keyToFetch = matched ? matched.id : custKey;
     setFormData((prev) => ({ ...prev, customer_id: String(keyToFetch || '') }));
     if (!keyToFetch) return;
@@ -733,20 +755,20 @@ const SalesCreate = () => {
         next.place_of_supply = `${value} (${code})`;
       }
       if (name === 'godown_from_id') {
-        const gd = lookups.godowns.find((g) => String(g.id) === String(value));
+        const gd = (lookups.godowns || []).find((g) => String(g.id) === String(value));
         next.godown_from_name = gd?.godown_name || '';
         next.loading_location = gd?.godown_name || next.loading_location;
       }
       if (name === 'transporter_id') {
-        const tr = lookups.transports.find((t) => String(t.id) === String(value));
+        const tr = (lookups.transports || []).find((t) => String(t.id) === String(value));
         next.pur_trans = tr ? (tr.print_name || tr.name) : '';
       }
       if (name === 'bank_account_id') {
-        const acc = lookups.cashBankLedgers.find((a) => String(a.id) === String(value));
+        const acc = (lookups.cashBankLedgers || []).find((a) => String(a.id) === String(value));
         next.bank_account_name = acc?.name || '';
       }
       if (name === 'loadman_worker_id') {
-        const wk = lookups.workers.find((w) => String(w.id) === String(value));
+        const wk = (lookups.workers || []).find((w) => String(w.id) === String(value));
         if (wk) {
           next.loadman_name = wk.name || wk.worker_name || '';
           if (Number(wk.per_kg_amount) > 0) {
@@ -776,7 +798,7 @@ const SalesCreate = () => {
       const current = { ...updated[idx], [field]: value };
 
       if (field === 'item_id' || field === 'item_name') {
-        const matched = lookups.items.find(
+        const matched = (lookups.items || []).find(
           (it) => (field === 'item_id' ? String(it.id) === String(value) : it.item_name === value)
         );
         if (matched) {
@@ -795,10 +817,10 @@ const SalesCreate = () => {
           }
         }
       } else if (field === 'lot_no') {
-        const matchedLot = availableLots.find(
+        const matchedLot = (availableLots || []).find(
           (l) =>
             l.lot_no === value &&
-            (!current.item_name || l.item_name.toLowerCase() === current.item_name.toLowerCase())
+            (!current.item_name || String(l.item_name || '').toLowerCase() === String(current.item_name || '').toLowerCase())
         );
         if (matchedLot) {
           current.parent_rm_lot_no = matchedLot.parent_rm_lot_no || '';
@@ -817,7 +839,7 @@ const SalesCreate = () => {
           }
         }
       } else if (field === 'godown_id') {
-        const gd = lookups.godowns.find((g) => String(g.id) === String(value));
+        const gd = (lookups.godowns || []).find((g) => String(g.id) === String(value));
         current.godown_name = gd?.godown_name || '';
       } else if (field === 'qty' || field === 'weight') {
         const q = parseFloat(field === 'qty' ? value : current.qty) || 0;
@@ -895,7 +917,7 @@ const SalesCreate = () => {
       const updated = [...prev];
       const nextRow = { ...updated[index], [field]: value };
       if (field === 'deduction_id') {
-        const ded = lookups.deductions.find((d) => String(d.id) === String(value));
+        const ded = (lookups.deductions || []).find((d) => String(d.id) === String(value));
         if (ded) {
           const dVal = parseFloat(ded.ded_value) || 0;
           const optType = String(ded.ded_type || ded.type || ded.deduction_type || '').toUpperCase();
@@ -1157,7 +1179,7 @@ const SalesCreate = () => {
     let active = true;
     api(`/sales/${fromOrderId}`)
       .then((res) => {
-        if (active && res && res.id) {
+        if (active && res && res.success !== false && res.id) {
           handleWorkflowImport(res);
         }
       })
@@ -1503,7 +1525,7 @@ const SalesCreate = () => {
                     >
                       <option value="">-- Choose Customer --</option>
                       <option value="__NEW_CUSTOMER__" style={{ fontWeight: 'bold', color: '#1d4ed8' }}>+ Enter Customer manually / New Customer</option>
-                      {lookups.customers.map((c) => (
+                      {(lookups.customers || []).map((c) => (
                         <option key={c.id} value={c.id}>
                           {c.name}{c.gst_number ? ` (${c.gst_number})` : ''}
                         </option>
@@ -1664,7 +1686,7 @@ const SalesCreate = () => {
                     <label style={ui.label}>Default Dispatch Godown</label>
                     <select value={formData.godown_from_id} onChange={(e) => handleFieldChange('godown_from_id', e.target.value)} style={ui.input}>
                       <option value="">-- Select Godown --</option>
-                      {lookups.godowns.map((g) => (
+                      {(lookups.godowns || []).map((g) => (
                         <option key={g.id} value={g.id}>{g.godown_name}</option>
                       ))}
                     </select>
@@ -1730,10 +1752,10 @@ const SalesCreate = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((row, idx) => {
+                  {(rows || []).map((row, idx) => {
                     const calc = summary.computedRows[idx] || { taxableAmount: 0, totalAmount: 0, netProductWt: 0 };
-                    const matchingLots = availableLots.filter(
-                      (l) => !row.item_name || l.item_name.toLowerCase() === row.item_name.toLowerCase()
+                    const matchingLots = (availableLots || []).filter(
+                      (l) => !row.item_name || String(l.item_name || '').toLowerCase() === String(row.item_name || '').toLowerCase()
                     );
                     return (
                       <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0', backgroundColor: idx % 2 === 0 ? '#ffffff' : '#f8fafc' }}>
@@ -1745,7 +1767,7 @@ const SalesCreate = () => {
                             style={ui.cellInput}
                           >
                             <option value="">-- Select Item --</option>
-                            {lookups.items.map((it) => (
+                            {(lookups.items || []).map((it) => (
                               <option key={it.id} value={it.item_name}>
                                 {it.item_name}{it.item_code ? ` (${it.item_code})` : ''}
                               </option>
@@ -1764,7 +1786,7 @@ const SalesCreate = () => {
                             style={ui.cellInput}
                           >
                             <option value="">-- Godown --</option>
-                            {lookups.godowns.map((g) => (
+                            {(lookups.godowns || []).map((g) => (
                               <option key={g.id} value={g.id}>{g.godown_name}</option>
                             ))}
                           </select>
@@ -2083,7 +2105,7 @@ const SalesCreate = () => {
                       <option value="__NEW_TRANSPORTER__" style={{ fontWeight: 'bold', color: '#1d4ed8' }}>
                         {getCreateLabel('transports')}
                       </option>
-                      {lookups.transports.map((t) => (
+                      {(lookups.transports || []).map((t) => (
                         <option key={t.id} value={t.id}>{t.print_name || t.name}</option>
                       ))}
                     </select>
@@ -2183,7 +2205,7 @@ const SalesCreate = () => {
                       <option value="__NEW_LOADMAN__" style={{ fontWeight: 'bold', color: '#1d4ed8' }}>
                         {getCreateLabel('loadman')}
                       </option>
-                      {lookups.workers.map((w) => (
+                      {(lookups.workers || []).map((w) => (
                         <option key={w.id} value={w.id}>{w.name || w.worker_name}</option>
                       ))}
                     </select>
@@ -2275,11 +2297,11 @@ const SalesCreate = () => {
                   + Add Deduction Row
                 </button>
               </div>
-              {selectedDeductions.map((dRow, dIdx) => (
+              {(selectedDeductions || []).map((dRow, dIdx) => (
                 <div key={dIdx} style={{ display: 'grid', gridTemplateColumns: '1.6fr 1.6fr 1fr 0.7fr 1.1fr 1.4fr 42px', gap: '8px', alignItems: 'center', marginBottom: '8px' }}>
                   <select value={dRow.deduction_id || ''} onChange={(e) => handleDeductionRowChange(dIdx, 'deduction_id', e.target.value)} style={ui.input}>
                     <option value="">-- Master --</option>
-                    {lookups.deductions.map((opt) => (
+                    {(lookups.deductions || []).map((opt) => (
                       <option key={opt.id} value={opt.id}>{opt.ded_name}</option>
                     ))}
                     <option value="__CREATE_NEW__">{getCreateLabel('deduction_sales')}</option>
@@ -2356,7 +2378,7 @@ const SalesCreate = () => {
                   <label style={ui.label}>Deposit Cash / Bank Account</label>
                   <select value={formData.bank_account_id} onChange={(e) => handleFieldChange('bank_account_id', e.target.value)} style={ui.input}>
                     <option value="">-- Select Cash / Bank Ledger --</option>
-                    {lookups.cashBankLedgers.map((l) => (
+                    {(lookups.cashBankLedgers || []).map((l) => (
                       <option key={l.id} value={l.id}>{l.name} ({l.group_name})</option>
                     ))}
                   </select>

@@ -63,7 +63,7 @@ const SalesExportCreate = () => {
         setLoading(true);
         try {
           const res = await api(`/sales-export-orders/${editId}`);
-          if (res) {
+          if (res && res.success !== false && (res.id || res.bill_no)) {
             setFormData({
               billNo: String(res.bill_no || ''),
               date: res.date ? res.date.substring(0, 10) : new Date().toISOString().split('T')[0],
@@ -112,6 +112,9 @@ const SalesExportCreate = () => {
                 inrAmt: String(it.inr_amt || '')
               })));
             }
+          } else if (res?.success === false) {
+            setMessage(res.message || 'Error loading export sales record');
+            setMessageType('error');
           }
         } catch (err) {
           console.error('Error fetching export sales record:', err);
@@ -123,7 +126,9 @@ const SalesExportCreate = () => {
       } else {
         try {
           const nextRes = await api('/sales-export-orders/next-sno');
-          const sno = nextRes?.next_sno ?? nextRes?.next_s_no ?? nextRes?.s_no ?? nextRes?.data?.s_no;
+          const sno = nextRes && nextRes.success !== false
+            ? (nextRes.next_sno ?? nextRes.next_s_no ?? nextRes.s_no ?? nextRes.data?.s_no)
+            : null;
           if (sno) {
             setFormData(prev => ({ ...prev, billNo: String(sno) }));
           } else {

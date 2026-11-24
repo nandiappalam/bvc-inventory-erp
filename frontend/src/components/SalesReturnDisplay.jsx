@@ -920,7 +920,7 @@ const SalesReturnDisplay = () => {
                   Original Invoice: {viewModal.data.original_invoice_no || '—'} · Date: {formatDateDMY(viewModal.data.date)}
                 </div>
               </div>
-              <button type="button" onClick={() => setViewModal({ open: false, loading: false, data: null })} style={{ background: 'none', border: 'none', color: '#fff', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+              <button type="button" onClick={() => setViewModal({ open: false, loading: false, data: null })} style={{ backgroundColor: 'rgba(255, 255, 255, 0.25)', border: '1px solid rgba(255, 255, 255, 0.4)', borderRadius: '6px', color: '#fff', fontSize: '16px', fontWeight: 900, width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} title="Close">✕</button>
             </div>
             <div style={{ padding: '16px', fontSize: '12px' }}>
               {viewModal.loading && <div style={{ color: '#64748b', marginBottom: '10px' }}>Loading full dossier...</div>}
@@ -1018,7 +1018,7 @@ const SalesReturnDisplay = () => {
               <span style={{ fontWeight: 800, fontSize: '15px' }}>
                 QC Inspection &amp; Authorized Approval · {approveModal.row.return_no}
               </span>
-              <button type="button" onClick={() => setApproveModal({ open: false, row: null, saving: false })} style={{ background: 'none', border: 'none', color: '#fff', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+              <button type="button" onClick={() => setApproveModal({ open: false, row: null, saving: false })} style={{ backgroundColor: 'rgba(255, 255, 255, 0.25)', border: '1px solid rgba(255, 255, 255, 0.4)', borderRadius: '6px', color: '#fff', fontSize: '16px', fontWeight: 900, width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} title="Close">✕</button>
             </div>
             <div style={{ padding: '16px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', fontSize: '12px' }}>
               <div>

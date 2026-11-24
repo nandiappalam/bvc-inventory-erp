@@ -130,7 +130,7 @@ export default function QualityCheckCreatePage() {
       selectedCompany || {},
       'COA'
     )
-    printHtml(html, { title: `Certificate of Analysis (COA) - ${result?.qc?.qc_no || 'Draft'}` })
+    printHtml(html, `Certificate of Analysis (COA) - ${result?.qc?.qc_no || 'Draft'}`)
   }
 
   const handlePrintIqr = () => {
@@ -148,7 +148,7 @@ export default function QualityCheckCreatePage() {
       selectedCompany || {},
       'IQR'
     )
-    printHtml(html, { title: `Incoming Quality Report (IQR) - ${result?.qc?.qc_no || 'Draft'}` })
+    printHtml(html, `Incoming Quality Report (IQR) - ${result?.qc?.qc_no || 'Draft'}`)
   }
 
   return (

@@ -65,18 +65,24 @@ export function generateQcPrintHtml(qcData = {}, company = {}, reportType = 'COA
   const evidenceHtml = evidenceList.length > 0
     ? `<div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(220px, 1fr));gap:10px;">` +
       evidenceList.map((ev, idx) => {
-        const isImg = String(ev.mime_type || ev.type || '').startsWith('image/') || /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(ev.url || ev.name || '');
-        const isVid = String(ev.mime_type || ev.type || '').startsWith('video/') || /\.(mp4|webm|mov|ogg)$/i.test(ev.url || ev.name || '');
+        const urlStr = String(ev?.url || '').trim();
+        const mimeStr = String(ev?.mime_type || ev?.mime || ev?.type || '').toLowerCase();
+        const kindStr = String(ev?.kind || '').toLowerCase();
+        const nameStr = String(ev?.name || 'Physical Test Reference');
+        const isDataUri = urlStr.startsWith('data:');
+        const isImg = kindStr === 'image' || mimeStr.startsWith('image/') || urlStr.startsWith('data:image/') || /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(nameStr);
+        const isVid = !isImg && (kindStr === 'video' || mimeStr.startsWith('video/') || urlStr.startsWith('data:video/') || /\.(mp4|webm|mov|ogg)$/i.test(nameStr));
+        const safeExternalUrl = !isDataUri && urlStr ? urlStr : '';
         return `
-          <div style="border:1px solid #cbd5e1;padding:8px;border-radius:4px;background:#ffffff;box-sizing:border-box;">
+          <div style="border:1px solid #cbd5e1;padding:8px;border-radius:4px;background:#ffffff;box-sizing:border-box;page-break-inside:avoid;">
             <div style="font-weight:700;font-size:11px;color:#1e3a8a;margin-bottom:4px;">
-              #${idx + 1} · ${escHtml(ev.name || 'Physical Test Reference')}
-              <span style="font-size:10px;color:#64748b;font-weight:normal;"> (${escHtml(ev.type || ev.mime_type || (isImg ? 'Photo' : isVid ? 'Video' : 'Document'))})</span>
+              #${idx + 1} · ${escHtml(nameStr)}
+              <span style="font-size:10px;color:#64748b;font-weight:normal;"> (${escHtml(ev?.type || ev?.mime_type || ev?.mime || (isImg ? 'Photo' : isVid ? 'Video' : 'Document'))})</span>
             </div>
-            ${ev.notes ? '<div style="font-size:11px;color:#334155;margin-bottom:6px;"><strong>Note:</strong> ' + escHtml(ev.notes) + '</div>' : ''}
-            ${isImg ? '<div style="text-align:center;"><img src="' + escHtml(ev.url) + '" alt="' + escHtml(ev.name || 'Evidence') + '" style="max-width:100%;max-height:160px;object-fit:contain;border:1px solid #e2e8f0;border-radius:3px;" /></div>' : ''}
-            ${isVid ? '<div style="text-align:center;"><video src="' + escHtml(ev.url) + '" controls style="max-width:100%;max-height:160px;border:1px solid #e2e8f0;border-radius:3px;"></video></div>' : ''}
-            ${!isImg && !isVid ? '<div style="padding:8px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:3px;font-size:11px;text-align:center;"><span style="font-size:18px;">📄</span><br/><a href="' + escHtml(ev.url) + '" target="_blank" style="color:#2563eb;word-break:break-all;font-weight:bold;">View Document</a></div>' : ''}
+            ${ev?.notes ? '<div style="font-size:11px;color:#334155;margin-bottom:6px;"><strong>Note:</strong> ' + escHtml(ev.notes) + '</div>' : ''}
+            ${isImg && urlStr ? '<div style="text-align:center;"><img src="' + escHtml(urlStr) + '" alt="' + escHtml(nameStr) + '" style="max-width:100%;max-height:160px;object-fit:contain;border:1px solid #e2e8f0;border-radius:3px;" /></div>' : ''}
+            ${isVid ? '<div style="padding:8px;background:#eff6ff;border:1px dashed #93c5fd;border-radius:3px;font-size:11px;text-align:center;color:#1e3a8a;"><strong>Video Reference Attached</strong>' + (safeExternalUrl ? '<br/><a href="' + escHtml(safeExternalUrl) + '" target="_blank" rel="noreferrer" style="color:#2563eb;word-break:break-all;font-weight:bold;">Open Video Link</a>' : '<br/><span style="color:#475569;">Stored in BVC ERP QC Record</span>') + '</div>' : ''}
+            ${!isImg && !isVid ? '<div style="padding:8px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:3px;font-size:11px;text-align:center;">' + (safeExternalUrl ? '<a href="' + escHtml(safeExternalUrl) + '" target="_blank" rel="noreferrer" style="color:#2563eb;word-break:break-all;font-weight:bold;">View Document</a>' : '<span style="color:#334155;font-weight:600;">Attached Document (Stored in ERP)</span>') + '</div>' : ''}
           </div>
         `;
       }).join('') + `</div>`

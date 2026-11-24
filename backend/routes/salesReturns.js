@@ -8,10 +8,14 @@ const {
   deleteSalesReturnVoucherChain
 } = require('../utils/ledgerHelper');
 const { syncDocumentMovements, deleteDocumentMovements } = require('../services/SourceMovementSync');
+const { ensureSalesSchema } = require('../services/SalesService');
 
-const getCompanyId = (req) =>
-  req.companyId ||
-  (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : (req.user?.company_id || 1));
+const getCompanyId = (req) => {
+  const raw =
+    req.companyId ||
+    (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : (req.user?.company_id || 1));
+  return parseInt(raw, 10) || 1;
+};
 
 const _srSchemaEnsured = new Set();
 
@@ -91,7 +95,19 @@ function defaultConditionForDisposition(disp) {
 }
 
 async function ensureReturnColumns(companyId) {
-  if (_srSchemaEnsured.has(companyId)) return;
+  const cId = parseInt(companyId, 10) || 1;
+  const runner = db.forCompany(cId);
+
+  await ensureSalesSchema(cId);
+
+  if (_srSchemaEnsured.has(cId)) {
+    try {
+      await runner.query(`SELECT return_no, complaint_no, approval_status FROM sales_return LIMIT 1`);
+      return;
+    } catch (_) {
+      _srSchemaEnsured.delete(cId);
+    }
+  }
 
   const headerCols = [
     'return_no TEXT',
@@ -172,7 +188,7 @@ async function ensureReturnColumns(companyId) {
 
   for (const col of headerCols) {
     try {
-      await db.run(`ALTER TABLE sales_return ADD COLUMN ${col}`, [], companyId);
+      await runner.run(`ALTER TABLE sales_return ADD COLUMN ${col}`);
     } catch (_) {}
   }
 
@@ -201,11 +217,11 @@ async function ensureReturnColumns(companyId) {
 
   for (const col of itemCols) {
     try {
-      await db.run(`ALTER TABLE sales_return_items ADD COLUMN ${col}`, [], companyId);
+      await runner.run(`ALTER TABLE sales_return_items ADD COLUMN ${col}`);
     } catch (_) {}
   }
 
-  _srSchemaEnsured.add(companyId);
+  _srSchemaEnsured.add(cId);
 }
 
 router.use(async (req, _res, next) => {
@@ -371,10 +387,10 @@ async function reverseApprovedStockImpact(runner, activeCompanyId, salesReturnId
     if (stk.item_name && q > 0) {
       await runner.run(
         `UPDATE stock_lots
-         SET remaining_quantity = MAX(0, COALESCE(remaining_quantity, 0) - ?)
+         SET remaining_quantity = CASE WHEN COALESCE(remaining_quantity, 0) - ? > 0 THEN COALESCE(remaining_quantity, 0) - ? ELSE 0 END
          WHERE LOWER(TRIM(item_name)) = LOWER(TRIM(?))
            AND UPPER(TRIM(COALESCE(lot_no, ''))) = UPPER(TRIM(?))`,
-        [q, stk.item_name, stk.lot_no || '']
+        [q, q, stk.item_name, stk.lot_no || '']
       ).catch(() => {});
     }
   }

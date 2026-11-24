@@ -55,16 +55,28 @@ function sanitizeEvidenceList(rawList) {
         safeUrl = rawUrl.slice(0, 1000);
       }
     }
-    const kind = ['image', 'video', 'document'].includes(String(entry.kind || '').toLowerCase())
+    const rawMime = String(entry.mime_type || entry.mime || entry.type || '').trim().slice(0, 80);
+    const inferredKind = ['image', 'video', 'document'].includes(String(entry.kind || '').toLowerCase())
       ? String(entry.kind).toLowerCase()
-      : (safeUrl.startsWith('data:video/') ? 'video' : safeUrl.startsWith('data:image/') ? 'image' : 'document');
+      : (rawMime.startsWith('video/') || safeUrl.startsWith('data:video/') || /\.(mp4|webm|mov|ogg)$/i.test(name))
+        ? 'video'
+        : (rawMime.startsWith('image/') || safeUrl.startsWith('data:image/') || /\.(png|jpe?g|webp|gif)$/i.test(name))
+          ? 'image'
+          : 'document';
+    const normalizedMime = rawMime || (
+      safeUrl.startsWith('data:video/') ? 'video/mp4'
+        : safeUrl.startsWith('data:image/') ? 'image/png'
+        : safeUrl.startsWith('data:application/pdf') ? 'application/pdf'
+        : inferredKind
+    );
 
     if (name || safeUrl || notes) {
       cleaned.push({
         id: String(entry.id || `${Date.now()}-${cleaned.length + 1}`),
         name: name || `Evidence ${cleaned.length + 1}`,
-        kind,
-        mime: String(entry.mime || '').slice(0, 80),
+        kind: inferredKind,
+        mime: normalizedMime,
+        mime_type: normalizedMime,
         size: Number(entry.size || 0) || 0,
         url: safeUrl,
         notes,

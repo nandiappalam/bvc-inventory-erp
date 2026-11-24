@@ -194,9 +194,18 @@ export function printHtml(html, title = "Print Document", options = {}) {
         <p>The selected record or report does not contain printable data.</p>
        </div>`;
 
+  const resolvedTitle =
+    typeof title === 'string'
+      ? title
+      : title && typeof title === 'object' && title.title
+      ? String(title.title)
+      : options && typeof options === 'object' && options.title
+      ? String(options.title)
+      : 'Print Document';
+
   const oldTitle = document.title;
-  if (title) {
-    document.title = title;
+  if (resolvedTitle) {
+    document.title = resolvedTitle;
   }
 
   let bodyContent = safeContent;
@@ -212,6 +221,12 @@ export function printHtml(html, title = "Print Document", options = {}) {
     if (bodyMatch && bodyMatch[1]) {
       bodyContent = bodyMatch[1];
     }
+  }
+
+  // Remove any stale portal style tags first
+  const prevStyle = document.getElementById('bvc-portal-print-style');
+  if (prevStyle && prevStyle.parentNode) {
+    prevStyle.parentNode.removeChild(prevStyle);
   }
 
   // Inject dynamic styles into head temporarily
@@ -235,6 +250,15 @@ export function printHtml(html, title = "Print Document", options = {}) {
   // Inject content into the portal
   portal.innerHTML = bodyContent;
 
+  // Defense-in-depth: strip heavy interactive media nodes (<video>, <audio>, <iframe>) from print DOM
+  // so WebView2 / Chromium print compositor never allocates huge video decoder frames or hangs
+  portal.querySelectorAll('video, audio, iframe').forEach((mediaEl) => {
+    const notice = document.createElement('div');
+    notice.style.cssText = 'padding:6px 8px;border:1px dashed #93c5fd;background:#eff6ff;color:#1e3a8a;font-size:11px;border-radius:4px;';
+    notice.textContent = 'Media Attachment Reference (Playable in ERP View)';
+    mediaEl.replaceWith(notice);
+  });
+
   // Add the portal printing class to body so @media print reveals ONLY the portal
   document.body.classList.add("bvc-printing-portal");
 
@@ -251,7 +275,7 @@ export function printHtml(html, title = "Print Document", options = {}) {
       if (portal && !document.body.classList.contains("bvc-printing-portal")) {
         portal.innerHTML = "";
       }
-    }, 2000);
+    }, 1500);
     document.title = oldTitle;
     window.removeEventListener("afterprint", cleanup);
   };
@@ -261,17 +285,45 @@ export function printHtml(html, title = "Print Document", options = {}) {
   // Safety fallback cleanup after 2 minutes in case afterprint does not fire
   setTimeout(cleanup, 120000);
 
-  // Allow browser layout engine to paint DOM before opening native print dialog
-  requestAnimationFrame(() => {
-    setTimeout(() => {
-      try {
-        window.focus();
-        window.print();
-      } catch (err) {
-        console.error("Print invocation error:", err);
-      }
-    }, 150);
-  });
+  // Wait briefly for any images inside the print portal to decode (capped at 600ms)
+  const imgs = Array.from(portal.querySelectorAll('img')).filter((img) => !img.complete);
+  const triggerPrint = () => {
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        try {
+          window.focus();
+          window.print();
+        } catch (err) {
+          console.error("Print invocation error:", err);
+          cleanup();
+        }
+      }, 120);
+    });
+  };
+
+  if (imgs.length === 0) {
+    triggerPrint();
+  } else {
+    let settled = false;
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      triggerPrint();
+    };
+    const fallbackTimer = setTimeout(done, 600);
+    Promise.all(
+      imgs.map(
+        (img) =>
+          new Promise((resolve) => {
+            img.addEventListener('load', resolve, { once: true });
+            img.addEventListener('error', resolve, { once: true });
+          })
+      )
+    ).then(() => {
+      clearTimeout(fallbackTimer);
+      done();
+    });
+  }
 }
 
 export default printHtml;

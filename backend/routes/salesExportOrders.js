@@ -24,10 +24,10 @@ router.get('/', async (req, res) => {
              COALESCE(egm.name, s.exporter) AS exporter_name,
              COALESCE(ctgm.name, s.consigned_to) AS consigned_to_name
       FROM sales_export_orders s
-      LEFT JOIN sender_group_master sgm ON s.sender = sgm.id OR s.sender = CAST(sgm.id AS TEXT) OR s.sender = sgm.name
-      LEFT JOIN consignee_group_master cgm ON s.consignee = cgm.id OR s.consignee = CAST(cgm.id AS TEXT) OR s.consignee = cgm.name
-      LEFT JOIN sender_group_master egm ON s.exporter = egm.id OR s.exporter = CAST(egm.id AS TEXT) OR s.exporter = egm.name
-      LEFT JOIN consignee_group_master ctgm ON s.consigned_to = ctgm.id OR s.consigned_to = CAST(ctgm.id AS TEXT) OR s.consigned_to = ctgm.name
+      LEFT JOIN sender_group_master sgm ON CAST(s.sender AS TEXT) = CAST(sgm.id AS TEXT) OR s.sender = sgm.name
+      LEFT JOIN consignee_group_master cgm ON CAST(s.consignee AS TEXT) = CAST(cgm.id AS TEXT) OR s.consignee = cgm.name
+      LEFT JOIN sender_group_master egm ON CAST(s.exporter AS TEXT) = CAST(egm.id AS TEXT) OR s.exporter = egm.name
+      LEFT JOIN consignee_group_master ctgm ON CAST(s.consigned_to AS TEXT) = CAST(ctgm.id AS TEXT) OR s.consigned_to = ctgm.name
     `;
     const params = [];
     
@@ -148,7 +148,7 @@ router.post('/', async (req, res) => {
          formData.placeOfRcpt, formData.loadingPort, formData.originCountry, formData.deliveryTerms,
          formData.paymentTerms, formData.purTransport, formData.driver, formData.lorryNo,
          formData.remarks, totalQty, totalUsdAmt, totalInrAmt, isOrderValue,
-         formData.loadman_name || '', formData.loadman_worker_id || null, parseFloat(formData.loadman_rate_per_kg) || 0.50, parseFloat(formData.loadman_charges) || 0])
+         formData.loadman_name || '', /^\d+$/.test(String(formData.loadman_worker_id || '').trim()) ? parseInt(formData.loadman_worker_id, 10) : null, parseFloat(formData.loadman_rate_per_kg) || 0.50, parseFloat(formData.loadman_charges) || 0])
 
     const exportOrderId = exportOrderResult.lastID
 
@@ -191,9 +191,9 @@ router.post('/', async (req, res) => {
             const deduct = Math.min(lot.remaining_quantity, remainingToDeduct);
             await db.run(`
               UPDATE stock_lots 
-              SET remaining_quantity = MAX(0, remaining_quantity - ?)
+              SET remaining_quantity = CASE WHEN COALESCE(remaining_quantity, 0) - ? > 0 THEN COALESCE(remaining_quantity, 0) - ? ELSE 0 END
               WHERE id = ?
-            `, [deduct, lot.id]);
+            `, [deduct, deduct, lot.id]);
             remainingToDeduct -= deduct;
           }
         }
@@ -212,9 +212,9 @@ router.post('/', async (req, res) => {
             const deduct = Math.min(lot.remaining_quantity, remainingToDeduct);
             await db.run(`
               UPDATE stock_lots 
-              SET remaining_quantity = MAX(0, remaining_quantity - ?)
+              SET remaining_quantity = CASE WHEN COALESCE(remaining_quantity, 0) - ? > 0 THEN COALESCE(remaining_quantity, 0) - ? ELSE 0 END
               WHERE id = ?
-            `, [deduct, lot.id]);
+            `, [deduct, deduct, lot.id]);
             remainingToDeduct -= deduct;
           }
         }
@@ -241,7 +241,7 @@ router.post('/', async (req, res) => {
             ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'OUT', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
           `, [
             'SALES_EXPORT',
-            formData.bill_no || exportOrderId,
+            exportOrderId,
             'OUTWARD',
             'Export Dispatch',
             vNo,
@@ -338,7 +338,7 @@ router.put('/:id', async (req, res) => {
          formData.placeOfRcpt, formData.loadingPort, formData.originCountry, formData.deliveryTerms,
          formData.paymentTerms, formData.purTransport, formData.driver, formData.lorryNo,
          formData.remarks, totalQty, totalUsdAmt, totalInrAmt, isOrderValue,
-         formData.loadman_name || '', formData.loadman_worker_id || null, parseFloat(formData.loadman_rate_per_kg) || 0.50, parseFloat(formData.loadman_charges) || 0,
+         formData.loadman_name || '', /^\d+$/.test(String(formData.loadman_worker_id || '').trim()) ? parseInt(formData.loadman_worker_id, 10) : null, parseFloat(formData.loadman_rate_per_kg) || 0.50, parseFloat(formData.loadman_charges) || 0,
          exportOrderId])
 
     // Delete existing items

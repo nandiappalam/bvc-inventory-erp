@@ -113,7 +113,7 @@ const QuotationCreate = () => {
       try {
         if (editId) {
           const res = await api(`/quotations/${editId}`);
-          if (res) {
+          if (res && res.success !== false && (res.id || res.bill_no || res.s_no)) {
             const customerVal = res.customer_name || res.customer || res.customer_id || '';
             const initialTaxRate = String(res.tax_percent !== undefined && res.tax_percent !== null ? res.tax_percent : '0');
 

@@ -64,6 +64,14 @@ function round3(v) {
   return Math.round((n + Number.EPSILON) * 1000) / 1000;
 }
 
+function toNullableInt(val) {
+  if (val === null || val === undefined || val === '') return null;
+  const s = String(val).trim();
+  if (!/^\d+$/.test(s)) return null;
+  const n = parseInt(s, 10);
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
+}
+
 function normalizeStateCode(val, fallback = '33') {
   if (!val) return fallback;
   const s = String(val).trim().toLowerCase();
@@ -188,9 +196,20 @@ async function ensureSalesSchema(companyId = 1) {
   const cId = parseInt(companyId, 10) || 1;
   const runner = db.forCompany(cId);
 
+  if (_ensuredSalesCompanies.has(cId)) {
+    try {
+      await runner.query(`SELECT outpass_status, dispatch_status, billing_address, sales_order_ref FROM sales LIMIT 1`);
+      return;
+    } catch (_) {
+      _ensuredSalesCompanies.delete(cId);
+    }
+  }
+
   await ensureMovementPassesSchema(cId);
 
   await ensureColumns(runner, 'sales', [
+    ['inv_no', 'TEXT'],
+    ['bill_no', 'TEXT'],
     ['is_order', 'INTEGER DEFAULT 0'],
     ['voucher_no', 'TEXT'],
     ['deductions_json', 'TEXT'],
@@ -366,7 +385,7 @@ async function getNextOutpassNo(companyId = 1, runnerOverride = null) {
 async function getNextSalesNo(companyId = 1, isOrder = false, runnerOverride = null) {
   const runner = runnerOverride || db.forCompany(companyId);
   const res = await runner.query(
-    `SELECT COALESCE(MAX(CAST(NULLIF(s_no, '') AS INTEGER)), 0) AS max_sno FROM sales WHERE COALESCE(is_order, 0) = ?`,
+    `SELECT COALESCE(MAX(CAST(s_no AS INTEGER)), 0) AS max_sno FROM sales WHERE COALESCE(is_order, 0) = ?`,
     [isOrder ? 1 : 0]
   );
   return String((parseInt(res.rows?.[0]?.max_sno, 10) || 0) + 1);
@@ -417,17 +436,17 @@ async function getFormLookups(companyId = 1) {
     nextOrderNo
   ] = await Promise.all([
     getCompanyProfile(companyId),
-    runner.query(`SELECT id, name, print_name, contact_person, address1, address2, address3, address4, city, state, state_code, gst_number, mobile1, mobile2, phone_off, email, transport, limit_days, limit_amount, opening_balance, balance_type, tax_reg_type, status FROM customer_master WHERE COALESCE(status, 'Active') != 'Inactive' ORDER BY name ASC`),
-    runner.query(`SELECT id, item_code, item_name, print_name, item_group, type, tax, hsn_code, weight, unit, tax_type, gst_rate, stock_category, status FROM item_master WHERE COALESCE(status, 'Active') != 'Inactive' ORDER BY item_name ASC`),
-    runner.query(`SELECT id, godown_name, print_name, location, godown_type, is_cold_storage, status FROM godown_master WHERE COALESCE(status, 'Active') != 'Inactive' ORDER BY id ASC`),
-    runner.query(`SELECT id, name, print_name, status FROM transport_master WHERE COALESCE(status, 'Active') != 'Inactive' ORDER BY name ASC`),
+    runner.query(`SELECT id, name, print_name, contact_person, address1, address2, address3, address4, city, state, state_code, gst_number, mobile1, mobile2, phone_off, email, transport, limit_days, limit_amount, opening_balance, balance_type, tax_reg_type, status FROM customer_master WHERE COALESCE(status, 'Active') != 'Inactive' ORDER BY name ASC`).catch(() => ({ rows: [] })),
+    runner.query(`SELECT id, item_code, item_name, print_name, item_group, type, tax, hsn_code, weight, unit, tax_type, gst_rate, stock_category, status FROM item_master WHERE COALESCE(status, 'Active') != 'Inactive' ORDER BY item_name ASC`).catch(() => ({ rows: [] })),
+    runner.query(`SELECT id, godown_name, print_name, location, godown_type, is_cold_storage, status FROM godown_master WHERE COALESCE(status, 'Active') != 'Inactive' ORDER BY id ASC`).catch(() => ({ rows: [] })),
+    runner.query(`SELECT id, name, print_name, status FROM transport_master WHERE COALESCE(status, 'Active') != 'Inactive' ORDER BY name ASC`).catch(() => ({ rows: [] })),
     runner.query(`SELECT * FROM operational_parties ORDER BY id ASC`).catch(() => ({ rows: [] })),
     runner.query(`SELECT * FROM weightmaster ORDER BY id ASC`).catch(() => ({ rows: [] })),
-    runner.query(`SELECT id, name, group_name, under, opening_balance, opening_balance_type FROM ledgermaster WHERE LOWER(COALESCE(group_name, under, '')) IN ('cash-in-hand', 'bank accounts', 'bank account', 'cash') AND COALESCE(TRIM(name), '') != '' ORDER BY group_name ASC, name ASC`),
+    runner.query(`SELECT id, name, group_name, under, opening_balance, opening_balance_type FROM ledgermaster WHERE LOWER(COALESCE(group_name, under, '')) IN ('cash-in-hand', 'bank accounts', 'bank account', 'cash') AND COALESCE(TRIM(name), '') != '' ORDER BY group_name ASC, name ASC`).catch(() => ({ rows: [] })),
     runner.query(`SELECT * FROM deduction_sales ORDER BY id ASC`).catch(() => ({ rows: [] })),
-    getNextOutpassNo(companyId, runner),
-    getNextSalesNo(companyId, false, runner),
-    getNextSalesNo(companyId, true, runner)
+    getNextOutpassNo(companyId, runner).catch(() => 'OP-00001'),
+    getNextSalesNo(companyId, false, runner).catch(() => '1'),
+    getNextSalesNo(companyId, true, runner).catch(() => '1')
   ]);
 
   const cashBankLedgers = ledgersRes.rows || [];
@@ -552,7 +571,7 @@ async function getAvailableLots(companyId = 1, filters = {}) {
 
   const smRowsRes = await runner.query(
     `SELECT
-       sm.item_id,
+       MAX(sm.item_id) AS item_id,
        sm.item_name,
        sm.lot_no,
        COALESCE(NULLIF(TRIM(MAX(sm.parent_lot_no)), ''), NULLIF(TRIM(MAX(sm.rm_lot_no)), ''), '') AS parent_rm_lot_no,
@@ -567,7 +586,8 @@ async function getAvailableLots(companyId = 1, filters = {}) {
      FROM stock_movements sm
      WHERE ${smWhere}
      GROUP BY sm.item_name, sm.lot_no, sm.godown_id
-     HAVING available_qty > 0.0001 OR available_weight > 0.0001
+     HAVING SUM(CASE WHEN sm.direction = 'IN' THEN COALESCE(sm.qty, 0) ELSE -COALESCE(sm.qty, 0) END) > 0.0001
+         OR SUM(CASE WHEN sm.direction = 'IN' THEN COALESCE(sm.weight, 0) ELSE -COALESCE(sm.weight, 0) END) > 0.0001
      ORDER BY sm.item_name ASC, sm.lot_no ASC`,
     smParams
   );
@@ -794,7 +814,12 @@ async function validateAndDeductSalesStock({ companyId, runner, salesId, saleDat
       const avail = parseFloat(lot.remaining_quantity) || 0;
       if (avail <= 0) continue;
       const take = Math.min(avail, rem);
-      await runner.run(`UPDATE stock_lots SET remaining_quantity = MAX(0, remaining_quantity - ?) WHERE id = ?`, [take, lot.id]);
+      await runner.run(
+        `UPDATE stock_lots
+         SET remaining_quantity = CASE WHEN COALESCE(remaining_quantity, 0) - ? > 0 THEN COALESCE(remaining_quantity, 0) - ? ELSE 0 END
+         WHERE id = ?`,
+        [take, take, lot.id]
+      );
       rem -= take;
     }
 
@@ -843,7 +868,12 @@ async function validateAndDeductSalesStock({ companyId, runner, salesId, saleDat
     const deductFromThis = Math.min(parseFloat(lot.remaining_quantity) || 0, remainingToDeduct);
     const ratio = qtyToDeduct > 0 ? deductFromThis / qtyToDeduct : 0;
 
-    await runner.run(`UPDATE stock_lots SET remaining_quantity = MAX(0, remaining_quantity - ?) WHERE id = ?`, [deductFromThis, lot.id]);
+    await runner.run(
+      `UPDATE stock_lots
+       SET remaining_quantity = CASE WHEN COALESCE(remaining_quantity, 0) - ? > 0 THEN COALESCE(remaining_quantity, 0) - ? ELSE 0 END
+       WHERE id = ?`,
+      [deductFromThis, deductFromThis, lot.id]
+    );
     await runner.run(
       `INSERT INTO stock (item_id, item_name, lot_no, qty, weight, rate, amount, date, type, reference_id, godown, godown_id)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Sale', ?, ?, ?)`,
@@ -893,7 +923,7 @@ async function prepareNormalizedPayload(companyId, runner, payload = {}, existin
     customerId: formData.customer_id
   });
   const resolvedCustName = custInfo.customerName || String(custKey);
-  const resolvedCustId = custInfo.id || (Number.isFinite(Number(formData.customer_id)) ? Number(formData.customer_id) : null);
+  const resolvedCustId = custInfo.id || toNullableInt(formData.customer_id);
   const custCtx = await getCustomerContext(companyId, resolvedCustId || resolvedCustName);
   const companyProfile = await getCompanyProfile(companyId);
 
@@ -1009,7 +1039,7 @@ async function prepareNormalizedPayload(companyId, runner, payload = {}, existin
     sumItemsTotal += lineTotalAmt;
 
     normalizedItems.push({
-      item_id: rawIt.item_id || rawIt.itemId || null,
+      item_id: toNullableInt(rawIt.item_id || rawIt.itemId),
       product_code: rawIt.product_code || rawIt.item_code || '',
       item_name: itName,
       category: rawIt.category || formData.stock_type || 'FG',
@@ -1404,6 +1434,7 @@ async function createSale(companyId = 1, payload = {}, user = null) {
   if (!billNo) {
     billNo = await getNextSalesNo(cId, norm.isOrder, runner);
   }
+  const sNoInt = toNullableInt(billNo) || toNullableInt(await getNextSalesNo(cId, norm.isOrder, runner)) || 1;
 
   const txResult = await runner.withTransaction(async () => {
     const insRes = await runner.run(
@@ -1431,18 +1462,18 @@ async function createSale(companyId = 1, payload = {}, user = null) {
          remarks, sign, is_order
        ) VALUES (${new Array(127).fill('?').join(', ')})`,
       [
-        billNo, formData.inv_no || billNo, norm.saleDate, norm.financialYear, norm.resolvedCustName, norm.resolvedCustId, norm.customerCode, norm.customerType, norm.customerGstin,
+        sNoInt, formData.inv_no || billNo, norm.saleDate, norm.financialYear, norm.resolvedCustName, toNullableInt(norm.resolvedCustId), norm.customerCode, norm.customerType, norm.customerGstin,
         norm.billingAddress, norm.billingAddress, norm.shippingAddress, norm.contactPerson, norm.phone, norm.email, norm.creditLimit, norm.customerOutstanding,
         formData.pay_type || (norm.receivedAmount >= norm.grandTotal && norm.grandTotal > 0 ? 'Cash' : 'Credit'),
         norm.taxType, norm.taxType, parseFloat(formData.tax_percent) || 5,
         norm.companyProfile.state, norm.companyProfile.state_code, norm.partyState, norm.partyStateCode, norm.placeOfSupply,
         formData.stock_type || 'FG', formData.pack_type || formData.type || 'Pack', formData.sales_category || 'Domestic',
-        formData.sales_order_ref || '', formData.sales_order_id || null, formData.customer_po_no || formData.p_o_no || '', formData.p_o_no || formData.customer_po_no || '',
+        formData.sales_order_ref || '', toNullableInt(formData.sales_order_id), formData.customer_po_no || formData.p_o_no || '', formData.p_o_no || formData.customer_po_no || '',
         norm.paymentTerms, norm.dueDate, sanitizeDate(formData.delivery_date) || '', formData.sales_person || '',
-        formData.sender_id || null, formData.consignee_id || null, norm.defaultGodown.id, norm.defaultGodown.godown_name,
-        formData.lorry_no || formData.vehicle_no || '', formData.driver || '', formData.driver_mobile || '', norm.transporterName, formData.transport_mode || 'Third Party', formData.transporter_id || null, formData.transporter_gstin || '', formData.vehicle_type || '',
+        toNullableInt(formData.sender_id), toNullableInt(formData.consignee_id), toNullableInt(norm.defaultGodown.id), norm.defaultGodown.godown_name,
+        formData.lorry_no || formData.vehicle_no || '', formData.driver || '', formData.driver_mobile || '', norm.transporterName, formData.transport_mode || 'Third Party', toNullableInt(formData.transporter_id), formData.transporter_gstin || '', formData.vehicle_type || '',
         formData.lr_no || '', sanitizeDate(formData.lr_date) || '', sanitizeDate(formData.expected_delivery_date) || '', sanitizeDate(formData.actual_delivery_date) || '',
-        formData.loadman_name || '', formData.loadman_worker_id || null, parseFloat(formData.loadman_rate_per_kg) || 0.5, parseFloat(formData.loadman_charges) || 0,
+        formData.loadman_name || '', toNullableInt(formData.loadman_worker_id), parseFloat(formData.loadman_rate_per_kg) || 0.5, parseFloat(formData.loadman_charges) || 0,
         norm.weighmentMode, norm.vehicleGrossWeight, norm.vehicleTareWeight, norm.netLoadWeight, norm.totalPkgTareWt, norm.totalProductNetWt,
         sanitizeDate(formData.weighment_date) || norm.saleDate, formData.weighment_time || '', formData.weighbridge_name || '', formData.weighment_slip_no || '', formData.weighed_by || '',
         norm.autoOutpass, formData.loading_location || norm.defaultGodown.godown_name, formData.delivery_location || norm.shippingAddress,
@@ -1452,7 +1483,7 @@ async function createSale(companyId = 1, payload = {}, user = null) {
         norm.billAmt, norm.billAmt, norm.billAmt, norm.taxAmt, norm.taxAmt,
         norm.cgstAmt, norm.sgstAmt, norm.igstAmt, norm.cgstAmt, norm.sgstAmt, norm.igstAmt,
         norm.totalAmt, norm.grandTotal, norm.grandTotal, formData.deduction || '', formData.deduction_remarks || '', norm.netDeductionAmount, norm.deductionsJson,
-        formData.payment_mode || formData.pay_type || 'Credit', norm.receivedAmount, norm.advanceAdjusted, norm.balanceReceivable, formData.bank_account_id || null, formData.bank_account_name || '', formData.transaction_ref || '', sanitizeDate(formData.payment_date) || norm.saleDate,
+        formData.payment_mode || formData.pay_type || 'Credit', norm.receivedAmount, norm.advanceAdjusted, norm.balanceReceivable, toNullableInt(formData.bank_account_id), formData.bank_account_name || '', formData.transaction_ref || '', sanitizeDate(formData.payment_date) || norm.saleDate,
         formData.dispatch_no || '', formData.dispatch_datetime || '', formData.dispatch_status || (norm.isOrder ? 'Sales Order' : (norm.autoOutpass ? 'Loaded' : 'Invoice Created')),
         formData.delivery_challan_no || '', formData.eway_bill_no || '', sanitizeDate(formData.eway_bill_validity) || '', formData.irn_no || '', formData.ack_no || '', formData.received_by || '', formData.delivery_remarks || '',
         formData.remarks || '', formData.sign || '', norm.isOrder ? 1 : 0
@@ -1516,7 +1547,7 @@ async function createSale(companyId = 1, payload = {}, user = null) {
            reference_type, reference_id, movement_type, operation_type, vehicle_no, driver_name,
            gate_in_time, gate_out_time, status, item_name, qty, weight, party_name, lot_no, created_at
          ) VALUES ('SALES', ?, 'OUTWARD', 'Sales Dispatch / Loading', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'OUT', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-        [billNo || salesId, vNo, formData.driver || '', norm.normalizedItems[0]?.item_name || '', norm.totalQty, norm.totalProductNetWt, norm.resolvedCustName, norm.normalizedItems[0]?.lot_no || '']
+        [salesId, vNo, formData.driver || '', norm.normalizedItems[0]?.item_name || '', norm.totalQty, norm.totalProductNetWt, norm.resolvedCustName, norm.normalizedItems[0]?.lot_no || '']
       ).catch(() => {});
     }
 
@@ -1621,6 +1652,7 @@ async function updateSale(companyId = 1, salesId, payload = {}, user = null) {
 
   const norm = await prepareNormalizedPayload(cId, runner, payload, existingSale);
   const billNo = String(formData.sNo || formData.bill_no || formData.s_no || existingSale.s_no || salesId).trim();
+  const sNoInt = toNullableInt(billNo) || toNullableInt(existingSale.s_no) || toNullableInt(salesId) || 1;
 
   const txResult = await runner.withTransaction(async () => {
     await revertSalesStock(salesId, runner);
@@ -1650,18 +1682,18 @@ async function updateSale(companyId = 1, salesId, payload = {}, user = null) {
          remarks = ?, sign = ?, is_order = ?
        WHERE id = ?`,
       [
-        billNo, formData.inv_no || billNo, norm.saleDate, norm.financialYear, norm.resolvedCustName, norm.resolvedCustId, norm.customerCode, norm.customerType, norm.customerGstin,
+        sNoInt, formData.inv_no || billNo, norm.saleDate, norm.financialYear, norm.resolvedCustName, toNullableInt(norm.resolvedCustId), norm.customerCode, norm.customerType, norm.customerGstin,
         norm.billingAddress, norm.billingAddress, norm.shippingAddress, norm.contactPerson, norm.phone, norm.email, norm.creditLimit, norm.customerOutstanding,
         formData.pay_type || existingSale.pay_type || 'Credit',
         norm.taxType, norm.taxType, parseFloat(formData.tax_percent) || 5,
         norm.companyProfile.state, norm.companyProfile.state_code, norm.partyState, norm.partyStateCode, norm.placeOfSupply,
         formData.stock_type || existingSale.stock_type || 'FG', formData.pack_type || formData.type || existingSale.pack_type || 'Pack', formData.sales_category || existingSale.sales_category || 'Domestic',
-        formData.sales_order_ref || '', formData.sales_order_id || null, formData.customer_po_no || formData.p_o_no || '', formData.p_o_no || formData.customer_po_no || '',
+        formData.sales_order_ref || '', toNullableInt(formData.sales_order_id), formData.customer_po_no || formData.p_o_no || '', formData.p_o_no || formData.customer_po_no || '',
         norm.paymentTerms, norm.dueDate, sanitizeDate(formData.delivery_date) || '', formData.sales_person || '',
-        formData.sender_id || null, formData.consignee_id || null, norm.defaultGodown.id, norm.defaultGodown.godown_name,
-        formData.lorry_no || formData.vehicle_no || '', formData.driver || '', formData.driver_mobile || '', norm.transporterName, formData.transport_mode || 'Third Party', formData.transporter_id || null, formData.transporter_gstin || '', formData.vehicle_type || '',
+        toNullableInt(formData.sender_id), toNullableInt(formData.consignee_id), toNullableInt(norm.defaultGodown.id), norm.defaultGodown.godown_name,
+        formData.lorry_no || formData.vehicle_no || '', formData.driver || '', formData.driver_mobile || '', norm.transporterName, formData.transport_mode || 'Third Party', toNullableInt(formData.transporter_id), formData.transporter_gstin || '', formData.vehicle_type || '',
         formData.lr_no || '', sanitizeDate(formData.lr_date) || '', sanitizeDate(formData.expected_delivery_date) || '', sanitizeDate(formData.actual_delivery_date) || '',
-        formData.loadman_name || '', formData.loadman_worker_id || null, parseFloat(formData.loadman_rate_per_kg) || 0.5, parseFloat(formData.loadman_charges) || 0,
+        formData.loadman_name || '', toNullableInt(formData.loadman_worker_id), parseFloat(formData.loadman_rate_per_kg) || 0.5, parseFloat(formData.loadman_charges) || 0,
         norm.weighmentMode, norm.vehicleGrossWeight, norm.vehicleTareWeight, norm.netLoadWeight, norm.totalPkgTareWt, norm.totalProductNetWt,
         sanitizeDate(formData.weighment_date) || norm.saleDate, formData.weighment_time || '', formData.weighbridge_name || '', formData.weighment_slip_no || '', formData.weighed_by || '',
         norm.autoOutpass, formData.loading_location || norm.defaultGodown.godown_name, formData.delivery_location || norm.shippingAddress,
@@ -1671,7 +1703,7 @@ async function updateSale(companyId = 1, salesId, payload = {}, user = null) {
         norm.billAmt, norm.billAmt, norm.billAmt, norm.taxAmt, norm.taxAmt,
         norm.cgstAmt, norm.sgstAmt, norm.igstAmt, norm.cgstAmt, norm.sgstAmt, norm.igstAmt,
         norm.totalAmt, norm.grandTotal, norm.grandTotal, formData.deduction || '', formData.deduction_remarks || '', norm.netDeductionAmount, norm.deductionsJson,
-        formData.payment_mode || formData.pay_type || 'Credit', norm.receivedAmount, norm.advanceAdjusted, norm.balanceReceivable, formData.bank_account_id || null, formData.bank_account_name || '', formData.transaction_ref || '', sanitizeDate(formData.payment_date) || norm.saleDate,
+        formData.payment_mode || formData.pay_type || 'Credit', norm.receivedAmount, norm.advanceAdjusted, norm.balanceReceivable, toNullableInt(formData.bank_account_id), formData.bank_account_name || '', formData.transaction_ref || '', sanitizeDate(formData.payment_date) || norm.saleDate,
         formData.dispatch_no || '', formData.dispatch_datetime || '', formData.dispatch_status || existingSale.dispatch_status || 'Invoice Created',
         formData.delivery_challan_no || '', formData.eway_bill_no || '', sanitizeDate(formData.eway_bill_validity) || '', formData.irn_no || '', formData.ack_no || '', formData.received_by || '', formData.delivery_remarks || '',
         formData.remarks || '', formData.sign || '', norm.isOrder ? 1 : 0,

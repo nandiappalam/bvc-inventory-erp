@@ -718,7 +718,10 @@ router.get('/:id/ledger-statement', async (req, res) => {
     const runner = db.forCompany(activeCompanyId);
     const rawId = String(req.params.id || '').trim();
 
-    let saleRes = await runner.query('SELECT * FROM sales WHERE id = ? LIMIT 1', [rawId]);
+    let saleRes = { rows: [] };
+    if (/^\d+$/.test(rawId)) {
+      saleRes = await runner.query('SELECT * FROM sales WHERE id = ? LIMIT 1', [parseInt(rawId, 10)]);
+    }
     if (!saleRes.rows || saleRes.rows.length === 0) {
       saleRes = await runner.query(
         'SELECT * FROM sales WHERE UPPER(TRIM(COALESCE(voucher_no, \'\'))) = UPPER(TRIM(?)) OR CAST(s_no AS TEXT) = ? LIMIT 1',

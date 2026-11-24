@@ -36,7 +36,7 @@ const SalesExportDisplay = () => {
       let fullRecord = row;
       if (!row.items || row.items.length === 0) {
         const fetched = await api(`/sales-export-orders/${row.id}`).catch(() => null);
-        if (fetched) fullRecord = fetched;
+        if (fetched && fetched.success !== false) fullRecord = fetched;
       }
       printFormalSalesBill({
         documentType: 'EXPORT INVOICE',

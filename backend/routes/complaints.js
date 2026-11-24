@@ -7,10 +7,14 @@ const {
   sanitizeEvidenceList,
   resolveBatchAndRmTraceability
 } = require('../services/complaintTraceabilityHelper');
+const { ensureSalesSchema } = require('../services/SalesService');
 
-const getCompanyId = (req) =>
-  req.companyId ||
-  (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : (req.user?.company_id || 1));
+const getCompanyId = (req) => {
+  const raw =
+    req.companyId ||
+    (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : (req.user?.company_id || 1));
+  return parseInt(raw, 10) || 1;
+};
 
 const _cmpSchemaEnsured = new Set();
 
@@ -19,9 +23,22 @@ const SEVERITY_LEVELS = ['Critical', 'Major', 'Minor'];
 const INVESTIGATION_STATUSES = ['Open', 'Under Investigation', 'Resolved'];
 
 async function ensureComplaintTables(companyId) {
-  if (_cmpSchemaEnsured.has(companyId)) return;
+  const cId = parseInt(companyId, 10) || 1;
+  const runner = db.forCompany(cId);
 
-  await db.run(
+  await ensureSalesSchema(cId);
+
+  if (_cmpSchemaEnsured.has(cId)) {
+    try {
+      await runner.query(`SELECT 1 FROM customer_complaints LIMIT 1`);
+      await runner.query(`SELECT 1 FROM customer_complaint_items LIMIT 1`);
+      return;
+    } catch (_) {
+      _cmpSchemaEnsured.delete(cId);
+    }
+  }
+
+  await runner.run(
     `CREATE TABLE IF NOT EXISTS customer_complaints (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       complaint_no TEXT UNIQUE NOT NULL,
@@ -59,9 +76,7 @@ async function ensureComplaintTables(companyId) {
       created_by TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )`,
-    [],
-    companyId
+    )`
   );
 
   const extraCols = [
@@ -89,11 +104,11 @@ async function ensureComplaintTables(companyId) {
 
   for (const col of extraCols) {
     try {
-      await db.run(`ALTER TABLE customer_complaints ADD COLUMN ${col}`, [], companyId);
+      await runner.run(`ALTER TABLE customer_complaints ADD COLUMN ${col}`);
     } catch (_) {}
   }
 
-  await db.run(
+  await runner.run(
     `CREATE TABLE IF NOT EXISTS customer_complaint_items (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       complaint_id INTEGER NOT NULL,
@@ -112,12 +127,10 @@ async function ensureComplaintTables(companyId) {
       complaint_weight REAL DEFAULT 0,
       issue_notes TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )`,
-    [],
-    companyId
+    )`
   );
 
-  _cmpSchemaEnsured.add(companyId);
+  _cmpSchemaEnsured.add(cId);
 }
 
 router.use(async (req, _res, next) => {
