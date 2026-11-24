@@ -249,10 +249,83 @@ export default function CertificateAnalysisDisplay() {
 
         {/* Lab Manager Declarations */}
         <Box sx={{ mb: 4, p: 2, border: '1px solid #c8e6c9', borderRadius: 1, backgroundColor: '#f1f8e9' }}>
-          <Typography variant="subtitle2" sx={{ fontWeight: 800, color: '#2e7d32', mb: 0.5 }}>Compliance Statement & Declaration:</Typography>
+          <Typography variant="subtitle2" sx={{ fontWeight: 800, color: '#2e7d32', mb: 0.5 }}>Compliance Statement &amp; Declaration:</Typography>
           <Typography variant="body2" sx={{ color: 'text.secondary', fontSize: 12.5, lineHeight: 1.5 }}>
-            It is hereby certified that the raw material lot mentioned above has been sampled and tested under ISO protocols. The test results conform to BVC food-grade safety standards. The batch is certified as <b>FIT FOR HUMANOID PRODUCTION</b>.
+            It is hereby certified that the raw material lot mentioned above has been sampled and tested under ISO protocols. The test results conform to BVC food-grade safety standards. The batch is certified as <b>FIT FOR PRODUCTION</b>.
           </Typography>
+        </Box>
+
+        {/* Photographic / Video / Document Evidence Section */}
+        <Box sx={{ mb: 4 }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 900, color: '#2e7d32', textTransform: 'uppercase', mb: 1.5 }}>
+            Attached Physical Test Photos, Videos &amp; Document References
+          </Typography>
+          {Array.isArray(data.evidence) && data.evidence.length > 0 ? (
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', md: 'repeat(3, 1fr)' }, gap: 2 }}>
+              {data.evidence.map((item, idx) => {
+                const isImage = (item.mime_type && item.mime_type.startsWith('image/')) || (item.type === 'image') || /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(item.url || item.name || '');
+                const isVideo = (item.mime_type && item.mime_type.startsWith('video/')) || (item.type === 'video') || /\.(mp4|webm|mov|ogg)$/i.test(item.url || item.name || '');
+                return (
+                  <Box 
+                    key={item.id || idx}
+                    sx={{ 
+                      border: '1.5px solid #c8e6c9', 
+                      borderRadius: 1.5, 
+                      p: 1.5, 
+                      backgroundColor: '#f9fbf9',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 1
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Typography variant="caption" sx={{ fontWeight: 800, color: '#2e7d32' }}>
+                        #{idx + 1} {item.name || 'Test Evidence'}
+                      </Typography>
+                      <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: 10 }}>
+                        {item.type || (isImage ? 'Photo' : isVideo ? 'Video' : 'Document')}
+                      </Typography>
+                    </Box>
+
+                    {item.notes && (
+                      <Typography variant="caption" sx={{ color: '#475569', fontStyle: 'italic', display: 'block' }}>
+                        {item.notes}
+                      </Typography>
+                    )}
+
+                    {isImage ? (
+                      <Box sx={{ textAlign: 'center', mt: 0.5 }}>
+                        <img 
+                          src={item.url} 
+                          alt={item.name || 'QC Physical Test'} 
+                          style={{ maxWidth: '100%', maxHeight: '180px', objectFit: 'contain', borderRadius: '4px', border: '1px solid #dcdcdc' }} 
+                        />
+                      </Box>
+                    ) : isVideo ? (
+                      <Box sx={{ textAlign: 'center', mt: 0.5 }}>
+                        <video 
+                          src={item.url} 
+                          controls 
+                          style={{ maxWidth: '100%', maxHeight: '180px', borderRadius: '4px', border: '1px solid #dcdcdc' }} 
+                        />
+                      </Box>
+                    ) : (
+                      <Box sx={{ p: 2, textAlign: 'center', backgroundColor: '#ffffff', borderRadius: 1, border: '1px dashed #81c784' }}>
+                        <Typography sx={{ fontSize: 24, mb: 0.5 }}>📄</Typography>
+                        <a href={item.url} target="_blank" rel="noopener noreferrer" style={{ color: '#2e7d32', fontWeight: 700, fontSize: 12, wordBreak: 'break-all' }}>
+                          View Certified Attachment
+                        </a>
+                      </Box>
+                    )}
+                  </Box>
+                );
+              })}
+            </Box>
+          ) : (
+            <Box sx={{ p: 2, border: '1px dashed #c8e6c9', borderRadius: 1, backgroundColor: '#f9fbf9', color: 'text.secondary', fontSize: 12, fontStyle: 'italic' }}>
+              No photographic, video or document test evidence attached to this certificate.
+            </Box>
+          )}
         </Box>
 
         {/* Certification block & signatures */}

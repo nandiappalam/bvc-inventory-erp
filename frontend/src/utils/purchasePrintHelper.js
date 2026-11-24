@@ -455,6 +455,38 @@ export function generatePurchasePrintHtml(purchase = {}, company = {}) {
         </tr>
       </table>
 
+      <div style="margin-top: 14px; margin-bottom: 14px; border: 1px solid #cbd5e1; border-radius: 4px; padding: 8px; background: #f8fafc;">
+        <div style="font-weight: 700; font-size: 11px; color: #1e3a8a; margin-bottom: 6px; text-transform: uppercase;">Attached Return Reference Images, Videos &amp; Evidence</div>
+        ${(() => {
+          const evidenceList = Array.isArray(purchase.evidence)
+            ? purchase.evidence
+            : purchase.evidence_json
+            ? (() => {
+                try {
+                  return JSON.parse(purchase.evidence_json);
+                } catch {
+                  return [];
+                }
+              })()
+            : [];
+
+          return evidenceList.length > 0
+            ? evidenceList
+                .map(
+                  (ev, idx) => `
+                <div style="border:1px solid #cbd5e1;padding:6px 8px;margin-bottom:6px;border-radius:4px;background:#ffffff;">
+                  <div style="font-weight:700;color:#1e3a8a;">#${idx + 1} · ${ev.name || 'Reference File'} <span style="font-size:10px;color:#64748b;font-weight:normal;">(${ev.mime_type || 'file'})</span></div>
+                  ${ev.notes ? '<div style="font-size:11px;color:#334155;margin-top:2px;">Notes: ' + ev.notes + '</div>' : ''}
+                  ${String(ev.mime_type || '').startsWith('image/') ? '<div style="margin-top:6px;"><img src="' + ev.url + '" style="max-width:200px;max-height:150px;object-fit:cover;border:1px solid #cbd5e1;border-radius:4px;" /></div>' : ''}
+                  ${String(ev.mime_type || '').startsWith('video/') ? '<div style="margin-top:6px;"><video src="' + ev.url + '" controls style="max-width:240px;max-height:160px;border:1px solid #cbd5e1;border-radius:4px;"></video></div>' : ''}
+                  ${!String(ev.mime_type || '').startsWith('image/') && !String(ev.mime_type || '').startsWith('video/') ? '<div style="margin-top:4px;font-size:11px;"><a href="' + ev.url + '" target="_blank" style="color:#2563eb;word-break:break-all;">' + ev.url + '</a></div>' : ''}
+                </div>`
+                )
+                .join('')
+            : '<div style="font-size:11px;color:#64748b;">No reference images or videos attached.</div>';
+        })()}
+      </div>
+
       <!-- SIGNATURE BLOCKS -->
       <div style="margin-top: 28px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; text-align: center; font-size: 11px;">
         <div style="border-top: 1.5px dashed #94a3b8; padding-top: 8px;">

@@ -25,6 +25,7 @@ import RecyclingIcon from '@mui/icons-material/Recycling';
 import SearchIcon from '@mui/icons-material/Search';
 import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import CalculatorModal from './CalculatorModal';
 import RecycleBinModal from './RecycleBinModal';
 import UniversalSearchModal from './common/UniversalSearchModal';
@@ -68,6 +69,8 @@ const modulePermissionMap = {
   'Sales Export': 'Sales Export',
   'Sales Export Order': 'Sales Export Order',
   'Sales Return': 'Sales Return',
+  'Customer Complaint': 'Customer Complaint',
+  'CAPA': 'CAPA',
   'Stock Adjust': 'Stock Adjust',
   'Weight Conversion': 'Weight Conversion',
   'Outpass': 'Open',
@@ -396,7 +399,7 @@ const Navigation = () => {
     },
     {
       groupTitle: 'Sales & Distribution',
-      modules: ['Quotation', 'Sales Order', 'Sales', 'Sales Export', 'Sales Export Order', 'Sales Return']
+      modules: ['Quotation', 'Sales Order', 'Sales', 'Sales Export', 'Sales Export Order', 'Sales Return', 'Customer Complaint', 'CAPA']
     },
     {
       groupTitle: 'Inventory & Movement',
@@ -482,6 +485,18 @@ const Navigation = () => {
 
   // Grouped Quality Modules
   const qualityGroups = [
+    {
+      groupTitle: 'Customer Quality & CAPA',
+      items: [
+        { name: 'Customer Complaints', path: '/entry/customer-complaint-display', permission: 'Customer Complaint' },
+        { name: 'Sales Return Entry', path: '/entry/sales-return-create', permission: 'Sales Return' },
+        { name: 'Sales Return Register', path: '/entry/sales-return-display', permission: 'Sales Return' },
+        { name: 'QC Inspection', path: '/entry/quality-control-list', permission: 'Quality Control' },
+        { name: 'CAPA Entry', path: '/entry/capa-create', permission: 'CAPA' },
+        { name: 'CAPA Register', path: '/entry/capa-display', permission: 'CAPA' },
+        { name: 'CAPA Reports', path: '/reports/capa', permission: 'CAPA' }
+      ]
+    },
     {
       groupTitle: 'Quality Operations',
       items: [
@@ -707,10 +722,11 @@ const Navigation = () => {
       ]
     },
     {
-      groupTitle: 'Sales',
+      groupTitle: 'Sales & Quality',
       items: [
         { name: 'Sales Reports', path: '/reports/category/sales', permission: 'Sales Register' },
-        { name: 'Sales Return Reports', path: '/reports/category/sales-return', permission: 'Sales Return Register' }
+        { name: 'Sales Return Reports', path: '/reports/category/sales-return', permission: 'Sales Return Register' },
+        { name: 'CAPA Reports & Analytics', path: '/reports/capa', permission: 'CAPA' }
       ]
     },
     {
@@ -947,10 +963,46 @@ const Navigation = () => {
             color="inherit"
             aria-label="menu"
             onClick={toggleDrawer}
-            sx={{ mr: 2 }}
+            sx={{ mr: 1 }}
           >
             <MenuIcon />
           </IconButton>
+          <Tooltip title="Go back to previous page">
+            <Button
+              onClick={() => {
+                if (window.history.length > 1) {
+                  navigate(-1);
+                } else {
+                  navigate('/dashboard');
+                }
+              }}
+              size="small"
+              startIcon={<ArrowBackIcon sx={{ fontSize: 16 }} />}
+              sx={{
+                mr: 2,
+                color: '#ffffff',
+                backgroundColor: 'rgba(255, 255, 255, 0.16)',
+                border: '1px solid rgba(255, 255, 255, 0.35)',
+                borderRadius: '6px',
+                px: 1.25,
+                py: 0.4,
+                fontSize: '12px',
+                fontWeight: 700,
+                textTransform: 'none',
+                minWidth: 'auto',
+                whiteSpace: 'nowrap',
+                '&:hover': {
+                  backgroundColor: 'rgba(255, 255, 255, 0.28)',
+                  borderColor: '#ffffff',
+                },
+                '@media print': {
+                  display: 'none !important',
+                },
+              }}
+            >
+              Back
+            </Button>
+          </Tooltip>
           <Typography 
             variant="h6" 
             component="div" 

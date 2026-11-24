@@ -123,9 +123,24 @@ async function listFinancialYears(companyId, conn = null) {
     const rows = await runner.all(
       `SELECT id, financial_year, year_name, start_date, end_date, status, is_active, is_current, is_locked
        FROM financial_years
-       ORDER BY start_date DESC, id DESC`
+       ORDER BY COALESCE(is_current, 0) DESC, COALESCE(is_active, 0) DESC, start_date DESC, id DESC`
     );
-    if (rows && rows.length > 0) return rows;
+    if (rows && rows.length > 0) {
+      const seen = new Map();
+      for (const r of rows) {
+        const fyKey = String(r.financial_year || r.year_name || '').trim();
+        if (!fyKey) continue;
+        if (!seen.has(fyKey)) {
+          seen.set(fyKey, { ...r, financial_year: fyKey });
+        } else {
+          const existing = seen.get(fyKey);
+          if (Number(r.is_active || 0) === 1) existing.is_active = 1;
+          if (Number(r.is_current || 0) === 1) existing.is_current = 1;
+        }
+      }
+      const deduped = Array.from(seen.values());
+      if (deduped.length > 0) return deduped;
+    }
   } catch (_) {}
   const def = deriveIndianFyFromDate(new Date().toISOString().slice(0, 10));
   return [{

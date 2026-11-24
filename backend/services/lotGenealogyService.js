@@ -238,26 +238,26 @@ async function searchLots(query = '', filters = {}, companyId = 1) {
     }
   } catch (_) {}
 
-  // 6. Outside Inpass lots (IP-*)
+  // 6. Outside Inpass lots (IP-*, LOT0018, WST0000)
   try {
     const ipLots = await runner.query(`
       SELECT DISTINCT
-        ii.lot_no AS lotNo, ii.item_name AS itemName, ip.s_no AS sNo,
-        SUBSTR(CAST(ip.date AS TEXT), 1, 10) AS ipDate, ii.qty, ii.total_wt
+        ii.lot_no AS lotNo, ii.item_name AS itemName, ip.inpass_no AS inpassNo,
+        SUBSTR(CAST(ip.date AS TEXT), 1, 10) AS ipDate, ii.qty, ii.total_weight AS totalWt, ii.output_type
       FROM inpass_items ii
-      JOIN inpass ip ON ii.inpass_id = ip.id
-      WHERE ii.lot_no IS NOT NULL AND TRIM(ii.lot_no) != ''
+      JOIN inpasses ip ON ii.inpass_id = ip.id
+      WHERE ii.lot_no IS NOT NULL AND TRIM(ii.lot_no) != '' AND UPPER(TRIM(ii.lot_no)) != 'LOSS'
         ${q ? 'AND (LOWER(ii.lot_no) LIKE ? OR LOWER(ii.item_name) LIKE ?)' : ''}
       LIMIT 50
     `, q ? [`%${q}%`, `%${q}%`] : []);
     for (const row of (ipLots.rows || [])) {
       upsertLot(row.lotNo, {
         itemName: row.itemName,
-        voucherNo: `IP-${row.sNo || 1}`,
+        voucherNo: row.inpassNo || 'IP-00001',
         date: row.ipDate,
         originalQuantity: row.qty,
-        currentWeightKg: row.total_wt,
-        location: 'Jobwork Receipt'
+        currentWeightKg: row.totalWt,
+        location: row.output_type === 'BYPRODUCT' ? 'By-product Recovery' : 'Jobwork Receipt'
       });
     }
   } catch (_) {}
@@ -282,6 +282,54 @@ async function searchLots(query = '', filters = {}, companyId = 1) {
         voucherNo: row.returnInvNo,
         date: row.returnDate,
         qcStatus: 'RETURNED'
+      });
+    }
+  } catch (_) {}
+
+  // 7b. Wastage & By-product lots (grain_wastage_items & work_order_wastages)
+  try {
+    const wstLots = await runner.query(`
+      SELECT DISTINCT
+        gwi.lot_no AS lotNo, gwi.item_name AS itemName, gwi.qty, gwi.total_wt AS totalWt,
+        COALESCE(g.work_order_no, 'GRD-' || CAST(g.s_no AS TEXT), 'GRD-' || CAST(g.id AS TEXT)) AS workOrderNo,
+        SUBSTR(CAST(g.date AS TEXT), 1, 10) AS millingDate
+      FROM grain_wastage_items gwi
+      JOIN grains g ON gwi.grain_id = g.id
+      WHERE gwi.lot_no IS NOT NULL AND TRIM(gwi.lot_no) != '' AND UPPER(TRIM(gwi.lot_no)) != 'LOSS'
+        ${q ? 'AND (LOWER(gwi.lot_no) LIKE ? OR LOWER(gwi.item_name) LIKE ?)' : ''}
+      LIMIT 50
+    `, q ? [`%${q}%`, `%${q}%`] : []);
+    for (const row of (wstLots.rows || [])) {
+      upsertLot(row.lotNo, {
+        itemName: row.itemName,
+        workOrderNo: row.workOrderNo,
+        date: row.millingDate,
+        originalQuantity: row.qty,
+        currentWeightKg: row.totalWt,
+        location: 'Wastage / By-product'
+      });
+    }
+  } catch (_) {}
+
+  try {
+    const woWstLots = await runner.query(`
+      SELECT DISTINCT
+        wow.lot_no AS lotNo, wow.item_name AS itemName, wow.qty, wow.total_wt AS totalWt,
+        wo.work_order_no AS workOrderNo, SUBSTR(CAST(wo.date AS TEXT), 1, 10) AS millingDate
+      FROM work_order_wastages wow
+      JOIN work_orders wo ON wow.work_order_id = wo.id
+      WHERE wow.lot_no IS NOT NULL AND TRIM(wow.lot_no) != '' AND UPPER(TRIM(wow.lot_no)) != 'LOSS'
+        ${q ? 'AND (LOWER(wow.lot_no) LIKE ? OR LOWER(wow.item_name) LIKE ?)' : ''}
+      LIMIT 50
+    `, q ? [`%${q}%`, `%${q}%`] : []);
+    for (const row of (woWstLots.rows || [])) {
+      upsertLot(row.lotNo, {
+        itemName: row.itemName,
+        workOrderNo: row.workOrderNo,
+        date: row.millingDate,
+        originalQuantity: row.qty,
+        currentWeightKg: row.totalWt,
+        location: 'Wastage / By-product'
       });
     }
   } catch (_) {}
@@ -462,133 +510,447 @@ async function getLotDetails(lotNo, companyId = 1) {
     vehicle = vehRes.rows?.[0] || null;
   } catch (_) {}
 
-  // 4. Milling & Production - Query grain_input_items and grain_output_items SEPARATELY per grain_id (no Cartesian join!)
+  // 4. Milling & Production - Query grain_input_items, grain_output_items, grain_wastage_items SEPARATELY per grain_id (no Cartesian join!)
   const millingConsumptions = [];
   const millingOutputs = [];
+  const millingBatches = [];
+  const wastageRecords = [];
   const parentLotSet = new Set(csParentPurchaseLots);
+  const coveredWoIds = new Set();
+  const coveredWoNos = new Set();
+
+  // Discover inpass_no references linked to cleanLotNo so Outside Mill outputs (e.g. LOT0018 -> IP-00001) resolve to their grain batch
+  let preInpassRows = [];
+  try {
+    const preIpRes = await runner.query(`
+      SELECT ii.*, ip.inpass_no AS ip_inpass_no, SUBSTR(CAST(ip.date AS TEXT), 1, 10) AS ip_date
+      FROM inpass_items ii
+      JOIN inpasses ip ON ii.inpass_id = ip.id
+      WHERE UPPER(TRIM(COALESCE(ii.lot_no, ''))) IN (${familyPh})
+         OR UPPER(TRIM(COALESCE(ii.original_lot_no, ''))) IN (${familyPh})
+    `, [...familyUpper, ...familyUpper]);
+    preInpassRows = preIpRes.rows || [];
+    for (const r of preInpassRows) {
+      if (r.lot_no && familyUpper.includes(String(r.lot_no).trim().toUpperCase()) && r.original_lot_no) {
+        parentLotSet.add(String(r.original_lot_no).trim());
+      }
+    }
+  } catch (_) {}
+
+  const matchedInpassNosUpper = Array.from(new Set(
+    preInpassRows.map(r => String(r.inpass_no || '').trim().toUpperCase()).filter(Boolean)
+  ));
+  const inpassGrainFilterSql = matchedInpassNosUpper.length
+    ? `OR UPPER(TRIM(COALESCE(g.inpass_no, ''))) IN (${matchedInpassNosUpper.map(() => 'UPPER(?)').join(',')})`
+    : '';
 
   try {
     const matchedGrainsRes = await runner.query(`
       SELECT DISTINCT
         g.id AS grain_id, g.s_no AS grain_s_no,
         SUBSTR(CAST(g.date AS TEXT), 1, 10) AS milling_date,
-        g.work_order_no,
+        g.work_order_id, g.work_order_no,
+        g.process_mode, g.mill_type, g.outpass_no, g.inpass_no,
         COALESCE(fmm.flourmill, g.flour_mill, 'BVC MILL') AS flour_mill_name
       FROM grains g
       LEFT JOIN flour_mill_master fmm ON (CAST(fmm.id AS TEXT) = CAST(g.flour_mill AS TEXT) OR fmm.flourmill = g.flour_mill)
       WHERE EXISTS (SELECT 1 FROM grain_input_items gii WHERE gii.grain_id = g.id AND UPPER(TRIM(gii.lot_no)) IN (${familyPh}))
          OR EXISTS (SELECT 1 FROM grain_output_items goi WHERE goi.grain_id = g.id AND UPPER(TRIM(goi.lot_no)) IN (${familyPh}))
+         OR EXISTS (SELECT 1 FROM grain_wastage_items gwi WHERE gwi.grain_id = g.id AND UPPER(TRIM(gwi.lot_no)) IN (${familyPh}))
+         ${inpassGrainFilterSql}
       ORDER BY g.date ASC, g.id ASC
-    `, [...familyUpper, ...familyUpper]);
+    `, [...familyUpper, ...familyUpper, ...familyUpper, ...matchedInpassNosUpper]);
 
     for (const g of (matchedGrainsRes.rows || [])) {
+      if (g.work_order_id) coveredWoIds.add(Number(g.work_order_id));
+      const woNo = g.work_order_no || `GRD-${g.grain_s_no || g.grain_id}`;
+      coveredWoNos.add(String(woNo).trim().toUpperCase());
+
       const inputsRes = await runner.query(`SELECT * FROM grain_input_items WHERE grain_id = ?`, [g.grain_id]);
       const outputsRes = await runner.query(`SELECT * FROM grain_output_items WHERE grain_id = ?`, [g.grain_id]);
+      const wastagesRes = await runner.query(`SELECT * FROM grain_wastage_items WHERE grain_id = ?`, [g.grain_id]);
+
       const inputs = inputsRes.rows || [];
-      const outputs = outputsRes.rows || [];
-      const woNo = g.work_order_no || `GRD-${g.grain_s_no || g.grain_id}`;
+      let outputs = outputsRes.rows || [];
+      let wastages = wastagesRes.rows || [];
 
-      const matchedInputs = inputs.filter(i => i.lot_no && familyUpper.includes(String(i.lot_no).trim().toUpperCase()));
-      const matchedOutputs = outputs.filter(o => o.lot_no && familyUpper.includes(String(o.lot_no).trim().toUpperCase()));
-
-      if (matchedInputs.length > 0) {
-        const myInWeight = matchedInputs.reduce((s, i) => s + (parseFloat(i.total_wt) || (parseFloat(i.qty) || 0) * (parseFloat(i.weight) || 50)), 0);
-        const myInBags = matchedInputs.reduce((s, i) => s + (parseFloat(i.qty) || 0), 0);
-        if (outputs.length > 0) {
-          for (const o of outputs) {
-            millingConsumptions.push({
-              grain_id: g.grain_id,
-              work_order_no: woNo,
-              work_unit: g.flour_mill_name,
-              target_product: o.item_name || 'Output',
-              work_order_date: g.milling_date,
-              input_qty: myInWeight,
-              input_bags: myInBags,
-              output_lot_no: o.lot_no,
-              output_qty: o.qty,
-              output_weight: o.total_wt || ((parseFloat(o.qty) || 0) * (parseFloat(o.weight) || 0)),
-              source: 'GRAIN_MILLING'
-            });
+      // Enrich outside mill batches with real created output/by-product lot numbers from inpass_items
+      if (g.inpass_no) {
+        try {
+          const ipBatchRes = await runner.query(
+            `SELECT * FROM inpass_items WHERE UPPER(TRIM(inpass_no)) = UPPER(?) ORDER BY id ASC`,
+            [g.inpass_no]
+          );
+          const ipBatchRows = ipBatchRes.rows || [];
+          const ipOutputs = ipBatchRows.filter(r => r.output_type === 'PROCESSED_OUTPUT');
+          if (ipOutputs.length > 0 && (outputs.length === 0 || outputs.every(o => String(o.lot_no || '').toUpperCase() === String(g.inpass_no).toUpperCase()))) {
+            outputs = ipOutputs.map(r => ({
+              item_name: r.item_name,
+              lot_no: r.lot_no || g.inpass_no,
+              qty: r.qty,
+              weight: r.weight,
+              total_wt: r.total_weight,
+              inpass_no: g.inpass_no
+            }));
           }
-        } else {
-          millingConsumptions.push({
-            grain_id: g.grain_id,
-            work_order_no: woNo,
-            work_unit: g.flour_mill_name,
-            target_product: 'Processed Output',
-            work_order_date: g.milling_date,
-            input_qty: myInWeight,
-            input_bags: myInBags,
-            output_lot_no: null,
-            output_qty: 0,
-            output_weight: 0,
-            source: 'GRAIN_MILLING'
-          });
-        }
+          if (wastages.length === 0) {
+            const ipWst = ipBatchRows.filter(r => r.output_type === 'BYPRODUCT' || r.output_type === 'PROCESS_LOSS');
+            wastages = ipWst.map(r => ({
+              item_name: r.item_name,
+              category: r.output_type === 'PROCESS_LOSS' ? 'Process Loss' : 'By-product (External Mill)',
+              lot_no: r.lot_no,
+              qty: r.qty,
+              weight: r.weight,
+              total_wt: r.total_weight
+            }));
+          }
+        } catch (_) {}
       }
 
-      if (matchedOutputs.length > 0) {
-        for (const i of inputs) {
+      const normInputs = inputs.map(i => {
+        const qtyBags = parseFloat(i.qty) || 0;
+        const unitWt = parseFloat(i.weight) || 50;
+        const totWt = parseFloat(i.total_wt) || (qtyBags * unitWt);
+        return {
+          lot_no: i.lot_no,
+          item_name: i.item_name,
+          qty: qtyBags,
+          weight: unitWt,
+          total_wt: totWt,
+          is_selected_lot: Boolean(i.lot_no && familyUpper.includes(String(i.lot_no).trim().toUpperCase()))
+        };
+      });
+
+      const normOutputs = outputs.map(o => {
+        const qtyBags = parseFloat(o.qty) || 0;
+        const unitWt = parseFloat(o.weight) || 0;
+        const totWt = parseFloat(o.total_wt) || (qtyBags * unitWt);
+        return {
+          lot_no: o.lot_no,
+          item_name: o.item_name || 'Output',
+          qty: qtyBags,
+          weight: unitWt,
+          total_wt: totWt,
+          inpass_no: o.inpass_no || g.inpass_no || null,
+          is_selected_lot: Boolean(o.lot_no && familyUpper.includes(String(o.lot_no).trim().toUpperCase()))
+        };
+      });
+
+      const normWastages = wastages.map(w => {
+        const qtyBags = parseFloat(w.qty) || 0;
+        const unitWt = parseFloat(w.weight) || 0;
+        const totWt = parseFloat(w.total_wt) || (qtyBags * unitWt);
+        return {
+          lot_no: w.lot_no || '-',
+          item_name: w.item_name || w.category || 'Wastage',
+          category: w.category || 'Wastage',
+          qty: qtyBags,
+          weight: unitWt,
+          total_wt: totWt
+        };
+      });
+
+      const totalBatchInputKg = normInputs.reduce((s, i) => s + i.total_wt, 0);
+      const totalBatchInputBags = normInputs.reduce((s, i) => s + i.qty, 0);
+      const totalBatchOutputKg = normOutputs.reduce((s, o) => s + o.total_wt, 0);
+      const totalBatchOutputBags = normOutputs.reduce((s, o) => s + o.qty, 0);
+      const totalBatchWastageKg = normWastages.reduce((s, w) => s + w.total_wt, 0);
+      const unaccountedLossKg = Math.max(0, Number((totalBatchInputKg - totalBatchOutputKg - totalBatchWastageKg).toFixed(2)));
+      const yieldPercent = totalBatchInputKg > 0 ? Number(((totalBatchOutputKg / totalBatchInputKg) * 100).toFixed(1)) : 0;
+
+      const matchedInputs = normInputs.filter(i => i.is_selected_lot);
+      const matchedOutputs = normOutputs.filter(o => o.is_selected_lot);
+      const matchedWastages = normWastages.filter(w => w.lot_no && familyUpper.includes(String(w.lot_no).trim().toUpperCase()));
+
+      const batchRecord = {
+        grain_id: g.grain_id,
+        work_order_id: g.work_order_id || null,
+        work_order_no: woNo,
+        work_unit: g.flour_mill_name,
+        work_order_date: g.milling_date,
+        process_mode: g.process_mode || g.mill_type || 'Inside Mill',
+        outpass_no: g.outpass_no || null,
+        inpass_no: g.inpass_no || null,
+        inputs: normInputs,
+        outputs: normOutputs,
+        wastages: normWastages,
+        total_input_kg: totalBatchInputKg,
+        total_input_bags: totalBatchInputBags,
+        total_output_kg: totalBatchOutputKg,
+        total_output_bags: totalBatchOutputBags,
+        total_wastage_kg: totalBatchWastageKg,
+        unaccounted_loss_kg: unaccountedLossKg,
+        yield_percent: yieldPercent,
+        source: 'GRAIN_MILLING'
+      };
+      millingBatches.push(batchRecord);
+
+      for (const w of normWastages) {
+        wastageRecords.push({
+          ...w,
+          grain_id: g.grain_id,
+          work_order_no: woNo,
+          work_unit: g.flour_mill_name,
+          work_order_date: g.milling_date
+        });
+      }
+
+      if (matchedInputs.length > 0) {
+        const myInWeight = matchedInputs.reduce((s, i) => s + i.total_wt, 0);
+        const myInBags = matchedInputs.reduce((s, i) => s + i.qty, 0);
+        const primaryOut = normOutputs[0] || null;
+        millingConsumptions.push({
+          grain_id: g.grain_id,
+          work_order_no: woNo,
+          work_unit: g.flour_mill_name,
+          process_mode: batchRecord.process_mode,
+          outpass_no: g.outpass_no || null,
+          inpass_no: g.inpass_no || null,
+          target_product: normOutputs.length > 0 ? normOutputs.map(o => o.item_name).join(', ') : 'Processed Output',
+          work_order_date: g.milling_date,
+          input_qty: myInWeight,
+          input_bags: myInBags,
+          batch_total_input_kg: totalBatchInputKg,
+          output_lot_no: primaryOut?.lot_no || null,
+          output_qty: primaryOut?.qty || 0,
+          output_weight: totalBatchOutputKg,
+          all_inputs: normInputs,
+          outputs: normOutputs,
+          wastages: normWastages,
+          total_output_kg: totalBatchOutputKg,
+          total_wastage_kg: totalBatchWastageKg,
+          unaccounted_loss_kg: unaccountedLossKg,
+          yield_percent: yieldPercent,
+          source: 'GRAIN_MILLING'
+        });
+      }
+
+      if (matchedOutputs.length > 0 || (g.inpass_no && matchedInpassNosUpper.includes(String(g.inpass_no).trim().toUpperCase()))) {
+        for (const i of normInputs) {
           if (i.lot_no) parentLotSet.add(String(i.lot_no).trim());
         }
-        const totalOutWt = matchedOutputs.reduce((s, o) => s + (parseFloat(o.total_wt) || (parseFloat(o.qty) || 0) * (parseFloat(o.weight) || 0)), 0);
-        const totalOutBags = matchedOutputs.reduce((s, o) => s + (parseFloat(o.qty) || 0), 0);
+        const totalOutWt = matchedOutputs.length > 0
+          ? matchedOutputs.reduce((s, o) => s + o.total_wt, 0)
+          : totalBatchOutputKg;
+        const totalOutBags = matchedOutputs.length > 0
+          ? matchedOutputs.reduce((s, o) => s + o.qty, 0)
+          : totalBatchOutputBags;
         millingOutputs.push({
           grain_id: g.grain_id,
           work_order_no: woNo,
           work_unit: g.flour_mill_name,
-          finished_product: matchedOutputs[0].item_name,
+          process_mode: batchRecord.process_mode,
+          outpass_no: g.outpass_no || null,
+          inpass_no: g.inpass_no || null,
+          finished_product: (matchedOutputs[0] || normOutputs[0])?.item_name || 'Finished Goods',
           work_order_date: g.milling_date,
           output_kgs: totalOutWt,
           output_bags: totalOutBags,
-          input_lot_no: inputs[0]?.lot_no || null,
-          input_item: inputs.map(i => `${i.item_name} (${i.lot_no})`).join(', '),
-          inputs: inputs.map(i => ({
-            lot_no: i.lot_no,
-            item_name: i.item_name,
-            qty: parseFloat(i.qty) || 0,
-            total_wt: parseFloat(i.total_wt) || 0
-          })),
+          input_lot_no: normInputs[0]?.lot_no || null,
+          input_item: normInputs.map(i => `${i.item_name} (${i.lot_no})`).join(', '),
+          inputs: normInputs,
+          all_outputs: normOutputs,
+          wastages: normWastages,
+          total_input_kg: totalBatchInputKg,
+          total_output_kg: totalBatchOutputKg,
+          total_wastage_kg: totalBatchWastageKg,
+          unaccounted_loss_kg: unaccountedLossKg,
+          yield_percent: yieldPercent,
+          source: 'GRAIN_MILLING'
+        });
+      }
+
+      if (matchedWastages.length > 0 && matchedInputs.length === 0 && matchedOutputs.length === 0) {
+        // Selected lot IS a wastage/by-product lot: link upstream parent inputs & batch outputs
+        for (const i of normInputs) {
+          if (i.lot_no) parentLotSet.add(String(i.lot_no).trim());
+        }
+        const totalWstWt = matchedWastages.reduce((s, w) => s + w.total_wt, 0);
+        const totalWstBags = matchedWastages.reduce((s, w) => s + w.qty, 0);
+        millingOutputs.push({
+          grain_id: g.grain_id,
+          work_order_no: woNo,
+          work_unit: g.flour_mill_name,
+          process_mode: batchRecord.process_mode,
+          finished_product: `${matchedWastages.map(w => w.item_name).join(', ')} [Wastage / By-product]`,
+          work_order_date: g.milling_date,
+          output_kgs: totalWstWt,
+          output_bags: totalWstBags,
+          input_lot_no: normInputs[0]?.lot_no || null,
+          input_item: normInputs.map(i => `${i.item_name} (${i.lot_no})`).join(', '),
+          inputs: normInputs,
+          all_outputs: normOutputs,
+          wastages: normWastages,
+          total_input_kg: totalBatchInputKg,
+          total_output_kg: totalBatchOutputKg,
+          total_wastage_kg: totalBatchWastageKg,
+          unaccounted_loss_kg: unaccountedLossKg,
+          yield_percent: yieldPercent,
+          is_wastage_lot: true,
           source: 'GRAIN_MILLING'
         });
       }
     }
   } catch (_) {}
 
-  // 5. Work orders
+  // 5. Standalone Work orders NOT already covered by grains (prevents duplicate WO-0003 rows & never mixes Bags with KG)
   try {
-    const woInputRes = await runner.query(`
-      SELECT woi.*, wo.work_order_no, SUBSTR(CAST(wo.date AS TEXT), 1, 10) AS work_order_date, wo.work_unit, wo.product AS target_product
-      FROM work_order_items woi
-      JOIN work_orders wo ON woi.work_order_id = wo.id
-      WHERE UPPER(TRIM(woi.lot_no)) IN (${familyPh})
-    `, familyUpper);
-    for (const woi of (woInputRes.rows || [])) {
-      millingConsumptions.push({
-        work_order_no: woi.work_order_no,
-        work_unit: woi.work_unit || 'Production Floor',
-        target_product: woi.target_product,
-        work_order_date: woi.work_order_date,
-        input_qty: woi.input_qty || woi.kgs || 0,
-        source: 'WORK_ORDER'
-      });
-    }
+    const matchedWoRes = await runner.query(`
+      SELECT DISTINCT wo.id, wo.work_order_no, SUBSTR(CAST(wo.date AS TEXT), 1, 10) AS work_order_date,
+                      wo.work_unit, wo.product, wo.grind_id
+      FROM work_orders wo
+      WHERE EXISTS (SELECT 1 FROM work_order_items woi WHERE woi.work_order_id = wo.id AND UPPER(TRIM(woi.lot_no)) IN (${familyPh}))
+         OR EXISTS (SELECT 1 FROM work_order_outputs woo WHERE woo.work_order_id = wo.id AND UPPER(TRIM(woo.fg_lot_no)) IN (${familyPh}))
+         OR EXISTS (SELECT 1 FROM work_order_wastages wow WHERE wow.work_order_id = wo.id AND UPPER(TRIM(wow.lot_no)) IN (${familyPh}))
+      ORDER BY wo.date ASC, wo.id ASC
+    `, [...familyUpper, ...familyUpper, ...familyUpper]);
 
-    const woOutputRes = await runner.query(`
-      SELECT woo.*, wo.work_order_no, SUBSTR(CAST(wo.date AS TEXT), 1, 10) AS work_order_date, wo.work_unit, wo.product AS finished_product
-      FROM work_order_outputs woo
-      JOIN work_orders wo ON woo.work_order_id = wo.id
-      WHERE UPPER(TRIM(woo.fg_lot_no)) IN (${familyPh})
-    `, familyUpper);
-    for (const woo of (woOutputRes.rows || [])) {
-      millingOutputs.push({
-        work_order_no: woo.work_order_no,
-        work_unit: woo.work_unit || 'Production Floor',
-        finished_product: woo.finished_product || woo.output_item,
-        work_order_date: woo.work_order_date,
-        output_kgs: woo.output_kgs || woo.expected_qty || 0,
-        source: 'WORK_ORDER'
+    for (const wo of (matchedWoRes.rows || [])) {
+      const woNoUpper = String(wo.work_order_no || '').trim().toUpperCase();
+      if (coveredWoIds.has(Number(wo.id)) || (woNoUpper && coveredWoNos.has(woNoUpper))) {
+        continue;
+      }
+
+      const woInRows = (await runner.query(`SELECT * FROM work_order_items WHERE work_order_id = ?`, [wo.id])).rows || [];
+      const woOutRows = (await runner.query(`SELECT * FROM work_order_outputs WHERE work_order_id = ?`, [wo.id])).rows || [];
+      const woWstRows = (await runner.query(`SELECT * FROM work_order_wastages WHERE work_order_id = ?`, [wo.id])).rows || [];
+
+      const normInputs = woInRows.map(i => {
+        const qtyBags = parseFloat(i.input_qty) || 0;
+        const unitWt = parseFloat(i.weight) || 50;
+        const totWt = parseFloat(i.kgs) || (qtyBags * unitWt);
+        return {
+          lot_no: i.lot_no,
+          item_name: i.item_name,
+          qty: qtyBags,
+          weight: unitWt,
+          total_wt: totWt,
+          is_selected_lot: Boolean(i.lot_no && familyUpper.includes(String(i.lot_no).trim().toUpperCase()))
+        };
       });
+
+      const normOutputs = woOutRows.map(o => {
+        const qtyBags = parseFloat(o.expected_qty) || 0;
+        const unitWt = parseFloat(o.weight) || 0;
+        const totWt = parseFloat(o.output_kgs) || (qtyBags * unitWt);
+        return {
+          lot_no: o.fg_lot_no,
+          item_name: o.output_item || wo.product || 'Output',
+          qty: qtyBags,
+          weight: unitWt,
+          total_wt: totWt,
+          is_selected_lot: Boolean(o.fg_lot_no && familyUpper.includes(String(o.fg_lot_no).trim().toUpperCase()))
+        };
+      });
+
+      const normWastages = woWstRows.map(w => {
+        const qtyBags = parseFloat(w.qty) || 0;
+        const unitWt = parseFloat(w.weight) || 0;
+        const totWt = parseFloat(w.total_wt) || (qtyBags * unitWt);
+        return {
+          lot_no: w.lot_no || '-',
+          item_name: w.item_name || w.category || 'Wastage',
+          category: w.category || 'Wastage',
+          qty: qtyBags,
+          weight: unitWt,
+          total_wt: totWt
+        };
+      });
+
+      const totalBatchInputKg = normInputs.reduce((s, i) => s + i.total_wt, 0);
+      const totalBatchInputBags = normInputs.reduce((s, i) => s + i.qty, 0);
+      const totalBatchOutputKg = normOutputs.reduce((s, o) => s + o.total_wt, 0);
+      const totalBatchOutputBags = normOutputs.reduce((s, o) => s + o.qty, 0);
+      const totalBatchWastageKg = normWastages.reduce((s, w) => s + w.total_wt, 0);
+      const unaccountedLossKg = Math.max(0, Number((totalBatchInputKg - totalBatchOutputKg - totalBatchWastageKg).toFixed(2)));
+      const yieldPercent = totalBatchInputKg > 0 ? Number(((totalBatchOutputKg / totalBatchInputKg) * 100).toFixed(1)) : 0;
+
+      const batchRecord = {
+        work_order_id: wo.id,
+        work_order_no: wo.work_order_no,
+        work_unit: wo.work_unit || 'Production Floor',
+        work_order_date: wo.work_order_date,
+        process_mode: 'WORK_ORDER',
+        inputs: normInputs,
+        outputs: normOutputs,
+        wastages: normWastages,
+        total_input_kg: totalBatchInputKg,
+        total_input_bags: totalBatchInputBags,
+        total_output_kg: totalBatchOutputKg,
+        total_output_bags: totalBatchOutputBags,
+        total_wastage_kg: totalBatchWastageKg,
+        unaccounted_loss_kg: unaccountedLossKg,
+        yield_percent: yieldPercent,
+        source: 'WORK_ORDER'
+      };
+      millingBatches.push(batchRecord);
+
+      for (const w of normWastages) {
+        wastageRecords.push({
+          ...w,
+          work_order_no: wo.work_order_no,
+          work_unit: wo.work_unit || 'Production Floor',
+          work_order_date: wo.work_order_date
+        });
+      }
+
+      const matchedInputs = normInputs.filter(i => i.is_selected_lot);
+      const matchedOutputs = normOutputs.filter(o => o.is_selected_lot);
+
+      if (matchedInputs.length > 0) {
+        const myInWeight = matchedInputs.reduce((s, i) => s + i.total_wt, 0);
+        const myInBags = matchedInputs.reduce((s, i) => s + i.qty, 0);
+        const primaryOut = normOutputs[0] || null;
+        millingConsumptions.push({
+          work_order_no: wo.work_order_no,
+          work_unit: wo.work_unit || 'Production Floor',
+          process_mode: 'WORK_ORDER',
+          target_product: normOutputs.length > 0 ? normOutputs.map(o => o.item_name).join(', ') : (wo.product || 'Output'),
+          work_order_date: wo.work_order_date,
+          input_qty: myInWeight,
+          input_bags: myInBags,
+          batch_total_input_kg: totalBatchInputKg,
+          output_lot_no: primaryOut?.lot_no || null,
+          output_qty: primaryOut?.qty || 0,
+          output_weight: totalBatchOutputKg,
+          all_inputs: normInputs,
+          outputs: normOutputs,
+          wastages: normWastages,
+          total_output_kg: totalBatchOutputKg,
+          total_wastage_kg: totalBatchWastageKg,
+          unaccounted_loss_kg: unaccountedLossKg,
+          yield_percent: yieldPercent,
+          source: 'WORK_ORDER'
+        });
+      }
+
+      if (matchedOutputs.length > 0) {
+        for (const i of normInputs) {
+          if (i.lot_no) parentLotSet.add(String(i.lot_no).trim());
+        }
+        const totalOutWt = matchedOutputs.reduce((s, o) => s + o.total_wt, 0);
+        const totalOutBags = matchedOutputs.reduce((s, o) => s + o.qty, 0);
+        millingOutputs.push({
+          work_order_no: wo.work_order_no,
+          work_unit: wo.work_unit || 'Production Floor',
+          process_mode: 'WORK_ORDER',
+          finished_product: matchedOutputs[0]?.item_name || wo.product,
+          work_order_date: wo.work_order_date,
+          output_kgs: totalOutWt,
+          output_bags: totalOutBags,
+          input_lot_no: normInputs[0]?.lot_no || null,
+          input_item: normInputs.map(i => `${i.item_name} (${i.lot_no})`).join(', '),
+          inputs: normInputs,
+          all_outputs: normOutputs,
+          wastages: normWastages,
+          total_input_kg: totalBatchInputKg,
+          total_output_kg: totalBatchOutputKg,
+          total_wastage_kg: totalBatchWastageKg,
+          unaccounted_loss_kg: unaccountedLossKg,
+          yield_percent: yieldPercent,
+          source: 'WORK_ORDER'
+        });
+      }
     }
   } catch (_) {}
 
@@ -667,9 +1029,9 @@ async function getLotDetails(lotNo, companyId = 1) {
   const inpassLinks = [];
   try {
     const ipRes = await runner.query(`
-      SELECT ii.*, ip.s_no AS ip_s_no, SUBSTR(CAST(ip.date AS TEXT), 1, 10) AS ip_date
+      SELECT ii.*, ip.inpass_no AS ip_inpass_no, SUBSTR(CAST(ip.date AS TEXT), 1, 10) AS ip_date
       FROM inpass_items ii
-      JOIN inpass ip ON ii.inpass_id = ip.id
+      JOIN inpasses ip ON ii.inpass_id = ip.id
       WHERE UPPER(TRIM(ii.lot_no)) IN (${familyPh}) OR UPPER(TRIM(COALESCE(ii.original_lot_no, ''))) IN (${familyPh})
     `, [...familyUpper, ...familyUpper]);
     for (const row of (ipRes.rows || [])) {
@@ -911,8 +1273,10 @@ async function getLotDetails(lotNo, companyId = 1) {
     coldStorageSiblings: csSiblingLots.filter(l => l.toUpperCase() !== cleanLotNo.toUpperCase()),
     godownTransfers,
     inpassLinks,
+    millingBatches,
     millingConsumptions,
     millingOutputs,
+    wastageRecords,
     workOrderConsumptions: millingConsumptions,
     workOrderOutputs: millingOutputs,
     jobworkMovements,
@@ -1022,22 +1386,35 @@ async function buildForwardTrace(lotNo, companyId = 1, visited = new Set()) {
     });
   }
 
-  // Milling Batches (recursive into output lots)
+  // Milling Batches (recursive into ALL output lots + wastage details)
   for (const mc of (details.millingConsumptions || [])) {
     const woNode = {
       id: `WO-${mc.work_order_no}-${mc.output_lot_no || 'out'}`,
       name: `Milling Batch: ${mc.work_order_no}`,
       type: 'PRODUCTION',
       consumedQty: mc.input_qty,
+      consumedBags: mc.input_bags || 0,
+      allInputs: mc.all_inputs || [],
+      outputs: mc.outputs || [],
+      wastages: mc.wastages || [],
+      totalInputKg: mc.batch_total_input_kg || mc.input_qty,
+      totalOutputKg: mc.total_output_kg || mc.output_weight || 0,
+      totalWastageKg: mc.total_wastage_kg || 0,
+      yieldPercent: mc.yield_percent || 0,
       mill: mc.work_unit || 'BVC MILL',
       date: mc.work_order_date,
       children: []
     };
 
-    if (mc.output_lot_no && !visitedNext.has(mc.output_lot_no.toUpperCase())) {
-      const childTree = await buildForwardTrace(mc.output_lot_no, companyId, visitedNext);
-      if (childTree) {
-        woNode.children.push(childTree);
+    const outputLotsToRecurse = Array.from(new Set(
+      (mc.outputs && mc.outputs.length > 0 ? mc.outputs.map(o => o.lot_no) : [mc.output_lot_no]).filter(Boolean)
+    ));
+    for (const outLotNo of outputLotsToRecurse) {
+      if (!visitedNext.has(outLotNo.toUpperCase())) {
+        const childTree = await buildForwardTrace(outLotNo, companyId, visitedNext);
+        if (childTree) {
+          woNode.children.push(childTree);
+        }
       }
     }
     storageNode.children.push(woNode);
@@ -1128,6 +1505,12 @@ async function buildBackwardTrace(lotNo, companyId = 1, visited = new Set()) {
       type: 'PRODUCTION',
       mill: mo.work_unit || 'BVC MILL',
       date: mo.work_order_date,
+      totalInputKg: mo.total_input_kg || 0,
+      totalOutputKg: mo.total_output_kg || mo.output_kgs || 0,
+      totalWastageKg: mo.total_wastage_kg || 0,
+      yieldPercent: mo.yield_percent || 0,
+      wastages: mo.wastages || [],
+      allOutputs: mo.all_outputs || [],
       inputs: []
     };
 
@@ -1141,6 +1524,7 @@ async function buildBackwardTrace(lotNo, companyId = 1, visited = new Set()) {
         name: inp.lot_no,
         item: inp.item_name || rawLotDetails?.itemName,
         consumedQty: inp.total_wt || mo.output_kgs,
+        consumedBags: inp.qty || 0,
         supplier: rawLotDetails?.purchase?.supplierName || 'Primary Supplier',
         purchaseVoucher: rawLotDetails?.purchase?.voucherNo || 'N/A',
         purchaseDate: rawLotDetails?.purchase?.purchaseDate || 'N/A',

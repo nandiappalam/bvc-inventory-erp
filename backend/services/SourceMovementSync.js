@@ -376,14 +376,16 @@ async function syncDocumentMovements(companyId, sourceModule, sourceId, performe
     const header = await runner.get(`SELECT * FROM sales WHERE id = ?`, [sId]);
     if (!header || Number(header.is_order || 0) === 1) return { synced: 0 };
     const items = await runner.all(`SELECT * FROM sales_items WHERE sales_id = ? ORDER BY id ASC`, [sId]);
-    const g = gdw.findG(header.godown_from_id, null, gdw.fgGodown);
     for (const r of items) {
+      const g = gdw.findG(r.godown_id || header.godown_from_id, r.godown_name, gdw.fgGodown);
       const qty = Math.abs(parseFloat(r.qty) || 0);
       const uw = parseFloat(r.weight) || 50;
       await postOne({
         movementDate: header.date,
+        itemId: r.item_id || null,
         itemName: r.item_name,
         lotNo: r.lot_no || '',
+        parentLotNo: r.parent_rm_lot_no || '',
         godownId: g.id,
         godownName: g.godown_name,
         partyName: header.customer || '',
@@ -428,28 +430,44 @@ async function syncDocumentMovements(companyId, sourceModule, sourceId, performe
   } else if (mod === 'SALES_RETURN') {
     const header = await runner.get(`SELECT * FROM sales_return WHERE id = ?`, [sId]);
     if (!header) return { synced: 0 };
+    const approvalSt = String(header.approval_status || '').trim().toUpperCase();
+    if (approvalSt !== 'APPROVED') {
+      return { synced: 0 };
+    }
     const items = await runner.all(`SELECT * FROM sales_return_items WHERE sales_return_id = ? ORDER BY id ASC`, [sId]);
     for (const r of items) {
+      const disp = String(r.stock_disposition || header.stock_disposition || header.stock_status || '').trim().toLowerCase();
+      if (disp !== 'resalable' && disp !== 'good / resalable') {
+        continue;
+      }
+      const destGodown = gdw.findG(
+        r.destination_godown_id || header.destination_godown_id,
+        r.destination_godown_name || header.destination_godown_name,
+        gdw.fgGodown
+      );
       const qty = Math.abs(parseFloat(r.qty) || 0);
       const uw = parseFloat(r.weight) || 50;
       await postOne({
         movementDate: header.date,
         itemName: r.item_name,
         lotNo: r.lot_no || '',
-        godownId: gdw.fgGodown.id,
-        godownName: gdw.fgGodown.godown_name,
+        godownId: destGodown.id,
+        godownName: destGodown.godown_name,
         partyName: header.customer || '',
         direction: 'IN',
         movementType: 'SALES_RETURN',
         categoryHintModule: 'SALES_RETURN',
         qty,
         unitWeight: uw,
-        weight: Math.abs(parseFloat(r.total_wt) || (qty * uw)),
+        weight: Math.abs(parseFloat(r.return_weight) || parseFloat(r.total_wt) || (qty * uw)),
+        rate: parseFloat(r.rate) || 0,
+        amount: parseFloat(r.total_amt) || 0,
         sourceModule: 'SALES_RETURN',
         sourceTable: 'sales_return_items',
         sourceId: sId,
         sourceLineId: r.id,
-        sourceRefNo: `SR-${header.s_no || sId}`
+        sourceRefNo: header.return_no || `SR-${header.s_no || sId}`,
+        remarks: header.remarks || ''
       });
     }
   } else if (mod === 'STOCK_ADJUST') {
@@ -551,6 +569,10 @@ async function syncDocumentMovements(companyId, sourceModule, sourceId, performe
   } else if (mod === 'OUTPASS') {
     const header = await runner.get(`SELECT * FROM outpasses WHERE id = ?`, [sId]);
     if (!header || String(header.status || '').toUpperCase() === 'CANCELLED') return { synced: 0 };
+    // Sales-linked Outpasses are Gate Dispatch Documents; the Sale itself handles physical stock deduction (never double-deduct!)
+    if (String(header.reference_type || '').toUpperCase() === 'SALES' || String(header.purpose || '').toLowerCase() === 'sales dispatch') {
+      return { synced: 0 };
+    }
     const items = await runner.all(`SELECT * FROM outpass_items WHERE outpass_id = ? ORDER BY id ASC`, [sId]);
     for (const r of items) {
       const g = gdw.findG(r.godown_id || header.from_godown_id, r.godown_name || header.from_godown_name, gdw.rmGodown);

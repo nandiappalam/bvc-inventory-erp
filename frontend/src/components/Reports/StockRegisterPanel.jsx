@@ -144,14 +144,27 @@ const StockRegisterPanel = ({ mode = 'current', hideHeader = false }) => {
     try {
       const res = await api.get('/stock-reports/filters');
       if (res && res.success !== false) {
+        const rawFys = Array.isArray(res.financialYears) ? res.financialYears : [];
+        const fyMap = new Map();
+        rawFys.forEach((f) => {
+          const fyName = String(f?.financial_year || f?.year_name || '').trim();
+          if (!fyName) return;
+          if (!fyMap.has(fyName)) {
+            fyMap.set(fyName, { ...f, financial_year: fyName });
+          } else if (f?.is_active) {
+            fyMap.get(fyName).is_active = f.is_active;
+          }
+        });
+        const uniqueFys = Array.from(fyMap.values());
+
         setMeta({
           company: res.company || { id: null, name: 'Company' },
-          financialYears: Array.isArray(res.financialYears) ? res.financialYears : [],
+          financialYears: uniqueFys,
           godowns: Array.isArray(res.godowns) ? res.godowns : [],
           suppliers: Array.isArray(res.suppliers) ? res.suppliers : []
         });
-        if (!financialYear && Array.isArray(res.financialYears) && res.financialYears.length > 0) {
-          const activeFy = res.financialYears.find(f => f.is_active) || res.financialYears[0];
+        if (!financialYear && uniqueFys.length > 0) {
+          const activeFy = uniqueFys.find(f => f.is_active) || uniqueFys[0];
           if (activeFy?.financial_year) {
             setFinancialYear(activeFy.financial_year);
           }
@@ -848,8 +861,8 @@ const StockRegisterPanel = ({ mode = 'current', hideHeader = false }) => {
               onChange={(e) => setFinancialYear(e.target.value)}
             >
               <MenuItem value="">Active / Auto</MenuItem>
-              {meta.financialYears.map((fy) => (
-                <MenuItem key={fy.financial_year} value={fy.financial_year}>
+              {meta.financialYears.map((fy, idx) => (
+                <MenuItem key={fy.id ? `${fy.financial_year}-${fy.id}` : `${fy.financial_year}-${idx}`} value={fy.financial_year}>
                   {fy.financial_year} {fy.is_active ? '(Active)' : ''}
                 </MenuItem>
               ))}

@@ -451,8 +451,21 @@ const SalesLedgerDetailsModal = ({ isOpen, onClose, salesId, salesData = null })
                     <h4 className="text-sm font-bold text-slate-900">{transporterDisplayName}</h4>
                     <div className="mt-2 text-xs space-y-1 text-slate-600">
                       <p><span className="text-slate-400">Vehicle No:</span> <strong className="text-slate-800">{sData.lorry_no || 'Not Entered'}</strong></p>
-                      <p><span className="text-slate-400">Driver:</span> {sData.driver || 'N/A'}</p>
-                      <p><span className="text-slate-400">PO Ref:</span> {sData.p_o_no || sData.po_no || 'N/A'}</p>
+                      <p><span className="text-slate-400">Driver / LR No:</span> {sData.driver || 'N/A'}{sData.lr_no ? ` · LR: ${sData.lr_no}` : ''}</p>
+                      <p><span className="text-slate-400">Outpass / PO:</span> {sData.outpass_no || '—'} · {sData.customer_po_no || sData.p_o_no || 'N/A'}</p>
+                      {(Number(sData.net_load_weight) > 0 || Number(sData.freight_amount) > 0) && (
+                        <p>
+                          <span className="text-slate-400">Load / Freight:</span>{' '}
+                          {Number(sData.net_load_weight || 0).toLocaleString('en-IN')} kg · ₹{Number(sData.freight_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })} ({sData.freight_paid_by || 'Buyer'})
+                        </p>
+                      )}
+                      {statementData?.linked_vouchers && (
+                        <p className="text-[11px] text-indigo-700 font-medium pt-1">
+                          {statementData.linked_vouchers.receipt_voucher_no ? `REC: ${statementData.linked_vouchers.receipt_voucher_no}` : ''}
+                          {statementData.linked_vouchers.receipt_voucher_no && statementData.linked_vouchers.freight_voucher_no ? ' · ' : ''}
+                          {statementData.linked_vouchers.freight_voucher_no ? `JNL Freight: ${statementData.linked_vouchers.freight_voucher_no}` : ''}
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -460,7 +473,7 @@ const SalesLedgerDetailsModal = ({ isOpen, onClose, salesId, salesData = null })
                     <span className="text-[10px] font-bold text-purple-600 uppercase tracking-wider block mb-1">Loadman & Loading</span>
                     <h4 className="text-sm font-bold text-slate-900">{loadmanDisplayName}</h4>
                     <div className="mt-2 text-xs space-y-1 text-slate-600">
-                      <p><span className="text-slate-400">Total Weight:</span> {Number(sData.total_wt || 0).toLocaleString('en-IN')} kg</p>
+                      <p><span className="text-slate-400">Total Net Weight:</span> {Number(sData.product_net_weight || sData.total_wt || 0).toLocaleString('en-IN')} kg</p>
                       <p><span className="text-slate-400">Loading Rate:</span> ₹{Number(sData.loadman_rate_per_kg || 0).toFixed(2)} / kg</p>
                       <p><span className="text-slate-400">Loading Charges:</span> <strong className="text-purple-700 font-bold">₹{loadmanAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></p>
                     </div>

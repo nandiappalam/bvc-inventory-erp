@@ -26,6 +26,7 @@ import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { useNavigate, Link, useLocation, useParams } from 'react-router-dom';
 import voucherAPI from './voucherService.js';
+import api from '../../services/api.js';
 import { safeArray } from '../../utils/safeArray.js';
 import { InlineMasterModal } from '../../components/common/InlineMasterModal.jsx';
 
@@ -545,10 +546,9 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
 
   // Fetch all pending bills for Quick Search
   const loadSearchableBills = useCallback(() => {
-    fetch('/api/reports/outstanding-details')
-      .then(r => r.json())
+    api('/reports/outstanding-details')
       .then(data => {
-        const bills = Array.isArray(data) ? data : (data.data || []);
+        const bills = Array.isArray(data) ? data : (data?.data || []);
         const pendingOnly = bills.filter(b => {
           const bal = parseFloat(b.balance) || 0;
           if (bal <= 0.01) return false;
@@ -1120,12 +1120,16 @@ const VoucherCreate = ({ voucherId = null, isEdit = false }) => {
                   if (b.category === 'transport') icon = '🚚 Transport Freight';
                   else if (b.category === 'loadman') icon = '👷 Loadman Charges';
                   else if (b.voucher_type === 'Operational') icon = '⚡ Operational Charge';
-                  else if (b.type === 'Receivable') icon = '🏷️ Sales Bill';
+                  else if (b.type === 'Receivable' || b.voucher_type === 'Sales' || b.category === 'sales') icon = '🏷️ Sales Bill';
                   else if (b.type === 'Payable' && b.category !== 'purchase') icon = '📄 General Payable';
+
+                  const refDisplay = b.voucher_no && b.invoice_no && String(b.voucher_no) !== String(b.invoice_no)
+                    ? `${b.voucher_no} (Inv #${b.invoice_no})`
+                    : (b.voucher_no || b.invoice_no);
 
                   return (
                     <MenuItem key={b.key} value={b.key}>
-                      {icon} #{b.invoice_no || b.voucher_no} — {b.ledger_name} (Bal: ₹{parseFloat(b.balance).toLocaleString('en-IN', { minimumFractionDigits: 2 })})
+                      {icon} #{refDisplay} — {b.ledger_name} (Bal: ₹{parseFloat(b.balance).toLocaleString('en-IN', { minimumFractionDigits: 2 })})
                     </MenuItem>
                   );
                 })}

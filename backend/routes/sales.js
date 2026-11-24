@@ -1,151 +1,67 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
-const recycleBinService = require('../services/RecycleBinService');
-const { createSalesLedgerEntries, deleteLedgerEntries } = require('../utils/ledgerHelper');
-const { rebuildStockLedger } = require('../utils/stockRebuilder');
-const { syncDocumentMovements, deleteDocumentMovements } = require('../services/SourceMovementSync');
+const SalesService = require('../services/SalesService');
 const { resolveCustomerName } = require('../utils/customerResolver');
 
 const getCompanyId = (req) => req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
-const _salesSchemaEnsured = new Set();
-
-async function ensureSalesSchema(companyId) {
-  if (_salesSchemaEnsured.has(companyId)) return;
-  try { await db.run("ALTER TABLE sales ADD COLUMN is_order INTEGER DEFAULT 0", [], companyId); } catch (_) {}
-  try { await db.run("ALTER TABLE sales ADD COLUMN voucher_no TEXT", [], companyId); } catch (_) {}
-  try { await db.run("ALTER TABLE sales ADD COLUMN deductions_json TEXT", [], companyId); } catch (_) {}
-  _salesSchemaEnsured.add(companyId);
-}
-
-function normalizeSalesDeductions(rawSelected, formData = {}) {
-  let list = [];
-  if (Array.isArray(rawSelected)) {
-    list = rawSelected;
-  } else if (typeof rawSelected === 'string' && rawSelected.trim()) {
-    try {
-      const parsed = JSON.parse(rawSelected);
-      if (Array.isArray(parsed)) list = parsed;
-    } catch (_) {}
-  }
-
-  const normalized = list
-    .map(d => {
-      const amt = parseFloat(d?.amount || d?.deduction_amount || 0);
-      if (!(amt > 0)) return null;
-      const rawType = String(d?.type || d?.ded_type || d?.deduction_type || '').trim().toUpperCase();
-      const isAdd = rawType === 'ADD' || rawType === '+' || rawType === 'ADDITION' || rawType === 'PLUS';
-      return {
-        deduction_id: d?.deduction_id || d?.id || null,
-        name: (d?.deduction_name || d?.name || d?.deduction || '').trim() || (isAdd ? 'Other Charges' : 'Sales Deduction'),
-        type: isAdd ? 'ADD' : 'LESS',
-        amount: amt,
-        remarks: d?.remarks || ''
-      };
-    })
-    .filter(Boolean);
-
-  const customManualDed = parseFloat(formData.deduction) || 0;
-  if (customManualDed > 0) {
-    normalized.push({
-      name: 'Manual Deduction',
-      type: 'LESS',
-      amount: customManualDed,
-      remarks: formData.deduction_remarks || ''
-    });
-  } else if (normalized.length === 0 && formData.deduction_amount) {
-    const rawDedAmt = parseFloat(formData.deduction_amount) || 0;
-    if (rawDedAmt !== 0) {
-      const isAdd = rawDedAmt < 0;
-      normalized.push({
-        name: (formData.deduction && isNaN(Number(formData.deduction)))
-          ? String(formData.deduction).trim()
-          : (isAdd ? 'Other Charges' : 'Sales Deduction'),
-        type: isAdd ? 'ADD' : 'LESS',
-        amount: Math.abs(rawDedAmt),
-        remarks: formData.deduction_remarks || ''
-      });
-    }
-  }
-  return normalized;
-}
 
 router.use(async (req, _res, next) => {
-  await ensureSalesSchema(getCompanyId(req));
+  try {
+    await SalesService.ensureSalesSchema(getCompanyId(req));
+  } catch (err) {
+    console.warn('[SalesRoute] schema ensure warning:', err.message);
+  }
   next();
 });
 
-// GET all sales
-router.get(['/', '/list'], async (req, res) => {
+// GET consolidated lookups for Sales Create/Edit form
+router.get('/form-lookups', async (req, res) => {
   try {
     const activeCompanyId = getCompanyId(req);
-    const runner = db.forCompany(activeCompanyId);
-    const isOrderQuery = req.query.is_order;
-    let query = `
-      SELECT s.id,
-             s.s_no,
-             s.date,
-             COALESCE(c.name, s.customer) as customer,
-             COALESCE(c.name, s.customer) as customer_name,
-             s.remarks,
-             s.is_order,
-             s.bill_amt,
-             s.tax_amt,
-             s.deduction,
-             s.deduction_amount,
-             s.deductions_json,
-             s.grand_total,
-             s.voucher_no,
-             s.created_at
-      FROM sales s
-      LEFT JOIN customer_master c ON (s.customer = CAST(c.id AS TEXT) OR s.customer = c.name)
-    `;
-
-    const params = [];
-    if (isOrderQuery !== undefined) {
-      query += ` WHERE COALESCE(s.is_order, 0) = ? `;
-      params.push(parseInt(isOrderQuery) || 0);
-    }
-
-    query += ` ORDER BY s.created_at DESC, s.id DESC`;
-    const result = await runner.query(query, params);
-    const salesList = result.rows || [];
-
-    for (const sale of salesList) {
-      const itemsRes = await runner.query(`SELECT * FROM sales_items WHERE sales_id = ?`, [sale.id]);
-      const items = itemsRes.rows || [];
-      sale.items = items.map(i => ({
-        id: i.id,
-        itemName: i.item_name,
-        item_name: i.item_name,
-        lotNo: i.lot_no,
-        lot_no: i.lot_no,
-        weight: i.weight,
-        qty: i.qty,
-        totalWt: i.total_wt,
-        total_wt: i.total_wt,
-        rate: i.rate,
-        discPerc: i.disc_perc,
-        taxPerc: i.tax_perc,
-        totalAmt: i.total_amt,
-        total_amt: i.total_amt
-      }));
-
-      sale.item_name = items.map(i => i.item_name).filter(Boolean).join(', ') || 'Sale Item';
-      sale.lot_no = items.map(i => i.lot_no).filter(Boolean).join(', ') || '';
-      sale.qty = items.reduce((sum, i) => sum + (parseFloat(i.qty) || 0), 0);
-      sale.weight = items[0]?.weight || 0;
-      sale.total_wt = items.reduce((sum, i) => sum + (parseFloat(i.total_wt) || 0), 0);
-      sale.rate = items[0]?.rate || 0;
-      sale.disc_perc = items[0]?.disc_perc || 0;
-      sale.tax_perc = items[0]?.tax_perc || 0;
-      sale.total_amt = sale.grand_total || items.reduce((sum, i) => sum + (parseFloat(i.total_amt) || 0), 0);
-    }
-
-    res.json(salesList);
+    const lookups = await SalesService.getFormLookups(activeCompanyId);
+    res.json({ success: true, data: lookups });
   } catch (error) {
-    console.error('Error fetching sales:', error);
-    res.status(500).json({ message: 'Error fetching sales', error: error.message });
+    console.error('Error fetching sales form lookups:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET customer credit, outstanding, GSTIN, billing/shipping context
+router.get('/customer-context/:customerKey', async (req, res) => {
+  try {
+    const activeCompanyId = getCompanyId(req);
+    const ctx = await SalesService.getCustomerContext(activeCompanyId, req.params.customerKey);
+    if (!ctx) {
+      return res.status(404).json({ success: false, message: 'Customer not found' });
+    }
+    res.json({ success: true, data: ctx });
+  } catch (error) {
+    console.error('Error fetching customer context:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET available FG/RM/Vacuum lots per godown
+router.get('/available-lots', async (req, res) => {
+  try {
+    const activeCompanyId = getCompanyId(req);
+    const lots = await SalesService.getAvailableLots(activeCompanyId, req.query || {});
+    res.json({ success: true, data: lots });
+  } catch (error) {
+    console.error('Error fetching available sales lots:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET next auto Outpass No
+router.get('/next-outpass-no', async (req, res) => {
+  try {
+    const activeCompanyId = getCompanyId(req);
+    const outpass_no = await SalesService.getNextOutpassNo(activeCompanyId);
+    res.json({ success: true, outpass_no });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
@@ -153,57 +69,544 @@ router.get(['/', '/list'], async (req, res) => {
 router.get('/next-sno', async (req, res) => {
   try {
     const activeCompanyId = getCompanyId(req);
-    const isOrderQuery = req.query.is_order;
-    let whereClause = '';
-    const params = [];
-    if (isOrderQuery !== undefined) {
-      whereClause = ' WHERE COALESCE(is_order, 0) = ?';
-      params.push(parseInt(isOrderQuery) || 0);
-    }
-    const maxRes = await db.forCompany(activeCompanyId).query(`
-      SELECT 
-        MAX(CAST(NULLIF(s_no, '') AS INTEGER)) as max_sno
-      FROM sales${whereClause}
-    `, params);
-
-    const maxVal = parseInt(maxRes.rows[0]?.max_sno, 10) || 0;
-    const nextSno = maxVal + 1;
-    res.json({ success: true, next_sno: String(nextSno), s_no: nextSno, next_s_no: String(nextSno), data: { s_no: nextSno } });
+    const isOrder = req.query.is_order !== undefined ? (parseInt(req.query.is_order, 10) === 1) : false;
+    const nextSno = await SalesService.getNextSalesNo(activeCompanyId, isOrder);
+    const nextNum = parseInt(nextSno, 10) || 1;
+    res.json({ success: true, next_sno: nextSno, s_no: nextNum, next_s_no: nextSno, data: { s_no: nextNum } });
   } catch (error) {
     console.error('Error fetching next sales s_no:', error);
     res.status(500).json({ success: false, message: 'Error fetching next sales s_no', error: error.message });
   }
 });
 
-// GET sales by ID
+// Helper: verify authorized Admin / Manager or explicit can_delete permission for controlled sales cancellation
+async function requireSalesCancelPermission(req, res, next) {
+  try {
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
+    const role = String(req.user.role || '').trim().toLowerCase();
+    if (['admin', 'manager', 'superadmin'].includes(role)) {
+      return next();
+    }
+    if (db.master && typeof db.master.query === 'function') {
+      const permRes = await db.master.query(
+        `SELECT can_delete FROM user_permissions
+         WHERE user_id = ?
+           AND LOWER(TRIM(COALESCE(module_name, ''))) IN ('sales', 'sales order', 'sales_order', 'all')
+           AND COALESCE(can_delete, 0) = 1
+         LIMIT 1`,
+        [req.user.id]
+      );
+      if (permRes.rows && permRes.rows.length > 0) {
+        return next();
+      }
+    }
+    return res.status(403).json({
+      success: false,
+      message: 'Only Admin or authorized users can cancel a posted sales record.'
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: 'Authorization check failed' });
+  }
+}
+
+function round2Num(val) {
+  const n = Number(val);
+  if (!Number.isFinite(n)) return 0;
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
+function deriveSalesRegisterFields({
+  sale,
+  items = [],
+  outpass = null,
+  outpassItemsAgg = null,
+  stockMoveAgg = null,
+  receiptEntries = [],
+  linkedReceiptVouchers = [],
+  qcMap = new Map(),
+  customerRow = null,
+  transporterRow = null,
+  godownRow = null
+}) {
+  const isOrder = Number(sale.is_order || 0) === 1;
+  const resolvedCustomerName =
+    (customerRow && (customerRow.name || customerRow.print_name)) ||
+    (!/^\d+$/.test(String(sale.customer || '').trim()) ? sale.customer : '') ||
+    'Customer';
+
+  const resolvedGstin = sale.customer_gstin || customerRow?.gst_number || '';
+  const resolvedState = sale.party_state || customerRow?.state || '';
+  const resolvedStateCode = sale.party_state_code || customerRow?.state_code || '';
+
+  const resolvedTransporterName =
+    (transporterRow && (transporterRow.print_name || transporterRow.name)) ||
+    (sale.pur_trans && !/^\d+$/.test(String(sale.pur_trans).trim()) ? sale.pur_trans : '') ||
+    (outpass?.transporter && !/^\d+$/.test(String(outpass.transporter).trim()) ? outpass.transporter : '') ||
+    '';
+
+  const resolvedGodownName =
+    sale.godown_from_name ||
+    godownRow?.godown_name ||
+    items.find((i) => i.godown_name)?.godown_name ||
+    outpass?.from_godown_name ||
+    '';
+
+  const mappedItems = items.map((i) => {
+    const lotKey = String(i.lot_no || '').trim().toUpperCase();
+    const parentLotKey = String(i.parent_rm_lot_no || '').trim().toUpperCase();
+    const matchedQc = qcMap.get(lotKey) || qcMap.get(parentLotKey) || null;
+    return {
+      id: i.id,
+      item_id: i.item_id,
+      product_code: i.product_code || '',
+      itemName: i.item_name,
+      item_name: i.item_name,
+      category: i.category || sale.stock_type || 'FG',
+      hsn_code: i.hsn_code || '',
+      lotNo: i.lot_no || '',
+      lot_no: i.lot_no || '',
+      parent_rm_lot_no: i.parent_rm_lot_no || '',
+      godown_id: i.godown_id,
+      godown_name: i.godown_name || resolvedGodownName || '',
+      package_type: i.package_type || 'Bag',
+      package_tare_wt: Number(i.package_tare_wt || 0),
+      uom: i.uom || 'KG',
+      weight: Number(i.weight || 0),
+      qty: Number(i.qty || 0),
+      totalWt: Number(i.total_wt || 0),
+      total_wt: Number(i.total_wt || 0),
+      net_product_wt: Number(i.net_product_wt || i.total_wt || 0),
+      allocated_load_wt: Number(i.allocated_load_wt || 0),
+      rate: Number(i.rate || 0),
+      rate_type: i.rate_type || 'Per Kg',
+      discPerc: Number(i.disc_perc || 0),
+      disc_perc: Number(i.disc_perc || 0),
+      disc_amount: Number(i.disc_amount || 0),
+      taxable_amount: Number(i.taxable_amount || 0),
+      taxPerc: Number(i.tax_perc || 0),
+      tax_perc: Number(i.tax_perc || 0),
+      gst_rate: Number(i.gst_rate ?? i.tax_perc ?? 0),
+      tax_type: i.tax_type || 'Taxable',
+      cgst_rate: Number(i.cgst_rate || 0),
+      cgst_amount: Number(i.cgst_amount || 0),
+      sgst_rate: Number(i.sgst_rate || 0),
+      sgst_amount: Number(i.sgst_amount || 0),
+      igst_rate: Number(i.igst_rate || 0),
+      igst_amount: Number(i.igst_amount || 0),
+      totalAmt: Number(i.total_amt || 0),
+      total_amt: Number(i.total_amt || 0),
+      box: Number(i.box || 0),
+      qc_id: matchedQc?.id || null,
+      qc_no: matchedQc?.qc_no || null
+    };
+  });
+
+  const itemNames = mappedItems.map((i) => i.item_name).filter(Boolean);
+  const uniqueLots = Array.from(new Set(mappedItems.map((i) => String(i.lot_no || '').trim()).filter(Boolean)));
+  const primaryQc = mappedItems.find((i) => i.qc_id) || null;
+
+  const totalQty = mappedItems.reduce((sum, i) => sum + (Number(i.qty) || 0), 0);
+  const invoiceNetWeight = round2Num(
+    Number(sale.product_net_weight || 0) > 0
+      ? Number(sale.product_net_weight)
+      : mappedItems.reduce((sum, i) => sum + (Number(i.net_product_wt || i.total_wt) || 0), 0)
+  );
+  const invoiceTotal = round2Num(
+    sale.grand_total !== undefined && sale.grand_total !== null && Number(sale.grand_total) > 0
+      ? Number(sale.grand_total)
+      : (Number(sale.total_amt || 0) > 0
+          ? Number(sale.total_amt)
+          : mappedItems.reduce((sum, i) => sum + (Number(i.total_amt) || 0), 0))
+  );
+
+  // Confirmed dispatch weight (ONLY from non-cancelled Outpasses in dispatched/outpassed/delivered/closed state or active outward stock movements)
+  const rawOpStatus = String(outpass?.status || sale.outpass_status || '').trim().toUpperCase();
+  const isOutpassCancelled = rawOpStatus === 'CANCELLED';
+  const isOutpassDispatched = !isOutpassCancelled && ['OUTPASSED', 'DISPATCHED', 'DELIVERED', 'CLOSED', 'IN_TRANSIT'].includes(rawOpStatus);
+  const outpassWt = isOutpassDispatched
+    ? round2Num(Math.max(Number(outpass?.total_weight || 0), Number(outpassItemsAgg?.op_wt || 0)))
+    : 0;
+  const movementWt = round2Num(Number(stockMoveAgg?.out_wt || 0));
+
+  let confirmedDispatchedWeight = 0;
+  if (!isOrder) {
+    if (outpassWt > 0) {
+      confirmedDispatchedWeight = outpassWt;
+    } else if (movementWt > 0) {
+      confirmedDispatchedWeight = movementWt;
+    }
+  }
+
+  // Honest Dispatch Status derivation
+  const rawSaleDispatch = String(sale.dispatch_status || '').trim();
+  const rawDispatchLower = rawSaleDispatch.toLowerCase();
+  const isSaleCancelled = rawDispatchLower === 'cancelled' || isOutpassCancelled;
+  let computedDispatchStatus = 'Pending';
+  if (isOrder) {
+    computedDispatchStatus = isSaleCancelled ? 'Cancelled' : 'Open Order';
+  } else if (isSaleCancelled) {
+    computedDispatchStatus = 'Cancelled';
+  } else if (sale.actual_delivery_date || rawDispatchLower.includes('delivered') || rawOpStatus === 'DELIVERED') {
+    computedDispatchStatus = 'Delivered';
+  } else if (
+    isOutpassDispatched ||
+    rawDispatchLower === 'dispatched' ||
+    rawDispatchLower === 'in transit' ||
+    (movementWt > 0 && (invoiceNetWeight <= 0 || movementWt + 0.01 >= invoiceNetWeight))
+  ) {
+    computedDispatchStatus = 'Dispatched';
+  } else if (movementWt > 0 && invoiceNetWeight > 0 && movementWt + 0.01 < invoiceNetWeight) {
+    computedDispatchStatus = 'Partially Dispatched';
+  } else {
+    computedDispatchStatus = 'Pending';
+  }
+
+  // Honest Customer Receipt & Payment Status derivation
+  const voucherNo = sale.voucher_no || (sale.is_order ? '' : `SAL-${String(sale.s_no || sale.id).padStart(5, '0')}`);
+  const custLower = resolvedCustomerName.trim().toLowerCase();
+  const receiptVnoUpper = String(sale.receipt_voucher_no || '').trim().toUpperCase();
+  const salVoucherUpper = String(voucherNo || '').trim().toUpperCase();
+  const billNoUpper = String(sale.inv_no || sale.s_no || '').trim().toUpperCase();
+
+  const matchedReceipts = [];
+  const seenReceiptKeys = new Set();
+  for (const le of receiptEntries) {
+    if (String(le.ledger_name || '').trim().toLowerCase() !== custLower) continue;
+    const refMatch = String(le.reference_id || '').trim() === String(sale.id);
+    const vnoUpper = String(le.voucher_no || '').trim().toUpperCase();
+    const recVnoMatch = Boolean(receiptVnoUpper && vnoUpper === receiptVnoUpper);
+    const partUpper = String(le.particulars || '').toUpperCase();
+    const partMatch = Boolean(
+      (salVoucherUpper && partUpper.includes(salVoucherUpper)) ||
+      (billNoUpper && partUpper.includes(`INV #${billNoUpper}`))
+    );
+    if (refMatch || recVnoMatch || partMatch) {
+      const uniq = `${le.voucher_no || ''}_${le.date || ''}_${le.credit || 0}`;
+      if (!seenReceiptKeys.has(uniq)) {
+        seenReceiptKeys.add(uniq);
+        matchedReceipts.push({
+          voucher_no: le.voucher_no || '',
+          voucher_type: le.voucher_type || 'Receipt',
+          date: le.date || '',
+          amount: round2Num(le.credit || 0),
+          particulars: le.particulars || ''
+        });
+      }
+    }
+  }
+  for (const lv of linkedReceiptVouchers) {
+    const vno = lv.voucher_no || '';
+    const exists = matchedReceipts.some((r) => String(r.voucher_no || '').toUpperCase() === String(vno).toUpperCase());
+    if (!exists && Number(lv.total_credit || lv.total_debit || 0) > 0) {
+      matchedReceipts.push({
+        voucher_no: vno,
+        voucher_type: lv.voucher_type || 'Receipt',
+        date: lv.date || '',
+        amount: round2Num(lv.total_credit || lv.total_debit || 0),
+        particulars: lv.narration || 'Linked Receipt Voucher'
+      });
+    }
+  }
+
+  const ledgerReceiptsTotal = round2Num(matchedReceipts.reduce((s, r) => s + Number(r.amount || 0), 0));
+  const storedReceived = round2Num(sale.received_amount || 0);
+  const advanceAdjusted = round2Num(sale.advance_adjusted || 0);
+  const effectiveReceipts = ledgerReceiptsTotal > 0 ? ledgerReceiptsTotal : storedReceived;
+  const actualReceivedAmount = isOrder ? 0 : round2Num(effectiveReceipts + advanceAdjusted);
+  const actualBalanceDue = isOrder ? invoiceTotal : round2Num(Math.max(0, invoiceTotal - actualReceivedAmount));
+
+  let computedPaymentStatus = 'Order';
+  if (!isOrder) {
+    if (isSaleCancelled) {
+      computedPaymentStatus = 'Cancelled';
+    } else if (invoiceTotal > 0 && actualBalanceDue <= 0.01) {
+      computedPaymentStatus = 'Paid';
+    } else if (actualReceivedAmount > 0.009) {
+      computedPaymentStatus = 'Partially Paid';
+    } else {
+      computedPaymentStatus = 'Unpaid';
+    }
+  }
+
+  return {
+    ...sale,
+    customer: resolvedCustomerName,
+    customer_name: resolvedCustomerName,
+    customer_gstin: resolvedGstin,
+    master_customer_gstin: customerRow?.gst_number || '',
+    party_state: resolvedState,
+    party_state_code: resolvedStateCode,
+    transporter_name: resolvedTransporterName,
+    pur_trans: resolvedTransporterName || sale.pur_trans || '',
+    godown_from_name: resolvedGodownName,
+    godown_name: resolvedGodownName,
+    outpass_id: sale.outpass_id || outpass?.id || null,
+    outpass_no: sale.outpass_no || outpass?.outpass_no || '',
+    outpass_status: outpass?.status || sale.outpass_status || '',
+    outpass_date: outpass?.date || '',
+    items: mappedItems,
+    item_count: mappedItems.length,
+    primary_item_name: itemNames[0] || 'Sale Item',
+    item_summary: itemNames.length > 1 ? `${itemNames[0]} + ${itemNames.length - 1} more` : (itemNames[0] || 'Sale Item'),
+    item_name: itemNames.join(', ') || 'Sale Item',
+    unique_lots: uniqueLots,
+    primary_lot_no: uniqueLots[0] || '',
+    lot_summary: uniqueLots.length > 1 ? `${uniqueLots.length} Lots (${uniqueLots.join(', ')})` : (uniqueLots[0] || ''),
+    lot_no: uniqueLots.join(', ') || '',
+    qty: totalQty,
+    weight: mappedItems[0]?.weight || 0,
+    total_wt: invoiceNetWeight,
+    product_net_weight: invoiceNetWeight,
+    confirmed_dispatched_weight: confirmedDispatchedWeight,
+    computed_dispatch_status: computedDispatchStatus,
+    rate: mappedItems[0]?.rate || 0,
+    disc_perc: mappedItems[0]?.disc_perc || 0,
+    tax_perc: mappedItems[0]?.tax_perc || 0,
+    total_amt: invoiceTotal,
+    grand_total: invoiceTotal,
+    actual_received_amount: actualReceivedAmount,
+    actual_balance_due: actualBalanceDue,
+    payment_status: computedPaymentStatus,
+    receipt_vouchers: matchedReceipts,
+    qc_id: primaryQc?.qc_id || null,
+    qc_no: primaryQc?.qc_no || null,
+    deductions: SalesService.normalizeSalesDeductions(sale.deductions_json, sale),
+    created_by: sale.created_by || outpass?.created_by || stockMoveAgg?.created_by || '',
+    updated_at: sale.updated_at || outpass?.updated_at || '',
+    is_cancelled: isSaleCancelled
+  };
+}
+
+// GET all sales (strictly read-only enriched register)
+router.get(['/', '/list'], async (req, res) => {
+  try {
+    const activeCompanyId = getCompanyId(req);
+    const runner = db.forCompany(activeCompanyId);
+    const isOrderQuery = req.query.is_order;
+    const fyQuery = req.query.financial_year;
+
+    let query = `SELECT * FROM sales WHERE 1=1`;
+    const params = [];
+    if (isOrderQuery !== undefined) {
+      query += ` AND COALESCE(is_order, 0) = ?`;
+      params.push(parseInt(isOrderQuery, 10) || 0);
+    }
+    if (fyQuery && String(fyQuery).toUpperCase() !== 'ALL') {
+      query += ` AND financial_year = ?`;
+      params.push(String(fyQuery).trim());
+    }
+    query += ` ORDER BY date DESC, id DESC`;
+
+    const salesRes = await runner.query(query, params);
+    const salesRows = salesRes.rows || [];
+    if (salesRows.length === 0) {
+      return res.json([]);
+    }
+
+    const [
+      customersRes,
+      transportsRes,
+      godownsRes,
+      outpassesRes,
+      outpassItemsRes,
+      salesItemsRes,
+      stockMovesRes,
+      qcRes,
+      receiptLedgerRes,
+      receiptVouchersRes
+    ] = await Promise.all([
+      runner.query(`SELECT id, name, print_name, gst_number, state, state_code, mobile1 FROM customer_master`).catch(() => ({ rows: [] })),
+      runner.query(`SELECT id, name, print_name FROM transport_master`).catch(() => ({ rows: [] })),
+      runner.query(`SELECT id, godown_name FROM godown_master`).catch(() => ({ rows: [] })),
+      runner.query(`SELECT id, outpass_no, date, reference_type, reference_id, status, total_qty, total_weight, net_load_weight, transporter, from_godown_name, created_by, updated_at FROM outpasses WHERE reference_type = 'SALES' ORDER BY id DESC`).catch(() => ({ rows: [] })),
+      runner.query(`SELECT outpass_id, COALESCE(SUM(qty), 0) AS op_qty, COALESCE(SUM(total_weight), 0) AS op_wt FROM outpass_items GROUP BY outpass_id`).catch(() => ({ rows: [] })),
+      runner.query(`SELECT * FROM sales_items ORDER BY id ASC`).catch(() => ({ rows: [] })),
+      runner.query(`SELECT source_id, SUM(CASE WHEN direction = 'OUT' THEN COALESCE(qty, 0) ELSE 0 END) AS out_qty, SUM(CASE WHEN direction = 'OUT' THEN COALESCE(weight, 0) ELSE 0 END) AS out_wt, MAX(created_by) AS created_by FROM stock_movements WHERE source_module = 'SALES' AND COALESCE(is_reversed, 0) = 0 GROUP BY source_id`).catch(() => ({ rows: [] })),
+      runner.query(`SELECT id, qc_no, rm_lot_no, overall_result FROM qc_inspections ORDER BY id DESC`).catch(() => ({ rows: [] })),
+      runner.query(`SELECT ledger_name, voucher_no, voucher_type, date, particulars, credit, reference_id FROM ledger_entries WHERE COALESCE(is_reversed, 0) = 0 AND voucher_type IN ('Receipt', 'REC', 'Bank Receipt', 'Cash Receipt', 'Advance')`).catch(() => ({ rows: [] })),
+      runner.query(`SELECT source_id, voucher_no, voucher_type, date, total_debit, total_credit, narration FROM voucher WHERE COALESCE(is_reversed, 0) = 0 AND source_module = 'sales_receipt'`).catch(() => ({ rows: [] }))
+    ]);
+
+    const customerById = new Map();
+    const customerByName = new Map();
+    for (const c of customersRes.rows || []) {
+      customerById.set(String(c.id), c);
+      if (c.name) customerByName.set(String(c.name).trim().toLowerCase(), c);
+      if (c.print_name) customerByName.set(String(c.print_name).trim().toLowerCase(), c);
+    }
+
+    const transportById = new Map((transportsRes.rows || []).map((t) => [String(t.id), t]));
+    const godownById = new Map((godownsRes.rows || []).map((g) => [String(g.id), g]));
+
+    const outpassById = new Map();
+    const outpassBySaleId = new Map();
+    for (const op of outpassesRes.rows || []) {
+      outpassById.set(String(op.id), op);
+      if (op.reference_id && !outpassBySaleId.has(String(op.reference_id))) {
+        outpassBySaleId.set(String(op.reference_id), op);
+      }
+    }
+    const opItemsByOpId = new Map((outpassItemsRes.rows || []).map((r) => [String(r.outpass_id), r]));
+
+    const itemsBySaleId = new Map();
+    for (const it of salesItemsRes.rows || []) {
+      const k = String(it.sales_id);
+      if (!itemsBySaleId.has(k)) itemsBySaleId.set(k, []);
+      itemsBySaleId.get(k).push(it);
+    }
+
+    const stockMoveBySaleId = new Map((stockMovesRes.rows || []).map((r) => [String(r.source_id), r]));
+
+    const qcMap = new Map();
+    for (const q of qcRes.rows || []) {
+      const lk = String(q.rm_lot_no || '').trim().toUpperCase();
+      if (lk && !qcMap.has(lk)) qcMap.set(lk, q);
+    }
+
+    const linkedRecVouchersBySaleId = new Map();
+    for (const v of receiptVouchersRes.rows || []) {
+      const k = String(v.source_id);
+      if (!linkedRecVouchersBySaleId.has(k)) linkedRecVouchersBySaleId.set(k, []);
+      linkedRecVouchersBySaleId.get(k).push(v);
+    }
+
+    const enrichedList = salesRows.map((sale) => {
+      const custRow =
+        customerById.get(String(sale.customer_id || '')) ||
+        customerById.get(String(sale.customer || '')) ||
+        customerByName.get(String(sale.customer || '').trim().toLowerCase()) ||
+        null;
+      const transRow = transportById.get(String(sale.transporter_id || '')) || null;
+      const gdRow = godownById.get(String(sale.godown_from_id || '')) || null;
+      const opRow =
+        (sale.outpass_id ? outpassById.get(String(sale.outpass_id)) : null) ||
+        outpassBySaleId.get(String(sale.id)) ||
+        null;
+      const opItemsAgg = opRow ? opItemsByOpId.get(String(opRow.id)) : null;
+
+      return deriveSalesRegisterFields({
+        sale,
+        items: itemsBySaleId.get(String(sale.id)) || [],
+        outpass: opRow,
+        outpassItemsAgg: opItemsAgg,
+        stockMoveAgg: stockMoveBySaleId.get(String(sale.id)) || null,
+        receiptEntries: receiptLedgerRes.rows || [],
+        linkedReceiptVouchers: linkedRecVouchersBySaleId.get(String(sale.id)) || [],
+        qcMap,
+        customerRow: custRow,
+        transporterRow: transRow,
+        godownRow: gdRow
+      });
+    });
+
+    res.json(enrichedList);
+  } catch (error) {
+    console.error('Error fetching sales:', error);
+    res.status(500).json({ message: 'Error fetching sales', error: error.message });
+  }
+});
+
+// GET sales by ID (enriched read-only single record)
 router.get('/:id', async (req, res) => {
   try {
     const activeCompanyId = getCompanyId(req);
+    const runner = db.forCompany(activeCompanyId);
     const id = req.params.id;
     if (!id || id === 'undefined' || id === 'null' || isNaN(Number(id))) {
       return res.status(404).json({ message: 'Sales record not found' });
     }
-    const salesResult = await db.forCompany(activeCompanyId).query('SELECT * FROM sales WHERE id = ?', [id]);
+    const salesResult = await runner.query('SELECT * FROM sales WHERE id = ?', [id]);
     if (salesResult.rows.length === 0) {
       return res.status(404).json({ message: 'Sales record not found' });
     }
 
-    const itemsResult = await db.forCompany(activeCompanyId).query('SELECT * FROM sales_items WHERE sales_id = ?', [id]);
-
     const salesRow = salesResult.rows[0];
-    let deductions = [];
-    if (salesRow.deductions_json) {
-      try {
-        deductions = JSON.parse(salesRow.deductions_json);
-      } catch (e) {
-        console.error('Error parsing deductions_json:', e);
+    const itemsResult = await runner.query('SELECT * FROM sales_items WHERE sales_id = ? ORDER BY id ASC', [id]);
+    const items = itemsResult.rows || [];
+
+    let outpass = null;
+    let outpassItemsAgg = null;
+    try {
+      if (salesRow.outpass_id) {
+        const opRes = await runner.query('SELECT * FROM outpasses WHERE id = ? LIMIT 1', [salesRow.outpass_id]);
+        outpass = opRes.rows?.[0] || null;
+      } else {
+        const opRes = await runner.query("SELECT * FROM outpasses WHERE reference_type = 'SALES' AND reference_id = ? LIMIT 1", [id]);
+        outpass = opRes.rows?.[0] || null;
       }
+      if (outpass) {
+        const opItems = await runner.query('SELECT * FROM outpass_items WHERE outpass_id = ?', [outpass.id]);
+        outpass.items = opItems.rows || [];
+        outpassItemsAgg = {
+          op_qty: (opItems.rows || []).reduce((s, r) => s + Number(r.qty || 0), 0),
+          op_wt: (opItems.rows || []).reduce((s, r) => s + Number(r.total_weight || 0), 0)
+        };
+      }
+    } catch (_) {}
+
+    let customerRow = null;
+    try {
+      const cKey = String(salesRow.customer_id || salesRow.customer || '').trim();
+      if (cKey) {
+        const cRes = await runner.query(
+          `SELECT id, name, print_name, gst_number, state, state_code, mobile1
+           FROM customer_master
+           WHERE CAST(id AS TEXT) = ? OR LOWER(TRIM(name)) = LOWER(TRIM(?)) OR LOWER(TRIM(COALESCE(print_name, ''))) = LOWER(TRIM(?))
+           LIMIT 1`,
+          [cKey, String(salesRow.customer || ''), String(salesRow.customer || '')]
+        );
+        customerRow = cRes.rows?.[0] || null;
+      }
+    } catch (_) {}
+
+    let transporterRow = null;
+    try {
+      if (salesRow.transporter_id) {
+        const tRes = await runner.query('SELECT id, name, print_name FROM transport_master WHERE id = ? LIMIT 1', [salesRow.transporter_id]);
+        transporterRow = tRes.rows?.[0] || null;
+      }
+    } catch (_) {}
+
+    let godownRow = null;
+    try {
+      if (salesRow.godown_from_id) {
+        const gRes = await runner.query('SELECT id, godown_name FROM godown_master WHERE id = ? LIMIT 1', [salesRow.godown_from_id]);
+        godownRow = gRes.rows?.[0] || null;
+      }
+    } catch (_) {}
+
+    const [stockMoveRes, qcRes, recLedgerRes, recVoucherRes] = await Promise.all([
+      runner.query(`SELECT SUM(CASE WHEN direction = 'OUT' THEN COALESCE(qty, 0) ELSE 0 END) AS out_qty, SUM(CASE WHEN direction = 'OUT' THEN COALESCE(weight, 0) ELSE 0 END) AS out_wt, MAX(created_by) AS created_by FROM stock_movements WHERE source_module = 'SALES' AND source_id = ? AND COALESCE(is_reversed, 0) = 0`, [id]).catch(() => ({ rows: [] })),
+      runner.query(`SELECT id, qc_no, rm_lot_no, overall_result FROM qc_inspections ORDER BY id DESC`).catch(() => ({ rows: [] })),
+      runner.query(`SELECT ledger_name, voucher_no, voucher_type, date, particulars, credit, reference_id FROM ledger_entries WHERE COALESCE(is_reversed, 0) = 0 AND voucher_type IN ('Receipt', 'REC', 'Bank Receipt', 'Cash Receipt', 'Advance')`).catch(() => ({ rows: [] })),
+      runner.query(`SELECT source_id, voucher_no, voucher_type, date, total_debit, total_credit, narration FROM voucher WHERE COALESCE(is_reversed, 0) = 0 AND source_module = 'sales_receipt' AND source_id = ?`, [id]).catch(() => ({ rows: [] }))
+    ]);
+
+    const qcMap = new Map();
+    for (const q of qcRes.rows || []) {
+      const lk = String(q.rm_lot_no || '').trim().toUpperCase();
+      if (lk && !qcMap.has(lk)) qcMap.set(lk, q);
     }
 
+    const enriched = deriveSalesRegisterFields({
+      sale: salesRow,
+      items,
+      outpass,
+      outpassItemsAgg,
+      stockMoveAgg: stockMoveRes.rows?.[0] || null,
+      receiptEntries: recLedgerRes.rows || [],
+      linkedReceiptVouchers: recVoucherRes.rows || [],
+      qcMap,
+      customerRow,
+      transporterRow,
+      godownRow
+    });
+
     res.json({
-      ...salesRow,
-      deductions,
-      items: itemsResult.rows
+      ...enriched,
+      outpass
     });
   } catch (error) {
     console.error('Error fetching sales:', error);
@@ -215,603 +618,81 @@ router.get('/:id', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const activeCompanyId = getCompanyId(req);
-    const { formData = {}, items = [], totals = {} } = req.body;
-
-    if (!formData.date || (!formData.customer && !formData.customer_id) || !Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ message: 'Date, customer, and at least one item are required' });
-    }
-
-    const validItems = items.filter(item => {
-      const name = item.itemName || item.item_name;
-      return name && String(name).trim() !== '';
-    });
-
-    if (validItems.length === 0) {
-      return res.status(400).json({ message: 'At least one item with a valid name is required.' });
-    }
-
-    const totalQty = validItems.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0);
-    const totalWt = validItems.reduce((sum, item) => sum + (parseFloat(item.totalWt || item.total_wt || item.total_weight) || 0), 0);
-    const itemsAmtSum = validItems.reduce((sum, item) => sum + (parseFloat(item.totalAmt || item.total_amt || item.amount) || 0), 0);
-    const totalAmt = parseFloat(formData.total_amt) || parseFloat(totals?.totalAmt) || parseFloat(totals?.netAmount) || parseFloat(totals?.totalAmount) || parseFloat(totals?.grandTotal) || parseFloat(formData.grand_total) || itemsAmtSum;
-
-    const deductionsJson = JSON.stringify(formData.selectedDeductions || req.body.selectedDeductions || []);
-    const grandTotalVal = parseFloat(formData.grand_total) || parseFloat(totals?.grandTotal) || parseFloat(totals?.totalAmt) || totalAmt;
-    const isOrder = !!(formData.is_order || req.body.is_order || false);
-    const billNo = formData.sNo || formData.s_no || formData.bill_no || '';
-
-    const custInfo = await resolveCustomerName(formData.customer || formData.customer_name || '', activeCompanyId, {
-      customerId: formData.customer_id
-    });
-    const resolvedCustName = custInfo.customerName || formData.customer || '';
-    const resolvedCustId = custInfo.id || formData.customer_id || null;
-
-    const txResult = await db.forCompany(activeCompanyId).withTransaction(async () => {
-      const salesResult = await db.run(`
-        INSERT INTO sales (
-          s_no, date, customer, remarks, total_qty, total_wt, total_amt,
-          pay_type, tax_type, lorry_no, p_o_no, driver, pur_trans,
-          customer_id, address, phone, sender_id, consignee_id, godown_from_id,
-          bill_amt, tax_amt, base_amt, grand_total, deduction, deduction_remarks, deduction_amount, deductions_json,
-          is_order, loadman_name, loadman_worker_id, loadman_rate_per_kg, loadman_charges
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, [
-        billNo,
-        formData.date || new Date().toISOString().split('T')[0],
-        resolvedCustName,
-        formData.remarks || '',
-        totalQty,
-        totalWt,
-        totalAmt,
-        formData.pay_type || 'Credit',
-        formData.tax_type || 'Exclusive',
-        formData.lorry_no || '',
-        formData.p_o_no || '',
-        formData.driver || '',
-        formData.pur_trans || '',
-        resolvedCustId,
-        formData.address || custInfo.address || '',
-        formData.phone || custInfo.phone || '',
-        formData.sender_id || null,
-        formData.consignee_id || null,
-        formData.godown_from_id || null,
-        parseFloat(formData.bill_amt) || 0,
-        parseFloat(formData.tax_amt) || 0,
-        parseFloat(totals?.baseAmount) || parseFloat(formData.bill_amt) || 0,
-        grandTotalVal,
-        formData.deduction || '',
-        formData.deduction_remarks || '',
-        parseFloat(formData.deduction_amount) || 0,
-        deductionsJson,
-        isOrder ? 1 : 0,
-        formData.loadman_name || '',
-        formData.loadman_worker_id || null,
-        parseFloat(formData.loadman_rate_per_kg) || 0.50,
-        parseFloat(formData.loadman_charges) || 0
-      ], activeCompanyId);
-
-      const salesId = salesResult.lastID || salesResult.lastInsertRowid;
-
-      for (const item of validItems) {
-        const itName = item.itemName || item.item_name || '';
-        const itLot = item.lotNo || item.lot_no || '';
-        const itTotalWt = item.totalWt || item.total_wt || item.total_weight || 0;
-        const itDiscPerc = item.discPerc || item.disc_perc || 0;
-        const itTaxPerc = item.taxPerc || item.tax_perc || 0;
-        const itTotalAmt = item.totalAmt || item.total_amt || item.amount || 0;
-
-        await db.run(`
-          INSERT INTO sales_items (sales_id, item_name, lot_no, weight, qty, total_wt, rate, disc_perc, tax_perc, total_amt)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [salesId, itName, itLot, item.weight || 0, item.qty, itTotalWt,
-             item.rate, itDiscPerc, itTaxPerc, itTotalAmt], activeCompanyId);
-
-        if (!isOrder) {
-          const qtyToDeduct = parseFloat(item.qty) || 0;
-          const availableLotsRes = await db.query(`
-            SELECT * FROM stock_lots 
-            WHERE item_name = ? AND remaining_quantity > 0
-            ORDER BY created_at ASC, id ASC
-          `, [itName], activeCompanyId);
-          const availableLots = availableLotsRes.rows || [];
-
-          const totalAvailable = availableLots.reduce((sum, lot) => sum + (parseFloat(lot.remaining_quantity) || 0), 0);
-          if (totalAvailable < qtyToDeduct) {
-            const err = new Error(`Insufficient stock for ${itName}. Available: ${totalAvailable}, Requested: ${qtyToDeduct}`);
-            err.statusCode = 400;
-            throw err;
-          }
-
-          let remainingToDeduct = qtyToDeduct;
-          for (const lot of availableLots) {
-            if (remainingToDeduct <= 0) break;
-            const deductFromThis = Math.min(parseFloat(lot.remaining_quantity) || 0, remainingToDeduct);
-
-            await db.run(`
-              UPDATE stock_lots 
-              SET remaining_quantity = remaining_quantity - ?
-              WHERE id = ?
-            `, [deductFromThis, lot.id], activeCompanyId);
-
-            await db.run(`
-              INSERT INTO stock (item_name, lot_no, qty, weight, rate, amount, date, type, reference_id)
-              VALUES (?, ?, ?, ?, ?, ?, ?, 'Sale', ?)
-            `, [itName, lot.lot_no, -deductFromThis, -(parseFloat(item.weight) || 0) * (qtyToDeduct > 0 ? (deductFromThis / qtyToDeduct) : 0), item.rate, -itTotalAmt, formData.date, salesId], activeCompanyId);
-
-            remainingToDeduct -= deductFromThis;
-          }
-        }
-      }
-
-      let voucherNo = null;
-      if (!isOrder && grandTotalVal > 0) {
-        const salesTaxVal = parseFloat(formData.tax_amt) || 0;
-        const isInterstateSales = String(formData.tax_type || '').toLowerCase().includes('inter');
-        const cgstSales = parseFloat(formData.cgst_amt) || (isInterstateSales ? 0 : Number((salesTaxVal / 2).toFixed(2)));
-        const sgstSales = parseFloat(formData.sgst_amt) || (isInterstateSales ? 0 : Number((salesTaxVal - cgstSales).toFixed(2)));
-        const igstSales = parseFloat(formData.igst_amt) || (isInterstateSales ? salesTaxVal : 0);
-        const normalizedDeductions = normalizeSalesDeductions(formData.selectedDeductions || req.body.selectedDeductions, formData);
-
-        const vRes = await createSalesLedgerEntries({
-          companyId: activeCompanyId,
-          customer: formData.customer_id || formData.customer || '',
-          date: formData.date || new Date().toISOString().split('T')[0],
-          invNo: billNo || String(salesId),
-          salesId,
-          totalAmount: grandTotalVal,
-          taxAmount: salesTaxVal,
-          cgstAmount: cgstSales,
-          sgstAmount: sgstSales,
-          igstAmount: igstSales,
-          isInterstate: isInterstateSales,
-          discAmount: 0,
-          baseAmount: parseFloat(totals?.baseAmount) || parseFloat(formData.bill_amt) || Math.max(0, totalAmt - salesTaxVal),
-          deductions: normalizedDeductions
-        });
-        voucherNo = vRes?.voucherNo || null;
-        if (voucherNo) {
-          await db.run('UPDATE sales SET voucher_no = ? WHERE id = ?', [voucherNo, salesId], activeCompanyId).catch(() => {});
-        }
-      }
-
-      if (formData.lorry_no || formData.vehicle_no) {
-        const vNo = formData.lorry_no || formData.vehicle_no;
-        await db.run(`
-          INSERT INTO vehicle_movements (
-            reference_type, reference_id, movement_type, operation_type, vehicle_no, driver_name,
-            gate_in_time, gate_out_time, status, item_name, qty, weight, party_name, lot_no, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'OUT', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-        `, [
-          'SALES',
-          billNo || salesId,
-          'OUTWARD',
-          'Sales Dispatch / Loading',
-          vNo,
-          formData.driver || '',
-          validItems[0]?.item_name || validItems[0]?.itemName || '',
-          parseFloat(totals?.totalQty) || parseFloat(formData.total_qty) || 0,
-          parseFloat(totals?.totalWeight) || parseFloat(formData.total_wt) || 0,
-          formData.customer || '',
-          validItems[0]?.lot_no || validItems[0]?.lotNo || ''
-        ], activeCompanyId).catch(() => {});
-      }
-
-      if (Array.isArray(req.body.operational_charges) && req.body.operational_charges.length > 0) {
-        const engine = require('../services/operationalChargeEngine');
-        for (const ch of req.body.operational_charges) {
-          await engine.createOperationalCharge(activeCompanyId, {
-            ...ch,
-            source_module: 'SALES',
-            source_transaction_type: 'SALES',
-            source_transaction_id: salesId,
-            source_transaction_no: billNo || `SI-${salesId}`,
-            charge_date: formData.date || new Date().toISOString().slice(0, 10),
-            item_name: validItems[0]?.item_name || validItems[0]?.itemName || 'Goods',
-            lot_no: validItems[0]?.lot_no || validItems[0]?.lotNo || '',
-            from_location: 'Main Factory Godown',
-            to_location: formData.customer || 'Customer Destination',
-            vehicle_no: ch.vehicle_no || formData.lorry_no || formData.vehicle_no || '',
-            driver_name: ch.driver_name || formData.driver || '',
-            quantity: ch.quantity !== undefined ? ch.quantity : (parseFloat(totals?.totalWeight) || 0)
-          });
-        }
-      }
-
-      return { salesId, voucherNo };
-    });
-
-    // Sync stock movements & rebuild ledger AFTER transaction commits
-    try {
-      await syncDocumentMovements(activeCompanyId, 'SALES', txResult.salesId, req.user?.username || 'admin');
-    } catch (e) {
-      console.error('Error syncing stock movements after sale:', e);
-    }
-
-    try {
-      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
-      const billNum = billNo || `SI-${String(txResult.salesId).padStart(5, '0')}`;
-      const totWt = (parseFloat(totals?.totalWeight) || parseFloat(formData.total_wt) || 0).toLocaleString();
-      const totalBags = validItems.reduce((sum, it) => sum + (parseFloat(it.qty) || 0), 0) || (parseFloat(totals?.totalQty) || 0);
-      const itemsSummary = `${validItems.length} items (${validItems[0].item_name || validItems[0].itemName || 'Goods'}${validItems.length > 1 ? '...' : ''})`;
-
-      await triggerTransactionNotification({
-        moduleName: 'SALES',
-        referenceNo: billNum,
-        title: `🔵 BVC ERP – Sales Created (${billNum})`,
-        message: `Customer: ${formData.customer || 'N/A'} | Items: ${itemsSummary} | Qty: ${totalBags} Bags (${totWt} KG) | Vehicle: ${formData.lorry_no || formData.vehicle_no || 'N/A'} | Loading: PENDING | Dispatch: PENDING`,
-        severity: 'INFO',
-        referenceId: txResult.salesId,
-        companyId: activeCompanyId,
-        details: {
-          sales_no: billNum,
-          date: formData.date,
-          customer: formData.customer || 'Customer',
-          item_summary: itemsSummary,
-          quantity: `${totalBags} Bags`,
-          bags: totalBags,
-          total_weight: `${totWt} KG`,
-          amount: parseFloat(totals?.grandTotal || totals?.netAmount || totals?.totalAmount || formData.grand_total || 0),
-          godown: formData.godown || 'Main Godown',
-          vehicle: formData.lorry_no || formData.vehicle_no || 'N/A',
-          loading_status: 'PENDING',
-          dispatch_status: 'PENDING',
-          created_by: req.user?.username || 'Sales Operator',
-          status: 'SALES CREATED'
-        }
-      });
-    } catch (notifErr) {
-      console.warn('Error triggering sales notification:', notifErr.message);
-    }
-
+    const result = await SalesService.createSale(activeCompanyId, req.body, req.user);
     res.status(201).json({
-      success: true,
-      message: 'Sales record saved successfully!',
-      id: txResult.salesId,
-      voucher_no: txResult.voucherNo
+      ...result,
+      message: req.body?.formData?.is_order ? 'Sales Order saved successfully!' : 'Sales record saved successfully!'
     });
   } catch (error) {
     console.error('Error saving sales:', error);
-    res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Error saving sales', error: error.message });
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || 'Error saving sales',
+      error: error.message
+    });
   }
 });
-
-// Helper to revert stock / lot deductions for a sale
-const revertSalesStock = async (salesId, companyId = null) => {
-  const stockEntries = await db.query(`
-    SELECT item_name, lot_no, qty 
-    FROM stock 
-    WHERE reference_id = ? AND type = 'Sale'
-  `, [salesId], companyId);
-
-  for (const entry of stockEntries.rows || []) {
-    const restoredQty = Math.abs(parseFloat(entry.qty) || 0);
-    if (restoredQty > 0) {
-      const result = await db.run(`
-        UPDATE stock_lots
-        SET remaining_quantity = remaining_quantity + ?
-        WHERE item_name = ? AND lot_no = ?
-      `, [restoredQty, entry.item_name, entry.lot_no || ''], companyId);
-
-      if (result && result.changes === 0) {
-        const firstLot = await db.query(`
-          SELECT lot_no FROM stock_lots 
-          WHERE item_name = ? 
-          ORDER BY created_at ASC LIMIT 1
-        `, [entry.item_name], companyId);
-        if (firstLot.rows && firstLot.rows.length > 0) {
-          await db.run(`
-            UPDATE stock_lots
-            SET remaining_quantity = remaining_quantity + ?
-            WHERE item_name = ? AND lot_no = ?
-          `, [restoredQty, entry.item_name, firstLot.rows[0].lot_no], companyId);
-        }
-      }
-    }
-  }
-
-  await db.run(`
-    DELETE FROM stock 
-    WHERE reference_id = ? AND type = 'Sale'
-  `, [salesId], companyId);
-};
-
-function sanitizeDate(val) {
-  if (val === null || val === undefined) return null;
-  const s = String(val).trim();
-  if (s === '' || s === 'null' || s === 'undefined') return null;
-  const ddmmyyyy = s.match(/^(\d{1,2})\s*[-\/]\s*(\d{1,2})\s*[-\/]\s*(\d{4})$/);
-  if (ddmmyyyy) {
-    return `${ddmmyyyy[3]}-${ddmmyyyy[2].padStart(2, '0')}-${ddmmyyyy[1].padStart(2, '0')}`;
-  }
-  return s;
-}
 
 // PUT update sales
 router.put('/:id', async (req, res) => {
   try {
     const activeCompanyId = getCompanyId(req);
-    const { formData = {}, items = [], totals = {} } = req.body;
-    const salesId = req.params.id;
-    const cleanDate = sanitizeDate(formData.date) || new Date().toISOString().split('T')[0];
-
-    const activeItems = (items || []).filter(item => item.item_name || item.itemName);
-    const isOrder = !!(formData.is_order || req.body.is_order || false);
-
-    const totalQty = activeItems.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0);
-    const totalWt = activeItems.reduce((sum, item) => sum + (parseFloat(item.totalWt || item.total_wt || item.total_weight || (item.weight * item.qty)) || 0), 0);
-    const itemsAmtSum = activeItems.reduce((sum, item) => sum + (parseFloat(item.totalAmt || item.total_amt || item.amount) || 0), 0);
-    const totalAmt = parseFloat(formData.total_amt) || parseFloat(totals?.totalAmt) || parseFloat(totals?.netAmount) || parseFloat(totals?.totalAmount) || parseFloat(totals?.grandTotal) || parseFloat(formData.grand_total) || itemsAmtSum;
-
-    const deductionsJson = JSON.stringify(formData.selectedDeductions || req.body.selectedDeductions || []);
-    const grandTotalVal = parseFloat(formData.grand_total) || parseFloat(totals?.grandTotal) || parseFloat(totals?.totalAmt) || totalAmt;
-
-    const txResult = await db.forCompany(activeCompanyId).withTransaction(async () => {
-      const existingSale = await db.query('SELECT id, voucher_no FROM sales WHERE id = ? LIMIT 1', [salesId], activeCompanyId);
-      if (!existingSale.rows || existingSale.rows.length === 0) {
-        const err = new Error('Sales record not found');
-        err.statusCode = 404;
-        throw err;
-      }
-
-      // Revert previous stock deductions inside transaction (automatically rolls back if new stock check fails)
-      await revertSalesStock(salesId, activeCompanyId);
-
-      if (!isOrder) {
-        for (const item of activeItems) {
-          const qtyToDeduct = parseFloat(item.qty) || 0;
-          const itemName = item.item_name || item.itemName;
-
-          const availableLots = await db.query(`
-            SELECT COALESCE(SUM(remaining_quantity), 0) as totalAvailable 
-            FROM stock_lots 
-            WHERE item_name = ? AND remaining_quantity > 0
-          `, [itemName], activeCompanyId);
-
-          const totalAvailable = parseFloat(availableLots.rows[0]?.totalAvailable) || 0;
-          if (totalAvailable < qtyToDeduct) {
-            const err = new Error(`Insufficient stock for ${itemName}. Available: ${totalAvailable}, Requested: ${qtyToDeduct}`);
-            err.statusCode = 400;
-            throw err;
-          }
-        }
-      }
-
-      await db.run(`
-        UPDATE sales SET 
-          s_no = ?, date = ?, customer = ?, remarks = ?, total_qty = ?, total_wt = ?, total_amt = ?,
-          pay_type = ?, tax_type = ?, lorry_no = ?, p_o_no = ?, driver = ?, pur_trans = ?,
-          customer_id = ?, address = ?, phone = ?, sender_id = ?, consignee_id = ?, godown_from_id = ?,
-          bill_amt = ?, tax_amt = ?, base_amt = ?, grand_total = ?, deduction = ?, deduction_remarks = ?, deduction_amount = ?, deductions_json = ?,
-          is_order = ?, loadman_name = ?, loadman_worker_id = ?, loadman_rate_per_kg = ?, loadman_charges = ?
-        WHERE id = ?
-      `, [
-        formData.sNo || formData.bill_no || formData.s_no || salesId,
-        cleanDate,
-        formData.customer || '',
-        formData.remarks || '',
-        totalQty,
-        totalWt,
-        totalAmt,
-        formData.pay_type || 'Credit',
-        formData.tax_type || 'Exclusive',
-        formData.lorry_no || '',
-        formData.p_o_no || '',
-        formData.driver || '',
-        formData.pur_trans || '',
-        formData.customer_id || null,
-        formData.address || '',
-        formData.phone || '',
-        formData.sender_id || null,
-        formData.consignee_id || null,
-        formData.godown_from_id || null,
-        parseFloat(formData.bill_amt) || 0,
-        parseFloat(formData.tax_amt) || 0,
-        parseFloat(totals?.baseAmount) || parseFloat(formData.bill_amt) || 0,
-        grandTotalVal,
-        formData.deduction || '',
-        formData.deduction_remarks || '',
-        parseFloat(formData.deduction_amount) || 0,
-        deductionsJson,
-        isOrder ? 1 : 0,
-        formData.loadman_name || '',
-        formData.loadman_worker_id || null,
-        parseFloat(formData.loadman_rate_per_kg) || 0.50,
-        parseFloat(formData.loadman_charges) || 0,
-        salesId
-      ], activeCompanyId);
-
-      await db.run('DELETE FROM sales_items WHERE sales_id = ?', [salesId], activeCompanyId);
-
-      for (const item of activeItems) {
-        const itemName = item.item_name || item.itemName;
-        const lotNo = item.lot_no || item.lotNo || '';
-        const weight = parseFloat(item.weight || item.weight_val || 0);
-        const qty = parseFloat(item.qty) || 0;
-        const totalWtVal = parseFloat(item.total_wt || item.totalWt || (qty * weight));
-        const rate = parseFloat(item.rate) || 0;
-        const discPerc = parseFloat(item.disc_perc || item.discPerc || item.disc || 0);
-        const taxPerc = parseFloat(item.tax_perc || item.taxPerc || item.tax || item.tax_rate || 0);
-        const totalAmtVal = parseFloat(item.total_amt || item.totalAmt || item.amount || 0);
-        const box = parseFloat(item.box) || 0;
-
-        await db.run(`
-          INSERT INTO sales_items (
-            sales_id, item_name, lot_no, weight, qty, total_wt, rate, disc_perc, tax_perc, total_amt, tax_rate, disc, box
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [salesId, itemName, lotNo, weight, qty, totalWtVal, rate, discPerc, taxPerc, totalAmtVal, taxPerc, discPerc, box], activeCompanyId);
-
-        if (!isOrder) {
-          const qtyToDeduct = qty;
-          const availableLots = await db.query(`
-            SELECT * FROM stock_lots 
-            WHERE item_name = ? AND remaining_quantity > 0
-            ORDER BY created_at ASC, id ASC
-          `, [itemName], activeCompanyId);
-
-          let remainingToDeduct = qtyToDeduct;
-          for (const lot of availableLots.rows || []) {
-            if (remainingToDeduct <= 0) break;
-            const deductFromThis = Math.min(parseFloat(lot.remaining_quantity) || 0, remainingToDeduct);
-
-            await db.run(`
-              UPDATE stock_lots 
-              SET remaining_quantity = MAX(0, remaining_quantity - ?)
-              WHERE id = ?
-            `, [deductFromThis, lot.id], activeCompanyId);
-
-            await db.run(`
-              INSERT INTO stock (item_name, lot_no, qty, weight, rate, amount, date, type, reference_id)
-              VALUES (?, ?, ?, ?, ?, ?, ?, 'Sale', ?)
-            `, [itemName, lot.lot_no, -deductFromThis, -weight * (qtyToDeduct > 0 ? (deductFromThis / qtyToDeduct) : 0), rate, -totalAmtVal, cleanDate, salesId], activeCompanyId);
-
-            remainingToDeduct -= deductFromThis;
-          }
-        }
-      }
-
-      let voucherNo = existingSale.rows[0]?.voucher_no || null;
-      if (!isOrder && grandTotalVal > 0) {
-        const salesTaxVal = parseFloat(formData.tax_amt) || 0;
-        const isInterstateSales = String(formData.tax_type || '').toLowerCase().includes('inter');
-        const cgstSales = parseFloat(formData.cgst_amt) || (isInterstateSales ? 0 : Number((salesTaxVal / 2).toFixed(2)));
-        const sgstSales = parseFloat(formData.sgst_amt) || (isInterstateSales ? 0 : Number((salesTaxVal - cgstSales).toFixed(2)));
-        const igstSales = parseFloat(formData.igst_amt) || (isInterstateSales ? salesTaxVal : 0);
-        const normalizedDeductions = normalizeSalesDeductions(formData.selectedDeductions || req.body.selectedDeductions, formData);
-
-        const vRes = await createSalesLedgerEntries({
-          companyId: activeCompanyId,
-          customer: formData.customer_id || formData.customer || '',
-          date: cleanDate,
-          invNo: formData.sNo || formData.bill_no || formData.s_no || salesId,
-          salesId,
-          totalAmount: grandTotalVal,
-          taxAmount: salesTaxVal,
-          cgstAmount: cgstSales,
-          sgstAmount: sgstSales,
-          igstAmount: igstSales,
-          isInterstate: isInterstateSales,
-          discAmount: 0,
-          baseAmount: parseFloat(totals?.baseAmount) || parseFloat(formData.bill_amt) || Math.max(0, totalAmt - salesTaxVal),
-          deductions: normalizedDeductions,
-          existingVoucherNo: voucherNo
-        });
-        voucherNo = vRes?.voucherNo || voucherNo;
-        if (voucherNo) {
-          await db.run('UPDATE sales SET voucher_no = ? WHERE id = ?', [voucherNo, salesId], activeCompanyId).catch(() => {});
-        }
-      } else {
-        await deleteLedgerEntries(salesId, 'sales', activeCompanyId);
-      }
-
-      return { voucherNo };
+    const result = await SalesService.updateSale(activeCompanyId, req.params.id, req.body, req.user);
+    res.json({
+      ...result,
+      message: 'Sales record updated successfully!'
     });
-
-    try {
-      await syncDocumentMovements(activeCompanyId, 'SALES', salesId, req.user?.username || 'admin');
-    } catch (e) {
-      console.error('Error syncing stock movements after updating sale:', e);
-    }
-
-    try {
-      const { triggerTransactionNotification } = require('../utils/transactionNotifier');
-      const billNum = formData.sNo || formData.bill_no || formData.s_no || `SI-${String(salesId).padStart(5, '0')}`;
-      const totWtStr = (parseFloat(totalWt) || parseFloat(formData.total_wt) || 0).toLocaleString();
-      const firstItemName = activeItems[0]?.item_name || activeItems[0]?.itemName || 'Goods';
-      const itemsSummary = activeItems.length > 0
-        ? `${activeItems.length} items (${firstItemName}${activeItems.length > 1 ? '...' : ''})`
-        : 'Sales Items';
-      const updVehicle = formData.lorry_no || formData.vehicle_no || 'N/A';
-
-      await triggerTransactionNotification({
-        eventType: isOrder ? 'ORDER_UPDATED' : 'SALES_UPDATED',
-        isUpdate: true,
-        moduleName: isOrder ? 'EXPORT_ORDER' : 'SALES',
-        referenceNo: billNum,
-        referenceId: salesId,
-        companyId: activeCompanyId,
-        title: `✏️ BVC ERP – ${isOrder ? 'Sales Order' : 'Sales'} Updated (${billNum})`,
-        message: `Updated ${isOrder ? 'Order' : 'Sales'} | Customer: ${formData.customer || 'N/A'} | Items: ${itemsSummary} | Qty: ${totalQty} Bags (${totWtStr} KG) | Vehicle: ${updVehicle}`,
-        severity: 'INFO',
-        details: {
-          sales_no: billNum,
-          reference_no: billNum,
-          action_label: isOrder ? 'SALES ORDER' : 'SALES',
-          date: cleanDate,
-          customer: formData.customer || 'Customer',
-          party_name: formData.customer || 'Customer',
-          item_summary: itemsSummary,
-          quantity: `${totalQty} Bags`,
-          bags: totalQty,
-          total_weight: `${totWtStr} KG`,
-          amount: grandTotalVal,
-          godown: formData.godown || 'Main Godown',
-          vehicle: updVehicle,
-          updated_by: req.user?.username || 'Sales Operator',
-          created_by: req.user?.username || 'Sales Operator',
-          status: isOrder ? 'ORDER UPDATED' : 'SALES UPDATED'
-        }
-      });
-    } catch (notifErr) {
-      console.warn('Error triggering sales update notification:', notifErr.message);
-    }
-
-    res.json({ success: true, message: 'Sales record updated successfully!', voucher_no: txResult.voucherNo });
   } catch (error) {
     console.error('Error updating sales:', error);
-    res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Error updating sales', error: error.message });
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || 'Error updating sales',
+      error: error.message
+    });
   }
 });
 
-// DELETE sales
-router.delete('/:id', async (req, res) => {
+// POST controlled cancellation for posted sales (Admin / authorized users)
+router.post('/:id/cancel', requireSalesCancelPermission, async (req, res) => {
   try {
     const activeCompanyId = getCompanyId(req);
-    const salesId = req.params.id;
-
-    await db.forCompany(activeCompanyId).withTransaction(async () => {
-      const sRes = await db.query('SELECT * FROM sales WHERE id = ?', [salesId], activeCompanyId);
-      if (!sRes.rows || sRes.rows.length === 0) {
-        const err = new Error('Sales record not found');
-        err.statusCode = 404;
-        throw err;
-      }
-
-      try {
-        const sRow = sRes.rows[0];
-        const sItems = await db.query('SELECT * FROM sales_items WHERE sales_id = ?', [salesId], activeCompanyId);
-        await recycleBinService.saveToRecycleBin({
-          moduleName: 'Sales',
-          recordId: salesId,
-          title: `Sales Invoice #${sRow.inv_no || sRow.s_no || salesId} - ${sRow.customer || 'Customer'}`,
-          recordData: {
-            tableName: 'sales',
-            record: sRow,
-            subRecords: [
-              { tableName: 'sales_items', records: sItems.rows || [] }
-            ]
-          },
-          deletedBy: req.user?.username || 'admin'
-        });
-      } catch (e) {
-        console.warn('Recycle bin save error in sales:', e.message);
-      }
-
-      await revertSalesStock(salesId, activeCompanyId);
-      await deleteLedgerEntries(salesId, 'sales', activeCompanyId);
-      await db.run('DELETE FROM sales_items WHERE sales_id = ?', [salesId], activeCompanyId);
-      await db.run('DELETE FROM sales WHERE id = ?', [salesId], activeCompanyId);
-    });
-
-    try {
-      await deleteDocumentMovements(activeCompanyId, 'SALES', salesId, 'Sales record deleted', req.user?.username || 'admin');
-    } catch (e) {
-      console.error('Error reversing stock movements after deleting sale:', e);
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      return res.status(400).json({ success: false, message: 'Invalid sales record ID' });
     }
+    const result = await SalesService.deleteSale(activeCompanyId, id, {
+      ...(req.user || {}),
+      cancel_reason: String(req.body?.reason || '').trim()
+    });
+    res.json({
+      ...result,
+      message: 'Sales record cancelled; stock, outpass, and accounting entries reversed cleanly (archived to Recycle Bin).'
+    });
+  } catch (error) {
+    console.error('Error cancelling sales:', error);
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || 'Error cancelling sales record'
+    });
+  }
+});
 
-    res.json({ success: true, message: 'Sales record deleted successfully' });
+// DELETE sales (role-gated, reverts stock/outpass/vouchers cleanly)
+router.delete('/:id', requireSalesCancelPermission, async (req, res) => {
+  try {
+    const activeCompanyId = getCompanyId(req);
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      return res.status(400).json({ success: false, message: 'Invalid sales record ID' });
+    }
+    const result = await SalesService.deleteSale(activeCompanyId, id, req.user);
+    res.json(result);
   } catch (error) {
     console.error('Error deleting sales:', error);
-    res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Error deleting sales' });
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || 'Error deleting sales'
+    });
   }
 });
 
@@ -954,7 +835,7 @@ router.get('/:id/ledger-statement', async (req, res) => {
     const sgstAmount = rawSgst > 0 ? rawSgst : (isInterstate ? 0 : Number((taxAmount - cgstAmount).toFixed(2)));
     const igstAmount = rawIgst > 0 ? rawIgst : (isInterstate ? taxAmount : 0);
 
-    const deductions = normalizeSalesDeductions(sale.deductions_json, sale);
+    const deductions = SalesService.normalizeSalesDeductions(sale.deductions_json, sale);
     const addDeductionsTotal = deductions.filter((d) => d.type === 'ADD').reduce((s, d) => s + Number(d.amount || 0), 0);
     const lessDeductionsTotal = deductions.filter((d) => d.type === 'LESS').reduce((s, d) => s + Number(d.amount || 0), 0);
 
@@ -971,6 +852,7 @@ router.get('/:id/ledger-statement', async (req, res) => {
       if (l === String(customerName).toLowerCase()) return 'Sundry Debtors (Customer)';
       if (l.includes('sales')) return 'Direct Income / Sales';
       if (l.includes('cgst') || l.includes('sgst') || l.includes('igst') || l.includes('tcs') || l.includes('gst')) return 'Duties & Taxes';
+      if (l.includes('freight') || l.includes('loading')) return 'Transport & Charges';
       if (l.includes('round')) return 'Indirect Expense / Income';
       return veType === 'Dr' ? 'Debit Account' : 'Credit Account';
     };
@@ -1017,6 +899,18 @@ router.get('/:id/ledger-statement', async (req, res) => {
       if (igstAmount > 0) {
         journalEntries.push({ no: idx++, ledger_name: 'Output IGST', account_head: 'Duties & Taxes', debit: 0, credit: igstAmount, particulars: `IGST on ${voucherNo}` });
       }
+      if (Number(sale.freight_recovery_amt || 0) > 0) {
+        journalEntries.push({ no: idx++, ledger_name: 'Freight Recovery', account_head: 'Transport & Charges', debit: 0, credit: Number(sale.freight_recovery_amt), particulars: `Freight recovered on ${voucherNo}` });
+      }
+      if (Number(sale.loading_charges_amt || 0) > 0) {
+        journalEntries.push({ no: idx++, ledger_name: 'Loading & Unloading Recovery', account_head: 'Transport & Charges', debit: 0, credit: Number(sale.loading_charges_amt), particulars: `Loading recovered on ${voucherNo}` });
+      }
+      if (Number(sale.other_charges || 0) > 0) {
+        journalEntries.push({ no: idx++, ledger_name: 'Other Sales Charges', account_head: 'Transport & Charges', debit: 0, credit: Number(sale.other_charges), particulars: `Other charges on ${voucherNo}` });
+      }
+      if (Number(sale.tcs_amount || 0) > 0) {
+        journalEntries.push({ no: idx++, ledger_name: 'TCS on Sales', account_head: 'Duties & Taxes', debit: 0, credit: Number(sale.tcs_amount), particulars: `TCS on ${voucherNo}` });
+      }
       for (const d of deductions) {
         journalEntries.push({
           no: idx++,
@@ -1033,6 +927,24 @@ router.get('/:id/ledger-statement', async (req, res) => {
     const creditTotal = Number(journalEntries.reduce((s, j) => s + Number(j.credit || 0), 0).toFixed(2));
     const isBalanced = Math.abs(debitTotal - creditTotal) < 0.01;
 
+    // Fetch linked Receipt & Freight vouchers
+    let linkedVouchers = [];
+    try {
+      const lvRes = await runner.query(
+        `SELECT id, voucher_no, voucher_type, date, total_debit, total_credit, narration, source_module
+         FROM voucher
+         WHERE COALESCE(is_reversed, 0) = 0
+           AND source_module IN ('sales_receipt', 'sales_freight')
+           AND source_id = ?
+         ORDER BY id ASC`,
+        [Number(salesId)]
+      );
+      for (const v of lvRes.rows || []) {
+        const veRes = await runner.query('SELECT ledger_name, type, debit, credit, remarks FROM voucher_entry WHERE voucher_id = ? ORDER BY id ASC', [v.id]);
+        linkedVouchers.push({ ...v, entries: veRes.rows || [] });
+      }
+    } catch (_) {}
+
     // Check customer receipts against this invoice
     let customerReceipts = 0;
     let receiptRows = [];
@@ -1041,16 +953,20 @@ router.get('/:id/ledger-statement', async (req, res) => {
         `SELECT date, voucher_no, particulars, credit
          FROM ledger_entries
          WHERE COALESCE(is_reversed, 0) = 0
-           AND voucher_type IN ('Receipt', 'Bank Receipt', 'Cash Receipt', 'Advance')
+           AND voucher_type IN ('Receipt', 'REC', 'Bank Receipt', 'Cash Receipt', 'Advance')
            AND LOWER(TRIM(ledger_name)) = LOWER(TRIM(?))
-           AND (reference_id = ? OR particulars LIKE ?)`,
-        [customerName, String(salesId), `%${voucherNo}%`]
+           AND (reference_id = ? OR voucher_no = ? OR particulars LIKE ?)`,
+        [customerName, String(salesId), String(sale.receipt_voucher_no || ''), `%${voucherNo}%`]
       );
       receiptRows = recRes.rows || [];
       customerReceipts = receiptRows.reduce((s, r) => s + Number(r.credit || 0), 0);
     } catch (_) {}
 
-    const customerOutstanding = Number((grandTotal - customerReceipts).toFixed(2));
+    if (customerReceipts === 0 && Number(sale.received_amount || 0) > 0) {
+      customerReceipts = Number(sale.received_amount || 0);
+    }
+    const advanceAdj = Number(sale.advance_adjusted || 0);
+    const customerOutstanding = Number(Math.max(0, grandTotal - customerReceipts - advanceAdj).toFixed(2));
     const loadmanCharges = Number(sale.loadman_charges || 0);
 
     const individualLedgers = {
@@ -1063,10 +979,17 @@ router.get('/:id/ledger-statement', async (req, res) => {
           ...receiptRows.map((rr) => ({
             date: rr.date,
             particulars: rr.particulars || 'Receipt received',
-            voucher: rr.voucher_no || voucherNo,
+            voucher: rr.voucher_no || sale.receipt_voucher_no || voucherNo,
             debit: 0,
             credit: Number(rr.credit || 0)
-          }))
+          })),
+          ...(advanceAdj > 0 ? [{
+            date: sale.date,
+            particulars: 'Advance adjusted',
+            voucher: voucherNo,
+            debit: 0,
+            credit: advanceAdj
+          }] : [])
         ],
         closing_balance: Math.abs(customerOutstanding),
         closing_balance_type: customerOutstanding >= 0 ? 'Dr' : 'Cr'
@@ -1127,7 +1050,7 @@ router.get('/:id/ledger-statement', async (req, res) => {
           ...sale,
           customer_name: customerName,
           customer_phone: customerPhone,
-          customer_gstin: customerGstin,
+          customer_gstin: customerGstin || sale.customer_gstin || '',
           transporter_name: transporterName,
           loadman_name: loadmanName,
           voucher_no: voucherNo,
@@ -1140,6 +1063,7 @@ router.get('/:id/ledger-statement', async (req, res) => {
           s_no: sale.s_no,
           customer: customerName
         },
+        linked_vouchers: linkedVouchers,
         items,
         journal_entries: journalEntries,
         totals: {
@@ -1152,11 +1076,15 @@ router.get('/:id/ledger-statement', async (req, res) => {
             name: customerName,
             invoice_debit: grandTotal,
             receipts_credit: customerReceipts,
+            advance_adjusted: advanceAdj,
             outstanding: customerOutstanding
           },
           transporter: {
             name: transporterName,
-            vehicle_no: sale.lorry_no || ''
+            vehicle_no: sale.lorry_no || '',
+            freight_amount: Number(sale.freight_amount || 0),
+            freight_paid_by: sale.freight_paid_by || 'Buyer',
+            freight_voucher_no: sale.freight_voucher_no || ''
           },
           loadman: {
             name: loadmanName,

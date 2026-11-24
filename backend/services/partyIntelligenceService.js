@@ -491,9 +491,10 @@ class PartyIntelligenceService {
         if (q.rm_lot_no) qcByLot.set(normLot(q.rm_lot_no), q.overall_result);
       }
 
-      // 4. Lot History enriched with real stock_lots + non-reversed physical stock_movements
+      // 4. Lot History enriched with real stock_lots + clean physical stock_movements + milling outputs/wastage
       let stockLotMap = new Map();
       let lotBalanceMap = new Map();
+      let lotMillingMap = new Map();
       if (supplierLotNos.length > 0) {
         try {
           const ph = supplierLotNos.map(() => '?').join(',');
@@ -506,22 +507,48 @@ class PartyIntelligenceService {
           }
 
           const mvRows = (await runner.all(
-            `SELECT 
+            `SELECT
               UPPER(TRIM(lot_no)) as lot_key,
-              SUM(CASE WHEN direction = 'IN' THEN COALESCE(qty_bags, 0) ELSE -COALESCE(qty_bags, 0) END) as bal_bags,
-              SUM(CASE WHEN direction = 'IN' THEN COALESCE(qty_kg, 0) ELSE -COALESCE(qty_kg, 0) END) as bal_kg
+              godown_name,
+              SUM(CASE WHEN direction = 'IN' THEN COALESCE(qty, 0) ELSE -COALESCE(qty, 0) END) as bal_bags,
+              SUM(CASE WHEN direction = 'IN' THEN COALESCE(weight, 0) ELSE -COALESCE(weight, 0) END) as bal_kg
              FROM stock_movements
              WHERE COALESCE(is_reversed, 0) = 0
-               AND COALESCE(is_non_physical, 0) = 0
+               AND COALESCE(is_reversal, 0) = 0
+               AND COALESCE(is_physical_stock, 1) = 1
                AND UPPER(TRIM(lot_no)) IN (${ph})
-             GROUP BY UPPER(TRIM(lot_no))`,
+             GROUP BY UPPER(TRIM(lot_no)), godown_name`,
             supplierLotNos
           )) || [];
           for (const mv of mvRows) {
-            lotBalanceMap.set(mv.lot_key, {
-              bags: Number(mv.bal_bags) || 0,
-              kg: Number(mv.bal_kg) || 0
-            });
+            const cur = lotBalanceMap.get(mv.lot_key) || { bags: 0, kg: 0, activeGodowns: [], allGodowns: [] };
+            const b = Number(mv.bal_bags) || 0;
+            const k = Number(mv.bal_kg) || 0;
+            cur.bags += b;
+            cur.kg += k;
+            if (mv.godown_name) {
+              cur.allGodowns.push(mv.godown_name);
+              if (b > 0.001) cur.activeGodowns.push(`${mv.godown_name} (${b} Bags)`);
+            }
+            lotBalanceMap.set(mv.lot_key, cur);
+          }
+
+          // Milling batches linked to supplier's raw material lots
+          const gRows = (await runner.all(
+            `SELECT DISTINCT UPPER(TRIM(gii.lot_no)) as input_lot, g.id as grain_id, COALESCE(g.work_order_no, 'GRD-' || CAST(g.s_no AS TEXT)) as batch_no
+             FROM grain_input_items gii
+             JOIN grains g ON g.id = gii.grain_id
+             WHERE UPPER(TRIM(gii.lot_no)) IN (${ph})`,
+            supplierLotNos
+          )) || [];
+          for (const gr of gRows) {
+            const cur = lotMillingMap.get(gr.input_lot) || { batches: [], outputLots: [], wastageKg: 0 };
+            cur.batches.push(gr.batch_no);
+            const outs = (await runner.all(`SELECT lot_no, item_name FROM grain_output_items WHERE grain_id = ?`, [gr.grain_id])) || [];
+            outs.forEach(o => o.lot_no && cur.outputLots.push(o.lot_no));
+            const wsts = (await runner.all(`SELECT total_wt FROM grain_wastage_items WHERE grain_id = ?`, [gr.grain_id])) || [];
+            cur.wastageKg += wsts.reduce((s, w) => s + (parseFloat(w.total_wt) || 0), 0);
+            lotMillingMap.set(gr.input_lot, cur);
           }
         } catch (_) {}
       }
@@ -536,11 +563,15 @@ class PartyIntelligenceService {
 
         const sl = stockLotMap.get(lKey);
         const mvBal = lotBalanceMap.get(lKey);
+        const millInfo = lotMillingMap.get(lKey);
         const initQtyBags = Number(r.qty || sl?.quantity || 0);
         const initWtKg = Number(r.item_wt || r.total_weight || 0);
-        const remBags = mvBal ? mvBal.bags : Number(sl?.remaining_quantity ?? initQtyBags);
-        const remKg = mvBal ? mvBal.kg : initWtKg;
+        const remBags = mvBal ? Number(mvBal.bags.toFixed(3)) : Number(sl?.remaining_quantity ?? initQtyBags);
+        const remKg = mvBal ? Number(mvBal.kg.toFixed(3)) : initWtKg;
         const qcStat = qcByLot.get(lKey) || sl?.qc_status || 'QC_PENDING';
+        const godownDisplay = mvBal?.activeGodowns?.length > 0
+          ? mvBal.activeGodowns.join(', ')
+          : (mvBal?.allGodowns?.[0] || sl?.godown_name || '-');
 
         lotHistory.push({
           lot_no: r.lot_no,
@@ -557,7 +588,10 @@ class PartyIntelligenceService {
           rate: r.rate || sl?.rate || 0,
           qc_status: qcStat,
           qcStatus: qcStat,
-          godown: sl?.godown_name || '-',
+          godown: godownDisplay,
+          milledBatches: millInfo?.batches || [],
+          outputLots: Array.from(new Set(millInfo?.outputLots || [])),
+          wastageKg: millInfo?.wastageKg || 0,
           voucherNo: `PUR-${r.inv_no || r.s_no || r.id}`,
           vehicleNo: r.vehicle_no || r.lorry_no || '-'
         });
@@ -808,19 +842,27 @@ class PartyIntelligenceService {
           for (const sl of slRows) stockLotMap.set(normLot(sl.lot_no), sl);
 
           const mvRows = (await runner.all(
-            `SELECT 
+            `SELECT
               UPPER(TRIM(lot_no)) as lot_key,
-              SUM(CASE WHEN direction = 'IN' THEN COALESCE(qty_bags, 0) ELSE -COALESCE(qty_bags, 0) END) as bal_bags,
-              SUM(CASE WHEN direction = 'IN' THEN COALESCE(qty_kg, 0) ELSE -COALESCE(qty_kg, 0) END) as bal_kg
+              godown_name,
+              SUM(CASE WHEN direction = 'IN' THEN COALESCE(qty, 0) ELSE -COALESCE(qty, 0) END) as bal_bags,
+              SUM(CASE WHEN direction = 'IN' THEN COALESCE(weight, 0) ELSE -COALESCE(weight, 0) END) as bal_kg
              FROM stock_movements
              WHERE COALESCE(is_reversed, 0) = 0
-               AND COALESCE(is_non_physical, 0) = 0
+               AND COALESCE(is_reversal, 0) = 0
+               AND COALESCE(is_physical_stock, 1) = 1
                AND UPPER(TRIM(lot_no)) IN (${ph})
-             GROUP BY UPPER(TRIM(lot_no))`,
+             GROUP BY UPPER(TRIM(lot_no)), godown_name`,
             custLotNos
           )) || [];
           for (const mv of mvRows) {
-            mvMap.set(mv.lot_key, { bags: Number(mv.bal_bags) || 0, kg: Number(mv.bal_kg) || 0 });
+            const cur = mvMap.get(mv.lot_key) || { bags: 0, kg: 0, activeGodowns: [] };
+            const b = Number(mv.bal_bags) || 0;
+            const k = Number(mv.bal_kg) || 0;
+            cur.bags += b;
+            cur.kg += k;
+            if (mv.godown_name && b > 0.001) cur.activeGodowns.push(`${mv.godown_name} (${b} Bags)`);
+            mvMap.set(mv.lot_key, cur);
           }
         } catch (_) {}
       }
@@ -835,7 +877,8 @@ class PartyIntelligenceService {
         const sl = stockLotMap.get(lKey);
         const mvBal = mvMap.get(lKey);
         const soldKg = Number(r.item_wt || r.total_weight || 0);
-        const remKg = mvBal ? mvBal.kg : Number(sl?.remaining_quantity ?? 0);
+        const remKg = mvBal ? Number(mvBal.kg.toFixed(3)) : Number(sl?.remaining_quantity ?? 0);
+        const remBags = mvBal ? Number(mvBal.bags.toFixed(3)) : Number(sl?.remaining_quantity ?? 0);
 
         lotHistory.push({
           lot_no: r.lot_no,
@@ -847,7 +890,9 @@ class PartyIntelligenceService {
           quantity: soldKg,
           weightKg: soldKg,
           remaining_quantity: remKg,
-          remainingBags: mvBal ? mvBal.bags : Number(sl?.remaining_quantity ?? 0),
+          remainingKg: remKg,
+          remainingBags: remBags,
+          godown: mvBal?.activeGodowns?.length > 0 ? mvBal.activeGodowns.join(', ') : (sl?.godown_name || '-'),
           qc_status: sl?.qc_status || 'PASSED',
           qcStatus: sl?.qc_status || 'PASSED',
           voucherNo: r.voucher_no || r.inv_no || `INV-${r.s_no || r.id}`

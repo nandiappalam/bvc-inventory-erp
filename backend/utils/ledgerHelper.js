@@ -381,6 +381,7 @@ async function createPurchaseLedgerEntries(purchaseData) {
 async function createSalesVoucherChain(salesData) {
   const cId = AccountingEngine.getActiveCompanyId(salesData.companyId);
   const {
+    conn = null,
     customer,
     date,
     invNo,
@@ -389,6 +390,10 @@ async function createSalesVoucherChain(salesData) {
     taxAmount = 0,
     discAmount = 0,
     baseAmount = 0,
+    freightRecoveryAmount = 0,
+    loadingChargesRecoverable = 0,
+    otherCharges = 0,
+    tcsAmount = 0,
     deductions = [],
     roundOff = 0,
     narration = '',
@@ -417,9 +422,14 @@ async function createSalesVoucherChain(salesData) {
   }
   const effectiveTaxPaise = cgstPaise + sgstPaise + igstPaise;
   const discPaise = toPaise(discAmount || 0);
+  const freightRecPaise = Math.max(0, toPaise(freightRecoveryAmount || 0));
+  const loadingRecPaise = Math.max(0, toPaise(loadingChargesRecoverable || 0));
+  const otherChargesPaise = Math.max(0, toPaise(otherCharges || 0));
+  const tcsPaise = Math.max(0, toPaise(tcsAmount || 0));
+
   let basePaise = toPaise(baseAmount || 0);
   if (basePaise === 0 && toPaise(totalAmount) > 0) {
-    basePaise = Math.max(0, toPaise(totalAmount) - effectiveTaxPaise + discPaise);
+    basePaise = Math.max(0, toPaise(totalAmount) - effectiveTaxPaise - freightRecPaise - loadingRecPaise - otherChargesPaise - tcsPaise + discPaise);
   }
 
   let lessDedPaise = 0;
@@ -437,6 +447,18 @@ async function createSalesVoucherChain(salesData) {
   }
   if (igstPaise > 0) {
     lines.push({ ledgerName: 'Output IGST', ledgerType: 'Tax', debit: 0, credit: fromPaise(igstPaise), remarks: `IGST on Sales #${invLabel}` });
+  }
+  if (freightRecPaise > 0) {
+    lines.push({ ledgerName: 'Freight Recovery', ledgerType: 'Income', debit: 0, credit: fromPaise(freightRecPaise), remarks: `Freight charges recovered on Sales #${invLabel}` });
+  }
+  if (loadingRecPaise > 0) {
+    lines.push({ ledgerName: 'Loading & Unloading Recovery', ledgerType: 'Income', debit: 0, credit: fromPaise(loadingRecPaise), remarks: `Loading charges on Sales #${invLabel}` });
+  }
+  if (otherChargesPaise > 0) {
+    lines.push({ ledgerName: 'Other Sales Charges', ledgerType: 'Income', debit: 0, credit: fromPaise(otherChargesPaise), remarks: `Other charges on Sales #${invLabel}` });
+  }
+  if (tcsPaise > 0) {
+    lines.push({ ledgerName: 'TCS Payable', ledgerType: 'Tax', debit: 0, credit: fromPaise(tcsPaise), remarks: `TCS on Sales #${invLabel}` });
   }
   if (discPaise > 0) {
     lines.push({ ledgerName: 'Discount Allowed', ledgerType: 'Expense', debit: fromPaise(discPaise), credit: 0, remarks: `Discount on Sales #${invLabel}` });
@@ -458,7 +480,7 @@ async function createSalesVoucherChain(salesData) {
     }
   }
 
-  const netReceivablePaise = basePaise + effectiveTaxPaise - discPaise - lessDedPaise + addDedPaise;
+  const netReceivablePaise = basePaise + effectiveTaxPaise + freightRecPaise + loadingRecPaise + otherChargesPaise + tcsPaise - discPaise - lessDedPaise + addDedPaise;
   let roundOffPaise = toPaise(roundOff);
   if (roundOffPaise === 0 && toPaise(totalAmount) > 0) {
     const diff = toPaise(totalAmount) - netReceivablePaise;
@@ -492,6 +514,7 @@ async function createSalesVoucherChain(salesData) {
   }));
 
   return AccountingEngine.postVoucher({
+    conn,
     companyId: cId,
     voucherType: 'Sales',
     prefix: 'SAL',
@@ -510,6 +533,175 @@ async function createSalesVoucherChain(salesData) {
 
 async function createSalesLedgerEntries(salesData) {
   return createSalesVoucherChain(salesData);
+}
+
+/**
+ * Separate Receipt Voucher for payments received against a Sales Invoice.
+ * Never merges receipt into the Sales Invoice voucher so Receivable & Cash/Bank stay clean.
+ */
+async function createSalesReceiptVoucher(receiptData) {
+  const cId = AccountingEngine.getActiveCompanyId(receiptData.companyId);
+  const {
+    conn = null,
+    customer,
+    date,
+    paymentDate,
+    invNo,
+    salesId,
+    receivedAmount = 0,
+    paymentMode = 'Cash',
+    bankAccountName = '',
+    transactionRef = '',
+    existingVoucherNo = null,
+  } = receiptData;
+
+  const amtPaise = toPaise(receivedAmount);
+  if (amtPaise <= 0) {
+    await AccountingEngine.deleteVoucherBySource({
+      conn,
+      companyId: cId,
+      sourceModule: 'sales_receipt',
+      sourceId: Number(salesId),
+    });
+    return null;
+  }
+
+  const resolvedCustomer = await getPartyName(customer, 'customer', cId);
+  if (!resolvedCustomer) {
+    throw new Error('Sales Receipt voucher requires a valid Customer ledger.');
+  }
+
+  const modeLower = String(paymentMode || 'Cash').trim().toLowerCase();
+  const isCash = modeLower === 'cash';
+  const settlementLedger = isCash ? 'Cash in Hand' : (String(bankAccountName || '').trim() || 'Bank Account');
+  const amtVal = fromPaise(amtPaise);
+  const vDate = sanitizeDate(paymentDate || date) || new Date().toISOString().slice(0, 10);
+  const invLabel = invNo || salesId;
+  const refNote = transactionRef ? ` (Ref: ${transactionRef})` : '';
+  const remarkText = `Receipt against Sales Invoice #${invLabel} via ${paymentMode}${refNote}`;
+
+  const lines = [
+    {
+      ledgerName: settlementLedger,
+      groupName: isCash ? 'Cash-in-hand' : 'Bank Accounts',
+      debit: amtVal,
+      credit: 0,
+      remarks: remarkText,
+      referenceId: salesId,
+      referenceType: 'sales_receipt',
+      transactionId: salesId,
+      transactionType: 'sales_receipt',
+    },
+    {
+      ledgerName: resolvedCustomer,
+      ledgerType: 'Customer',
+      debit: 0,
+      credit: amtVal,
+      remarks: remarkText,
+      referenceId: salesId,
+      referenceType: 'sales_receipt',
+      transactionId: salesId,
+      transactionType: 'sales_receipt',
+    },
+  ];
+
+  return AccountingEngine.postVoucher({
+    conn,
+    companyId: cId,
+    voucherType: 'Receipt',
+    prefix: 'REC',
+    existingVoucherNo: existingVoucherNo || null,
+    date: vDate,
+    referenceNo: String(salesId || invLabel),
+    narration: remarkText,
+    sourceModule: 'sales_receipt',
+    sourceId: Number(salesId),
+    postingKey: `sales_receipt:${salesId}`,
+    lines,
+    allowUpdate: true,
+    preserveVoucherNoOnUpdate: true,
+  });
+}
+
+/**
+ * Separate Freight Outward Voucher when Seller pays freight (Paid By = Seller).
+ */
+async function createSalesFreightVoucher(freightData) {
+  const cId = AccountingEngine.getActiveCompanyId(freightData.companyId);
+  const {
+    conn = null,
+    salesId,
+    invNo,
+    date,
+    freightAmount = 0,
+    freightPaidBy = 'Buyer',
+    freightPaymentStatus = 'Pending',
+    transporter = '',
+    vehicleNo = '',
+    existingVoucherNo = null,
+  } = freightData;
+
+  const amtPaise = toPaise(freightAmount);
+  if (amtPaise <= 0 || String(freightPaidBy || '').toLowerCase() !== 'seller') {
+    await AccountingEngine.deleteVoucherBySource({
+      conn,
+      companyId: cId,
+      sourceModule: 'sales_freight',
+      sourceId: Number(salesId),
+    });
+    return null;
+  }
+
+  const resolvedTransporter = await getPartyName(transporter, 'transporter', cId);
+  const isPaid = String(freightPaymentStatus || '').toLowerCase() === 'paid';
+  const creditLedger = isPaid ? 'Cash in Hand' : (resolvedTransporter || 'Transporter Payable');
+  const amtVal = fromPaise(amtPaise);
+  const vDate = sanitizeDate(date) || new Date().toISOString().slice(0, 10);
+  const invLabel = invNo || salesId;
+  const remarkText = `Freight outward for Sales #${invLabel}${vehicleNo ? ` (${vehicleNo})` : ''}`;
+
+  const lines = [
+    {
+      ledgerName: 'Freight Outward',
+      ledgerType: 'Expense',
+      debit: amtVal,
+      credit: 0,
+      remarks: remarkText,
+      referenceId: salesId,
+      referenceType: 'sales_freight',
+      transactionId: salesId,
+      transactionType: 'sales_freight',
+    },
+    {
+      ledgerName: creditLedger,
+      groupName: isPaid ? 'Cash-in-hand' : 'Sundry Creditors',
+      ledgerType: isPaid ? 'Asset' : 'Transporter',
+      debit: 0,
+      credit: amtVal,
+      remarks: remarkText,
+      referenceId: salesId,
+      referenceType: 'sales_freight',
+      transactionId: salesId,
+      transactionType: 'sales_freight',
+    },
+  ];
+
+  return AccountingEngine.postVoucher({
+    conn,
+    companyId: cId,
+    voucherType: 'Journal',
+    prefix: 'JNL',
+    existingVoucherNo: existingVoucherNo || null,
+    date: vDate,
+    referenceNo: String(salesId || invLabel),
+    narration: remarkText,
+    sourceModule: 'sales_freight',
+    sourceId: Number(salesId),
+    postingKey: `sales_freight:${salesId}`,
+    lines,
+    allowUpdate: true,
+    preserveVoucherNoOnUpdate: true,
+  });
 }
 
 async function createAdvanceLedgerEntries(advanceData) {
@@ -802,6 +994,7 @@ async function createSalesReturnVoucherChain(returnData) {
     companyId: cId,
     voucherType: 'Credit Note',
     prefix: 'CN',
+    existingVoucherNo: returnData.existingVoucherNo || null,
     date: voucherDate,
     referenceNo: String(effectiveId || invoiceRef),
     narration: narration || `Credit Note / Sales Return #${invoiceRef} for ${resolvedCustomer}`,
@@ -809,6 +1002,90 @@ async function createSalesReturnVoucherChain(returnData) {
     sourceId: effectiveId ? Number(effectiveId) : null,
     postingKey: effectiveId ? `sales_return:${effectiveId}` : null,
     lines: taggedLines,
+    allowUpdate: true,
+    preserveVoucherNoOnUpdate: true,
+  });
+}
+
+async function createSalesReturnRefundVoucher(refundData) {
+  const cId = AccountingEngine.getActiveCompanyId(refundData.companyId);
+  const {
+    customer,
+    date,
+    returnInvNo,
+    salesReturnId,
+    refundAmount = 0,
+    refundMode = 'Bank',
+    bankAccountName = '',
+    refundRefNo = '',
+    existingVoucherNo = null,
+    narration = '',
+  } = refundData;
+
+  const amtPaise = toPaise(refundAmount);
+  if (!salesReturnId || amtPaise <= 0) {
+    if (salesReturnId) {
+      await AccountingEngine.deleteVoucherBySource({
+        companyId: cId,
+        sourceModule: 'sales_return_refund',
+        sourceId: Number(salesReturnId),
+        voucherTypes: ['Payment', 'PAY'],
+      });
+    }
+    return null;
+  }
+
+  const resolvedCustomer = await getPartyName(customer, 'customer', cId);
+  if (!resolvedCustomer) {
+    throw new Error('Sales Return Refund requires a valid Customer ledger.');
+  }
+
+  const modeLower = String(refundMode || 'Cash').trim().toLowerCase();
+  const isCash = modeLower === 'cash';
+  const payoutLedger = isCash ? 'Cash in Hand' : (String(bankAccountName || '').trim() || 'Bank Account');
+  const amtVal = fromPaise(amtPaise);
+  const vDate = sanitizeDate(date) || new Date().toISOString().slice(0, 10);
+  const invLabel = returnInvNo || salesReturnId;
+  const refNote = refundRefNo ? ` (Ref: ${refundRefNo})` : '';
+  const remarkText = narration || `Refund to ${resolvedCustomer} for Sales Return #${invLabel} via ${refundMode}${refNote}`;
+
+  const lines = [
+    {
+      ledgerName: resolvedCustomer,
+      ledgerType: 'Customer',
+      debit: amtVal,
+      credit: 0,
+      remarks: remarkText,
+      referenceId: salesReturnId,
+      referenceType: 'sales_return_refund',
+      transactionId: salesReturnId,
+      transactionType: 'sales_return_refund',
+    },
+    {
+      ledgerName: payoutLedger,
+      groupName: isCash ? 'Cash-in-hand' : 'Bank Accounts',
+      debit: 0,
+      credit: amtVal,
+      remarks: remarkText,
+      referenceId: salesReturnId,
+      referenceType: 'sales_return_refund',
+      transactionId: salesReturnId,
+      transactionType: 'sales_return_refund',
+    },
+  ];
+
+  return AccountingEngine.postVoucher({
+    companyId: cId,
+    voucherType: 'Payment',
+    prefix: 'PAY',
+    existingVoucherNo: existingVoucherNo || null,
+    date: vDate,
+    referenceNo: String(salesReturnId || invLabel),
+    narration: remarkText,
+    sourceModule: 'sales_return_refund',
+    sourceId: Number(salesReturnId),
+    postingKey: `sales_return_refund:${salesReturnId}`,
+    lines,
     allowUpdate: true,
     preserveVoucherNoOnUpdate: true,
   });
@@ -830,13 +1107,28 @@ async function deletePurchaseVoucherChain(referenceId, companyId = null) {
 async function deleteSalesVoucherChain(referenceId, companyId = null) {
   if (!referenceId) return true;
   const cId = AccountingEngine.getActiveCompanyId(companyId);
+  const srcId = /^\d+$/.test(String(referenceId)) ? Number(referenceId) : null;
   await AccountingEngine.deleteVoucherBySource({
     companyId: cId,
     sourceModule: 'sales',
-    sourceId: /^\d+$/.test(String(referenceId)) ? Number(referenceId) : null,
+    sourceId: srcId,
     voucherTypes: ['Sales', 'SAL'],
     referenceNo: String(referenceId),
   });
+  if (srcId) {
+    await AccountingEngine.deleteVoucherBySource({
+      companyId: cId,
+      sourceModule: 'sales_receipt',
+      sourceId: srcId,
+      voucherTypes: ['Receipt', 'REC'],
+    });
+    await AccountingEngine.deleteVoucherBySource({
+      companyId: cId,
+      sourceModule: 'sales_freight',
+      sourceId: srcId,
+      voucherTypes: ['Journal', 'JNL'],
+    });
+  }
   return true;
 }
 
@@ -869,13 +1161,22 @@ async function deletePurchaseReturnVoucherChain(referenceId, companyId = null) {
 async function deleteSalesReturnVoucherChain(referenceId, companyId = null) {
   if (!referenceId) return true;
   const cId = AccountingEngine.getActiveCompanyId(companyId);
+  const srcId = /^\d+$/.test(String(referenceId)) ? Number(referenceId) : null;
   await AccountingEngine.deleteVoucherBySource({
     companyId: cId,
     sourceModule: 'sales_return',
-    sourceId: /^\d+$/.test(String(referenceId)) ? Number(referenceId) : null,
+    sourceId: srcId,
     voucherTypes: ['Credit Note', 'Sales Return', 'CN'],
     referenceNo: String(referenceId),
   });
+  if (srcId) {
+    await AccountingEngine.deleteVoucherBySource({
+      companyId: cId,
+      sourceModule: 'sales_return_refund',
+      sourceId: srcId,
+      voucherTypes: ['Payment', 'PAY'],
+    });
+  }
   return true;
 }
 
@@ -914,8 +1215,11 @@ module.exports = {
   createPurchaseVoucherChain,
   createPurchaseReturnVoucherChain,
   createSalesReturnVoucherChain,
+  createSalesReturnRefundVoucher,
   createSalesVoucherChain,
   createSalesLedgerEntries,
+  createSalesReceiptVoucher,
+  createSalesFreightVoucher,
   createAdvanceLedgerEntries,
   deleteLedgerEntries,
   deletePurchaseVoucherChain,

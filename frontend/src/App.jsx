@@ -70,6 +70,11 @@ import SalesCreationPage from './components/SalesCreationPage'
 import SalesDisplayPage from './components/SalesDisplayPage'
 import SalesReturnCreate from './components/SalesReturnCreate'
 import SalesReturnDisplay from './components/SalesReturnDisplay'
+import CustomerComplaintCreate from './components/CustomerComplaintCreate'
+import CustomerComplaintDisplay from './components/CustomerComplaintDisplay'
+import CapaCreate from './components/CapaCreate'
+import CapaDisplay from './components/CapaDisplay'
+import CapaReports from './components/CapaReports'
 import ItemCreate from './components/ItemCreate'
 import ItemDisplay from './components/ItemDisplay'
 import ItemGroupCreate from './components/ItemGroupCreate'
@@ -469,6 +474,11 @@ const AppLayout = () => {
           <Route path="/entry/quotation-display" element={<QuotationDisplay />} />
           <Route path="/entry/sales-return-create" element={<SalesReturnCreate />} />
           <Route path="/entry/sales-return-display" element={<SalesReturnDisplay />} />
+          <Route path="/entry/customer-complaint-create" element={<CustomerComplaintCreate />} />
+          <Route path="/entry/customer-complaint-display" element={<CustomerComplaintDisplay />} />
+          <Route path="/entry/capa-create" element={<CapaCreate />} />
+          <Route path="/entry/capa-display" element={<CapaDisplay />} />
+          <Route path="/reports/capa" element={<CapaReports />} />
           <Route path="/entry/stock-adjust-create" element={<StockAdjustCreate />} />
           <Route path="/entry/stock-adjust-display" element={<StockAdjustDisplay />} />
           <Route path="/entry/packing-create" element={<PackingCreate />} />

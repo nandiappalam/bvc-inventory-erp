@@ -41,6 +41,7 @@ import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import KitchenIcon from '@mui/icons-material/Kitchen';
 import FactoryIcon from '@mui/icons-material/Factory';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SecurityIcon from '@mui/icons-material/Security';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 
@@ -231,8 +232,38 @@ const CompanySelection = () => {
           justifyContent: 'space-between'
         }}
       >
-        {/* Zone 1: Brand */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, cursor: 'pointer' }} onClick={() => scrollToSection('hero')}>
+        {/* Zone 1: Back & Brand */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+          <Button
+            onClick={() => {
+              if (window.history.length > 1) {
+                navigate(-1);
+              } else if (user) {
+                navigate('/dashboard');
+              }
+            }}
+            size="small"
+            variant="outlined"
+            startIcon={<ArrowBackIcon sx={{ fontSize: 16 }} />}
+            sx={{
+              color: themeColors.primary,
+              borderColor: themeColors.border,
+              bgcolor: '#ffffff',
+              borderRadius: '6px',
+              px: 1.25,
+              py: 0.45,
+              fontSize: '12px',
+              fontWeight: 700,
+              textTransform: 'none',
+              '&:hover': {
+                bgcolor: themeColors.lighterBlue,
+                borderColor: themeColors.primary,
+              },
+            }}
+          >
+            Back
+          </Button>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, cursor: 'pointer' }} onClick={() => scrollToSection('hero')}>
           <Box
             sx={{
               width: 40,
@@ -255,6 +286,7 @@ const CompanySelection = () => {
             <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600, letterSpacing: '0.5px' }}>
               Enterprise ERP Hub
             </Typography>
+          </Box>
           </Box>
         </Box>
 

@@ -1073,26 +1073,31 @@ async function backfillCompanyMovements(companyId, conn = null) {
     }
   } catch (_) {}
 
-  // 14. Sales Return (`sales_return` singular)
+  // 14. Sales Return (`sales_return` singular) — only APPROVED + Resalable disposition enter saleable FG stock
   try {
     const srRows = await runner.all(`
-      SELECT sri.*, sr.date, sr.s_no, sr.customer, sr.remarks as header_remarks, sr.created_at
+      SELECT sri.*, sr.date, sr.s_no, sr.return_no, sr.customer, sr.remarks as header_remarks, sr.created_at,
+             sr.approval_status, sr.stock_disposition as header_disposition, sr.stock_status,
+             sr.destination_godown_id as header_godown_id, sr.destination_godown_name as header_godown_name
       FROM sales_return_items sri
       JOIN sales_return sr ON sri.sales_return_id = sr.id
+      WHERE UPPER(COALESCE(sr.approval_status, '')) = 'APPROVED'
       ORDER BY sr.date ASC, sri.id ASC
     `);
     for (const r of (srRows || [])) {
       if (!r.item_name) continue;
+      const disp = String(r.stock_disposition || r.header_disposition || r.stock_status || '').trim().toLowerCase();
+      if (disp !== 'resalable' && disp !== 'good / resalable') continue;
       const qty = Math.abs(parseFloat(r.qty) || 0);
       const unitWt = parseFloat(r.weight) || 50;
-      const totWt = Math.abs(parseFloat(r.total_wt) || (qty * unitWt));
+      const totWt = Math.abs(parseFloat(r.return_weight) || parseFloat(r.total_wt) || (qty * unitWt));
       const res = await postMovement(cId, {
         movementDate: r.date,
         createdAt: r.created_at,
         itemName: r.item_name,
         lotNo: r.lot_no || '',
-        godownId: gdw.fgGodown.id,
-        godownName: gdw.fgGodown.godown_name,
+        godownId: r.destination_godown_id || r.header_godown_id || gdw.fgGodown.id,
+        godownName: r.destination_godown_name || r.header_godown_name || gdw.fgGodown.godown_name,
         partyName: r.customer || '',
         direction: 'IN',
         movementType: 'SALES_RETURN',
@@ -1106,7 +1111,7 @@ async function backfillCompanyMovements(companyId, conn = null) {
         sourceTable: 'sales_return_items',
         sourceId: r.sales_return_id,
         sourceLineId: r.id,
-        sourceRefNo: `SR-${r.s_no || r.sales_return_id}`,
+        sourceRefNo: r.return_no || `SR-${r.s_no || r.sales_return_id}`,
         remarks: r.header_remarks || ''
       }, runner);
       track('SALES_RETURN', res);

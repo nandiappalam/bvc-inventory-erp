@@ -71,6 +71,10 @@ const ensureQcTables = async () => {
     } catch (e) {}
 
     try {
+      await db.run("ALTER TABLE qc_inspections ADD COLUMN evidence_json TEXT");
+    } catch (e) {}
+
+    try {
       await db.run(`
         CREATE TABLE IF NOT EXISTS qc_inspection_params (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -619,6 +623,7 @@ router.get(['/inspection/:id', '/purchase-lab-testing/:id', '/coa/:id', '/iqr/:i
         qi.inspector as analyst,
         qi.overall_result as overallResult,
         qi.remarks,
+        qi.evidence_json,
         COALESCE(sl.item_name, pi.item_name, '') as item,
         COALESCE(sl.quantity, pi.qty, 0) as quantity,
         COALESCE(sl.unloading_status, 'PENDING_DECISION') as unloadingStatus,
@@ -968,12 +973,22 @@ router.get(['/inspection/:id', '/purchase-lab-testing/:id', '/coa/:id', '/iqr/:i
     rowData.invoice_date = String(rowData.invoice_date).split('T')[0];
   }
 
+  let parsedEvidence = [];
+  if (raw.evidence_json) {
+    try {
+      parsedEvidence = typeof raw.evidence_json === 'string' ? JSON.parse(raw.evidence_json) : raw.evidence_json;
+    } catch (e) {
+      parsedEvidence = [];
+    }
+  }
+
   res.json({ 
     success: true, 
     data: {
       ...rowData,
       qcResults,
-      iqr: iqrData
+      iqr: iqrData,
+      evidence: Array.isArray(parsedEvidence) ? parsedEvidence : []
     }
   });
 }));
@@ -994,10 +1009,16 @@ router.post(['/submit', '/purchase-lab-testing'], asyncHandler(async (req, res) 
     batch,
     analyst,
     remarks,
-    qcResults = []
+    qcResults = [],
+    evidence = []
   } = qcHeader;
 
-  const overallResult = summary?.overallResult || qcHeader.status || 'ACCEPTED';
+  const rawEvidence = (Array.isArray(evidence) && evidence.length > 0) 
+    ? evidence 
+    : (req.body.evidence || qcHeader.evidence_json || req.body.evidence_json || []);
+  const evidenceJson = typeof rawEvidence === 'string' ? rawEvidence : JSON.stringify(rawEvidence || []);
+
+  const overallResult = qcHeader.status || summary?.overallResult || 'ACCEPTED';
 
   // Use a transaction
   const connection = await db.getConnection();
@@ -1093,15 +1114,19 @@ router.post(['/submit', '/purchase-lab-testing'], asyncHandler(async (req, res) 
     let usable_for_production = 0;
     let approval_status = 'PENDING_APPROVAL';
 
-    if (overallResult === 'ACCEPTED' || overallResult === 'PASS') {
+    const resUpper = String(overallResult || '').toUpperCase();
+    if (resUpper === 'ACCEPTED' || resUpper === 'PASS' || resUpper === 'APPROVE' || resUpper === 'APPROVED') {
       usable_for_production = 1;
       approval_status = 'APPROVED';
-    } else if (overallResult === 'REJECTED' || overallResult === 'FAIL') {
+    } else if (resUpper === 'REJECTED' || resUpper === 'FAIL' || resUpper === 'RETURN' || resUpper === 'RETURNED') {
       usable_for_production = 0;
       approval_status = 'REJECTED';
-    } else if (overallResult === 'HOLD') {
+    } else if (resUpper === 'HOLD') {
       usable_for_production = 0;
       approval_status = 'ON_HOLD';
+    } else {
+      usable_for_production = 0;
+      approval_status = 'PENDING_APPROVAL';
     }
 
     // Ensure columns exist in SQLite database
@@ -1156,9 +1181,9 @@ router.post(['/submit', '/purchase-lab-testing'], asyncHandler(async (req, res) 
         // Update existing qc_inspections record
         await connection.run(
           `UPDATE qc_inspections 
-           SET purchase_id = ?, rm_lot_no = ?, inspection_date = ?, inspector = ?, overall_result = ?, remarks = ?, updated_at = CURRENT_TIMESTAMP
+           SET purchase_id = ?, rm_lot_no = ?, inspection_date = ?, inspector = ?, overall_result = ?, remarks = ?, evidence_json = ?, updated_at = CURRENT_TIMESTAMP
            WHERE id = ?`,
-          [resolvedPurchaseId, lotNo, new Date().toISOString().split('T')[0], analyst, overallResult, remarks, savedQcId]
+          [resolvedPurchaseId, lotNo, new Date().toISOString().split('T')[0], analyst, overallResult, remarks, evidenceJson, savedQcId]
         );
       } else {
         savedQcId = null;
@@ -1171,9 +1196,9 @@ router.post(['/submit', '/purchase-lab-testing'], asyncHandler(async (req, res) 
         savedQcId = existingByLot.rows[0].id;
         await connection.run(
           `UPDATE qc_inspections 
-           SET purchase_id = ?, rm_lot_no = ?, inspection_date = ?, inspector = ?, overall_result = ?, remarks = ?, updated_at = CURRENT_TIMESTAMP
+           SET purchase_id = ?, rm_lot_no = ?, inspection_date = ?, inspector = ?, overall_result = ?, remarks = ?, evidence_json = ?, updated_at = CURRENT_TIMESTAMP
            WHERE id = ?`,
-          [resolvedPurchaseId, lotNo, new Date().toISOString().split('T')[0], analyst, overallResult, remarks, savedQcId]
+          [resolvedPurchaseId, lotNo, new Date().toISOString().split('T')[0], analyst, overallResult, remarks, evidenceJson, savedQcId]
         );
       }
     }
@@ -1182,9 +1207,9 @@ router.post(['/submit', '/purchase-lab-testing'], asyncHandler(async (req, res) 
       // Insert new qc_inspections record
       const qc_no = `QC-${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 8)}-${Math.floor(1000 + Math.random() * 9000)}`;
       const result = await connection.run(
-        `INSERT INTO qc_inspections (qc_no, purchase_id, rm_lot_no, inspection_date, inspector, overall_result, remarks)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [qc_no, resolvedPurchaseId, lotNo, new Date().toISOString().split('T')[0], analyst || 'QC Engineer', overallResult, remarks]
+        `INSERT INTO qc_inspections (qc_no, purchase_id, rm_lot_no, inspection_date, inspector, overall_result, remarks, evidence_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [qc_no, resolvedPurchaseId, lotNo, new Date().toISOString().split('T')[0], analyst || 'QC Engineer', overallResult, remarks, evidenceJson]
       );
       savedQcId = result.lastID || result.lastInsertRowid || result.rows?.[0]?.id;
       if (!savedQcId) {

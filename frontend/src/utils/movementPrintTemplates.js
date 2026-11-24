@@ -28,6 +28,12 @@ const formatCurrency = (val) => {
 export const printOutpassDocument = (op, copyTitle = 'ORIGINAL STORE COPY') => {
   if (!op) return;
 
+  const isSalesDispatch = op.reference_type === 'SALES' || op.purpose === 'Sales Dispatch';
+  const vGross = parseFloat(op.vehicle_gross_weight) || 0;
+  const vTare = parseFloat(op.vehicle_tare_weight) || 0;
+  const vNetLoad = parseFloat(op.net_load_weight) || (vGross > 0 ? Math.max(0, vGross - vTare) : 0);
+  const freightAmt = parseFloat(op.freight_amount) || 0;
+
   const items = op.items && op.items.length > 0 ? op.items : [
     {
       item_name: op.input_item_name || op.item_name || 'Material Item',
@@ -36,11 +42,11 @@ export const printOutpassDocument = (op, copyTitle = 'ORIGINAL STORE COPY') => {
       weight: op.unit_weight || 50,
       total_weight: op.total_weight || 0,
       godown_name: op.from_godown_name || op.godown_name || 'PJ Main Godown',
-      reason: op.purpose || 'Outside Processing'
+      reason: op.purpose || (isSalesDispatch ? 'Sales Dispatch' : 'Outside Processing')
     }
   ];
 
-  const totalBags = items.reduce((sum, it) => sum + (parseInt(it.qty) || 0), 0);
+  const totalBags = items.reduce((sum, it) => sum + (parseInt(it.qty, 10) || 0), 0);
   const totalWeightKg = items.reduce((sum, it) => sum + (parseFloat(it.total_weight) || 0), 0) || parseFloat(op.total_weight) || 0;
   const totalTonnes = (totalWeightKg / 1000).toFixed(3);
 
@@ -67,7 +73,7 @@ export const printOutpassDocument = (op, copyTitle = 'ORIGINAL STORE COPY') => {
         ${it.godown_name || op.from_godown_name || 'PJ Main Godown'}
       </td>
       <td style="border: 1px solid #cbd5e1; padding: 8px; color: #475569; font-size: 12px;">
-        ${it.reason || op.purpose || 'Outside Processing'}
+        ${it.reason || op.purpose || (isSalesDispatch ? 'Sales Dispatch' : 'Outside Processing')}
       </td>
     </tr>
   `).join('');
@@ -83,7 +89,7 @@ export const printOutpassDocument = (op, copyTitle = 'ORIGINAL STORE COPY') => {
               BVC 
             </h1>
             <p style="margin: 3px 0 0 0; font-size: 12px; color: #475569; font-weight: 600;">
-              Factory & Works • Material Movement & Security Gate Control
+              Factory & Works • ${isSalesDispatch ? 'Customer Dispatch & Security Gate Clearance' : 'Material Movement & Security Gate Control'}
             </p>
             <p style="margin: 2px 0 0 0; font-size: 11px; color: #64748b;">
               Unit I: Main Industrial Area | Phone: +91 98765 43210 | Email: dispatch@bvcagro.com
@@ -105,7 +111,7 @@ export const printOutpassDocument = (op, copyTitle = 'ORIGINAL STORE COPY') => {
         <!-- Banner Bar -->
         <div style="margin-top: 12px; background: #f0f4ff; border: 1px solid #bfdbfe; border-radius: 4px; padding: 6px 12px; display: flex; justify-content: space-between; align-items: center; font-size: 13px;">
           <span style="font-weight: 800; color: #1e40af; letter-spacing: 0.5px; text-transform: uppercase;">
-            📋 MATERIAL GATE OUTPASS (DELIVERY CHALLAN / GOODS OUTWARD PASS)
+            ${isSalesDispatch ? '🚚 SALES DISPATCH GATE OUTPASS / DELIVERY CHALLAN' : '📋 MATERIAL GATE OUTPASS (DELIVERY CHALLAN / GOODS OUTWARD PASS)'}
           </span>
           <span style="background: #1f4fb2; color: #ffffff; padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 700;">
             STATUS: ${op.status || 'OUTPASSED'}
@@ -119,7 +125,7 @@ export const printOutpassDocument = (op, copyTitle = 'ORIGINAL STORE COPY') => {
         <!-- Box 1: Dispatch & Movement Metadata -->
         <div style="border: 1px solid #cbd5e1; border-radius: 6px; padding: 12px; background: #f8fafc;">
           <h3 style="margin: 0 0 8px 0; font-size: 12px; text-transform: uppercase; color: #1f4fb2; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; letter-spacing: 0.5px;">
-            📍 Movement & Source Details
+            📍 ${isSalesDispatch ? 'Sales Invoice & Dispatch Details' : 'Movement & Source Details'}
           </h3>
           <table style="width: 100%; border-collapse: collapse; font-size: 12px; margin: 0;">
             <tr>
@@ -134,14 +140,14 @@ export const printOutpassDocument = (op, copyTitle = 'ORIGINAL STORE COPY') => {
               <td style="padding: 3px 0; color: #64748b;">Purpose / Mode:</td>
               <td style="padding: 3px 0;">
                 <span style="background: #dbeafe; color: #1e40af; padding: 2px 6px; border-radius: 3px; font-weight: 700; font-size: 11px;">
-                  ${op.purpose || 'Outside Mill Processing'}
+                  ${op.purpose || (isSalesDispatch ? 'Sales Dispatch' : 'Outside Mill Processing')}
                 </span>
               </td>
             </tr>
             <tr>
-              <td style="padding: 3px 0; color: #64748b;">Reference Doc:</td>
-              <td style="padding: 3px 0; font-weight: 600; color: #334155;">
-                ${op.reference_type || 'Grind'} (${op.reference_no || op.work_order_no || `#${op.reference_id || '-'}`})
+              <td style="padding: 3px 0; color: #64748b;">${isSalesDispatch ? 'Sales Invoice Ref:' : 'Reference Doc:'}</td>
+              <td style="padding: 3px 0; font-weight: 700; color: #334155;">
+                ${isSalesDispatch ? (op.reference_no || `SI-${op.reference_id || '-'}`) : `${op.reference_type || 'Grind'} (${op.reference_no || op.work_order_no || `#${op.reference_id || '-'}`})`}
               </td>
             </tr>
             <tr>
@@ -150,6 +156,12 @@ export const printOutpassDocument = (op, copyTitle = 'ORIGINAL STORE COPY') => {
                 ${op.from_godown_name || op.from_location || '-'}
               </td>
             </tr>
+            ${op.lr_no ? `
+              <tr>
+                <td style="padding: 3px 0; color: #64748b;">LR / GR No:</td>
+                <td style="padding: 3px 0; font-weight: 600; color: #0f172a;">${op.lr_no}${op.lr_date ? ` (${String(op.lr_date).substring(0, 10)})` : ''}</td>
+              </tr>
+            ` : ''}
             ${op.expected_return_date ? `
               <tr>
                 <td style="padding: 3px 0; color: #64748b;">Expected Return:</td>
@@ -162,22 +174,22 @@ export const printOutpassDocument = (op, copyTitle = 'ORIGINAL STORE COPY') => {
         <!-- Box 2: Destination & Party Details -->
         <div style="border: 1px solid #cbd5e1; border-radius: 6px; padding: 12px; background: #f8fafc;">
           <h3 style="margin: 0 0 8px 0; font-size: 12px; text-transform: uppercase; color: #1f4fb2; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; letter-spacing: 0.5px;">
-            🏭 Destination Mill / Party Information
+            ${isSalesDispatch ? '🏢 Buyer & Transport Details' : '🏭 Destination Mill / Party Information'}
           </h3>
           <table style="width: 100%; border-collapse: collapse; font-size: 12px; margin: 0;">
             <tr>
-              <td style="padding: 3px 0; color: #64748b; width: 38%;">External Mill / Party:</td>
-              <td style="padding: 3px 0; font-weight: 800; font-size: 13px; color: #0f172a;">${op.party_name || op.external_mill_name || 'External Mill'}</td>
+              <td style="padding: 3px 0; color: #64748b; width: 38%;">${isSalesDispatch ? 'Customer / Buyer:' : 'External Mill / Party:'}</td>
+              <td style="padding: 3px 0; font-weight: 800; font-size: 13px; color: #0f172a;">${op.party_name || op.external_mill_name || (isSalesDispatch ? 'Customer' : 'External Mill')}</td>
             </tr>
             ${op.mill_area ? `
               <tr>
-                <td style="padding: 3px 0; color: #64748b;">Mill Location / Area:</td>
+                <td style="padding: 3px 0; color: #64748b;">Location / Area:</td>
                 <td style="padding: 3px 0; font-weight: 600; color: #334155;">${op.mill_area}</td>
               </tr>
             ` : ''}
             <tr>
-              <td style="padding: 3px 0; color: #64748b;">Destination Address:</td>
-              <td style="padding: 3px 0; color: #334155;">${op.destination || op.mill_area || 'External Mill Premises'}</td>
+              <td style="padding: 3px 0; color: #64748b;">${isSalesDispatch ? 'Delivery Address:' : 'Destination Address:'}</td>
+              <td style="padding: 3px 0; color: #334155;">${op.destination || op.mill_area || (isSalesDispatch ? 'Customer Shipping Address' : 'External Mill Premises')}</td>
             </tr>
             <tr>
               <td style="padding: 3px 0; color: #64748b;">Vehicle Number:</td>
@@ -194,12 +206,34 @@ export const printOutpassDocument = (op, copyTitle = 'ORIGINAL STORE COPY') => {
               </td>
             </tr>
             <tr>
-              <td style="padding: 3px 0; color: #64748b;">Transporter Name:</td>
-              <td style="padding: 3px 0; color: #334155;">${op.transporter || 'Self Logistics / Direct'}</td>
+              <td style="padding: 3px 0; color: #64748b;">Transporter / Mode:</td>
+              <td style="padding: 3px 0; color: #334155;">${op.transporter || 'Self Logistics / Direct'}${op.transport_mode ? ` (${op.transport_mode})` : ''}</td>
             </tr>
           </table>
         </div>
       </div>
+
+      <!-- Weighbridge Gross / Tare / Net Load Weight Box -->
+      ${(vGross > 0 || vNetLoad > 0) ? `
+      <div style="background: #eff6ff; border: 1.5px solid #93c5fd; border-radius: 6px; padding: 10px 14px; margin-bottom: 16px;">
+        <div style="font-size: 11px; font-weight: 800; color: #1e40af; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.5px;">
+          ⚖️ Weighbridge & Vehicle Weight Clearance ${op.weighment_slip_no ? `(Slip #${op.weighment_slip_no})` : ''}
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; text-align: center;">
+          <div style="background: #ffffff; padding: 7px; border: 1px solid #cbd5e1; border-radius: 4px;">
+            <div style="font-size: 10px; color: #64748b; font-weight: 600;">VEHICLE GROSS WEIGHT</div>
+            <div style="font-size: 14px; font-weight: 800; color: #0f172a; margin-top: 2px;">${formatWeight(vGross)} kg</div>
+          </div>
+          <div style="background: #ffffff; padding: 7px; border: 1px solid #cbd5e1; border-radius: 4px;">
+            <div style="font-size: 10px; color: #64748b; font-weight: 600;">VEHICLE TARE WEIGHT</div>
+            <div style="font-size: 14px; font-weight: 800; color: #475569; margin-top: 2px;">${formatWeight(vTare)} kg</div>
+          </div>
+          <div style="background: #ffffff; padding: 7px; border: 1px solid #93c5fd; border-radius: 4px;">
+            <div style="font-size: 10px; color: #1d4ed8; font-weight: 700;">NET LOAD WEIGHT</div>
+            <div style="font-size: 14px; font-weight: 800; color: #1e3a8a; margin-top: 2px;">${formatWeight(vNetLoad)} kg</div>
+          </div>
+        </div>
+      </div>` : ''}
 
       <!-- Dispatched Materials Table -->
       <div style="margin-bottom: 16px;">
@@ -214,11 +248,11 @@ export const printOutpassDocument = (op, copyTitle = 'ORIGINAL STORE COPY') => {
               <th style="border: 1px solid #cbd5e1; padding: 8px; width: 40px; text-align: center;">S.No</th>
               <th style="border: 1px solid #cbd5e1; padding: 8px; text-align: left;">Item & Description</th>
               <th style="border: 1px solid #cbd5e1; padding: 8px; text-align: center; width: 110px;">Lot / Batch No</th>
-              <th style="border: 1px solid #cbd5e1; padding: 8px; text-align: right; width: 75px;">Bags</th>
+              <th style="border: 1px solid #cbd5e1; padding: 8px; text-align: right; width: 75px;">Qty</th>
               <th style="border: 1px solid #cbd5e1; padding: 8px; text-align: right; width: 90px;">Unit Wt</th>
               <th style="border: 1px solid #cbd5e1; padding: 8px; text-align: right; width: 110px;">Total Net Weight</th>
               <th style="border: 1px solid #cbd5e1; padding: 8px; text-align: left; width: 120px;">Godown</th>
-              <th style="border: 1px solid #cbd5e1; padding: 8px; text-align: left;">Process Reason</th>
+              <th style="border: 1px solid #cbd5e1; padding: 8px; text-align: left;">Purpose</th>
             </tr>
           </thead>
           <tbody>
@@ -230,7 +264,7 @@ export const printOutpassDocument = (op, copyTitle = 'ORIGINAL STORE COPY') => {
                 TOTAL DISPATCH SUMMARY:
               </td>
               <td style="border: 1px solid #cbd5e1; padding: 8px; text-align: right; font-size: 14px; font-weight: 800; color: #0f172a;">
-                ${totalBags} Bags
+                ${totalBags} Units
               </td>
               <td style="border: 1px solid #cbd5e1; padding: 8px;"></td>
               <td style="border: 1px solid #cbd5e1; padding: 8px; text-align: right; color: #1f4fb2; font-size: 15px; font-weight: 800;">
@@ -245,11 +279,22 @@ export const printOutpassDocument = (op, copyTitle = 'ORIGINAL STORE COPY') => {
         </table>
       </div>
 
-      <!-- Financial & Rate Note (If charges specified) -->
-      ${parseFloat(op.processing_rate_kg) > 0 ? `
+      <!-- Freight / Processing Rate Box -->
+      ${freightAmt > 0 ? `
         <div style="background: #f0fdf4; border: 1px solid #86efac; border-radius: 6px; padding: 10px 14px; margin-bottom: 16px; font-size: 12px; display: flex; justify-content: space-between; align-items: center;">
           <div>
-            <strong style="color: #166534; font-size: 13px;">Agrred Processing Rate:</strong>
+            <strong style="color: #166534; font-size: 13px;">Freight Paid By:</strong>
+            <span style="font-weight: 700; color: #15803d; font-size: 13px; margin-left: 6px;">${op.freight_paid_by || 'Buyer'}</span>
+          </div>
+          <div>
+            <strong style="color: #166534; font-size: 13px;">Freight Charges:</strong>
+            <span style="font-weight: 800; color: #166534; font-size: 15px; margin-left: 6px;">${formatCurrency(freightAmt)}</span>
+          </div>
+        </div>
+      ` : (parseFloat(op.processing_rate_kg) > 0 ? `
+        <div style="background: #f0fdf4; border: 1px solid #86efac; border-radius: 6px; padding: 10px 14px; margin-bottom: 16px; font-size: 12px; display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <strong style="color: #166534; font-size: 13px;">Agreed Processing Rate:</strong>
             <span style="font-weight: 700; color: #15803d; font-size: 14px; margin-left: 6px;">₹${op.processing_rate_kg} / kg</span>
           </div>
           <div>
@@ -257,15 +302,21 @@ export const printOutpassDocument = (op, copyTitle = 'ORIGINAL STORE COPY') => {
             <span style="font-weight: 800; color: #166534; font-size: 15px; margin-left: 6px;">${formatCurrency(op.estimated_charges || (op.processing_rate_kg * totalWeightKg))}</span>
           </div>
         </div>
-      ` : ''}
+      ` : '')}
 
-      <!-- Custody & Legal Declaration Box -->
+      <!-- Custody / Gate Clearance Declaration Box -->
       <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-left: 4px solid #1f4fb2; border-radius: 4px; padding: 10px 12px; margin-bottom: 24px; font-size: 11px; color: #1e3a8a; line-height: 1.5;">
-        <strong>CUSTODY & OWNERSHIP DECLARATION:</strong>
-        The material detailed in this gate outpass is dispatched exclusively for outside processing / jobwork / grinding.
-        <strong>Physical ownership remains 100% with BVC.</strong>
-        The recipient mill is bound to return the processed material along with by-products and reconciled process loss via corresponding Inpass.
-        Not for sale or transfer to any third party.
+        ${isSalesDispatch ? `
+          <strong>SALES DISPATCH & SECURITY GATE CLEARANCE:</strong>
+          The finished/traded commodities listed above have been verified against Tax Invoice <strong>${op.reference_no || op.outpass_no}</strong>, weighed at the factory weighbridge, and cleared for customer delivery.
+          Security Gate Out must verify vehicle registration <strong>${op.vehicle_no || 'N/A'}</strong> and seal count before gate exit.
+        ` : `
+          <strong>CUSTODY & OWNERSHIP DECLARATION:</strong>
+          The material detailed in this gate outpass is dispatched exclusively for outside processing / jobwork / grinding.
+          <strong>Physical ownership remains 100% with BVC.</strong>
+          The recipient mill is bound to return the processed material along with by-products and reconciled process loss via corresponding Inpass.
+          Not for sale or transfer to any third party.
+        `}
       </div>
 
       ${op.remarks ? `

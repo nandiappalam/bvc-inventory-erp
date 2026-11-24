@@ -603,9 +603,12 @@ export default function PartyIntelligenceCenter() {
                     <TableHead sx={{ bgcolor: 'grey.50' }}>
                       <TableRow>
                         <TableCell sx={{ fontWeight: 700 }}>Lot Number</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Commodity</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Commodity & Godown</TableCell>
                         <TableCell sx={{ fontWeight: 700 }}>{dossierType === 'SUPPLIER' ? 'Initial Qty' : 'Dispatched Qty'}</TableCell>
                         <TableCell sx={{ fontWeight: 700 }}>Current Balance</TableCell>
+                        {dossierType === 'SUPPLIER' && (
+                          <TableCell sx={{ fontWeight: 700 }}>Milling / Outputs & Wastage</TableCell>
+                        )}
                         <TableCell sx={{ fontWeight: 700 }}>QC Status</TableCell>
                         <TableCell sx={{ fontWeight: 700 }} align="center">360° Action</TableCell>
                       </TableRow>
@@ -613,8 +616,9 @@ export default function PartyIntelligenceCenter() {
                     <TableBody>
                       {(() => {
                         const lotsList = dossierData?.lots || dossierData?.lotHistory || [];
+                        const colSpan = dossierType === 'SUPPLIER' ? 7 : 6;
                         if (lotsList.length === 0) {
-                          return <TableRow><TableCell colSpan={6} align="center" sx={{ py: 3, color: 'text.secondary' }}>No specific lot batches mapped.</TableCell></TableRow>;
+                          return <TableRow><TableCell colSpan={colSpan} align="center" sx={{ py: 3, color: 'text.secondary' }}>No specific lot batches mapped.</TableCell></TableRow>;
                         }
                         return lotsList.map((lot, idx) => {
                           const lotNo = lot.lot_no || lot.lotNo || `LOT-${idx + 1}`;
@@ -626,28 +630,85 @@ export default function PartyIntelligenceCenter() {
                           const qcStat = lot.qc_status || lot.qcStatus || 'QC_PENDING';
                           const isPass = isPassQcStatus(qcStat);
                           const isRejected = ['REJECTED', 'FAILED'].includes(String(qcStat).toUpperCase());
+                          const milledBatches = Array.isArray(lot.milledBatches) ? lot.milledBatches : [];
+                          const outputLots = Array.isArray(lot.outputLots) ? lot.outputLots : [];
+                          const wastageKg = Number(lot.wastageKg || 0);
                           return (
                             <TableRow key={idx} hover>
                               <TableCell sx={{ fontFamily: 'monospace', fontWeight: 700 }}>{lotNo}</TableCell>
-                              <TableCell>{itemName}</TableCell>
-                              <TableCell>{initKg} KG{initBags ? ` (${initBags} Bags)` : ''}</TableCell>
-                              <TableCell sx={{ fontWeight: 700 }}>{remKg} KG{remBags ? ` (${remBags} Bags)` : ''}</TableCell>
+                              <TableCell>
+                                <Typography variant="body2" sx={{ fontWeight: 600 }}>{itemName}</Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  Godown: {lot.godown || '—'}
+                                </Typography>
+                              </TableCell>
+                              <TableCell>{Number(initKg).toLocaleString()} KG{initBags ? ` (${initBags} Bags)` : ''}</TableCell>
+                              <TableCell sx={{ fontWeight: 700 }}>
+                                {Number(remKg).toLocaleString()} KG ({remBags} Bags)
+                              </TableCell>
+                              {dossierType === 'SUPPLIER' && (
+                                <TableCell>
+                                  {milledBatches.length > 0 || outputLots.length > 0 ? (
+                                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                                      {milledBatches.length > 0 && (
+                                        <Typography variant="caption" sx={{ fontWeight: 700, color: '#6b21a8' }}>
+                                          Batches: {milledBatches.join(', ')}
+                                        </Typography>
+                                      )}
+                                      {outputLots.length > 0 && (
+                                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                                          {outputLots.map((outLot) => (
+                                            <Chip
+                                              key={outLot}
+                                              label={`→ ${outLot}`}
+                                              size="small"
+                                              onClick={() => {
+                                                setDossierOpen(false);
+                                                navigate(`/lot-genealogy?lotNo=${encodeURIComponent(outLot)}`);
+                                              }}
+                                              sx={{ fontFamily: 'monospace', fontSize: '10px', fontWeight: 700, cursor: 'pointer', bgcolor: '#f3e8ff', color: '#6b21a8' }}
+                                            />
+                                          ))}
+                                        </Box>
+                                      )}
+                                      {wastageKg > 0 && (
+                                        <Typography variant="caption" sx={{ color: '#b45309', fontWeight: 600 }}>
+                                          Wastage: {wastageKg.toLocaleString()} KG
+                                        </Typography>
+                                      )}
+                                    </Box>
+                                  ) : (
+                                    <Typography variant="caption" color="text.secondary">Direct / Unmilled</Typography>
+                                  )}
+                                </TableCell>
+                              )}
                               <TableCell>
                                 <Chip label={qcStat} size="small" color={isPass ? 'success' : isRejected ? 'error' : 'warning'} />
                               </TableCell>
                               <TableCell align="center">
-                                <Box sx={{ display: 'flex', gap: 0.75, justifyContent: 'center' }}>
+                                <Box sx={{ display: 'flex', gap: 0.75, justifyContent: 'center', flexWrap: 'wrap' }}>
                                   <Button
                                     size="small"
                                     variant="contained"
                                     startIcon={<AccountTreeIcon />}
                                     onClick={() => {
                                       setDossierOpen(false);
+                                      navigate(`/lot-genealogy?lotNo=${encodeURIComponent(lotNo)}`);
+                                    }}
+                                    sx={{ textTransform: 'none' }}
+                                  >
+                                    Genealogy
+                                  </Button>
+                                  <Button
+                                    size="small"
+                                    variant="outlined"
+                                    onClick={() => {
+                                      setDossierOpen(false);
                                       navigate(`/quality/traceability?lot=${encodeURIComponent(lotNo)}`);
                                     }}
                                     sx={{ textTransform: 'none' }}
                                   >
-                                    Trace 360°
+                                    P8 Trace
                                   </Button>
                                   <Button
                                     size="small"
@@ -655,7 +716,7 @@ export default function PartyIntelligenceCenter() {
                                     startIcon={<QrCode2Icon />}
                                     onClick={() => {
                                       setDossierOpen(false);
-                                      navigate(`/barcode-qr?code=LOT-${encodeURIComponent(lotNo)}`);
+                                      navigate(`/barcode-qr?code=${encodeURIComponent(lotNo)}`);
                                     }}
                                     sx={{ textTransform: 'none' }}
                                   >

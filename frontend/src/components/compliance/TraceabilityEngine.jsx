@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { printHtml } from '../../utils/printHelper';
 import { api } from '../../services/api';
 import {
@@ -42,6 +42,7 @@ import SyncAltIcon from '@mui/icons-material/SyncAlt';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import ClearIcon from '@mui/icons-material/Clear';
+import AccountTreeIcon from '@mui/icons-material/AccountTree';
 
 const escHtml = (val) => String(val ?? '')
   .replace(/&/g, '&amp;')
@@ -51,8 +52,9 @@ const escHtml = (val) => String(val ?? '')
   .replace(/'/g, '&#39;');
 
 export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const urlLot = searchParams.get('lot') || searchParams.get('lot_no') || '';
+  const urlLot = searchParams.get('lot') || searchParams.get('lotNo') || searchParams.get('lot_no') || '';
 
   const [lotInput, setLotInput] = useState(urlLot || targetLot || '');
   const [traceData, setTraceData] = useState(null);
@@ -61,26 +63,25 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
   const [error, setError] = useState(null);
 
   const lastQueriedLotRef = useRef(null);
-  const isFetchingRef = useRef(false);
+  const traceSeqRef = useRef(0);
 
   const fetchTraceData = useCallback(async (lotToQuery, updateUrl = true) => {
     const query = (lotToQuery || 'latest').trim();
     if (!query) return;
 
-    if (isFetchingRef.current && lastQueriedLotRef.current?.toUpperCase() === query.toUpperCase()) {
-      return;
-    }
-
-    isFetchingRef.current = true;
+    const seq = ++traceSeqRef.current;
     setLoading(true);
     setError(null);
     lastQueriedLotRef.current = query;
 
     try {
       const data = await api(`/compliance/traceability/${encodeURIComponent(query)}`);
+      if (seq !== traceSeqRef.current) return;
+
       if (data && data.success && data.lotNo) {
         setTraceData(data);
         const resolved = data.lotNo || query;
+        lastQueriedLotRef.current = resolved;
         setLotInput(resolved);
         if (data.activeLots && data.activeLots.length > 0) {
           setAllLots(data.activeLots);
@@ -99,12 +100,14 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
         setError(data?.message || `No trace records found for lot "${query}" in this company.`);
       }
     } catch (err) {
+      if (seq !== traceSeqRef.current) return;
       console.error('Error tracing lot:', err);
       setTraceData(null);
       setError(err?.message || 'Failed to connect to Traceability Engine.');
     } finally {
-      setLoading(false);
-      isFetchingRef.current = false;
+      if (seq === traceSeqRef.current) {
+        setLoading(false);
+      }
     }
   }, [onLotChange, setSearchParams]);
 
@@ -121,13 +124,21 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
     return () => window.removeEventListener('erp_company_changed', handleCompanyChange);
   }, []);
 
+  // Watch URL ?lot=... changes when navigating directly with a new query param
+  useEffect(() => {
+    if (urlLot && urlLot.trim().toUpperCase() !== String(lastQueriedLotRef.current || '').trim().toUpperCase()) {
+      setLotInput(urlLot);
+      fetchTraceData(urlLot, false);
+    }
+  }, [urlLot, fetchTraceData]);
+
   // When external targetLot prop changes
   useEffect(() => {
-    if (targetLot && targetLot !== lastQueriedLotRef.current && targetLot !== traceData?.lotNo) {
+    if (targetLot && targetLot.trim().toUpperCase() !== String(lastQueriedLotRef.current || '').trim().toUpperCase()) {
       setLotInput(targetLot);
       fetchTraceData(targetLot, true);
     }
-  }, [targetLot]);
+  }, [targetLot, fetchTraceData]);
 
   const handleManualSearch = (specificLot) => {
     const query = (specificLot || lotInput || 'latest').trim();
@@ -147,6 +158,7 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
     const supplier = traceData.backwardTrace?.supplier;
     const iqr = traceData.backwardTrace?.iqr;
     const grindBatches = traceData.productionHistory?.grindBatches || [];
+    const weightConversionsPrint = traceData.productionHistory?.weightConversions || [];
     const coas = traceData.qualityCertificates?.coas || [];
     const dispatches = traceData.forwardTrace?.dispatches || [];
     const purReturns = traceData.purchaseReturns || traceData.backwardTrace?.purchaseReturns || [];
@@ -302,15 +314,76 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
           </div>
         </div>
 
-        ${grindBatches.length > 0 ? `
+        ${(grindBatches.length > 0 || weightConversionsPrint.length > 0) ? `
           <div class="section">
-            <div class="section-header">3. Milling Transformation & In-Process Audit (P3 / P4)</div>
+            <div class="section-header">3. Milling Transformation, Inputs, Outputs & Wastages Audit (P3 / P4)</div>
             <div class="section-body">
               ${grindBatches.map(gb => `
-                <div style="margin-bottom:8px; padding-bottom:8px; border-bottom:1px dashed #cbd5e1;">
+                <div style="margin-bottom:10px; padding-bottom:8px; border-bottom:1px dashed #cbd5e1;">
                   <div style="font-weight:800; color:#6b21a8; margin-bottom:4px;">
-                    Grind Ref: ${escHtml(gb.grind_no)} | Date: ${escHtml(gb.date || '—')} | Facility: ${escHtml(gb.flour_mill)} | Yield: ${escHtml(gb.yield_efficiency)}
+                    Batch: ${escHtml(gb.grind_no)} (${escHtml(gb.mode || 'Inside Mill')}) | Date: ${escHtml(gb.date || '—')} | Facility: ${escHtml(gb.flour_mill)} | Input: ${escHtml(gb.total_input_kg || 0)} Kg | Output: ${escHtml(gb.total_output_kg || 0)} Kg | Wastage: ${escHtml(gb.total_wastage_kg || 0)} Kg | Loss: ${escHtml(gb.milling_loss_kg || 0)} Kg | Yield: ${escHtml(gb.yield_efficiency)}${gb.mass_balance_percent ? ` | Mass Balance: ${escHtml(gb.mass_balance_percent)}` : ''}
                   </div>
+                  ${gb.inputs && gb.inputs.length > 0 ? `
+                    <table>
+                      <thead>
+                        <tr><th>Input Commodity</th><th>Input Lot</th><th>Bags</th><th>Weight (Kg)</th></tr>
+                      </thead>
+                      <tbody>
+                        ${gb.inputs.map(inp => `
+                          <tr>
+                            <td>${escHtml(inp.item_name)}</td>
+                            <td style="font-family:monospace; font-weight:700;">${escHtml(inp.lot_no)}</td>
+                            <td>${escHtml(inp.qty_bags)}</td>
+                            <td>${escHtml(inp.total_weight_kg)} Kg</td>
+                          </tr>
+                        `).join('')}
+                      </tbody>
+                    </table>
+                  ` : ''}
+                  ${gb.outputs && gb.outputs.length > 0 ? `
+                    <table>
+                      <thead>
+                        <tr><th>Output Finished Good</th><th>Output Lot</th><th>Bags</th><th>Weight (Kg)</th></tr>
+                      </thead>
+                      <tbody>
+                        ${gb.outputs.map(out => `
+                          <tr>
+                            <td>${escHtml(out.item_name)}</td>
+                            <td style="font-family:monospace; font-weight:700;">${escHtml(out.lot_no)}</td>
+                            <td>${escHtml(out.qty_bags)}</td>
+                            <td>${escHtml(out.total_weight_kg)} Kg</td>
+                          </tr>
+                        `).join('')}
+                      </tbody>
+                    </table>
+                  ` : ''}
+                  ${((gb.wastages && gb.wastages.length > 0) || (gb.milling_loss_kg > 0)) ? `
+                    <table>
+                      <thead>
+                        <tr><th>Wastage / By-Product</th><th>Category</th><th>Wastage Lot</th><th>Bags</th><th>Weight (Kg)</th></tr>
+                      </thead>
+                      <tbody>
+                        ${(gb.wastages || []).map(wst => `
+                          <tr>
+                            <td>${escHtml(wst.item_name)}</td>
+                            <td>${escHtml(wst.category || 'Wastage')}</td>
+                            <td style="font-family:monospace; font-weight:700;">${escHtml(wst.lot_no || '—')}</td>
+                            <td>${escHtml(wst.qty_bags || 0)}</td>
+                            <td>${escHtml(wst.total_weight_kg || 0)} Kg</td>
+                          </tr>
+                        `).join('')}
+                        ${gb.milling_loss_kg > 0 ? `
+                          <tr>
+                            <td>Unaccounted Milling / Moisture Loss</td>
+                            <td>Process Loss</td>
+                            <td style="font-family:monospace;">LOSS</td>
+                            <td>—</td>
+                            <td>${escHtml(gb.milling_loss_kg)} Kg</td>
+                          </tr>
+                        ` : ''}
+                      </tbody>
+                    </table>
+                  ` : ''}
                   <table>
                     <tr>
                       <th>CCP / Process Check</th>
@@ -335,6 +408,18 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
                   </table>
                 </div>
               `).join('')}
+              ${weightConversionsPrint.length > 0 ? `
+                <div style="margin-top:8px;">
+                  <div style="font-weight:800; color:#1f4fb2; margin-bottom:4px;">Repacking / Weight Conversions</div>
+                  ${weightConversionsPrint.map(wc => `
+                    <div style="margin-bottom:6px; font-size:10px;">
+                      <strong>${escHtml(wc.voucher_no)}</strong> (${escHtml(wc.date || '—')}):
+                      In: ${escHtml((wc.inputs || []).map(i => `${i.lot_no} (${i.qty} Bags / ${i.total_wt || 0} Kg)`).join(', ') || '—')} →
+                      Out: ${escHtml((wc.outputs || []).map(o => `${o.lot_no} (${o.qty} Bags / ${o.total_wt || 0} Kg)`).join(', ') || '—')}
+                    </div>
+                  `).join('')}
+                </div>
+              ` : ''}
             </div>
           </div>
         ` : ''}
@@ -464,6 +549,7 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
   const totalReturnedBags = purchaseReturns.reduce((acc, r) => acc + (parseFloat(r.returned_qty) || 0), 0);
   const iqr = traceData?.backwardTrace?.iqr;
   const grindBatches = traceData?.productionHistory?.grindBatches || [];
+  const weightConversions = traceData?.productionHistory?.weightConversions || [];
   const rawCoas = traceData?.qualityCertificates?.coas || [];
   const seenCoaKeys = new Set();
   const coas = rawCoas.filter(c => {
@@ -473,6 +559,8 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
     return true;
   });
   const currentStock = traceData?.currentStock || [];
+  const totalCurrentBags = currentStock.reduce((s, c) => s + (parseFloat(c.remaining_quantity ?? c.available_qty ?? c.quantity) || 0), 0);
+  const totalCurrentKg = currentStock.reduce((s, c) => s + (parseFloat(c.remaining_weight_kg ?? c.total_weight) || 0), 0);
   const stockMovements = traceData?.stockMovements || [];
   const dispatches = traceData?.forwardTrace?.dispatches || [];
   const parentLots = (traceData?.parentLots && traceData.parentLots.length > 0)
@@ -531,9 +619,15 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
                 size="small"
                 fullWidth
                 options={activeLots}
+                isOptionEqualToValue={(option, value) => {
+                  const optLot = typeof option === 'string' ? option : option?.lot_no;
+                  const valLot = typeof value === 'string' ? value : value?.lot_no;
+                  return String(optLot || '').toUpperCase() === String(valLot || '').toUpperCase();
+                }}
                 getOptionLabel={(option) => {
                   if (typeof option === 'string') return option;
-                  return `${option.lot_no} — ${option.item_name} (${option.remaining_quantity ?? option.initial_qty ?? 0} Bags)`;
+                  const wt = option.remaining_weight_kg ? ` / ${Number(option.remaining_weight_kg).toLocaleString()} KG` : '';
+                  return `${option.lot_no} — ${option.item_name} (${option.remaining_quantity ?? option.initial_qty ?? 0} Bags${wt})`;
                 }}
                 inputValue={lotInput}
                 onInputChange={(event, newInputValue, reason) => {
@@ -648,16 +742,25 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
               </Stack>
             </Box>
 
-            <Stack direction="row" spacing={3} alignItems="center">
+            <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
               <Box sx={{ textAlign: 'right' }}>
                 <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
                   CURRENT FACTORY STOCK
                 </Typography>
                 <Typography variant="h6" sx={{ fontWeight: 800, color: '#16a34a' }}>
-                  {currentStock.reduce((s, c) => s + (parseFloat(c.remaining_quantity || c.available_qty || c.quantity) || 0), 0)} Bags
+                  {totalCurrentBags.toLocaleString()} Bags{totalCurrentKg ? ` / ${totalCurrentKg.toLocaleString()} Kg` : ''}
                 </Typography>
               </Box>
               <Divider orientation="vertical" flexItem />
+              <Button
+                variant="outlined"
+                startIcon={<AccountTreeIcon />}
+                onClick={() => navigate(`/lot-genealogy?lotNo=${encodeURIComponent(traceData.lotNo)}`)}
+                size="medium"
+                sx={{ fontWeight: 700, borderColor: '#8b5cf6', color: '#6d28d9' }}
+              >
+                Genealogy Tree
+              </Button>
               <Button
                 variant="outlined"
                 startIcon={<PrintIcon />}
@@ -875,23 +978,37 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
                         <Paper key={idx} variant="outlined" sx={{ p: 2, bgcolor: '#faf5ff', borderColor: '#e9d5ff', borderRadius: 2 }}>
                           <Grid container spacing={2} alignItems="center" sx={{ mb: 1.5 }}>
                             <Grid item xs={12} sm={3}>
-                              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>GRIND NUMBER</Typography>
+                              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>GRIND / BATCH NUMBER</Typography>
                               <Typography variant="subtitle2" sx={{ fontWeight: 800, fontFamily: 'monospace', color: '#6b21a8' }}>
                                 {gb.grind_no}
                               </Typography>
+                              {gb.mode && (
+                                <Chip label={gb.mode} size="small" sx={{ mt: 0.25, height: 18, fontSize: '10px', fontWeight: 700, bgcolor: '#ede9fe', color: '#5b21b6' }} />
+                              )}
                             </Grid>
                             <Grid item xs={12} sm={3}>
                               <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>MILLING FACILITY</Typography>
                               <Typography variant="body2" sx={{ fontWeight: 700 }}>{gb.flour_mill}</Typography>
+                              {gb.inpass_no && (
+                                <Typography variant="caption" color="text.secondary">
+                                  Inpass: {gb.inpass_no}{gb.outpass_no ? ` • Outpass: ${gb.outpass_no}` : ''}
+                                </Typography>
+                              )}
                             </Grid>
                             <Grid item xs={12} sm={3}>
-                              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>MILLING DATE</Typography>
-                              <Typography variant="body2">{gb.date}</Typography>
+                              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>MILLING DATE & WEIGHTS</Typography>
+                              <Typography variant="body2" sx={{ fontWeight: 600 }}>{gb.date || '—'}</Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                In: {Number(gb.total_input_kg || 0).toLocaleString()} Kg → Out: {Number(gb.total_output_kg || 0).toLocaleString()} Kg
+                              </Typography>
                             </Grid>
                             <Grid item xs={12} sm={3}>
-                              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>YIELD EFFICIENCY</Typography>
+                              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>YIELD & MASS BALANCE</Typography>
                               <Typography variant="body2" sx={{ fontWeight: 800, color: '#15803d' }}>
-                                {gb.yield_efficiency} (Loss: {gb.milling_loss_kg} Kg)
+                                {gb.yield_efficiency}{gb.mass_balance_percent ? ` • MB: ${gb.mass_balance_percent}` : ''}
+                              </Typography>
+                              <Typography variant="caption" sx={{ color: '#b45309', fontWeight: 700 }}>
+                                Wastage: {Number(gb.total_wastage_kg || 0).toLocaleString()} Kg | Loss: {Number(gb.milling_loss_kg || 0).toLocaleString()} Kg
                               </Typography>
                             </Grid>
                           </Grid>
@@ -969,6 +1086,68 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
                             </Grid>
                           </Grid>
 
+                          {/* Wastages & Process Loss Sub-Table */}
+                          {((gb.wastages && gb.wastages.length > 0) || (gb.milling_loss_kg > 0)) && (
+                            <Box sx={{ mt: 2 }}>
+                              <Typography variant="caption" sx={{ fontWeight: 800, color: '#b45309', display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
+                                ♻️ WASTAGES, BY-PRODUCTS & PROCESS LOSS ({Number(gb.total_wastage_kg || 0).toLocaleString()} Kg Wastage • {Number(gb.milling_loss_kg || 0).toLocaleString()} Kg Unaccounted Loss)
+                              </Typography>
+                              <TableContainer component={Paper} variant="outlined" sx={{ bgcolor: 'white', borderColor: '#fde68a' }}>
+                                <Table size="small">
+                                  <TableHead sx={{ bgcolor: '#fffbeb' }}>
+                                    <TableRow>
+                                      <TableCell sx={{ fontWeight: 700 }}>Wastage / By-Product Item</TableCell>
+                                      <TableCell sx={{ fontWeight: 700 }}>Category</TableCell>
+                                      <TableCell sx={{ fontWeight: 700 }}>Wastage Lot</TableCell>
+                                      <TableCell sx={{ fontWeight: 700 }}>Bags</TableCell>
+                                      <TableCell sx={{ fontWeight: 700 }}>Weight (Kg)</TableCell>
+                                    </TableRow>
+                                  </TableHead>
+                                  <TableBody>
+                                    {(gb.wastages || []).map((wst, wIdx) => {
+                                      const canTraceWst = wst.lot_no && wst.lot_no !== '-' && String(wst.lot_no).toUpperCase() !== 'LOSS';
+                                      return (
+                                        <TableRow key={wIdx}>
+                                          <TableCell sx={{ fontWeight: 600 }}>{wst.item_name}</TableCell>
+                                          <TableCell>{wst.category || 'Wastage'}</TableCell>
+                                          <TableCell>
+                                            {canTraceWst ? (
+                                              <Chip
+                                                label={wst.lot_no}
+                                                size="small"
+                                                onClick={() => handleTrace(wst.lot_no)}
+                                                sx={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '11px', cursor: 'pointer', bgcolor: '#fef3c7', color: '#92400e' }}
+                                              />
+                                            ) : (
+                                              <Typography variant="caption" sx={{ fontFamily: 'monospace', color: '#64748b' }}>
+                                                {wst.lot_no || '—'}
+                                              </Typography>
+                                            )}
+                                          </TableCell>
+                                          <TableCell>{wst.qty_bags || 0}</TableCell>
+                                          <TableCell sx={{ fontWeight: 700, color: '#b45309' }}>
+                                            {Number(wst.total_weight_kg || 0).toLocaleString()} Kg
+                                          </TableCell>
+                                        </TableRow>
+                                      );
+                                    })}
+                                    {gb.milling_loss_kg > 0 && (
+                                      <TableRow sx={{ bgcolor: '#fef2f2' }}>
+                                        <TableCell sx={{ fontWeight: 600, color: '#b91c1c' }}>Unaccounted Milling / Moisture Loss</TableCell>
+                                        <TableCell>Process Loss</TableCell>
+                                        <TableCell sx={{ fontFamily: 'monospace', color: '#b91c1c' }}>LOSS</TableCell>
+                                        <TableCell>—</TableCell>
+                                        <TableCell sx={{ fontWeight: 700, color: '#b91c1c' }}>
+                                          {Number(gb.milling_loss_kg).toLocaleString()} Kg
+                                        </TableCell>
+                                      </TableRow>
+                                    )}
+                                  </TableBody>
+                                </Table>
+                              </TableContainer>
+                            </Box>
+                          )}
+
                           {/* In-Process & CCP Verifications */}
                           <Grid container spacing={2} sx={{ mt: 1 }}>
                             <Grid item xs={12} md={6}>
@@ -1007,11 +1186,61 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
                         </Paper>
                       ))}
                     </Stack>
-                  ) : (
+                  ) : weightConversions.length === 0 ? (
                     <Box sx={{ p: 2, bgcolor: '#faf5ff', borderRadius: 1.5, border: '1px dashed #c084fc' }}>
                       <Typography variant="body2" sx={{ color: '#6b21a8' }}>
                         Raw material storage lot — directly held for packaging / whole grain dispatch.
                       </Typography>
+                    </Box>
+                  ) : null}
+
+                  {weightConversions.length > 0 && (
+                    <Box sx={{ mt: grindBatches.length > 0 ? 2.5 : 0 }}>
+                      <Typography variant="caption" sx={{ fontWeight: 800, color: '#1f4fb2', display: 'block', mb: 1 }}>
+                        🔄 REPACKING & WEIGHT CONVERSIONS ({weightConversions.length})
+                      </Typography>
+                      <Stack spacing={1.5}>
+                        {weightConversions.map((wc, wIdx) => (
+                          <Paper key={wIdx} variant="outlined" sx={{ p: 1.5, bgcolor: '#f8fafc', borderColor: '#cbd5e1', borderRadius: 1.5 }}>
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                              <Typography variant="subtitle2" sx={{ fontWeight: 800, color: '#1f4fb2', fontFamily: 'monospace' }}>
+                                {wc.voucher_no} — {wc.type}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">{wc.date || '—'}</Typography>
+                            </Box>
+                            <Grid container spacing={1.5}>
+                              <Grid item xs={12} sm={6}>
+                                <Typography variant="caption" sx={{ fontWeight: 700, color: '#475569', display: 'block', mb: 0.5 }}>Inputs</Typography>
+                                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                                  {(wc.inputs || []).map((inp, iIdx) => (
+                                    <Chip
+                                      key={iIdx}
+                                      size="small"
+                                      label={`${inp.lot_no} (${inp.item_name}: ${inp.qty || 0} Bags / ${inp.total_wt || 0} Kg)`}
+                                      onClick={() => inp.lot_no && handleTrace(inp.lot_no)}
+                                      sx={{ cursor: 'pointer', bgcolor: '#e0f2fe', color: '#0369a1', fontWeight: 600, fontSize: '11px' }}
+                                    />
+                                  ))}
+                                </Stack>
+                              </Grid>
+                              <Grid item xs={12} sm={6}>
+                                <Typography variant="caption" sx={{ fontWeight: 700, color: '#475569', display: 'block', mb: 0.5 }}>Repacked Outputs</Typography>
+                                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                                  {(wc.outputs || []).map((out, oIdx) => (
+                                    <Chip
+                                      key={oIdx}
+                                      size="small"
+                                      label={`${out.lot_no} (${out.item_name}: ${out.qty || 0} Bags / ${out.total_wt || 0} Kg)`}
+                                      onClick={() => out.lot_no && handleTrace(out.lot_no)}
+                                      sx={{ cursor: 'pointer', bgcolor: '#dcfce7', color: '#15803d', fontWeight: 600, fontSize: '11px' }}
+                                    />
+                                  ))}
+                                </Stack>
+                              </Grid>
+                            </Grid>
+                          </Paper>
+                        ))}
+                      </Stack>
                     </Box>
                   )}
                 </CardContent>
@@ -1129,7 +1358,8 @@ export default function TraceabilityEngine({ targetLot = '', onLotChange }) {
                                 />
                               </TableCell>
                               <TableCell sx={{ fontWeight: 800, color: '#16a34a' }}>
-                                {s.remaining_quantity || s.available_qty || s.quantity} Bags
+                                {Number(s.remaining_quantity ?? s.available_qty ?? s.quantity ?? 0).toLocaleString()} Bags
+                                {s.remaining_weight_kg != null ? ` (${Number(s.remaining_weight_kg).toLocaleString()} Kg)` : ''}
                               </TableCell>
                             </TableRow>
                           ))}

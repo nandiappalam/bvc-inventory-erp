@@ -65,7 +65,7 @@ export const MODULE_CATEGORIES = {
   // Quality Control Modules
   QUALITY: [
     'Quality Dashboard', 'Purchase Lab Entry', 'Parameter Registry', 'QC Template Master', 
-    'Quality Control', 'Incoming Quality', 'Compliance Documents'
+    'Quality Control', 'Incoming Quality', 'Compliance Documents', 'Customer Complaint', 'CAPA'
   ],
   // Operations & Enterprise Intelligence
   ENTERPRISE: [

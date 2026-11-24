@@ -12,6 +12,7 @@ import {
 import LoginIcon from '@mui/icons-material/Login';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import BusinessIcon from '@mui/icons-material/Business';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 
 const themeColors = {
   primary: '#1f4fb2',
@@ -51,8 +52,40 @@ const AuthChoice = () => {
         alignItems: 'center',
         background: `linear-gradient(135deg, ${themeColors.primary} 0%, ${themeColors.secondary} 100%)`,
         padding: 2,
+        position: 'relative',
       }}
     >
+      <Button
+        onClick={() => {
+          if (window.history.length > 1) {
+            navigate(-1);
+          } else {
+            navigate('/company-select');
+          }
+        }}
+        size="small"
+        startIcon={<ArrowBackIcon sx={{ fontSize: 16 }} />}
+        sx={{
+          position: 'absolute',
+          top: 16,
+          left: 16,
+          color: '#ffffff',
+          backgroundColor: 'rgba(255, 255, 255, 0.16)',
+          border: '1px solid rgba(255, 255, 255, 0.35)',
+          borderRadius: '6px',
+          px: 1.5,
+          py: 0.6,
+          fontSize: '13px',
+          fontWeight: 700,
+          textTransform: 'none',
+          '&:hover': {
+            backgroundColor: 'rgba(255, 255, 255, 0.28)',
+            borderColor: '#ffffff',
+          },
+        }}
+      >
+        Back
+      </Button>
       <Card
         sx={{
           maxWidth: 500,

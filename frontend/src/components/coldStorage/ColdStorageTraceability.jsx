@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   Box,
   Typography,
@@ -42,19 +43,28 @@ const escHtml = (val) => String(val ?? '')
   .replace(/'/g, '&#39;');
 
 const ColdStorageTraceability = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const urlQueryParam = (searchParams.get('lot') || searchParams.get('lotNo') || searchParams.get('query') || '').trim();
+
   const [loading, setLoading] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(urlQueryParam);
   const [traceResults, setTraceResults] = useState([]);
   const [availableLots, setAvailableLots] = useState([]);
   const [notice, setNotice] = useState('');
+  const fetchSeqRef = useRef(0);
+  const searchQueryRef = useRef(urlQueryParam);
+  searchQueryRef.current = searchQuery;
 
   const fetchTraceability = useCallback(async (queryText = '') => {
+    const seq = ++fetchSeqRef.current;
     setLoading(true);
     setNotice('');
     try {
       const q = String(queryText || '').trim();
       const url = q ? `/cold-storage/traceability?query=${encodeURIComponent(q)}` : `/cold-storage/traceability`;
       const res = await api(url);
+      if (seq !== fetchSeqRef.current) return;
       if (res && res.data) {
         setTraceResults(res.data);
       } else {
@@ -64,19 +74,29 @@ const ColdStorageTraceability = () => {
         setAvailableLots(res.availableColdLots);
       }
     } catch (err) {
+      if (seq !== fetchSeqRef.current) return;
       console.error('Error searching traceability:', err);
       setTraceResults([]);
       setNotice(err?.message || 'Failed to fetch Cold Storage traceability records.');
     } finally {
-      setLoading(false);
+      if (seq === fetchSeqRef.current) {
+        setLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
-    fetchTraceability('');
+    if (urlQueryParam) {
+      setSearchQuery(urlQueryParam);
+      fetchTraceability(urlQueryParam);
+    } else {
+      fetchTraceability('');
+    }
+  }, [urlQueryParam, fetchTraceability]);
 
+  useEffect(() => {
     const handleRefresh = () => {
-      fetchTraceability(searchQuery);
+      fetchTraceability(searchQueryRef.current);
     };
     window.addEventListener('erp_company_changed', handleRefresh);
     window.addEventListener('erp_stock_updated', handleRefresh);
@@ -183,7 +203,7 @@ const ColdStorageTraceability = () => {
           </table>
 
           <h4 style="margin: 8px 0 4px 0; color: #1f4fb2; font-size: 12px;">Chronological Movement Audit Trail</h4>
-          <table style="width: 100%; border-collapse: collapse; font-size: 10px;">
+          <table style="width: 100%; border-collapse: collapse; font-size: 10px; margin-bottom: 12px;">
             <thead>
               <tr style="background: #f1f5f9;">
                 <th style="padding: 4px 6px; border: 1px solid #cbd5e1; text-align: center;">#</th>
@@ -200,6 +220,32 @@ const ColdStorageTraceability = () => {
               ${movRows || '<tr><td colspan="8" style="text-align:center; padding: 6px;">No movements</td></tr>'}
             </tbody>
           </table>
+
+          ${(trace.milling_batches && trace.milling_batches.length > 0) ? `
+            <h4 style="margin: 8px 0 4px 0; color: #b45309; font-size: 12px;">Milling / Production &amp; Wastage Breakdown</h4>
+            <table style="width: 100%; border-collapse: collapse; font-size: 10px;">
+              <thead>
+                <tr style="background: #fef3c7;">
+                  <th style="padding: 4px 6px; border: 1px solid #cbd5e1; text-align: left;">Batch #</th>
+                  <th style="padding: 4px 6px; border: 1px solid #cbd5e1; text-align: left;">Facility / Date</th>
+                  <th style="padding: 4px 6px; border: 1px solid #cbd5e1; text-align: left;">Inputs Consumed</th>
+                  <th style="padding: 4px 6px; border: 1px solid #cbd5e1; text-align: left;">Outputs Produced</th>
+                  <th style="padding: 4px 6px; border: 1px solid #cbd5e1; text-align: left;">Wastage / Recovery</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${trace.milling_batches.map(mb => `
+                  <tr>
+                    <td style="padding: 4px 6px; border: 1px solid #cbd5e1; font-weight: bold;">${escHtml(mb.batch_no)} (${escHtml(mb.yield_percent || 0)}%)</td>
+                    <td style="padding: 4px 6px; border: 1px solid #cbd5e1;">${escHtml(mb.mill_name)}<br/>${escHtml(mb.date)}</td>
+                    <td style="padding: 4px 6px; border: 1px solid #cbd5e1;">${(mb.inputs || []).map(i => `${escHtml(i.lot_no)}: ${escHtml(i.item_name)} (${escHtml(i.total_wt)} KG)`).join('<br/>') || '-'}</td>
+                    <td style="padding: 4px 6px; border: 1px solid #cbd5e1;">${(mb.outputs || []).map(o => `${escHtml(o.lot_no)}: ${escHtml(o.item_name)} (${escHtml(o.total_wt)} KG)`).join('<br/>') || '-'}</td>
+                    <td style="padding: 4px 6px; border: 1px solid #cbd5e1;">${(mb.wastages || []).map(w => `${escHtml(w.item_name)} [${escHtml(w.lot_no || '-')}]: ${escHtml(w.total_wt)} KG`).join('<br/>') || 'None'}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          ` : ''}
         </div>
       `;
     }).join('');
@@ -354,11 +400,20 @@ const ColdStorageTraceability = () => {
                   Original Purchase Lot #: <strong>{trace.purchase_lot_no}</strong> | Supplier: <strong>{trace.supplier_name}</strong> | Voucher: {trace.purchase_voucher}
                 </Typography>
               </Box>
-              <Stack direction="row" spacing={1}>
+              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
                 {(trace.sibling_lots || []).filter(l => l !== trace.purchase_lot_no).map(sl => (
                   <Chip key={sl} label={sl} size="small" sx={{ bgcolor: '#dbeafe', color: '#1e3a8a', fontWeight: 700 }} />
                 ))}
-                <Chip label={`Unit: ${trace.unit}`} color="secondary" sx={{ fontWeight: 'bold' }} />
+                <Button
+                  size="small"
+                  variant="contained"
+                  color="secondary"
+                  onClick={() => navigate(`/lot-genealogy?lotNo=${encodeURIComponent(trace.purchase_lot_no)}`)}
+                  sx={{ textTransform: 'none', fontWeight: 700 }}
+                >
+                  Open Genealogy Tree
+                </Button>
+                <Chip label={`Unit: ${trace.unit}`} color="info" sx={{ fontWeight: 'bold' }} />
               </Stack>
             </Box>
 
@@ -490,32 +545,18 @@ const ColdStorageTraceability = () => {
                 </Table>
               </TableContainer>
 
-              {/* Transfers, Milling & Sales Summary if present */}
-              {(trace.transfers?.length > 0 || trace.milling_batches?.length > 0 || trace.sales_dispatches?.length > 0) && (
+              {/* Transfers, Milling (Inputs/Outputs/Wastages), Weight Conversions & Sales Summary */}
+              {(trace.transfers?.length > 0 || trace.milling_batches?.length > 0 || trace.weight_conversions?.length > 0 || trace.sales_dispatches?.length > 0) && (
                 <Grid container spacing={2} sx={{ mb: 3 }}>
                   {trace.transfers?.length > 0 && (
                     <Grid item xs={12} md={4}>
-                      <Paper variant="outlined" sx={{ p: 1.5, bgcolor: '#faf5ff', borderColor: '#e9d5ff' }}>
+                      <Paper variant="outlined" sx={{ p: 1.5, bgcolor: '#faf5ff', borderColor: '#e9d5ff', height: '100%' }}>
                         <Typography variant="caption" sx={{ fontWeight: 800, color: '#6b21a8', display: 'block', mb: 0.5 }}>
                           GODOWN TRANSFERS ({trace.transfers.length})
                         </Typography>
                         {trace.transfers.map((tr, tIdx) => (
-                          <Typography key={tIdx} variant="caption" sx={{ display: 'block', color: '#4c1d95' }}>
+                          <Typography key={tIdx} variant="caption" sx={{ display: 'block', color: '#4c1d95', mb: 0.4 }}>
                             • {tr.ref_no}: {tr.from_godown_name} → {tr.to_godown_name} ({tr.qty} Bags / {tr.transfer_date})
-                          </Typography>
-                        ))}
-                      </Paper>
-                    </Grid>
-                  )}
-                  {trace.milling_batches?.length > 0 && (
-                    <Grid item xs={12} md={4}>
-                      <Paper variant="outlined" sx={{ p: 1.5, bgcolor: '#fffbeb', borderColor: '#fde68a' }}>
-                        <Typography variant="caption" sx={{ fontWeight: 800, color: '#b45309', display: 'block', mb: 0.5 }}>
-                          MILLING / PRODUCTION ({trace.milling_batches.length})
-                        </Typography>
-                        {trace.milling_batches.map((mb, mIdx) => (
-                          <Typography key={mIdx} variant="caption" sx={{ display: 'block', color: '#78350f' }}>
-                            • {mb.batch_no} ({mb.mill_name}, {mb.date}) → {(mb.outputs || []).map(o => `${o.item_name} [${o.lot_no}]`).join(', ')}
                           </Typography>
                         ))}
                       </Paper>
@@ -523,15 +564,80 @@ const ColdStorageTraceability = () => {
                   )}
                   {trace.sales_dispatches?.length > 0 && (
                     <Grid item xs={12} md={4}>
-                      <Paper variant="outlined" sx={{ p: 1.5, bgcolor: '#f0fdf4', borderColor: '#bbf7d0' }}>
+                      <Paper variant="outlined" sx={{ p: 1.5, bgcolor: '#f0fdf4', borderColor: '#bbf7d0', height: '100%' }}>
                         <Typography variant="caption" sx={{ fontWeight: 800, color: '#15803d', display: 'block', mb: 0.5 }}>
                           SALES DISPATCHES ({trace.sales_dispatches.length})
                         </Typography>
                         {trace.sales_dispatches.map((sd, sIdx) => (
-                          <Typography key={sIdx} variant="caption" sx={{ display: 'block', color: '#14532d' }}>
+                          <Typography key={sIdx} variant="caption" sx={{ display: 'block', color: '#14532d', mb: 0.4 }}>
                             • Inv #{sd.invoice_no}: {sd.customer_name} ({sd.qty} Bags / {sd.total_wt} KG, {sd.date})
                           </Typography>
                         ))}
+                      </Paper>
+                    </Grid>
+                  )}
+                  {trace.weight_conversions?.length > 0 && (
+                    <Grid item xs={12} md={4}>
+                      <Paper variant="outlined" sx={{ p: 1.5, bgcolor: '#eff6ff', borderColor: '#bfdbfe', height: '100%' }}>
+                        <Typography variant="caption" sx={{ fontWeight: 800, color: '#1e40af', display: 'block', mb: 0.5 }}>
+                          WEIGHT CONVERSIONS ({trace.weight_conversions.length})
+                        </Typography>
+                        {trace.weight_conversions.map((wc, wIdx) => (
+                          <Typography key={wIdx} variant="caption" sx={{ display: 'block', color: '#1e3a8a', mb: 0.4 }}>
+                            • {wc.voucher_no} ({wc.date}): {(wc.inputs || []).map(i => `${i.lot_no} (${i.total_wt} KG)`).join(', ')} → {(wc.outputs || []).map(o => `${o.lot_no} (${o.total_wt} KG)`).join(', ')}
+                          </Typography>
+                        ))}
+                      </Paper>
+                    </Grid>
+                  )}
+                  {trace.milling_batches?.length > 0 && (
+                    <Grid item xs={12}>
+                      <Paper variant="outlined" sx={{ p: 2, bgcolor: '#fffbeb', borderColor: '#fde68a' }}>
+                        <Typography variant="subtitle2" sx={{ fontWeight: 800, color: '#b45309', mb: 1 }}>
+                          MILLING / PRODUCTION — INPUTS, OUTPUTS &amp; WASTAGES ({trace.milling_batches.length})
+                        </Typography>
+                        <Grid container spacing={1.5}>
+                          {trace.milling_batches.map((mb, mIdx) => (
+                            <Grid item xs={12} md={6} key={`mb-cs-${mIdx}`}>
+                              <Paper variant="outlined" sx={{ p: 1.5, bgcolor: '#ffffff', borderColor: '#fcd34d' }}>
+                                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
+                                  <Typography variant="body2" sx={{ fontWeight: 800, color: '#0f172a' }}>
+                                    {mb.batch_no} ({mb.process_mode})
+                                  </Typography>
+                                  <Chip label={`${mb.yield_percent ?? 0}% Yield`} size="small" color="success" sx={{ fontWeight: 700, fontSize: '10px', height: '20px' }} />
+                                </Box>
+                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.75 }}>
+                                  Facility: <strong>{mb.mill_name}</strong> | Date: <strong>{mb.date}</strong>
+                                  {mb.inpass_no ? ` | Inpass: ${mb.inpass_no}` : ''}
+                                </Typography>
+                                <Typography variant="caption" sx={{ display: 'block', color: '#1e40af', fontWeight: 600 }}>
+                                  Inputs ({Number(mb.total_input_kg || 0).toLocaleString()} KG): {(mb.inputs || []).map(i => `${i.item_name} [${i.lot_no}] (${i.qty} Bags / ${i.total_wt} KG)`).join(', ') || '-'}
+                                </Typography>
+                                <Typography variant="caption" sx={{ display: 'block', color: '#15803d', fontWeight: 600, mt: 0.25 }}>
+                                  Outputs ({Number(mb.total_output_kg || 0).toLocaleString()} KG): {(mb.outputs || []).map(o => `${o.item_name} [${o.lot_no}] (${o.qty} Bags / ${o.total_wt} KG)`).join(', ') || '-'}
+                                </Typography>
+                                {mb.wastages?.length > 0 && (
+                                  <Typography variant="caption" sx={{ display: 'block', color: '#b45309', fontWeight: 600, mt: 0.25 }}>
+                                    Wastages ({Number(mb.total_wastage_kg || 0).toLocaleString()} KG): {mb.wastages.map(w => `${w.item_name}${w.lot_no && w.lot_no !== '-' ? ` [${w.lot_no}]` : ''} (${w.total_wt} KG)`).join(', ')}
+                                  </Typography>
+                                )}
+                                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.75 }}>
+                                  {(mb.outputs || []).filter(o => o.lot_no).map((o, oIdx) => (
+                                    <Chip
+                                      key={`cs-out-chip-${oIdx}`}
+                                      label={`Trace Output ${o.lot_no}`}
+                                      size="small"
+                                      color="primary"
+                                      variant="outlined"
+                                      onClick={() => navigate(`/lot-genealogy?lotNo=${encodeURIComponent(o.lot_no)}`)}
+                                      sx={{ fontSize: '10px', fontWeight: 700, cursor: 'pointer' }}
+                                    />
+                                  ))}
+                                </Stack>
+                              </Paper>
+                            </Grid>
+                          ))}
+                        </Grid>
                       </Paper>
                     </Grid>
                   )}

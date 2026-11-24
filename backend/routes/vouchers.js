@@ -1440,14 +1440,18 @@ router.get('/lookup', async (req, res) => {
           SELECT s.*,
             COALESCE(cm.print_name, cm.name, CAST(s.customer AS TEXT), '') AS resolved_customer_name
           FROM sales s
-          LEFT JOIN customer_master cm ON (CAST(cm.id AS TEXT) = CAST(s.customer AS TEXT) OR LOWER(TRIM(cm.name)) = LOWER(TRIM(CAST(s.customer AS TEXT))) OR LOWER(TRIM(cm.print_name)) = LOWER(TRIM(CAST(s.customer AS TEXT))))
-          WHERE LOWER(TRIM(COALESCE(s.voucher_no, ''))) = ?
-             OR LOWER(REPLACE(TRIM(COALESCE(s.voucher_no, '')), '-', '')) = ?
-             OR CAST(s.id AS TEXT) = ?
-             OR CAST(s.s_no AS TEXT) = ?
+          LEFT JOIN customer_master cm ON (CAST(cm.id AS TEXT) = CAST(s.customer_id AS TEXT) OR CAST(cm.id AS TEXT) = CAST(s.customer AS TEXT) OR LOWER(TRIM(cm.name)) = LOWER(TRIM(CAST(s.customer AS TEXT))) OR LOWER(TRIM(cm.print_name)) = LOWER(TRIM(CAST(s.customer AS TEXT))))
+          WHERE COALESCE(s.is_order, 0) = 0
+            AND (
+              LOWER(TRIM(COALESCE(s.voucher_no, ''))) = ?
+              OR LOWER(REPLACE(TRIM(COALESCE(s.voucher_no, '')), '-', '')) = ?
+              OR LOWER(TRIM(COALESCE(s.inv_no, ''))) = ?
+              OR CAST(s.id AS TEXT) = ?
+              OR CAST(s.s_no AS TEXT) = ?
+            )
           ORDER BY s.id DESC
           LIMIT 1
-        `, [qLower, qCompact, sMatchVal, numericOnly || rawQ]);
+        `, [qLower, qCompact, qLower, sMatchVal, numericOnly || rawQ]);
         if (sRes.rows && sRes.rows[0]) {
           saleRow = sRes.rows[0];
           if (!voucherRow) {
@@ -1573,6 +1577,7 @@ router.get('/lookup', async (req, res) => {
     }
     if (saleRow) {
       addTok(saleRow.voucher_no);
+      addTok(saleRow.inv_no);
       addTok(saleRow.s_no);
       addTok(saleRow.id);
       addTok(`SAL-${saleRow.s_no}`);

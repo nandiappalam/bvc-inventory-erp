@@ -3,6 +3,7 @@ const router = express.Router()
 const db = require('../config/database')
 const AccountingEngine = require('../services/AccountingEngine')
 const { enrichStatementRow } = require('../utils/statementParticularsHelper')
+const { loadPartyDirectory, resolvePartyFromDirectory } = require('../services/PartyNameResolver')
 
 const isWastageItem = (itemName, itemGroup) => {
   const grp = (itemGroup || '').toLowerCase();
@@ -993,37 +994,47 @@ router.get('/purchase-return-register', async (req, res) => {
 // ============================================================
 router.get('/sales-return-register', async (req, res) => {
   try {
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1)
     const { customer_id, from_date, to_date } = req.query
-    
     let query = `
       SELECT 
+        sr.id,
         sr.date,
-        sr.s_no as return_no,
+        COALESCE(sr.return_no, 'SR-' || COALESCE(CAST(sr.s_no AS TEXT), CAST(sr.id AS TEXT))) as return_no,
+        sr.original_invoice_no,
         sr.customer,
+        sr.customer as customer_name,
         sri.item_name,
+        sri.lot_no,
         sri.qty,
+        COALESCE(sri.return_weight, sri.total_wt, sr.total_wt, 0) as return_weight,
         sri.rate,
-        sri.total_amt as amount,
+        COALESCE(sri.total_amt, sr.grand_total, sr.total_amt, 0) as amount,
+        sr.return_reason_category,
+        sr.qc_status,
+        sr.stock_status,
+        sr.credit_note_no,
+        sr.settlement_status,
         sr.remarks
       FROM sales_return sr
       LEFT JOIN sales_return_items sri ON sr.id = sri.sales_return_id
-      WHERE 1=1
+      WHERE COALESCE(sr.approval_status, 'PENDING') != 'CANCELLED'
     `
     const params = []
-    
+    if (customer_id) {
+      query += ` AND (CAST(sr.customer_id AS TEXT) = ? OR LOWER(sr.customer) = LOWER(?))`
+      params.push(String(customer_id), String(customer_id))
+    }
     if (from_date) {
       query += ` AND sr.date >= ?`
       params.push(from_date)
     }
-    
     if (to_date) {
       query += ` AND sr.date <= ?`
       params.push(to_date)
     }
-    
-    query += ` ORDER BY sr.date DESC`
-    
-    const result = await db.query(query, params)
+    query += ` ORDER BY sr.date DESC, sr.id DESC`
+    const result = await db.forCompany(activeCompanyId).query(query, params)
     res.json(result.rows || [])
   } catch (error) {
     console.error('Error fetching sales return register:', error)
@@ -1446,8 +1457,131 @@ router.get('/customer-ledger', async (req, res) => {
 // ============================================================
 router.get('/lot-history', async (req, res) => {
   try {
-    const { item_id, lot_no } = req.query
-    
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1);
+    const companyId = Number.isSafeInteger(activeCompanyId) && activeCompanyId > 0 ? activeCompanyId : 1;
+    const runner = db.forCompany(companyId);
+    const { item_id, lot_no, from_date, to_date } = req.query;
+
+    const partyDir = await loadPartyDirectory(companyId, runner);
+
+    let mvSql = `
+      SELECT
+        sm.id,
+        sm.movement_date AS date,
+        sm.source_module,
+        sm.source_id,
+        sm.movement_type,
+        sm.source_ref_no AS reference_no,
+        sm.item_id,
+        sm.item_name,
+        sm.lot_no,
+        sm.godown_name,
+        sm.direction,
+        sm.qty,
+        sm.weight AS overall_kg,
+        sm.unit_weight,
+        sm.party_name,
+        sm.supplier_name,
+        sm.nav_route,
+        sm.remarks
+      FROM stock_movements sm
+      WHERE COALESCE(sm.is_reversed, 0) = 0
+        AND COALESCE(sm.is_reversal, 0) = 0
+        AND COALESCE(sm.is_physical_stock, 1) = 1
+    `;
+    const mvParams = [];
+
+    if (item_id) {
+      if (isNaN(item_id)) {
+        mvSql += ` AND UPPER(TRIM(COALESCE(sm.item_name, ''))) = UPPER(?)`;
+        mvParams.push(String(item_id).trim());
+      } else {
+        mvSql += ` AND (sm.item_id = ? OR UPPER(TRIM(COALESCE(sm.item_name, ''))) = UPPER(?))`;
+        mvParams.push(Number(item_id), String(item_id).trim());
+      }
+    }
+
+    if (lot_no && String(lot_no).trim() !== '') {
+      const cleanLot = String(lot_no).trim();
+      mvSql += ` AND (UPPER(TRIM(COALESCE(sm.lot_no, ''))) = UPPER(?) OR UPPER(TRIM(COALESCE(sm.fg_lot_no, ''))) = UPPER(?) OR UPPER(TRIM(COALESCE(sm.rm_lot_no, ''))) = UPPER(?))`;
+      mvParams.push(cleanLot, cleanLot, cleanLot);
+    }
+
+    if (from_date) {
+      mvSql += ` AND SUBSTR(CAST(sm.movement_date AS TEXT), 1, 10) >= ?`;
+      mvParams.push(String(from_date).slice(0, 10));
+    }
+    if (to_date) {
+      mvSql += ` AND SUBSTR(CAST(sm.movement_date AS TEXT), 1, 10) <= ?`;
+      mvParams.push(String(to_date).slice(0, 10));
+    }
+
+    mvSql += ` ORDER BY sm.movement_date ASC, sm.id ASC`;
+
+    const mvRes = await runner.query(mvSql, mvParams);
+    let rows = mvRes.rows || [];
+
+    if (rows.length > 0) {
+      const balances = {};
+      const balancesKg = {};
+      const processedRows = rows.map(row => {
+        const key = `${String(row.item_name || 'Other').trim().toUpperCase()}:::${String(row.lot_no || '').trim().toUpperCase()}`;
+        if (balances[key] === undefined) balances[key] = 0;
+        if (balancesKg[key] === undefined) balancesKg[key] = 0;
+
+        const qty = parseFloat(row.qty || 0);
+        const wt = parseFloat(row.overall_kg || 0);
+        const modStr = String(row.source_module || row.movement_type || '').toUpperCase();
+        const isOpening = modStr.includes('OPENING');
+        const isReturn = modStr.includes('RETURN') && row.direction === 'OUT';
+
+        const openQty = isOpening ? qty : 0;
+        const qtyIn = !isOpening && row.direction === 'IN' ? qty : 0;
+        const rejectionQty = isReturn ? qty : 0;
+        const qtyOut = !isOpening && !isReturn && row.direction === 'OUT' ? qty : 0;
+
+        const signedQty = row.direction === 'IN' ? qty : -qty;
+        const signedWt = row.direction === 'IN' ? wt : -wt;
+        balances[key] = Number((balances[key] + signedQty).toFixed(3));
+        balancesKg[key] = Number((balancesKg[key] + signedWt).toFixed(3));
+
+        const resolvedParty = resolvePartyFromDirectory(partyDir, {
+          supplierName: row.supplier_name,
+          partyName: row.party_name,
+          sourceModule: row.source_module
+        });
+
+        const unitWeight = parseFloat(row.unit_weight || 0) || (qty > 0 ? Number((wt / qty).toFixed(2)) : 50);
+
+        return {
+          id: row.id,
+          date: row.date,
+          type: `${row.source_module || row.movement_type} (${row.direction})`,
+          movement_type: row.movement_type,
+          reference_no: row.reference_no || '-',
+          item_name: row.item_name,
+          lot_no: row.lot_no,
+          godown_name: row.godown_name || '-',
+          party_name: resolvedParty.partyName || row.party_name || '-',
+          source_module: row.source_module || null,
+          source_id: row.source_id || null,
+          nav_route: row.nav_route || null,
+          qty_in: qtyIn,
+          qty_out: qtyOut,
+          rejection_qty: rejectionQty,
+          open_stock_qty: openQty,
+          balance: balances[key],
+          weight: unitWeight,
+          overall_kg: wt,
+          balance_kg: balancesKg[key],
+          rejection_weight: rejectionQty > 0 ? wt : 0
+        };
+      });
+
+      return res.json(processedRows);
+    }
+
+    // Legacy fallback if stock_movements has no matching rows
     let query = `
       SELECT 
         s.date,
@@ -1456,88 +1590,73 @@ router.get('/lot-history', async (req, res) => {
         s.item_name,
         s.lot_no,
         s.weight,
+        s.godown as godown_name,
         CASE WHEN s.qty > 0 AND s.type NOT IN ('Opening Stock', 'Open Stock') THEN s.qty ELSE 0 END as qty_in,
         CASE WHEN s.qty < 0 THEN ABS(s.qty) ELSE 0 END as qty_out,
         CASE WHEN sl.approval_status = 'REJECTED' THEN sl.quantity ELSE 0 END as rejection_qty,
         CASE WHEN s.type IN ('Opening Stock', 'Open Stock') OR s.type = 'Opening' THEN s.qty ELSE 0 END as open_stock_qty
       FROM stock s
-      LEFT JOIN stock_lots sl ON s.lot_no = sl.lot_no AND s.item_name = sl.item_name
+      LEFT JOIN stock_lots sl ON UPPER(TRIM(s.lot_no)) = UPPER(TRIM(sl.lot_no)) AND s.item_name = sl.item_name
       WHERE 1=1
-    `
-    const params = []
-    
+    `;
+    const params = [];
     if (item_id) {
       if (isNaN(item_id)) {
-        query += ` AND s.item_name = ?`
-        params.push(item_id)
+        query += ` AND UPPER(TRIM(s.item_name)) = UPPER(?)`;
+        params.push(String(item_id).trim());
       } else {
-        query += ` AND (s.item_id = ? OR s.item_name = ?)`
-        params.push(item_id)
-        params.push(item_id)
+        query += ` AND (s.item_id = ? OR UPPER(TRIM(s.item_name)) = UPPER(?))`;
+        params.push(item_id, String(item_id).trim());
       }
     }
-    
-    if (lot_no) {
-      query += ` AND s.lot_no = ?`
-      params.push(lot_no)
+    if (lot_no && String(lot_no).trim() !== '') {
+      query += ` AND UPPER(TRIM(s.lot_no)) = UPPER(?)`;
+      params.push(String(lot_no).trim());
     }
-    
-    query += ` ORDER BY s.date, s.id`
-    
-    const result = await db.query(query, params)
-    const rows = result.rows || []
-    
-    // Compute running balance per item name
-    const balances = {}
-    const balancesKg = {}
-    const processedRows = rows.map(row => {
-      const itemKey = row.item_name || 'Other'
-      if (balances[itemKey] === undefined) {
-        balances[itemKey] = 0
-      }
-      if (balancesKg[itemKey] === undefined) {
-        balancesKg[itemKey] = 0
-      }
-      const qtyIn = row.qty_in || 0
-      const qtyOut = row.qty_out || 0
-      const rejectQty = row.rejection_qty || 0
-      const openQty = row.open_stock_qty || 0
-      balances[itemKey] += qtyIn + openQty - qtyOut - rejectQty
-      
+    if (from_date) {
+      query += ` AND SUBSTR(CAST(s.date AS TEXT), 1, 10) >= ?`;
+      params.push(String(from_date).slice(0, 10));
+    }
+    if (to_date) {
+      query += ` AND SUBSTR(CAST(s.date AS TEXT), 1, 10) <= ?`;
+      params.push(String(to_date).slice(0, 10));
+    }
+    query += ` ORDER BY s.date, s.id`;
+
+    const result = await runner.query(query, params);
+    const legacyRows = result.rows || [];
+    const balances = {};
+    const balancesKg = {};
+    const processedRows = legacyRows.map(row => {
+      const itemKey = `${row.item_name || 'Other'}:::${row.lot_no || ''}`;
+      if (balances[itemKey] === undefined) balances[itemKey] = 0;
+      if (balancesKg[itemKey] === undefined) balancesKg[itemKey] = 0;
+      const qtyIn = row.qty_in || 0;
+      const qtyOut = row.qty_out || 0;
+      const rejectQty = row.rejection_qty || 0;
+      const openQty = row.open_stock_qty || 0;
+      balances[itemKey] += qtyIn + openQty - qtyOut - rejectQty;
       const rawWeight = row.weight || 0;
-      let netWeightChange = rawWeight;
-      
-      if (rejectQty > 0) {
-        const totalWeight = Math.abs(rawWeight);
-        const txQty = qtyIn > 0 ? qtyIn : (qtyOut > 0 ? qtyOut : (openQty > 0 ? openQty : 0));
-        const unitW = txQty > 0 ? totalWeight / txQty : 50;
-        netWeightChange -= (rejectQty * unitW);
-      }
-      
-      balancesKg[itemKey] += netWeightChange;
-      
+      balancesKg[itemKey] += rawWeight;
       const totalWeight = Math.abs(rawWeight);
       const txQty = qtyIn > 0 ? qtyIn : (qtyOut > 0 ? qtyOut : (rejectQty > 0 ? rejectQty : (openQty > 0 ? openQty : 0)));
-      const unitWeight = txQty > 0 ? totalWeight / txQty : (rawWeight ? totalWeight / Math.abs(row.qty || 1) : 50);
-      const overallKg = totalWeight;
-      const rejectionWeight = rejectQty > 0 ? rejectQty * unitWeight : 0;
-      
+      const unitWeight = txQty > 0 ? totalWeight / txQty : 50;
       return {
         ...row,
         balance: balances[itemKey],
         weight: unitWeight,
-        overall_kg: overallKg,
+        overall_kg: totalWeight,
         balance_kg: balancesKg[itemKey],
-        rejection_weight: rejectionWeight
-      }
-    })
-    
-    res.json(processedRows)
+        rejection_weight: rejectQty > 0 ? rejectQty * unitWeight : 0
+      };
+    });
+
+    res.json(processedRows);
   } catch (error) {
-    console.error('Error fetching lot history:', error)
-    res.status(500).json({ success: false, error: error.message, message: 'Failed to fetch lot history' })
+    console.error('Error fetching lot history:', error);
+    res.status(500).json({ success: false, error: error.message, message: 'Failed to fetch lot history' });
   }
-})
+});
 
 // ============================================================
 // DAY BOOK - All transactions date-wise
@@ -2938,11 +3057,32 @@ router.get('/outstanding-summary', async (req, res) => {
 // ============================================================
 router.get('/outstanding-details', async (req, res) => {
   try {
+    const activeCompanyId = req.companyId || (req.headers['x-company-id'] ? parseInt(req.headers['x-company-id'], 10) : 1)
+    const runner = db.forCompany(activeCompanyId)
+    const hasTbl = async (tableName) => {
+      try {
+        if (db.isPostgres) {
+          const r = await runner.query(
+            'SELECT table_name FROM information_schema.tables WHERE LOWER(table_name) = LOWER(?)',
+            [tableName]
+          )
+          return Boolean(r.rows && r.rows.length > 0)
+        }
+        const r = await runner.query(
+          "SELECT name FROM sqlite_master WHERE type='table' AND LOWER(name) = LOWER(?)",
+          [tableName]
+        )
+        return Boolean(r.rows && r.rows.length > 0)
+      } catch (_) {
+        return true
+      }
+    }
+
     const { as_on_date, ledger_name } = req.query
     const toDate = as_on_date || new Date().toISOString().split('T')[0]
     
     // 1. Get all ledgers to resolve names, types, and groupings
-    const ledgersRes = await db.query('SELECT id, name, ledger_type, under FROM ledgermaster')
+    const ledgersRes = await runner.query('SELECT id, name, ledger_type, under FROM ledgermaster')
     const ledgerMap = {}
     const ledgerTypeMap = {}
     const ledgerUnderMap = {}
@@ -2959,6 +3099,14 @@ router.get('/outstanding-details', async (req, res) => {
       const n = String(ledgerName).trim().toLowerCase()
       const lt = String(ledgerTypeMap[n] || '').trim().toLowerCase()
       const u = String(ledgerUnderMap[n] || '').trim().toLowerCase()
+
+      // Explicit party ledger types or party groups (Sundry Debtors / Sundry Creditors often carry Asset / Liability ledger_type)
+      if (['supplier', 'customer', 'transporter', 'worker', 'loadman', 'party'].includes(lt)) {
+        return false
+      }
+      if (u.includes('debtor') || u.includes('creditor') || u.includes('customer') || u.includes('supplier')) {
+        return false
+      }
 
       // Obvious non-party ledger types
       if (['purchase', 'sales', 'tax', 'expense', 'income', 'asset', 'cash', 'bank'].includes(lt)) {
@@ -2979,9 +3127,7 @@ router.get('/outstanding-details', async (req, res) => {
         u.includes('fixed assets') ||
         u.includes('current assets')
       ) {
-        if (!u.includes('debtor') && !u.includes('creditor') && !u.includes('customer') && !u.includes('supplier')) {
-          return true
-        }
+        return true
       }
 
       // Name based exclusions
@@ -3095,7 +3241,7 @@ router.get('/outstanding-details', async (req, res) => {
         purchaseQuery += ` WHERE p.date <= ?`
         purchaseParams.push(toDate)
       }
-      const purchasesRes = await db.query(purchaseQuery, purchaseParams)
+      const purchasesRes = await runner.query(purchaseQuery, purchaseParams)
       ;(purchasesRes.rows || []).forEach(row => {
         const vNo = `PUR-${row.invoice_no}`
         const amt = parseFloat(row.amount || 0)
@@ -3197,41 +3343,46 @@ router.get('/outstanding-details', async (req, res) => {
       console.warn('Error fetching purchases for outstanding details:', e.message)
     }
 
-    // 2b. Real Sales from sales table
+    // 2b. Real Sales Invoices from sales table (exclude Sales Orders)
     try {
       let salesQuery = `
         SELECT 
           s.id,
           s.s_no,
-          CAST(COALESCE(s.s_no, s.id) AS TEXT) as invoice_no,
+          s.inv_no,
+          s.voucher_no,
+          COALESCE(NULLIF(TRIM(CAST(s.inv_no AS TEXT)), ''), NULLIF(TRIM(CAST(s.voucher_no AS TEXT)), ''), CAST(s.s_no AS TEXT), CAST(s.id AS TEXT)) as invoice_no,
           s.date,
           'Sales' as voucher_type,
           'Receivable' as type,
           COALESCE(cm.name, cm.print_name, CAST(s.customer AS TEXT), 'Customer') as ledger_name,
-          COALESCE(s.grand_total, s.total_amt, s.bill_amt, 0) as amount
+          COALESCE(NULLIF(s.grand_total, 0), s.total_amt, s.bill_amt, 0) as amount
         FROM sales s
         LEFT JOIN customer_master cm ON (
+          CAST(cm.id AS TEXT) = CAST(s.customer_id AS TEXT) OR
           CAST(cm.id AS TEXT) = CAST(s.customer AS TEXT) OR 
           cm.name = CAST(s.customer AS TEXT) OR 
           cm.print_name = CAST(s.customer AS TEXT)
         )
+        WHERE COALESCE(s.is_order, 0) = 0
       `
       const salesParams = []
       if (as_on_date) {
-        salesQuery += ` WHERE s.date <= ?`
+        salesQuery += ` AND s.date <= ?`
         salesParams.push(toDate)
       }
-      const salesRes = await db.query(salesQuery, salesParams)
+      const salesRes = await runner.query(salesQuery, salesParams)
       ;(salesRes.rows || []).forEach(row => {
-        const vNo = `SAL-${row.invoice_no}`
+        const vNo = `SAL-${row.voucher_no || row.invoice_no || row.id}`
         const amt = parseFloat(row.amount || 0)
         if (amt > 0) {
-          const tokens = getBillSearchTokens(row.id, row.s_no, row.invoice_no, 'Sales')
+          const tokens = getBillSearchTokens(row.id, row.s_no, row.inv_no || row.invoice_no, 'Sales', row.voucher_no)
           const billObj = {
             id: row.id,
             s_no: row.s_no,
-            voucher_no: row.invoice_no,
+            voucher_no: row.voucher_no || row.invoice_no,
             invoice_no: row.invoice_no,
+            inv_no: row.inv_no,
             date: row.date,
             voucher_type: 'Sales',
             type: 'Receivable',
@@ -3253,6 +3404,15 @@ router.get('/outstanding-details', async (req, res) => {
             trackedSalesKeys.add(`sal-${String(row.s_no).toLowerCase()}`)
             salesBillsByRef.set(String(row.s_no).toLowerCase(), billObj)
           }
+          if (row.inv_no) {
+            trackedSalesKeys.add(String(row.inv_no).toLowerCase())
+            trackedSalesKeys.add(`sal-${String(row.inv_no).toLowerCase()}`)
+            salesBillsByRef.set(String(row.inv_no).toLowerCase(), billObj)
+          }
+          if (row.voucher_no) {
+            trackedSalesKeys.add(String(row.voucher_no).toLowerCase())
+            salesBillsByRef.set(String(row.voucher_no).toLowerCase(), billObj)
+          }
         }
       })
     } catch (e) {
@@ -3261,9 +3421,9 @@ router.get('/outstanding-details', async (req, res) => {
 
     // 2c. Operational Charges (Unpaid labour, loading, freight, milling fees)
     try {
-      const opExists = await tableExists('operational_charges')
+      const opExists = await hasTbl('operational_charges')
       if (opExists) {
-        const opRes = await db.query(`
+        const opRes = await runner.query(`
           SELECT 
             id,
             charge_no,
@@ -3316,8 +3476,8 @@ router.get('/outstanding-details', async (req, res) => {
 
     // 2d. Scan voucher and voucher_entry for standalone Purchase / Sales vouchers
     try {
-      const vExists = await tableExists('voucher')
-      const veExists = await tableExists('voucher_entry')
+      const vExists = await hasTbl('voucher')
+      const veExists = await hasTbl('voucher_entry')
       if (vExists && veExists) {
         const vQuery = `
           SELECT 
@@ -3336,9 +3496,10 @@ router.get('/outstanding-details', async (req, res) => {
           FROM voucher v
           JOIN voucher_entry ve ON CAST(ve.voucher_id AS TEXT) = CAST(v.id AS TEXT)
           LEFT JOIN ledgermaster lm ON CAST(ve.ledger_id AS TEXT) = CAST(lm.id AS TEXT)
-          WHERE v.voucher_type IN ('Purchase', 'Sales')
+          WHERE COALESCE(v.is_reversed, 0) = 0
+            AND v.voucher_type IN ('Purchase', 'Sales')
         `
-        const vRes = await db.query(vQuery)
+        const vRes = await runner.query(vQuery)
         // Group entries by voucher ID
         const voucherMap = new Map()
         ;(vRes.rows || []).forEach(row => {
@@ -3448,9 +3609,9 @@ router.get('/outstanding-details', async (req, res) => {
 
     // 2e. Scan ledger_entries for any remaining standalone Purchase / Sales / Payable / Transporter / Worker entries
     try {
-      const leExists = await tableExists('ledger_entries')
+      const leExists = await hasTbl('ledger_entries')
       if (leExists) {
-        const leRes = await db.query(`
+        const leRes = await runner.query(`
           SELECT 
             id,
             voucher_no,
@@ -3462,7 +3623,8 @@ router.get('/outstanding-details', async (req, res) => {
             reference_id,
             reference_type
           FROM ledger_entries
-          WHERE voucher_type IN ('Purchase', 'Sales', 'Journal', 'Debit Note', 'Credit Note')
+          WHERE COALESCE(is_reversed, 0) = 0
+            AND voucher_type IN ('Purchase', 'Sales', 'Journal', 'Debit Note', 'Credit Note')
         `)
         ;(leRes.rows || []).forEach(row => {
           const vType = row.voucher_type === 'Purchase' ? 'Purchase' : (row.voucher_type === 'Sales' ? 'Sales' : row.voucher_type)
@@ -3539,14 +3701,15 @@ router.get('/outstanding-details', async (req, res) => {
           credit,
           particulars
         FROM ledger_entries
-        WHERE voucher_type NOT IN ('Purchase', 'Sales')
+        WHERE COALESCE(is_reversed, 0) = 0
+          AND voucher_type NOT IN ('Purchase', 'Sales')
       `
       const settlementParams = []
       if (as_on_date) {
         settlementQuery += ` AND date <= ?`
         settlementParams.push(toDate)
       }
-      const settlementRes = await db.query(settlementQuery, settlementParams)
+      const settlementRes = await runner.query(settlementQuery, settlementParams)
       settlements = (settlementRes.rows || []).map(s => {
         let name = s.ledger_name
         if (name) {
@@ -3571,10 +3734,10 @@ router.get('/outstanding-details', async (req, res) => {
 
     // Also fetch settlements directly from voucher and voucher_entry
     try {
-      const vExists = await tableExists('voucher')
-      const veExists = await tableExists('voucher_entry')
+      const vExists = await hasTbl('voucher')
+      const veExists = await hasTbl('voucher_entry')
       if (vExists && veExists) {
-        const vRes = await db.query(`
+        const vRes = await runner.query(`
           SELECT 
             ve.id,
             lm.name as ledger_name,
@@ -3589,7 +3752,8 @@ router.get('/outstanding-details', async (req, res) => {
           FROM voucher v
           JOIN voucher_entry ve ON CAST(v.id AS TEXT) = CAST(ve.voucher_id AS TEXT)
           LEFT JOIN ledgermaster lm ON CAST(ve.ledger_id AS TEXT) = CAST(lm.id AS TEXT)
-          WHERE v.voucher_type IN ('Payment', 'Receipt', 'Journal')
+          WHERE COALESCE(v.is_reversed, 0) = 0
+            AND v.voucher_type IN ('Payment', 'Receipt', 'Journal')
         `)
         const existingByKey = new Map()
         settlements.forEach(s => {
@@ -3632,7 +3796,7 @@ router.get('/outstanding-details', async (req, res) => {
     // Also fetch advances as settlements
     let advanceSettlements = []
     try {
-      const advExists = await tableExists('advances')
+      const advExists = await hasTbl('advances')
       if (advExists) {
         let advanceQuery = `
           SELECT 
@@ -3651,7 +3815,7 @@ router.get('/outstanding-details', async (req, res) => {
           advanceQuery += ` WHERE date <= ?`
           advanceParams.push(toDate)
         }
-        const advanceRes = await db.query(advanceQuery, advanceParams)
+        const advanceRes = await runner.query(advanceQuery, advanceParams)
         advanceSettlements = (advanceRes.rows || []).map(a => {
           let name = a.ledger_name
           if (name) {

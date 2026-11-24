@@ -1864,78 +1864,146 @@ router.get('/traceability/:lotNo', async (req, res) => {
       });
     }
 
-    // 1. Resolve lot across stock_lots, purchase_items, grain_output_items, cold_storage_items, open_items, weight_conversion_items, inpass_items, stock_movements
+    // 1. Resolve lot cleanly: EXACT match across all tables FIRST, then LIKE partial fallback only if no exact match exists anywhere
     let lot = null;
-    const lotRes = await runner.query(`
-      SELECT sl.*, COALESCE(gm.godown_name, sl.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name
-      FROM stock_lots sl
-      LEFT JOIN godown_master gm ON sl.godown_id = gm.id
-      WHERE UPPER(sl.lot_no) = UPPER(?) OR UPPER(sl.lot_no) LIKE UPPER(?)
-      ORDER BY CASE WHEN UPPER(sl.lot_no) = UPPER(?) THEN 0 ELSE 1 END, sl.id DESC
-    `, [lotNo, `%${lotNo}%`, lotNo]);
-    lot = lotRes.rows?.[0] || null;
+    const findExactMatch = async () => {
+      const exactSl = await runner.query(`
+        SELECT sl.*, COALESCE(gm.godown_name, sl.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name
+        FROM stock_lots sl
+        LEFT JOIN godown_master gm ON sl.godown_id = gm.id
+        WHERE UPPER(TRIM(sl.lot_no)) = UPPER(?)
+        ORDER BY sl.id DESC LIMIT 1
+      `, [lotNo]);
+      if (exactSl.rows?.[0]) return exactSl.rows[0];
 
-    if (!lot) {
-      const piFallback = await runner.query(`
+      const exactPi = await runner.query(`
         SELECT pi.lot_no, pi.item_name, pi.qty as quantity, pi.rate, pi.weight as per_unit_weight, pi.total_weight, 'Raw Material' as type,
                pi.purchase_id, COALESCE(gm.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name
         FROM purchase_items pi
         LEFT JOIN purchases p ON p.id = pi.purchase_id
         LEFT JOIN godown_master gm ON (CAST(gm.id AS TEXT) = CAST(p.godown AS TEXT) OR p.godown = gm.godown_name)
-        WHERE UPPER(pi.lot_no) = UPPER(?) OR UPPER(pi.lot_no) LIKE UPPER(?)
-        ORDER BY CASE WHEN UPPER(pi.lot_no) = UPPER(?) THEN 0 ELSE 1 END, pi.id DESC LIMIT 1
-      `, [lotNo, `%${lotNo}%`, lotNo]);
-      if (piFallback.rows?.[0]) lot = piFallback.rows[0];
-    }
+        WHERE UPPER(TRIM(pi.lot_no)) = UPPER(?)
+        ORDER BY pi.id DESC LIMIT 1
+      `, [lotNo]);
+      if (exactPi.rows?.[0]) return exactPi.rows[0];
 
-    if (!lot) {
-      const goFallback = await runner.query(`
+      const exactGo = await runner.query(`
         SELECT go.lot_no, go.item_name, go.qty as quantity, go.weight as per_unit_weight, go.total_wt as total_weight, 'Finished Goods' as type,
                COALESCE((SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1), 'PJ') as godown_name
         FROM grain_output_items go
-        WHERE UPPER(go.lot_no) = UPPER(?) OR UPPER(go.lot_no) LIKE UPPER(?)
-        ORDER BY CASE WHEN UPPER(go.lot_no) = UPPER(?) THEN 0 ELSE 1 END, go.id DESC LIMIT 1
-      `, [lotNo, `%${lotNo}%`, lotNo]);
-      if (goFallback.rows?.[0]) lot = goFallback.rows[0];
-    }
+        WHERE UPPER(TRIM(go.lot_no)) = UPPER(?)
+        ORDER BY go.id DESC LIMIT 1
+      `, [lotNo]);
+      if (exactGo.rows?.[0]) return exactGo.rows[0];
 
-    if (!lot) {
       try {
-        const csFallback = await runner.query(`
-          SELECT csi.cold_storage_lot_no as lot_no, csi.purchase_lot_no, csi.item_name, csi.quantity, csi.weight as per_unit_weight, csi.total_wt as total_weight,
+        const exactIp = await runner.query(`
+          SELECT ii.lot_no, ii.item_name, ii.qty as quantity, ii.weight as per_unit_weight, ii.total_weight,
+                 CASE WHEN ii.output_type = 'BYPRODUCT' THEN 'By-product / Wastage' ELSE 'Finished Goods (Outside Mill)' END as type,
+                 COALESCE(ii.godown_name, ip.to_godown_name, 'PJ') as godown_name
+          FROM inpass_items ii
+          LEFT JOIN inpasses ip ON ip.id = ii.inpass_id
+          WHERE UPPER(TRIM(ii.lot_no)) = UPPER(?)
+          ORDER BY ii.id DESC LIMIT 1
+        `, [lotNo]);
+        if (exactIp.rows?.[0]) return exactIp.rows[0];
+      } catch (_) {}
+
+      try {
+        const exactGw = await runner.query(`
+          SELECT gw.lot_no, gw.item_name, gw.qty as quantity, gw.weight as per_unit_weight, gw.total_wt as total_weight,
+                 'Wastage / By-product' as type,
+                 COALESCE((SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1), 'PJ') as godown_name
+          FROM grain_wastage_items gw
+          WHERE UPPER(TRIM(gw.lot_no)) = UPPER(?)
+          ORDER BY gw.id DESC LIMIT 1
+        `, [lotNo]);
+        if (exactGw.rows?.[0]) return exactGw.rows[0];
+      } catch (_) {}
+
+      try {
+        const exactWoOut = await runner.query(`
+          SELECT woo.fg_lot_no as lot_no, woo.output_item as item_name, woo.expected_qty as quantity, woo.weight as per_unit_weight, woo.output_kgs as total_weight,
+                 'Finished Goods' as type,
+                 COALESCE((SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1), 'PJ') as godown_name
+          FROM work_order_outputs woo
+          WHERE UPPER(TRIM(woo.fg_lot_no)) = UPPER(?)
+          ORDER BY woo.id DESC LIMIT 1
+        `, [lotNo]);
+        if (exactWoOut.rows?.[0]) return exactWoOut.rows[0];
+      } catch (_) {}
+
+      try {
+        const exactWc = await runner.query(`
+          SELECT wci.lot_no, wci.item_name, wci.qty as quantity, wci.weight as per_unit_weight, wci.total_wt as total_weight,
+                 'Weight Conversion' as type,
+                 COALESCE((SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1), 'PJ') as godown_name
+          FROM weight_conversion_items wci
+          WHERE UPPER(TRIM(wci.lot_no)) = UPPER(?)
+          ORDER BY wci.id DESC LIMIT 1
+        `, [lotNo]);
+        if (exactWc.rows?.[0]) return exactWc.rows[0];
+      } catch (_) {}
+
+      try {
+        const exactCs = await runner.query(`
+          SELECT COALESCE(NULLIF(csi.cold_storage_lot_no, ''), csi.purchase_lot_no) as lot_no, csi.purchase_lot_no,
+                 csi.item_name, csi.quantity, csi.weight as per_unit_weight, csi.total_wt as total_weight,
                  'Cold Storage' as type, COALESCE(csv.cold_storage_name, 'Cold Storage') as godown_name
           FROM cold_storage_items csi
           JOIN cold_storage_vouchers csv ON csv.id = csi.voucher_id
-          WHERE UPPER(csi.cold_storage_lot_no) = UPPER(?) OR UPPER(csi.purchase_lot_no) = UPPER(?)
+          WHERE UPPER(TRIM(csi.cold_storage_lot_no)) = UPPER(?) OR UPPER(TRIM(csi.purchase_lot_no)) = UPPER(?)
           ORDER BY csi.id DESC LIMIT 1
         `, [lotNo, lotNo]);
-        if (csFallback.rows?.[0]) lot = csFallback.rows[0];
+        if (exactCs.rows?.[0]) return exactCs.rows[0];
       } catch (_) {}
-    }
 
-    if (!lot) {
       try {
-        const mvFallback = await runner.query(`
+        const exactMv = await runner.query(`
           SELECT lot_no, item_name, qty as quantity, unit_weight as per_unit_weight, weight as total_weight, stock_category as type, godown_name
           FROM stock_movements
           WHERE is_reversed = 0 AND is_reversal = 0
-            AND (UPPER(lot_no) = UPPER(?) OR UPPER(fg_lot_no) = UPPER(?) OR UPPER(rm_lot_no) = UPPER(?))
+            AND (UPPER(TRIM(lot_no)) = UPPER(?) OR UPPER(TRIM(COALESCE(fg_lot_no, ''))) = UPPER(?) OR UPPER(TRIM(COALESCE(rm_lot_no, ''))) = UPPER(?))
           ORDER BY id DESC LIMIT 1
         `, [lotNo, lotNo, lotNo]);
-        if (mvFallback.rows?.[0]) lot = mvFallback.rows[0];
+        if (exactMv.rows?.[0]) return exactMv.rows[0];
       } catch (_) {}
-    }
 
-    if (!lot) {
-      const stFallback = await runner.query(`
+      const exactSt = await runner.query(`
         SELECT s.lot_no, s.item_name, s.qty as quantity, s.rate, 'Stock' as type,
                COALESCE(gm.godown_name, s.godown, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name
         FROM stock s
         LEFT JOIN godown_master gm ON (CAST(gm.id AS TEXT) = CAST(s.godown AS TEXT) OR s.godown = gm.godown_name)
-        WHERE UPPER(s.lot_no) = UPPER(?) OR UPPER(s.lot_no) LIKE UPPER(?)
-        ORDER BY CASE WHEN UPPER(s.lot_no) = UPPER(?) THEN 0 ELSE 1 END, s.id DESC LIMIT 1
-      `, [lotNo, `%${lotNo}%`, lotNo]);
-      if (stFallback.rows?.[0]) lot = stFallback.rows[0];
+        WHERE UPPER(TRIM(s.lot_no)) = UPPER(?)
+        ORDER BY s.id DESC LIMIT 1
+      `, [lotNo]);
+      return exactSt.rows?.[0] || null;
+    };
+
+    lot = await findExactMatch();
+
+    if (!lot) {
+      const likeSl = await runner.query(`
+        SELECT sl.*, COALESCE(gm.godown_name, sl.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name
+        FROM stock_lots sl
+        LEFT JOIN godown_master gm ON sl.godown_id = gm.id
+        WHERE UPPER(sl.lot_no) LIKE UPPER(?)
+        ORDER BY sl.id DESC LIMIT 1
+      `, [`%${lotNo}%`]);
+      lot = likeSl.rows?.[0] || null;
+    }
+
+    if (!lot) {
+      const likePi = await runner.query(`
+        SELECT pi.lot_no, pi.item_name, pi.qty as quantity, pi.rate, pi.weight as per_unit_weight, pi.total_weight, 'Raw Material' as type,
+               pi.purchase_id, COALESCE(gm.godown_name, (SELECT godown_name FROM godown_master ORDER BY id ASC LIMIT 1)) as godown_name
+        FROM purchase_items pi
+        LEFT JOIN purchases p ON p.id = pi.purchase_id
+        LEFT JOIN godown_master gm ON (CAST(gm.id AS TEXT) = CAST(p.godown AS TEXT) OR p.godown = gm.godown_name)
+        WHERE UPPER(pi.lot_no) LIKE UPPER(?)
+        ORDER BY pi.id DESC LIMIT 1
+      `, [`%${lotNo}%`]);
+      lot = likePi.rows?.[0] || null;
     }
 
     const canonicalLotNo = lot?.lot_no || lotNo;
@@ -1960,19 +2028,45 @@ router.get('/traceability/:lotNo', async (req, res) => {
       }
     } catch (_) {}
 
-    // 3. Milling / Grinding Transformation Batches (NO Cartesian join!)
+    // 3. Milling / Grinding Transformation Batches (Inputs + Outputs + Wastages + Inpass/Outpass + Work Orders; NO Cartesian join!)
     const seedLotsForGrind = Array.from(new Set([canonicalLotNo, linkedPurchaseLotFromCS].filter(Boolean))).map(l => l.toUpperCase());
     const seedGrindPh = seedLotsForGrind.map(() => 'UPPER(?)').join(',');
     const grainIdSet = new Set();
+    const matchedInpassNos = new Set();
+    const outpassInpass = [];
     try {
-      const gInIds = await runner.query(`SELECT DISTINCT grain_id FROM grain_input_items WHERE UPPER(lot_no) IN (${seedGrindPh})`, seedLotsForGrind);
+      const ipRes = await runner.query(`
+        SELECT ii.*, ip.inpass_no AS ip_inpass_no, SUBSTR(CAST(ip.date AS TEXT), 1, 10) AS ip_date,
+               ip.outpass_no, ip.party_name, ip.vehicle_no, ip.yield_percent, ip.loss_percent, ip.processing_charge_per_kg, ip.total_processing_charges
+        FROM inpass_items ii
+        JOIN inpasses ip ON ii.inpass_id = ip.id
+        WHERE UPPER(TRIM(COALESCE(ii.lot_no, ''))) IN (${seedGrindPh})
+           OR UPPER(TRIM(COALESCE(ii.original_lot_no, ''))) IN (${seedGrindPh})
+      `, [...seedLotsForGrind, ...seedLotsForGrind]);
+      for (const r of (ipRes.rows || [])) {
+        if (r.inpass_no) matchedInpassNos.add(String(r.inpass_no).trim().toUpperCase());
+        outpassInpass.push(r);
+      }
+    } catch (_) {}
+
+    try {
+      const gInIds = await runner.query(`SELECT DISTINCT grain_id FROM grain_input_items WHERE UPPER(TRIM(lot_no)) IN (${seedGrindPh})`, seedLotsForGrind);
       (gInIds.rows || []).forEach(r => grainIdSet.add(r.grain_id));
-      const gOutIds = await runner.query(`SELECT DISTINCT grain_id FROM grain_output_items WHERE UPPER(lot_no) IN (${seedGrindPh})`, seedLotsForGrind);
+      const gOutIds = await runner.query(`SELECT DISTINCT grain_id FROM grain_output_items WHERE UPPER(TRIM(lot_no)) IN (${seedGrindPh})`, seedLotsForGrind);
       (gOutIds.rows || []).forEach(r => grainIdSet.add(r.grain_id));
+      const gWstIds = await runner.query(`SELECT DISTINCT grain_id FROM grain_wastage_items WHERE UPPER(TRIM(lot_no)) IN (${seedGrindPh})`, seedLotsForGrind);
+      (gWstIds.rows || []).forEach(r => grainIdSet.add(r.grain_id));
+      if (matchedInpassNos.size > 0) {
+        const ipArr = Array.from(matchedInpassNos);
+        const gIpIds = await runner.query(`SELECT id FROM grains WHERE UPPER(TRIM(COALESCE(inpass_no, ''))) IN (${ipArr.map(() => 'UPPER(?)').join(',')})`, ipArr);
+        (gIpIds.rows || []).forEach(r => grainIdSet.add(r.id));
+      }
     } catch (_) {}
 
     const grindBatches = [];
     const parentLotNames = new Set();
+    const coveredWoIds = new Set();
+    const coveredWoNos = new Set();
     if (linkedPurchaseLotFromCS && linkedPurchaseLotFromCS.toUpperCase() !== canonicalLotNo.toUpperCase()) {
       parentLotNames.add(linkedPurchaseLotFromCS);
     }
@@ -1986,8 +2080,13 @@ router.get('/traceability/:lotNo', async (req, res) => {
       `, [gid]);
       const inputs = await runner.query(`SELECT * FROM grain_input_items WHERE grain_id = ?`, [gid]);
       const outputs = await runner.query(`SELECT * FROM grain_output_items WHERE grain_id = ?`, [gid]);
+      const wastages = await runner.query(`SELECT * FROM grain_wastage_items WHERE grain_id = ?`, [gid]);
 
       const gRow = gHeader.rows?.[0] || {};
+      if (gRow.work_order_id) coveredWoIds.add(Number(gRow.work_order_id));
+      const resolvedBatchNo = gRow.work_order_no || `GRD-${String(gRow.s_no || gid).padStart(4, '0')}`;
+      coveredWoNos.add(String(resolvedBatchNo).trim().toUpperCase());
+
       const mappedInputs = (inputs.rows || []).map(i => ({
         item_name: i.item_name,
         lot_no: i.lot_no,
@@ -1995,7 +2094,38 @@ router.get('/traceability/:lotNo', async (req, res) => {
         bag_weight: parseFloat(i.weight) || 50,
         total_weight_kg: parseFloat(i.total_wt) || ((parseFloat(i.qty) || 0) * (parseFloat(i.weight) || 50))
       }));
-      const mappedOutputs = (outputs.rows || []).map(o => ({
+
+      let rawOutputRows = outputs.rows || [];
+      let rawWastageRows = wastages.rows || [];
+
+      if (gRow.inpass_no) {
+        try {
+          const ipBatchRes = await runner.query(`SELECT * FROM inpass_items WHERE UPPER(TRIM(inpass_no)) = UPPER(?) ORDER BY id ASC`, [gRow.inpass_no]);
+          const ipRows = ipBatchRes.rows || [];
+          const ipOut = ipRows.filter(r => r.output_type === 'PROCESSED_OUTPUT');
+          if (ipOut.length > 0 && (rawOutputRows.length === 0 || rawOutputRows.every(o => String(o.lot_no || '').toUpperCase() === String(gRow.inpass_no).toUpperCase()))) {
+            rawOutputRows = ipOut.map(r => ({
+              item_name: r.item_name,
+              lot_no: r.lot_no || gRow.inpass_no,
+              qty: r.qty,
+              weight: r.weight,
+              total_wt: r.total_weight
+            }));
+          }
+          if (rawWastageRows.length === 0) {
+            rawWastageRows = ipRows.filter(r => r.output_type === 'BYPRODUCT' || r.output_type === 'PROCESS_LOSS').map(r => ({
+              item_name: r.item_name,
+              category: r.output_type === 'PROCESS_LOSS' ? 'Process Loss' : 'By-product (External Mill)',
+              lot_no: r.lot_no,
+              qty: r.qty,
+              weight: r.weight,
+              total_wt: r.total_weight
+            }));
+          }
+        } catch (_) {}
+      }
+
+      const mappedOutputs = rawOutputRows.map(o => ({
         item_name: o.item_name,
         lot_no: o.lot_no,
         qty_bags: parseFloat(o.qty) || 0,
@@ -2003,46 +2133,72 @@ router.get('/traceability/:lotNo', async (req, res) => {
         total_weight_kg: parseFloat(o.total_wt) || ((parseFloat(o.qty) || 0) * (parseFloat(o.weight) || 30))
       }));
 
-      // If canonicalLotNo is an output in this batch, register ALL inputs as parent lots
-      const isOutputInBatch = mappedOutputs.some(o => String(o.lot_no || '').toUpperCase() === canonicalLotNo.toUpperCase());
-      if (isOutputInBatch) {
+      const mappedWastages = rawWastageRows.map(w => ({
+        item_name: w.item_name || w.category || 'Wastage',
+        category: w.category || 'Wastage',
+        lot_no: w.lot_no || '-',
+        qty_bags: parseFloat(w.qty) || 0,
+        bag_weight: parseFloat(w.weight) || 0,
+        total_weight_kg: parseFloat(w.total_wt) || ((parseFloat(w.qty) || 0) * (parseFloat(w.weight) || 0))
+      }));
+
+      const isOutputOrWastageInBatch =
+        mappedOutputs.some(o => String(o.lot_no || '').trim().toUpperCase() === canonicalLotNo.toUpperCase()) ||
+        mappedWastages.some(w => String(w.lot_no || '').trim().toUpperCase() === canonicalLotNo.toUpperCase()) ||
+        (gRow.inpass_no && matchedInpassNos.has(String(gRow.inpass_no).trim().toUpperCase()) && !mappedInputs.some(i => String(i.lot_no || '').trim().toUpperCase() === canonicalLotNo.toUpperCase()));
+      if (isOutputOrWastageInBatch) {
         mappedInputs.forEach(i => i.lot_no && parentLotNames.add(i.lot_no));
       }
 
       const totalInputKg = mappedInputs.reduce((sum, i) => sum + i.total_weight_kg, 0);
       const totalOutputKg = mappedOutputs.reduce((sum, o) => sum + o.total_weight_kg, 0);
+      const totalWastageKg = mappedWastages.reduce((sum, w) => sum + w.total_weight_kg, 0);
+      const recoveredWastageKg = mappedWastages
+        .filter(w => String(w.lot_no || '').toUpperCase() !== 'LOSS' && !String(w.category || '').toLowerCase().includes('loss'))
+        .reduce((sum, w) => sum + w.total_weight_kg, 0);
+      const processLossKg = Math.max(0, Number((totalInputKg - totalOutputKg - recoveredWastageKg).toFixed(2)));
       const yieldEfficiency = totalInputKg > 0 ? ((totalOutputKg / totalInputKg) * 100).toFixed(1) + '%' : 'N/A';
+      const massBalancePercent = totalInputKg > 0 ? (((totalOutputKg + totalWastageKg) / totalInputKg) * 100).toFixed(1) + '%' : 'N/A';
 
       // Look for real P3/P4 compliance records if logged
       let p3Rec = null;
       let p4Rec = null;
       try {
-        const compRes = await runner.query(`
-          SELECT * FROM compliance_production_records
-          WHERE record_code IN ('P3', 'P4') AND UPPER(lot_no) IN (${mappedInputs.concat(mappedOutputs).map(() => 'UPPER(?)').join(',') || "''"})
-          ORDER BY id DESC
-        `, mappedInputs.concat(mappedOutputs).map(x => String(x.lot_no || '')));
-        for (const cr of (compRes.rows || [])) {
-          let f = {};
-          try { f = typeof cr.findings_json === 'string' ? JSON.parse(cr.findings_json) : (cr.findings_json || {}); } catch (_) {}
-          if (cr.record_code === 'P3' && !p3Rec) p3Rec = { ...cr, findings: f };
-          if (cr.record_code === 'P4' && !p4Rec) p4Rec = { ...cr, findings: f };
+        const compLotList = mappedInputs.concat(mappedOutputs).map(x => String(x.lot_no || '')).filter(Boolean);
+        if (compLotList.length > 0) {
+          const compRes = await runner.query(`
+            SELECT * FROM compliance_production_records
+            WHERE record_code IN ('P3', 'P4') AND UPPER(lot_no) IN (${compLotList.map(() => 'UPPER(?)').join(',')})
+            ORDER BY id DESC
+          `, compLotList);
+          for (const cr of (compRes.rows || [])) {
+            let f = {};
+            try { f = typeof cr.findings_json === 'string' ? JSON.parse(cr.findings_json) : (cr.findings_json || {}); } catch (_) {}
+            if (cr.record_code === 'P3' && !p3Rec) p3Rec = { ...cr, findings: f };
+            if (cr.record_code === 'P4' && !p4Rec) p4Rec = { ...cr, findings: f };
+          }
         }
       } catch (_) {}
 
       grindBatches.push({
         grain_id: gid,
-        grind_no: gRow.work_order_no || `GRD-${String(gRow.s_no || gid).padStart(4, '0')}`,
-        mode: gRow.mode || 'Inside Mill',
+        grind_no: resolvedBatchNo,
+        mode: gRow.mill_type || gRow.process_mode || 'Inside Mill',
+        outpass_no: gRow.outpass_no || null,
+        inpass_no: gRow.inpass_no || null,
         date: gRow.date || '',
         flour_mill: gRow.mill_name,
         mill_area: gRow.mill_area || 'Factory Milling Floor',
         inputs: mappedInputs,
         outputs: mappedOutputs,
+        wastages: mappedWastages,
         total_input_kg: totalInputKg,
         total_output_kg: totalOutputKg,
-        milling_loss_kg: Math.max(0, totalInputKg - totalOutputKg),
+        total_wastage_kg: totalWastageKg,
+        recovered_wastage_kg: recoveredWastageKg,
+        milling_loss_kg: processLossKg,
         yield_efficiency: yieldEfficiency,
+        mass_balance_percent: massBalancePercent,
         in_process_checklist: p3Rec ? {
           record_no: p3Rec.record_no,
           mesh_size: p3Rec.findings?.mesh_size || p3Rec.findings?.sieve_mesh || 'Logged in P3',
@@ -2056,7 +2212,7 @@ router.get('/traceability/:lotNo', async (req, res) => {
           sieve_integrity: 'N/A',
           milling_temperature: 'N/A',
           foreign_matter_audit: 'N/A',
-          operator: gRow.created_by || 'Production Floor'
+          operator: gRow.operator || 'Production Floor'
         },
         ccp_monitoring: p4Rec ? {
           record_no: p4Rec.record_no,
@@ -2074,27 +2230,116 @@ router.get('/traceability/:lotNo', async (req, res) => {
       });
     }
 
-    // Check weight_conversion & inpass_items for additional parent links
+    // 3b. Standalone Work Orders not already covered by grains
     try {
-      const wcRes = await runner.query(`
-        SELECT wc.id, wc.s_no, wc.date, wc.type as conv_type, wci_in.lot_no as parent_lot
-        FROM weight_conversion_items wci_out
-        JOIN weight_conversion wc ON CAST(wc.id AS TEXT) = CAST(wci_out.weight_conversion_id AS TEXT)
-        JOIN weight_conversion_items wci_in ON CAST(wci_in.weight_conversion_id AS TEXT) = CAST(wc.id AS TEXT) AND wci_in.type = 'input'
-        WHERE wci_out.type = 'output' AND UPPER(wci_out.lot_no) = UPPER(?)
-      `, [canonicalLotNo]);
-      (wcRes.rows || []).forEach(r => r.parent_lot && parentLotNames.add(r.parent_lot));
+      const woRes = await runner.query(`
+        SELECT DISTINCT wo.*
+        FROM work_orders wo
+        WHERE EXISTS (SELECT 1 FROM work_order_items woi WHERE woi.work_order_id = wo.id AND UPPER(TRIM(woi.lot_no)) IN (${seedGrindPh}))
+           OR EXISTS (SELECT 1 FROM work_order_outputs woo WHERE woo.work_order_id = wo.id AND UPPER(TRIM(woo.fg_lot_no)) IN (${seedGrindPh}))
+           OR EXISTS (SELECT 1 FROM work_order_wastages wow WHERE wow.work_order_id = wo.id AND UPPER(TRIM(wow.lot_no)) IN (${seedGrindPh}))
+      `, [...seedLotsForGrind, ...seedLotsForGrind, ...seedLotsForGrind]);
+
+      for (const wo of (woRes.rows || [])) {
+        if (coveredWoIds.has(Number(wo.id)) || (wo.work_order_no && coveredWoNos.has(String(wo.work_order_no).trim().toUpperCase()))) {
+          continue;
+        }
+        const woIn = (await runner.query(`SELECT * FROM work_order_items WHERE work_order_id = ?`, [wo.id])).rows || [];
+        const woOut = (await runner.query(`SELECT * FROM work_order_outputs WHERE work_order_id = ?`, [wo.id])).rows || [];
+        const woWst = (await runner.query(`SELECT * FROM work_order_wastages WHERE work_order_id = ?`, [wo.id])).rows || [];
+
+        const mappedInputs = woIn.map(i => ({
+          item_name: i.item_name,
+          lot_no: i.lot_no,
+          qty_bags: parseFloat(i.input_qty) || 0,
+          bag_weight: parseFloat(i.weight) || 50,
+          total_weight_kg: parseFloat(i.kgs) || ((parseFloat(i.input_qty) || 0) * (parseFloat(i.weight) || 50))
+        }));
+        const mappedOutputs = woOut.map(o => ({
+          item_name: o.output_item || wo.product,
+          lot_no: o.fg_lot_no,
+          qty_bags: parseFloat(o.expected_qty) || 0,
+          bag_weight: parseFloat(o.weight) || 50,
+          total_weight_kg: parseFloat(o.output_kgs) || ((parseFloat(o.expected_qty) || 0) * (parseFloat(o.weight) || 50))
+        }));
+        const mappedWastages = woWst.map(w => ({
+          item_name: w.item_name || w.category || 'Wastage',
+          category: w.category || 'Wastage',
+          lot_no: w.lot_no || '-',
+          qty_bags: parseFloat(w.qty) || 0,
+          bag_weight: parseFloat(w.weight) || 0,
+          total_weight_kg: parseFloat(w.total_wt) || 0
+        }));
+
+        if (mappedOutputs.some(o => String(o.lot_no || '').trim().toUpperCase() === canonicalLotNo.toUpperCase())) {
+          mappedInputs.forEach(i => i.lot_no && parentLotNames.add(i.lot_no));
+        }
+        const totalInputKg = mappedInputs.reduce((s, i) => s + i.total_weight_kg, 0);
+        const totalOutputKg = mappedOutputs.reduce((s, o) => s + o.total_weight_kg, 0);
+        const totalWastageKg = mappedWastages.reduce((s, w) => s + w.total_weight_kg, 0);
+        const processLossKg = Math.max(0, Number((totalInputKg - totalOutputKg - totalWastageKg).toFixed(2)));
+        const yieldEfficiency = totalInputKg > 0 ? ((totalOutputKg / totalInputKg) * 100).toFixed(1) + '%' : 'N/A';
+
+        grindBatches.push({
+          work_order_id: wo.id,
+          grind_no: wo.work_order_no,
+          mode: 'Work Order',
+          date: wo.date || '',
+          flour_mill: wo.work_unit || 'Factory Production Floor',
+          mill_area: 'Production Floor',
+          inputs: mappedInputs,
+          outputs: mappedOutputs,
+          wastages: mappedWastages,
+          total_input_kg: totalInputKg,
+          total_output_kg: totalOutputKg,
+          total_wastage_kg: totalWastageKg,
+          recovered_wastage_kg: totalWastageKg,
+          milling_loss_kg: processLossKg,
+          yield_efficiency: yieldEfficiency,
+          in_process_checklist: { record_no: null, mesh_size: 'Standard Work Order', sieve_integrity: 'N/A', milling_temperature: 'N/A', foreign_matter_audit: 'N/A', operator: 'Production Floor' },
+          ccp_monitoring: { record_no: null, ccp1_magnet: 'Not Logged (P4)', ccp1_destoner: 'Not Logged (P4)', ccp2_sifter: 'Not Logged (P4)', status: 'PENDING_P4_LOG' }
+        });
+      }
+    } catch (_) {}
+
+    // Check weight_conversion & inpass_items for additional parent links + weight conversion history
+    const weightConversions = [];
+    try {
+      const wcMatched = await runner.query(`
+        SELECT DISTINCT wc.id, wc.s_no, SUBSTR(CAST(wc.date AS TEXT), 1, 10) AS date, wc.type as conv_type, wc.remarks
+        FROM weight_conversion_items wci
+        JOIN weight_conversion wc ON CAST(wc.id AS TEXT) = CAST(wci.weight_conversion_id AS TEXT)
+        WHERE UPPER(TRIM(wci.lot_no)) IN (${seedGrindPh})
+      `, seedLotsForGrind);
+      for (const wc of (wcMatched.rows || [])) {
+        const itemsRes = await runner.query(`SELECT * FROM weight_conversion_items WHERE CAST(weight_conversion_id AS TEXT) = CAST(? AS TEXT)`, [wc.id]);
+        const items = itemsRes.rows || [];
+        const wcInputs = items.filter(i => (i.type || 'input') === 'input');
+        const wcOutputs = items.filter(i => i.type === 'output');
+        if (wcOutputs.some(o => String(o.lot_no || '').trim().toUpperCase() === canonicalLotNo.toUpperCase())) {
+          wcInputs.forEach(i => i.lot_no && parentLotNames.add(i.lot_no));
+        }
+        weightConversions.push({
+          conversion_id: wc.id,
+          voucher_no: `WC-${wc.s_no || wc.id}`,
+          date: wc.date,
+          type: wc.conv_type || 'Conversion',
+          remarks: wc.remarks || '',
+          inputs: wcInputs,
+          outputs: wcOutputs
+        });
+      }
     } catch (_) {}
 
     try {
       const ipRes = await runner.query(`
-        SELECT original_lot_no FROM inpass_items WHERE UPPER(lot_no) = UPPER(?) AND original_lot_no IS NOT NULL
+        SELECT original_lot_no FROM inpass_items WHERE UPPER(TRIM(lot_no)) = UPPER(?) AND original_lot_no IS NOT NULL
       `, [canonicalLotNo]);
       (ipRes.rows || []).forEach(r => r.original_lot_no && parentLotNames.add(r.original_lot_no));
     } catch (_) {}
 
     try {
-      const lgRes = await runner.query(`SELECT parent_lot_no FROM lot_genealogy WHERE UPPER(child_lot_no) = UPPER(?)`, [canonicalLotNo]);
+      const lgRes = await runner.query(`SELECT parent_lot_no FROM lot_genealogy WHERE UPPER(TRIM(child_lot_no)) = UPPER(?)`, [canonicalLotNo]);
       (lgRes.rows || []).forEach(r => r.parent_lot_no && parentLotNames.add(r.parent_lot_no));
     } catch (_) {}
 
@@ -2153,11 +2398,12 @@ router.get('/traceability/:lotNo', async (req, res) => {
       }
     }
 
-    // Collect ALL associated lots in the family (canonical, CS aliases, parents, children)
+    // Collect ALL associated lots in the family (canonical, CS aliases, parents, children, wastages)
     const associatedLots = new Set([canonicalLotNo, ...Array.from(csAliasLots), ...parentLotsList]);
     grindBatches.forEach(g => {
       g.inputs.forEach(i => i.lot_no && associatedLots.add(i.lot_no));
       g.outputs.forEach(o => o.lot_no && associatedLots.add(o.lot_no));
+      (g.wastages || []).forEach(w => w.lot_no && String(w.lot_no).toUpperCase() !== 'LOSS' && w.lot_no !== '-' && associatedLots.add(w.lot_no));
     });
 
     const lotList = Array.from(associatedLots);
@@ -2416,40 +2662,60 @@ router.get('/traceability/:lotNo', async (req, res) => {
       };
     });
 
-    // 10. All Active Lots across Purchases, Grain Outputs, Cold Storage, Weight Conversion, Inpass, Stock Lots
+    // 10. All Active Lots across stock_movements, Purchases, Grain Outputs, Inpass, Wastages, Cold Storage, Weight Conversion, Stock Lots
     const activeLotsRes = await runner.query(`
-      SELECT lot_no, MAX(item_name) as item_name, SUM(initial_qty) as initial_qty, SUM(remaining_quantity) as remaining_quantity, MAX(godown_name) as godown_name
+      WITH mv_bal AS (
+        SELECT UPPER(TRIM(lot_no)) AS lot_key,
+               MAX(godown_name) AS godown_name,
+               SUM(CASE WHEN direction = 'IN' THEN qty ELSE -qty END) AS net_qty,
+               SUM(CASE WHEN direction = 'IN' THEN COALESCE(weight, 0) ELSE -COALESCE(weight, 0) END) AS net_wt
+        FROM stock_movements
+        WHERE is_reversed = 0 AND is_reversal = 0 AND is_physical_stock = 1 AND lot_no IS NOT NULL AND TRIM(lot_no) != ''
+        GROUP BY UPPER(TRIM(lot_no))
+      )
+      SELECT c.lot_no,
+             MAX(c.item_name) AS item_name,
+             MAX(c.initial_qty) AS initial_qty,
+             COALESCE(MAX(mv.net_qty), MAX(c.fallback_rem)) AS remaining_quantity,
+             COALESCE(MAX(mv.net_wt), 0) AS remaining_weight_kg,
+             COALESCE(MAX(mv.godown_name), MAX(c.godown_name)) AS godown_name
       FROM (
-        SELECT pi.lot_no, pi.item_name, pi.qty as initial_qty, COALESCE(sl.remaining_quantity, pi.qty) as remaining_quantity, COALESCE(gm.godown_name, sl.godown_name, 'PJ') as godown_name
+        SELECT TRIM(pi.lot_no) AS lot_no, pi.item_name, pi.qty AS initial_qty, pi.qty AS fallback_rem, COALESCE(gm.godown_name, 'PJ') AS godown_name
         FROM purchase_items pi
         JOIN purchases p ON p.id = pi.purchase_id
-        LEFT JOIN stock_lots sl ON sl.lot_no = pi.lot_no
-        LEFT JOIN godown_master gm ON (CAST(gm.id AS TEXT) = CAST(p.godown AS TEXT) OR p.godown = gm.godown_name OR CAST(gm.id AS TEXT) = CAST(sl.godown_id AS TEXT))
+        LEFT JOIN godown_master gm ON (CAST(gm.id AS TEXT) = CAST(p.godown AS TEXT) OR p.godown = gm.godown_name)
         WHERE pi.lot_no IS NOT NULL AND TRIM(pi.lot_no) != ''
         UNION ALL
-        SELECT go.lot_no, go.item_name, go.qty as initial_qty, COALESCE(sl.remaining_quantity, go.qty) as remaining_quantity, COALESCE(sl.godown_name, 'PJ') as godown_name
+        SELECT TRIM(go.lot_no) AS lot_no, go.item_name, go.qty AS initial_qty, go.qty AS fallback_rem, 'PJ' AS godown_name
         FROM grain_output_items go
-        LEFT JOIN stock_lots sl ON sl.lot_no = go.lot_no
         WHERE go.lot_no IS NOT NULL AND TRIM(go.lot_no) != ''
         UNION ALL
-        SELECT csi.cold_storage_lot_no as lot_no, csi.item_name, csi.quantity as initial_qty, csi.quantity as remaining_quantity, COALESCE(csv.cold_storage_name, 'Cold Storage') as godown_name
+        SELECT TRIM(ii.lot_no) AS lot_no, ii.item_name, ii.qty AS initial_qty, ii.qty AS fallback_rem, COALESCE(ii.godown_name, 'PJ') AS godown_name
+        FROM inpass_items ii
+        WHERE ii.lot_no IS NOT NULL AND TRIM(ii.lot_no) != '' AND UPPER(TRIM(ii.lot_no)) != 'LOSS'
+        UNION ALL
+        SELECT TRIM(gw.lot_no) AS lot_no, gw.item_name, gw.qty AS initial_qty, gw.qty AS fallback_rem, 'PJ' AS godown_name
+        FROM grain_wastage_items gw
+        WHERE gw.lot_no IS NOT NULL AND TRIM(gw.lot_no) != '' AND UPPER(TRIM(gw.lot_no)) != 'LOSS'
+        UNION ALL
+        SELECT TRIM(csi.cold_storage_lot_no) AS lot_no, csi.item_name, csi.quantity AS initial_qty, csi.quantity AS fallback_rem, COALESCE(csv.cold_storage_name, 'Cold Storage') AS godown_name
         FROM cold_storage_items csi
         JOIN cold_storage_vouchers csv ON csv.id = csi.voucher_id
         WHERE csi.cold_storage_lot_no IS NOT NULL AND TRIM(csi.cold_storage_lot_no) != '' AND csv.voucher_type = 'IN'
         UNION ALL
-        SELECT wci.lot_no, wci.item_name, wci.qty as initial_qty, COALESCE(sl.remaining_quantity, wci.qty) as remaining_quantity, COALESCE(sl.godown_name, 'PJ') as godown_name
+        SELECT TRIM(wci.lot_no) AS lot_no, wci.item_name, wci.qty AS initial_qty, wci.qty AS fallback_rem, 'PJ' AS godown_name
         FROM weight_conversion_items wci
-        LEFT JOIN stock_lots sl ON sl.lot_no = wci.lot_no
         WHERE wci.lot_no IS NOT NULL AND TRIM(wci.lot_no) != ''
         UNION ALL
-        SELECT sl.lot_no, sl.item_name, sl.quantity as initial_qty, sl.remaining_quantity, COALESCE(sl.godown_name, gm.godown_name, 'PJ') as godown_name
+        SELECT TRIM(sl.lot_no) AS lot_no, sl.item_name, sl.quantity AS initial_qty, sl.remaining_quantity AS fallback_rem, COALESCE(sl.godown_name, gm.godown_name, 'PJ') AS godown_name
         FROM stock_lots sl
         LEFT JOIN godown_master gm ON CAST(gm.id AS TEXT) = CAST(sl.godown_id AS TEXT)
         WHERE sl.lot_no IS NOT NULL AND TRIM(sl.lot_no) != ''
-      ) combined_lots
-      GROUP BY lot_no
-      ORDER BY lot_no ASC
-      LIMIT 150
+      ) c
+      LEFT JOIN mv_bal mv ON UPPER(c.lot_no) = mv.lot_key
+      GROUP BY c.lot_no
+      ORDER BY c.lot_no ASC
+      LIMIT 200
     `);
 
     // 11. Normalized Supplier Details
@@ -2512,7 +2778,9 @@ router.get('/traceability/:lotNo', async (req, res) => {
         allIQRs: iqrList
       },
       productionHistory: {
-        grindBatches
+        grindBatches,
+        weightConversions,
+        outpassInpass
       },
       qualityCertificates: {
         coas: coaList

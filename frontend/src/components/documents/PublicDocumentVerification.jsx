@@ -249,7 +249,16 @@ export default function PublicDocumentVerification() {
 
   if (error || !docData) {
     return (
-      <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#f8fafc', p: 3 }}>
+      <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#f8fafc', p: 3, position: 'relative' }}>
+        <Button
+          variant="outlined"
+          size="small"
+          startIcon={<ArrowBackIcon />}
+          onClick={() => (window.history.length > 1 ? navigate(-1) : navigate('/'))}
+          sx={{ position: 'absolute', top: 16, left: 16, textTransform: 'none', fontWeight: 600 }}
+        >
+          Back
+        </Button>
         <Card sx={{ maxWidth: 500, width: '100%', p: 3, textAlign: 'center', borderRadius: 3, boxShadow: '0 10px 25px rgba(0,0,0,0.05)' }}>
           <SecurityIcon sx={{ fontSize: 64, color: '#ef4444', mb: 2 }} />
           <Typography variant="h5" sx={{ fontWeight: 700, color: '#0f172a', mb: 1 }}>
@@ -291,6 +300,24 @@ export default function PublicDocumentVerification() {
           }}
         >
           <Stack direction="row" alignItems="center" spacing={1.5}>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<ArrowBackIcon sx={{ fontSize: 16 }} />}
+              onClick={() => (window.history.length > 1 ? navigate(-1) : navigate('/'))}
+              sx={{
+                color: '#ffffff',
+                borderColor: '#475569',
+                bgcolor: 'rgba(255,255,255,0.08)',
+                '&:hover': { borderColor: '#94a3b8', bgcolor: 'rgba(255,255,255,0.16)' },
+                textTransform: 'none',
+                fontWeight: 700,
+                fontSize: '0.8rem',
+                '@media print': { display: 'none' }
+              }}
+            >
+              Back
+            </Button>
             <VerifiedIcon sx={{ color: '#22c55e', fontSize: 32 }} />
             <Box>
               <Typography variant="subtitle1" sx={{ fontWeight: 800, letterSpacing: '0.02em', lineHeight: 1.2 }}>

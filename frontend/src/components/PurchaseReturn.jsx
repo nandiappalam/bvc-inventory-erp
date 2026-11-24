@@ -5,6 +5,9 @@ import { getMasters } from '../services/masterservice.js';
 import api from '../services/api.js';
 import { InlineMasterModal, getCreateLabel } from './common/InlineMasterModal.jsx';
 import TaxDropdownCell from './entry/TaxDropdownCell.jsx';
+import { printHtml } from '../utils/printHelper';
+import { generatePurchasePrintHtml } from '../utils/purchasePrintHelper';
+import { useAuth } from '../context/AuthContext';
 
 // Predefined return reasons for business compliance & audit trail
 const RETURN_REASONS = [
@@ -26,6 +29,48 @@ const RETURN_REASONS = [
 
 const PurchaseReturn = () => {
   const navigate = useNavigate();
+  const { selectedCompany } = useAuth();
+
+  const [evidence, setEvidence] = useState([]);
+  const [linkDraft, setLinkDraft] = useState({ name: '', url: '', notes: '' });
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 4 * 1024 * 1024) {
+      setMessage('Evidence file must be under 4 MB.');
+      setMessageType('error');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setEvidence((prev) => [
+        ...prev,
+        { name: file.name, mime_type: file.type || 'application/octet-stream', url: String(reader.result || ''), notes: 'Uploaded in Purchase Return' }
+      ]);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleAddExternalLink = () => {
+    const u = String(linkDraft.url || '').trim();
+    if (!u || (!u.startsWith('https://') && !u.startsWith('http://') && !u.startsWith('/'))) {
+      setMessage('Enter a valid http://, https://, or relative / document URL.');
+      setMessageType('error');
+      return;
+    }
+    setEvidence((prev) => [...prev, { name: linkDraft.name.trim() || 'Document Ref', mime_type: 'link', url: u, notes: linkDraft.notes.trim() }]);
+    setLinkDraft({ name: '', url: '', notes: '' });
+  };
+
+  const handlePrintPurchaseReturn = () => {
+    const html = generatePurchasePrintHtml(
+      { ...formData, items, deductions: selectedDeductions, evidence },
+      selectedCompany || {}
+    );
+    printHtml(html, { title: `Purchase Return Debit Note - ${formData.returnInvNo || 'Draft'}` });
+  };
 
   // Unified Workflow State: Two Entry Sources
   // 'QC_IQR': Method A — Quality / Inspection Exception (QC Rejected, QC Hold, Not Unloaded, Not Approved, Lab Pending)
@@ -308,6 +353,10 @@ const PurchaseReturn = () => {
             inspector: data.inspector || '',
             iqrNo: data.iqr_no || ''
           });
+
+          if (Array.isArray(data.evidence)) {
+            setEvidence(data.evidence);
+          }
 
           if (Array.isArray(data.items) && data.items.length > 0) {
             const mappedItems = data.items.map((it, idx) => {
@@ -917,7 +966,8 @@ const PurchaseReturn = () => {
         },
         items,
         totals,
-        deductions: selectedDeductions
+        deductions: selectedDeductions,
+        evidence
       };
 
       let res;
@@ -969,6 +1019,14 @@ const PurchaseReturn = () => {
           </div>
         </div>
         <div style={{ display: 'flex', gap: '10px' }}>
+          <button
+            type="button"
+            onClick={handlePrintPurchaseReturn}
+            className="pr-btn"
+            style={{ height: '38px', fontSize: '13px', backgroundColor: '#0284c7', color: '#fff' }}
+          >
+            🖨️ Print Debit Note
+          </button>
           <button
             type="button"
             onClick={() => navigate('/entry/purchase-return-display')}
@@ -1492,6 +1550,41 @@ const PurchaseReturn = () => {
               />
             </div>
           </div>
+        </div>
+
+        {/* Evidence & Media Reference Section */}
+        <div className="pr-card" style={{ marginTop: '16px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+            <div className="pr-section-title" style={{ margin: 0 }}>
+              <span>Photographic / Video / Document Return Reference ({evidence.length})</span>
+            </div>
+            <label style={{ backgroundColor: '#1f4fb2', color: '#fff', padding: '6px 12px', borderRadius: '5px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>
+              + Upload Return Photo / Video / PDF
+              <input type="file" accept="image/*,application/pdf,video/mp4,video/webm" onChange={handleFileUpload} style={{ display: 'none' }} />
+            </label>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.6fr 1fr auto', gap: '8px', marginBottom: '10px' }}>
+            <input type="text" className="pr-input" placeholder="Document Label" value={linkDraft.name} onChange={(e) => setLinkDraft((p) => ({ ...p, name: e.target.value }))} />
+            <input type="text" className="pr-input" placeholder="https://... or /uploads/..." value={linkDraft.url} onChange={(e) => setLinkDraft((p) => ({ ...p, url: e.target.value }))} />
+            <input type="text" className="pr-input" placeholder="Notes / Defect Ref" value={linkDraft.notes} onChange={(e) => setLinkDraft((p) => ({ ...p, notes: e.target.value }))} />
+            <button type="button" onClick={handleAddExternalLink} className="pr-btn pr-btn-secondary" style={{ backgroundColor: '#0284c7', color: '#fff', height: '38px', fontWeight: 700 }}>+ Add Link</button>
+          </div>
+          {evidence.length > 0 && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '10px' }}>
+              {evidence.map((ev, idx) => (
+                <div key={idx} style={{ backgroundColor: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '8px', fontSize: '12px' }}>
+                  {String(ev.mime_type || '').startsWith('image/') && String(ev.url || '').startsWith('data:image/') && (
+                    <img src={ev.url} alt={ev.name} style={{ width: '100%', height: '100px', objectFit: 'cover', borderRadius: '4px', marginBottom: '6px' }} />
+                  )}
+                  <div style={{ fontWeight: 700, wordBreak: 'break-word' }}>{ev.name}</div>
+                  <div style={{ fontSize: '11px', color: '#64748b' }}>{ev.notes || ev.mime_type}</div>
+                  <button type="button" onClick={() => setEvidence((p) => p.filter((_, i) => i !== idx))} style={{ marginTop: '4px', backgroundColor: '#fee2e2', color: '#991b1b', border: 'none', borderRadius: '4px', padding: '2px 8px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* ========================================================================= */}

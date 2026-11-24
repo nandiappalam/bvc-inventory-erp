@@ -60,25 +60,28 @@ export const SD_MODULES = [
 ];
 
 export const SalesDistributionWorkflow = ({
-  currentModule = 'quotation',
+  currentModule = '',
   onImportRecord = null,
   importButtonText = ''
 }) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const currentPath = location.pathname;
+  const currentPath = String(location.pathname || '').toLowerCase();
 
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importSourceList, setImportSourceList] = useState([]);
   const [loadingImport, setLoadingImport] = useState(false);
 
-  // Identify active step
-  const activeModule = SD_MODULES.find(m => 
-    m.id === currentModule || 
-    currentPath.includes(m.id) || 
-    (m.id === 'sales_order' && currentPath.includes('sales-order')) ||
-    (m.id === 'sales' && (currentPath.includes('sales-create') || currentPath.includes('sales-display')) && !currentPath.includes('order') && !currentPath.includes('export') && !currentPath.includes('return'))
-  ) || SD_MODULES[0];
+  // Identify active step: exact prop match first, then unambiguous path matching (longest/most-specific first)
+  const activeModule =
+    SD_MODULES.find((m) => m.id === currentModule) ||
+    (currentPath.includes('/sales-return') && SD_MODULES.find((m) => m.id === 'sales_return')) ||
+    (currentPath.includes('/sales-export-order') && SD_MODULES.find((m) => m.id === 'sales_export_order')) ||
+    (currentPath.includes('/sales-export') && SD_MODULES.find((m) => m.id === 'sales_export')) ||
+    (currentPath.includes('/sales-order') && SD_MODULES.find((m) => m.id === 'sales_order')) ||
+    (currentPath.includes('/quotation') && SD_MODULES.find((m) => m.id === 'quotation')) ||
+    ((currentPath.includes('/sales-create') || currentPath.includes('/sales-display')) && SD_MODULES.find((m) => m.id === 'sales')) ||
+    SD_MODULES[0];
 
   // Determine what source module can be imported into this step
   let importSourceEndpoint = null;
@@ -90,10 +93,10 @@ export const SalesDistributionWorkflow = ({
     importSourceEndpoint = '/sales?is_order=1';
     importSourceName = 'Sales Order';
   } else if (activeModule.id === 'sales_export') {
-    importSourceEndpoint = '/sales-export-orders';
+    importSourceEndpoint = '/sales-export-orders?is_order=1';
     importSourceName = 'Export Order';
   } else if (activeModule.id === 'sales_return') {
-    importSourceEndpoint = '/sales?is_order=0';
+    importSourceEndpoint = '/sales-returns/invoice-candidates';
     importSourceName = 'Sales Invoice';
   }
 
@@ -117,7 +120,7 @@ export const SalesDistributionWorkflow = ({
     setImportModalOpen(false);
     let fullRecord = record;
     try {
-      if (record && record.id && importSourceEndpoint) {
+      if (record && record.id && importSourceEndpoint && importSourceEndpoint !== '/sales-returns/invoice-candidates') {
         let baseEndpoint = importSourceEndpoint.split('?')[0];
         if (baseEndpoint.startsWith('/api/')) baseEndpoint = baseEndpoint.replace('/api/', '/');
         const res = await api(`${baseEndpoint}/${record.id}`);
@@ -155,7 +158,7 @@ export const SalesDistributionWorkflow = ({
             type="button"
             onClick={() => navigate(activeModule.displayPath)}
             style={styles.listBtn}
-            title="View Register / List for this module"
+            title={`View ${activeModule.label} Register / List`}
           >
             📋 View Register
           </button>
@@ -287,17 +290,17 @@ export const SalesDistributionWorkflow = ({
                   </thead>
                   <tbody>
                     {importSourceList.slice(0, 25).map((row, idx) => {
-                      const docNo = row.bill_no || row.s_no || row.sNo || row.id;
+                      const docNo = row.inv_no || row.bill_no || row.s_no || row.sNo || row.id;
                       const dateVal = row.date ? String(row.date).substring(0, 10) : '';
-                      const cust = row.customer_name || row.customer || row.consignee || 'Unknown';
-                      const amt = row.total_amt || row.grand_total || row.bill_amt || 0;
+                      const cust = row.customer_name || row.consignee_name || row.customer || row.consignee || 'Unknown';
+                      const amt = row.original_invoice_amount || row.grand_total || row.total_amt || row.total_inr_amt || row.bill_amt || 0;
                       return (
                         <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0' }}>
                           <td style={styles.td}><strong>#{docNo}</strong></td>
                           <td style={styles.td}>{dateVal}</td>
                           <td style={styles.td}>{cust}</td>
                           <td style={{ ...styles.td, fontWeight: '700', color: '#1d4ed8' }}>
-                            ₹{parseFloat(amt || 0).toLocaleString()}
+                            ₹{parseFloat(amt || 0).toLocaleString('en-IN')}
                           </td>
                           <td style={styles.td}>
                             <button

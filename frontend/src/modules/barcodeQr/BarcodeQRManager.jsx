@@ -44,6 +44,7 @@ import AssignmentReturnIcon from '@mui/icons-material/AssignmentReturn';
 import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import QRCode from 'qrcode';
+import { printHtml } from '../../utils/printHelper';
 
 export default function BarcodeQRManager() {
   const navigate = useNavigate();
@@ -65,6 +66,7 @@ export default function BarcodeQRManager() {
   const [genTitle, setGenTitle] = useState('');
   const [qrDataUrl, setQrDataUrl] = useState('');
   const printLabelRef = useRef(null);
+  const lookupSeqRef = useRef(0);
 
   // Registered codes
   const [registeredCodes, setRegisteredCodes] = useState([]);
@@ -125,10 +127,12 @@ export default function BarcodeQRManager() {
       return;
     }
 
+    const seq = ++lookupSeqRef.current;
     setLoading(true);
     setErrorMsg('');
     try {
       const res = await axios.get(`/api/barcode-qr/lookup/${encodeURIComponent(code.trim())}`);
+      if (seq !== lookupSeqRef.current) return;
       if (res.data.success) {
         setLookupResult(res.data.data);
         setDossierOpen(true);
@@ -136,9 +140,12 @@ export default function BarcodeQRManager() {
         setErrorMsg('Lookup failed: ' + (res.data.error || 'Code not found'));
       }
     } catch (err) {
+      if (seq !== lookupSeqRef.current) return;
       setErrorMsg(parseError(err));
     } finally {
-      setLoading(false);
+      if (seq === lookupSeqRef.current) {
+        setLoading(false);
+      }
     }
   };
 
@@ -167,30 +174,24 @@ export default function BarcodeQRManager() {
   const handlePrintLabel = () => {
     if (!printLabelRef.current) return;
     const printContent = printLabelRef.current.innerHTML;
-    const win = window.open('', '', 'width=600,height=500');
-    win.document.write(`
+    const html = `
+      <!DOCTYPE html>
       <html>
         <head>
-          <title>Print Label</title>
+          <title>Print QR Label</title>
           <style>
             body { font-family: sans-serif; margin: 0; padding: 20px; text-align: center; }
             .label-box { border: 2px solid #000; padding: 15px; border-radius: 8px; display: inline-block; max-width: 320px; }
-            .title { font-size: 16px; font-weight: bold; margin-bottom: 8px; }
-            .code-text { font-family: monospace; font-size: 14px; margin-top: 8px; font-weight: bold; }
-            .sub { font-size: 12px; color: #555; }
           </style>
         </head>
         <body>
           <div class="label-box">
             ${printContent}
           </div>
-          <script>
-            window.onload = function() { window.print(); window.close(); }
-          </script>
         </body>
       </html>
-    `);
-    win.document.close();
+    `;
+    printHtml(html, `QR_Label_${genEntity || 'BVC'}`);
   };
 
   return (
@@ -494,26 +495,58 @@ export default function BarcodeQRManager() {
                     <Typography variant="body2" color="text.secondary">
                       Lot No: <strong style={{ fontFamily: 'monospace' }}>{lookupResult.lotNo}</strong>
                     </Typography>
+                    {lookupResult.coldStorageMovements?.siblings?.length > 0 && (
+                      <Box sx={{ mt: 0.75, display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                        {lookupResult.coldStorageMovements.siblings.map((sib) => (
+                          <Chip
+                            key={sib}
+                            label={`Sibling: ${sib}`}
+                            size="small"
+                            color="info"
+                            variant="outlined"
+                            onClick={() => {
+                              setScanQuery(sib);
+                              handleLookup(sib);
+                            }}
+                            sx={{ fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}
+                          />
+                        ))}
+                      </Box>
+                    )}
                   </Grid>
                   <Grid item xs={6} sm={3}>
                     <Typography variant="caption" color="text.secondary">Current On-Hand Stock</Typography>
                     <Typography variant="h6" color="primary.main" sx={{ fontWeight: 700 }}>
-                      {lookupResult.currentStock?.toLocaleString()} {lookupResult.unit}
+                      {Number(lookupResult.currentStock ?? 0).toLocaleString()} {lookupResult.unit || 'Bags'}
                     </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Location: {lookupResult.currentGodown}
+                    <Typography variant="caption" color="text.secondary" display="block">
+                      {Number(lookupResult.currentWeightKg ?? 0).toLocaleString()} KG | Loc: {lookupResult.currentGodown}
                     </Typography>
                   </Grid>
                   <Grid item xs={6} sm={3} sx={{ textAlign: 'right' }}>
                     <Typography variant="caption" color="text.secondary" display="block">Quality Status</Typography>
                     <Chip
                       label={lookupResult.qcStatus}
-                      color={lookupResult.qcStatus === 'PASSED' ? 'success' : lookupResult.qcStatus === 'HOLD' ? 'warning' : 'error'}
+                      color={lookupResult.qcStatus === 'PASSED' || lookupResult.qcStatus === 'ACCEPTED' ? 'success' : lookupResult.qcStatus === 'HOLD' ? 'warning' : 'error'}
                       size="small"
                       sx={{ fontWeight: 700 }}
                     />
                   </Grid>
                 </Grid>
+                {lookupResult.perGodownBalances?.length > 0 && (
+                  <Box sx={{ mt: 1.5, pt: 1, borderTop: '1px dashed #cbd5e1', display: 'flex', gap: 0.75, flexWrap: 'wrap' }}>
+                    {lookupResult.perGodownBalances.map((gb, gIdx) => (
+                      <Chip
+                        key={`d-gb-${gIdx}`}
+                        label={`${gb.godownName}: ${gb.balanceQty} Bags (${Number(gb.balanceWeightKg || 0).toLocaleString()} KG)`}
+                        size="small"
+                        color={gb.balanceQty > 0 ? 'success' : 'default'}
+                        variant={gb.balanceQty > 0 ? 'filled' : 'outlined'}
+                        sx={{ fontSize: '11px', fontWeight: 700 }}
+                      />
+                    ))}
+                  </Box>
+                )}
               </Paper>
 
               {/* Traceability Grid */}
@@ -543,6 +576,21 @@ export default function BarcodeQRManager() {
                             <span style={{ color: '#64748b' }}>Vehicle:</span>
                             <span>{lookupResult.purchase.vehicleNo || 'N/A'}</span>
                           </Box>
+                          {lookupResult.purchase.isDerivedFromParent && lookupResult.purchase.parentLotNo && (
+                            <Box sx={{ mt: 0.5 }}>
+                              <Chip
+                                label={`Parent Purchase Lot: ${lookupResult.purchase.parentLotNo}`}
+                                size="small"
+                                color="info"
+                                variant="outlined"
+                                onClick={() => {
+                                  setScanQuery(lookupResult.purchase.parentLotNo);
+                                  handleLookup(lookupResult.purchase.parentLotNo);
+                                }}
+                                sx={{ fontSize: '11px', cursor: 'pointer' }}
+                              />
+                            </Box>
+                          )}
                         </Box>
                       ) : (
                         <Typography variant="body2" color="text.secondary">No direct purchase inward record linked.</Typography>
@@ -600,7 +648,33 @@ export default function BarcodeQRManager() {
                           <span style={{ color: '#64748b' }}>Flour/Gotta Produced:</span>
                           <span>{lookupResult.millingUsage?.outputs?.length || 0} batches</span>
                         </Box>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', py: 0.5 }}>
+                          <span style={{ color: '#64748b' }}>Wastages / By-products:</span>
+                          <span>{lookupResult.millingUsage?.wastages?.length || 0} entries</span>
+                        </Box>
                       </Box>
+                      {lookupResult.millingUsage?.batches?.length > 0 && (
+                        <Box sx={{ mt: 1.5, pt: 1, borderTop: '1px dashed #e2e8f0', display: 'flex', flexDirection: 'column', gap: 1 }}>
+                          {lookupResult.millingUsage.batches.map((b, bIdx) => (
+                            <Box key={`b-${bIdx}`} sx={{ p: 1, bgcolor: '#f8fafc', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                              <Typography variant="caption" sx={{ fontWeight: 800, display: 'block', color: '#0f172a' }}>
+                                {b.batch_no} ({b.milling_date}) — {b.mill_name} [{b.yield_percent}% Yield]
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                                In: {(b.inputs || []).map(i => `${i.lot_no} (${i.weight_kg} KG)`).join(', ')}
+                              </Typography>
+                              <Typography variant="caption" color="success.main" sx={{ display: 'block', fontWeight: 600 }}>
+                                Out: {(b.outputs || []).map(o => `${o.lot_no} (${o.weight_kg} KG)`).join(', ') || 'None'}
+                              </Typography>
+                              {b.wastages?.length > 0 && (
+                                <Typography variant="caption" sx={{ display: 'block', color: '#b45309', fontWeight: 600 }}>
+                                  Wastage: {b.wastages.map(w => `${w.item_name}${w.lot_no && w.lot_no !== '-' ? ` [${w.lot_no}]` : ''}: ${w.weight_kg} KG`).join(', ')}
+                                </Typography>
+                              )}
+                            </Box>
+                          ))}
+                        </Box>
+                      )}
                     </CardContent>
                   </Card>
                 </Grid>

@@ -36,7 +36,8 @@ async function ensureReturnSchema(companyId = 1) {
     "ALTER TABLE purchase_returns ADD COLUMN iqr_no TEXT",
     "ALTER TABLE purchase_returns ADD COLUMN qc_no TEXT",
     "ALTER TABLE purchase_returns ADD COLUMN status TEXT DEFAULT 'POSTED'",
-    "ALTER TABLE purchase_returns ADD COLUMN approval_status TEXT DEFAULT 'APPROVED'"
+    "ALTER TABLE purchase_returns ADD COLUMN approval_status TEXT DEFAULT 'APPROVED'",
+    "ALTER TABLE purchase_returns ADD COLUMN evidence_json TEXT"
   ];
   for (const sql of returnCols) {
     try { await db.run(sql, [], companyId); } catch (e) {}
@@ -97,7 +98,14 @@ router.get(['/', '/list'], async (req, res) => {
       LEFT JOIN supplier_master sm ON (CAST(pr.supplier AS TEXT) = CAST(sm.id AS TEXT) OR pr.supplier = sm.name)
       ORDER BY pr.id DESC
     `);
-    res.json(result.rows || []);
+    const rows = (result.rows || []).map(row => {
+      let evidence = [];
+      try {
+        if (row.evidence_json) evidence = JSON.parse(row.evidence_json);
+      } catch (e) {}
+      return { ...row, evidence };
+    });
+    res.json(rows);
   } catch (error) {
     console.error('Error fetching purchase returns:', error);
     res.status(500).json({ message: 'Error fetching purchase returns', error: error.message });
@@ -688,8 +696,16 @@ router.get('/:id', async (req, res) => {
       deductionsResult = d.rows || [];
     } catch (e) {}
 
+    let evidence = [];
+    try {
+      if (purchaseReturnResult.rows[0].evidence_json) {
+        evidence = JSON.parse(purchaseReturnResult.rows[0].evidence_json);
+      }
+    } catch (e) {}
+
     const purchaseReturn = {
       ...purchaseReturnResult.rows[0],
+      evidence,
       items: itemsResult.rows || [],
       deductions: deductionsResult
     };
@@ -797,6 +813,7 @@ router.post('/', async (req, res) => {
       const vat = parseFloat(totals?.deductions?.vat ?? totals?.vat) || 0;
       const returnSource = formData.returnMethod === 'QC_IQR' ? 'QC_REJECTION' : (formData.source || 'MANUAL');
       const cleanDate = sanitizeDate(formData.date) || new Date().toISOString().slice(0, 10);
+      const evidenceJson = JSON.stringify(req.body.evidence || formData.evidence || []);
 
       const purchaseReturnResult = await db.run(`
         INSERT INTO purchase_returns (
@@ -804,8 +821,8 @@ router.post('/', async (req, res) => {
           tax_type, godown, remarks, total_qty, total_weight, total_amount,
           base_amount, disc_amount, tax_amount, net_amount, auto_wages,
           vat_percent, vat, grand_total, source, purchase_id, purchase_inv_no,
-          po_no, iqr_no, qc_no, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          po_no, iqr_no, qc_no, status, evidence_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
         formData.sNo ?? formData.s_no,
         cleanDate,
@@ -835,7 +852,8 @@ router.post('/', async (req, res) => {
         formData.poNo || null,
         formData.iqrNo || null,
         formData.qcNo || null,
-        'POSTED'
+        'POSTED',
+        evidenceJson
       ], activeCompanyId);
 
       const purchaseReturnId = purchaseReturnResult.lastID || purchaseReturnResult.lastInsertRowid || purchaseReturnResult.rows?.[0]?.id;
@@ -1071,6 +1089,7 @@ router.put('/:id', async (req, res) => {
       const returnSource = formData.returnMethod === 'QC_IQR' ? 'QC_REJECTION' : (formData.source || 'MANUAL');
       const cleanDate = sanitizeDate(formData.date) || new Date().toISOString().slice(0, 10);
       const cleanInvDate = sanitizeDate(formData.invDate || formData.inv_date);
+      const evidenceJson = JSON.stringify(req.body.evidence || formData.evidence || []);
 
       await db.run(`
         UPDATE purchase_returns SET
@@ -1080,6 +1099,7 @@ router.put('/:id', async (req, res) => {
           base_amount = ?, disc_amount = ?, tax_amount = ?, net_amount = ?,
           auto_wages = ?, vat_percent = ?, vat = ?, grand_total = ?,
           source = ?, purchase_id = ?, purchase_inv_no = ?, po_no = ?,
+          evidence_json = ?,
           updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `, [
@@ -1109,6 +1129,7 @@ router.put('/:id', async (req, res) => {
         purchaseId ? String(purchaseId) : null,
         formData.purchaseInvNo || formData.returnInvNo || null,
         formData.poNo || null,
+        evidenceJson,
         purchaseReturnId
       ], activeCompanyId);
 

@@ -255,6 +255,79 @@ export default function IncomingQualityReportDisplay() {
           </Typography>
         </Box>
 
+        {/* Photographic / Video / Document Evidence Section */}
+        <Box sx={{ mb: 4 }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 800, color: 'text.secondary', textTransform: 'uppercase', mb: 1.5 }}>
+            Attached Photographic, Video &amp; Document Evidence
+          </Typography>
+          {Array.isArray(data.evidence) && data.evidence.length > 0 ? (
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', md: 'repeat(3, 1fr)' }, gap: 2 }}>
+              {data.evidence.map((item, idx) => {
+                const isImage = (item.mime_type && item.mime_type.startsWith('image/')) || (item.type === 'image') || /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(item.url || item.name || '');
+                const isVideo = (item.mime_type && item.mime_type.startsWith('video/')) || (item.type === 'video') || /\.(mp4|webm|mov|ogg)$/i.test(item.url || item.name || '');
+                return (
+                  <Box 
+                    key={item.id || idx}
+                    sx={{ 
+                      border: '1px solid #cbd5e1', 
+                      borderRadius: 1.5, 
+                      p: 1.5, 
+                      backgroundColor: '#f8fafc',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 1
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Typography variant="caption" sx={{ fontWeight: 800, color: '#1e3a8a' }}>
+                        #{idx + 1} {item.name || 'Test Evidence'}
+                      </Typography>
+                      <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: 10 }}>
+                        {item.type || (isImage ? 'Photo' : isVideo ? 'Video' : 'Document')}
+                      </Typography>
+                    </Box>
+
+                    {item.notes && (
+                      <Typography variant="caption" sx={{ color: '#475569', fontStyle: 'italic', display: 'block' }}>
+                        {item.notes}
+                      </Typography>
+                    )}
+
+                    {isImage ? (
+                      <Box sx={{ textAlign: 'center', mt: 0.5 }}>
+                        <img 
+                          src={item.url} 
+                          alt={item.name || 'QC Test'} 
+                          style={{ maxWidth: '100%', maxHeight: '180px', objectFit: 'contain', borderRadius: '4px', border: '1px solid #e2e8f0' }} 
+                        />
+                      </Box>
+                    ) : isVideo ? (
+                      <Box sx={{ textAlign: 'center', mt: 0.5 }}>
+                        <video 
+                          src={item.url} 
+                          controls 
+                          style={{ maxWidth: '100%', maxHeight: '180px', borderRadius: '4px', border: '1px solid #e2e8f0' }} 
+                        />
+                      </Box>
+                    ) : (
+                      <Box sx={{ p: 2, textAlign: 'center', backgroundColor: '#ffffff', borderRadius: 1, border: '1px dashed #cbd5e1' }}>
+                        <Typography sx={{ fontSize: 24, mb: 0.5 }}>📄</Typography>
+                        <a href={item.url} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', fontWeight: 700, fontSize: 12, wordBreak: 'break-all' }}>
+                          View / Download Document
+                        </a>
+                      </Box>
+                    )}
+                  </Box>
+                );
+              })}
+            </Box>
+          ) : (
+            <Box sx={{ p: 2, border: '1px dashed #cbd5e1', borderRadius: 1, backgroundColor: '#f8fafc', color: 'text.secondary', fontSize: 12, fontStyle: 'italic' }}>
+              No photographic, video or document test evidence attached to this inspection record.
+            </Box>
+          )}
+        </Box>
+
         {/* Signatures */}
         <Box sx={{ mt: 6, display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10, textAlign: 'center' }}>
           <Box sx={{ borderTop: '1px solid #333', pt: 1 }}>

@@ -12,30 +12,31 @@ const LotHistoryReport = () => {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   
+  const urlLotParam = searchParams.get('lotNo') || searchParams.get('lot_no') || searchParams.get('lot') || ''
+
   const [items, setItems] = useState([])
   const [selectedItem, setSelectedItem] = useState('')
-  const [lotNo, setLotNo] = useState('')
+  const [lotNo, setLotNo] = useState(urlLotParam)
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [reportData, setReportData] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  // Auto-fill lotNo from search params on mount
+  // Sync lotNo when URL query parameter changes
   useEffect(() => {
-    const lotQuery = searchParams.get('lotNo') || searchParams.get('lot_no')
-    if (lotQuery) {
-      setLotNo(lotQuery)
+    if (urlLotParam && urlLotParam !== lotNo) {
+      setLotNo(urlLotParam)
     }
-  }, [searchParams])
+  }, [urlLotParam])
 
   // Fetch items dropdown
   useEffect(() => {
     const fetchItems = async () => {
       try {
         const response = await axios.get('/api/masters/item_master')
-        const itemsData = Array.isArray(response.data) 
-          ? response.data 
+        const itemsData = Array.isArray(response.data)
+          ? response.data
           : (response.data?.data || [])
         setItems(itemsData)
       } catch (err) {
@@ -47,18 +48,23 @@ const LotHistoryReport = () => {
   }, [])
 
   // Fetch lot history report
-  const fetchReport = async () => {
+  const fetchReport = async (overrides = null) => {
     setLoading(true)
     setError('')
     try {
+      const fItem = overrides ? overrides.selectedItem : selectedItem
+      const fLot = overrides ? overrides.lotNo : lotNo
+      const fFrom = overrides ? overrides.fromDate : fromDate
+      const fTo = overrides ? overrides.toDate : toDate
+
       const params = new URLSearchParams()
-      if (selectedItem) params.append('item_id', selectedItem)
-      if (lotNo) params.append('lot_no', lotNo)
-      if (fromDate) params.append('from_date', fromDate)
-      if (toDate) params.append('to_date', toDate)
+      if (fItem) params.append('item_id', fItem)
+      if (fLot) params.append('lot_no', fLot)
+      if (fFrom) params.append('from_date', fFrom)
+      if (fTo) params.append('to_date', fTo)
 
       const response = await axios.get(`/api/reports/lot-history?${params.toString()}`)
-      
+
       let responseData = []
       if (response.data) {
         if (Array.isArray(response.data)) {
@@ -86,21 +92,31 @@ const LotHistoryReport = () => {
     setLotNo('')
     setFromDate('')
     setToDate('')
+    fetchReport({ selectedItem: '', lotNo: '', fromDate: '', toDate: '' })
   }
+
+  const esc = (val) => String(val ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
 
   const handlePrint = () => {
     if (safeReportData.length === 0) {
-      alert("No data to print.");
-      return;
+      setError('No data to print.')
+      return
     }
 
     const rowsHtml = safeReportData.map((row) => `
       <tr>
-        <td style="border: 1px solid #cbd5e1; padding: 6px; font-size: 12px;">${row.date ? new Date(row.date).toLocaleDateString() : '-'}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 6px; font-size: 12px; font-weight: bold;">${row.item_name || '-'}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 6px; font-size: 12px; font-family: monospace;">${row.lot_no || '-'}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 6px; font-size: 12px;">${row.type || '-'}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 6px; font-size: 12px;">${row.reference_no || '-'}</td>
+        <td style="border: 1px solid #cbd5e1; padding: 6px; font-size: 12px;">${row.date ? esc(new Date(row.date).toLocaleDateString()) : '-'}</td>
+        <td style="border: 1px solid #cbd5e1; padding: 6px; font-size: 12px; font-weight: bold;">${esc(row.item_name || '-')}</td>
+        <td style="border: 1px solid #cbd5e1; padding: 6px; font-size: 12px; font-family: monospace;">${esc(row.lot_no || '-')}</td>
+        <td style="border: 1px solid #cbd5e1; padding: 6px; font-size: 12px;">${esc(row.godown_name || '-')}</td>
+        <td style="border: 1px solid #cbd5e1; padding: 6px; font-size: 12px;">${esc(row.party_name || '-')}</td>
+        <td style="border: 1px solid #cbd5e1; padding: 6px; font-size: 12px;">${esc(row.type || '-')}</td>
+        <td style="border: 1px solid #cbd5e1; padding: 6px; font-size: 12px;">${esc(row.reference_no || '-')}</td>
         <td style="border: 1px solid #cbd5e1; padding: 6px; font-size: 12px; text-align: right;">${parseFloat(row.qty_in || 0).toFixed(2)}</td>
         <td style="border: 1px solid #cbd5e1; padding: 6px; font-size: 12px; text-align: right;">${parseFloat(row.qty_out || 0).toFixed(2)}</td>
         <td style="border: 1px solid #cbd5e1; padding: 6px; font-size: 12px; text-align: right;">${parseFloat(row.rejection_qty || 0).toFixed(2)}</td>
@@ -108,7 +124,7 @@ const LotHistoryReport = () => {
         <td style="border: 1px solid #cbd5e1; padding: 6px; font-size: 12px; text-align: right;">${parseFloat(row.weight || 0).toFixed(2)}</td>
         <td style="border: 1px solid #cbd5e1; padding: 6px; font-size: 12px; text-align: right; font-weight: bold;">${parseFloat(row.balance_kg || 0).toFixed(2)} kg</td>
       </tr>
-    `).join('');
+    `).join('')
 
     const html = `
       <div style="font-family: Arial, sans-serif; padding: 20px; color: #334155;">
@@ -116,7 +132,7 @@ const LotHistoryReport = () => {
           <h1 style="color: #1f4fb2; margin: 0; font-size: 24px;">A.S.MOORTHY & CO</h1>
           <p style="margin: 5px 0 0 0; font-size: 14px; font-weight: bold; text-transform: uppercase;">Lot History & Traceability Report</p>
           <p style="margin: 3px 0 0 0; font-size: 12px; color: #64748b;">
-            ${lotNo ? `Lot No: ${lotNo}` : 'All Lots'}
+            ${lotNo ? `Lot No: ${esc(lotNo)}` : 'All Lots'}
           </p>
         </div>
         <table style="width: 100%; border-collapse: collapse; margin-top: 15px;">
@@ -125,6 +141,8 @@ const LotHistoryReport = () => {
               <th style="border: 1px solid #cbd5e1; padding: 8px; font-size: 12px; text-align: left;">Date</th>
               <th style="border: 1px solid #cbd5e1; padding: 8px; font-size: 12px; text-align: left;">Item Name</th>
               <th style="border: 1px solid #cbd5e1; padding: 8px; font-size: 12px; text-align: left;">Lot No</th>
+              <th style="border: 1px solid #cbd5e1; padding: 8px; font-size: 12px; text-align: left;">Godown</th>
+              <th style="border: 1px solid #cbd5e1; padding: 8px; font-size: 12px; text-align: left;">Party / Supplier</th>
               <th style="border: 1px solid #cbd5e1; padding: 8px; font-size: 12px; text-align: left;">Type</th>
               <th style="border: 1px solid #cbd5e1; padding: 8px; font-size: 12px; text-align: left;">Ref No</th>
               <th style="border: 1px solid #cbd5e1; padding: 8px; font-size: 12px; text-align: right;">Qty In</th>
@@ -140,8 +158,8 @@ const LotHistoryReport = () => {
           </tbody>
         </table>
       </div>
-    `;
-    printHtml(html, `Lot_History_Report_${lotNo || 'all'}`);
+    `
+    printHtml(html, `Lot_History_Report_${lotNo || 'all'}`)
   }
 
   const safeReportData = Array.isArray(reportData) ? reportData : []
@@ -205,7 +223,7 @@ const LotHistoryReport = () => {
           </div>
 
           <div className="filter-group" style={{ display: 'flex', gap: '8px', alignSelf: 'flex-end' }}>
-            <button className="btn btn-primary" onClick={fetchReport}>
+            <button className="btn btn-primary" onClick={() => fetchReport()}>
               Search
             </button>
             <button className="btn btn-secondary" onClick={handleClear}>
@@ -246,6 +264,8 @@ const LotHistoryReport = () => {
                 <th>Date</th>
                 <th>Item Name</th>
                 <th>Lot No</th>
+                <th>Godown</th>
+                <th>Party / Supplier</th>
                 <th>Type / Transaction</th>
                 <th>Reference No</th>
                 <th className="text-right">Qty In</th>
@@ -261,7 +281,7 @@ const LotHistoryReport = () => {
             <tbody>
               {safeReportData.length === 0 ? (
                 <tr>
-                  <td colSpan="13" className="text-center">No lot history found for current filter criteria</td>
+                  <td colSpan="15" className="text-center">No lot history found for current filter criteria</td>
                 </tr>
               ) : (
                 safeReportData.map((row, index) => {
@@ -270,23 +290,58 @@ const LotHistoryReport = () => {
 
                   const handleRefClick = () => {
                     if (!isClickable) return;
+                    const rawNav = String(row.nav_route || '').trim();
+                    if (rawNav) {
+                      const editMatch = rawNav.match(/^\/purchase\/edit\/(\d+)/i);
+                      if (editMatch) {
+                        navigate(`/entry/purchase-display?highlightId=${editMatch[1]}`);
+                        return;
+                      }
+                      const createMatch = rawNav.match(/^\/entry\/([a-z0-9-]+)-create(?:\?.*?\bid=(\d+))?/i);
+                      if (createMatch) {
+                        const slug = createMatch[1].toLowerCase();
+                        const extId = createMatch[2] ? `highlightId=${createMatch[2]}` : `highlightRef=${encodeURIComponent(refVal)}`;
+                        navigate(`/entry/${slug}-display?${extId}`);
+                        return;
+                      }
+                      const sep = rawNav.includes('?') ? '&' : '?';
+                      const highlightParam = row.source_id
+                        ? `highlightId=${encodeURIComponent(row.source_id)}`
+                        : `highlightRef=${encodeURIComponent(refVal)}`;
+                      navigate(`${rawNav}${sep}${highlightParam}`);
+                      return;
+                    }
                     const typeStr = String(row.type || '').toLowerCase();
                     if (typeStr.includes('purchase return')) {
-                      navigate(`/entry/purchase-return-display?search=${encodeURIComponent(refVal)}`);
+                      navigate(`/entry/purchase-return-display?highlightRef=${encodeURIComponent(refVal)}`);
                     } else if (typeStr.includes('purchase')) {
-                      navigate(`/entry/purchase-display?search=${encodeURIComponent(refVal)}`);
+                      navigate(`/entry/purchase-display?highlightRef=${encodeURIComponent(refVal)}`);
                     } else if (typeStr.includes('sales return')) {
-                      navigate(`/entry/sales-return-display?search=${encodeURIComponent(refVal)}`);
+                      navigate(`/entry/sales-return-display?highlightRef=${encodeURIComponent(refVal)}`);
                     } else if (typeStr.includes('sale')) {
-                      navigate(`/entry/sales-display?search=${encodeURIComponent(refVal)}`);
-                    } else if (typeStr.includes('grind')) {
-                      navigate(`/entry/grind-display?search=${encodeURIComponent(refVal)}`);
+                      navigate(`/entry/sales-display?highlightRef=${encodeURIComponent(refVal)}`);
+                    } else if (typeStr.includes('grain') || typeStr.includes('grind')) {
+                      navigate(`/entry/grind-display?highlightRef=${encodeURIComponent(refVal)}`);
+                    } else if (typeStr.includes('inpass')) {
+                      navigate(`/entry/inpass-display?highlightRef=${encodeURIComponent(refVal)}`);
+                    } else if (typeStr.includes('outpass')) {
+                      navigate(`/entry/outpass-display?highlightRef=${encodeURIComponent(refVal)}`);
+                    } else if (typeStr.includes('cold_storage') || typeStr.includes('cold storage')) {
+                      navigate(`/cold-storage/vouchers?highlightRef=${encodeURIComponent(refVal)}`);
+                    } else if (typeStr.includes('godown_transfer') || typeStr.includes('godown transfer')) {
+                      navigate(`/entry/godown-transfer-display?highlightRef=${encodeURIComponent(refVal)}`);
+                    } else if (typeStr.includes('item_transfer') || typeStr.includes('item transfer')) {
+                      navigate(`/inventory/item-transfer/display?highlightRef=${encodeURIComponent(refVal)}`);
+                    } else if (typeStr.includes('packing')) {
+                      navigate(`/entry/packing-display?highlightRef=${encodeURIComponent(refVal)}`);
+                    } else if (typeStr.includes('weight_conversion')) {
+                      navigate(`/entry/weight-conversion-display?highlightRef=${encodeURIComponent(refVal)}`);
                     } else if (typeStr.includes('flour out return')) {
-                      navigate(`/entry/flour-out-return-display?search=${encodeURIComponent(refVal)}`);
+                      navigate(`/entry/flour-out-return-display?highlightRef=${encodeURIComponent(refVal)}`);
                     } else if (typeStr.includes('flour out')) {
-                      navigate(`/entry/flour-out-display?search=${encodeURIComponent(refVal)}`);
+                      navigate(`/entry/flour-out-display?highlightRef=${encodeURIComponent(refVal)}`);
                     } else {
-                      navigate(`/entry/purchase-display?search=${encodeURIComponent(refVal)}`);
+                      navigate(`/entry/purchase-display?highlightRef=${encodeURIComponent(refVal)}`);
                     }
                   };
 
@@ -295,14 +350,16 @@ const LotHistoryReport = () => {
                       <td>{row.date ? new Date(row.date).toLocaleDateString() : '-'}</td>
                       <td style={{ fontWeight: 'bold' }}>{row.item_name || '-'}</td>
                       <td style={{ fontFamily: 'monospace', fontWeight: 'bold', color: '#1e293b' }}>{row.lot_no || '-'}</td>
+                      <td>{row.godown_name || '-'}</td>
+                      <td>{row.party_name || '-'}</td>
                       <td>
                         <span style={{
                           padding: '2px 8px',
                           borderRadius: '4px',
                           fontSize: '11px',
                           fontWeight: 'bold',
-                          background: row.type?.includes('Purchase') ? '#dcfce7' : row.type?.includes('Sale') ? '#fee2e2' : '#f1f5f9',
-                          color: row.type?.includes('Purchase') ? '#15803d' : row.type?.includes('Sale') ? '#b91c1c' : '#334155'
+                          background: row.type?.includes('PURCHASE') || row.type?.includes('Purchase') ? '#dcfce7' : (row.type?.includes('SALE') || row.type?.includes('Sale')) ? '#fee2e2' : '#f1f5f9',
+                          color: row.type?.includes('PURCHASE') || row.type?.includes('Purchase') ? '#15803d' : (row.type?.includes('SALE') || row.type?.includes('Sale')) ? '#b91c1c' : '#334155'
                         }}>
                           {row.type || '-'}
                         </span>

@@ -213,6 +213,8 @@ app.use('/api/operational-charges', require('./routes/operationalCharges'))
 // Phases 14–18 Compliance, Complaint, Recall, BI & AI Modules
 app.use('/api/compliance-system', require('./routes/complianceSystem'))
 app.use('/api/complaint-recall', require('./routes/complaintRecall'))
+app.use('/api/complaints', require('./routes/complaints'))
+app.use('/api/capa', require('./routes/capa'))
 app.use('/api/bi-intelligence', require('./routes/biIntelligence'))
 app.use('/api/ai-intelligence', require('./routes/aiIntelligence'))
 

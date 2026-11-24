@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   Box,
   Typography,
@@ -47,8 +48,12 @@ import {
 import manufacturingService from '../../services/manufacturingService';
 
 const LotGenealogyDashboard = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const urlLotParam = (searchParams.get('lotNo') || searchParams.get('lot') || searchParams.get('lot_no') || '').trim();
+
   const [activeTab, setActiveTab] = useState(0);
-  const [selectedLotNo, setSelectedLotNo] = useState('');
+  const [selectedLotNo, setSelectedLotNo] = useState(urlLotParam);
   const [lotOptions, setLotOptions] = useState([]);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [lotDetails, setLotDetails] = useState(null);
@@ -58,6 +63,22 @@ const LotGenealogyDashboard = () => {
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
+  const selectedLotRef = useRef(urlLotParam);
+  const urlLotRef = useRef(urlLotParam);
+  const loadSeqRef = useRef(0);
+  selectedLotRef.current = selectedLotNo;
+  urlLotRef.current = urlLotParam;
+
+  const selectLot = useCallback((nextLot, syncUrl = true) => {
+    const clean = String(nextLot || '').trim();
+    if (!clean) return;
+    selectedLotRef.current = clean;
+    setSelectedLotNo(clean);
+    if (syncUrl) {
+      setSearchParams({ lotNo: clean }, { replace: true });
+    }
+  }, [setSearchParams]);
+
   // Modals
   const [splitDialogOpen, setSplitDialogOpen] = useState(false);
   const [splitRows, setSplitRows] = useState([
@@ -65,53 +86,67 @@ const LotGenealogyDashboard = () => {
     { targetLotNo: '', quantity: '', godownName: '' }
   ]);
 
-  // Load Lot Genealogy Details
+  // Load Lot Genealogy Details (sequence-guarded against stale async overwrites)
   const loadLotData = useCallback(async (lotNo) => {
-    if (!lotNo) return;
+    const clean = String(lotNo || '').trim();
+    if (!clean) return;
+    const seq = ++loadSeqRef.current;
     setDetailsLoading(true);
     setError('');
     try {
       const [detRes, fwdRes, backRes, recRes] = await Promise.all([
-        manufacturingService.getLotDetails(lotNo),
-        manufacturingService.getForwardTrace(lotNo),
-        manufacturingService.getBackwardTrace(lotNo),
-        manufacturingService.getRecallReport(lotNo)
+        manufacturingService.getLotDetails(clean),
+        manufacturingService.getForwardTrace(clean),
+        manufacturingService.getBackwardTrace(clean),
+        manufacturingService.getRecallReport(clean)
       ]);
+      if (seq !== loadSeqRef.current) return;
 
       if (detRes.success) setLotDetails(detRes.data);
       if (fwdRes.success) setForwardTree(fwdRes.data);
       if (backRes.success) setBackwardTree(backRes.data);
       if (recRes.success) setRecallReport(recRes.data);
     } catch (e) {
+      if (seq !== loadSeqRef.current) return;
       console.error('Error loading lot trace:', e);
       setError('Could not load complete genealogy tree for this lot.');
     } finally {
-      setDetailsLoading(false);
+      if (seq === loadSeqRef.current) {
+        setDetailsLoading(false);
+      }
     }
   }, []);
 
-  // Fetch lot suggestions from database
+  // Fetch lot suggestions from database (never override URL or user-selected lot!)
   const fetchLotOptions = useCallback(async (q = '') => {
     try {
       const res = await manufacturingService.searchLots(q);
       if (res.success && res.data) {
         setLotOptions(res.data);
-        if (!selectedLotNo && res.data.length > 0) {
-          setSelectedLotNo(res.data[0].lotNo);
+        if (!selectedLotRef.current && !urlLotRef.current && res.data.length > 0) {
+          selectLot(res.data[0].lotNo, false);
         }
       }
     } catch (e) {
       console.error('Error fetching lot options:', e);
     }
-  }, [selectedLotNo]);
+  }, [selectLot]);
+
+  // Keep selected lot synchronized whenever URL query param changes (e.g. from 360 Dossier -> Trace Lot Genealogy Tree)
+  useEffect(() => {
+    if (urlLotParam && urlLotParam.toUpperCase() !== String(selectedLotRef.current || '').toUpperCase()) {
+      selectedLotRef.current = urlLotParam;
+      setSelectedLotNo(urlLotParam);
+    }
+  }, [urlLotParam]);
 
   useEffect(() => {
     fetchLotOptions();
 
     const handleUpdate = () => {
       fetchLotOptions();
-      if (selectedLotNo) {
-        loadLotData(selectedLotNo);
+      if (selectedLotRef.current) {
+        loadLotData(selectedLotRef.current);
       }
     };
 
@@ -124,7 +159,7 @@ const LotGenealogyDashboard = () => {
       window.removeEventListener('erp_company_changed', handleUpdate);
       window.removeEventListener('erp_data_updated', handleUpdate);
     };
-  }, [fetchLotOptions, selectedLotNo, loadLotData]);
+  }, [fetchLotOptions, loadLotData]);
 
   useEffect(() => {
     if (selectedLotNo) {
@@ -170,7 +205,27 @@ const LotGenealogyDashboard = () => {
             </Stack>
           </Grid>
           <Grid item xs={12} md={5}>
-            <Stack direction="row" spacing={1.5} justifyContent={{ xs: 'flex-start', md: 'flex-end' }}>
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap justifyContent={{ xs: 'flex-start', md: 'flex-end' }}>
+              {selectedLotNo && (
+                <>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    onClick={() => navigate(`/quality/traceability?lot=${encodeURIComponent(selectedLotNo)}`)}
+                    sx={{ textTransform: 'none', fontWeight: 600 }}
+                  >
+                    P8 Compliance Trace
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    onClick={() => navigate(`/reports/lot-history?lotNo=${encodeURIComponent(selectedLotNo)}`)}
+                    sx={{ textTransform: 'none', fontWeight: 600 }}
+                  >
+                    Lot Ledger
+                  </Button>
+                </>
+              )}
               <Button
                 variant="outlined"
                 startIcon={<CallSplitIcon />}
@@ -211,10 +266,25 @@ const LotGenealogyDashboard = () => {
             </Typography>
             <Autocomplete
               options={lotOptions}
-              getOptionLabel={(option) => `${option.lotNo} — ${option.itemName} (${option.currentQuantity ?? option.quantity ?? 0} Bags / ${option.currentWeightKg ?? 0} KG)`}
-              value={lotOptions.find(o => o.lotNo === selectedLotNo) || null}
+              getOptionLabel={(option) => {
+                if (typeof option === 'string') return option;
+                return `${option.lotNo} — ${option.itemName || 'Lot'} (${option.currentQuantity ?? option.quantity ?? 0} Bags / ${Number(option.currentWeightKg ?? 0).toLocaleString()} KG)`;
+              }}
+              isOptionEqualToValue={(option, val) =>
+                String(option?.lotNo || '').toUpperCase() === String(val?.lotNo || '').toUpperCase()
+              }
+              value={
+                selectedLotNo
+                  ? (lotOptions.find(o => String(o.lotNo || '').toUpperCase() === String(selectedLotNo).toUpperCase()) || {
+                      lotNo: selectedLotNo,
+                      itemName: lotDetails?.itemName || '',
+                      currentQuantity: lotDetails?.remainingQuantity ?? 0,
+                      currentWeightKg: lotDetails?.currentWeightKg ?? 0
+                    })
+                  : null
+              }
               onChange={(e, val) => {
-                if (val) setSelectedLotNo(val.lotNo);
+                if (val && val.lotNo) selectLot(val.lotNo);
               }}
               renderInput={(params) => (
                 <TextField {...params} size="small" placeholder="Search by Lot #, Grain or Output..." />
@@ -229,7 +299,7 @@ const LotGenealogyDashboard = () => {
                     size="small"
                     color="secondary"
                     variant="outlined"
-                    onClick={() => setSelectedLotNo(pLot)}
+                    onClick={() => selectLot(pLot)}
                     sx={{ fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}
                   />
                 ))}
@@ -240,7 +310,7 @@ const LotGenealogyDashboard = () => {
                     size="small"
                     color="info"
                     variant="outlined"
-                    onClick={() => setSelectedLotNo(csLot)}
+                    onClick={() => selectLot(csLot)}
                     sx={{ fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}
                   />
                 ))}
@@ -393,8 +463,29 @@ const LotGenealogyDashboard = () => {
                                   label={`Inward derived from Raw Parent Lot #${lotDetails.purchase.parentLotNo}`}
                                   size="small"
                                   color="info"
-                                  sx={{ fontWeight: 600, mt: 0.5 }}
+                                  onClick={() => selectLot(lotDetails.purchase.parentLotNo)}
+                                  sx={{ fontWeight: 600, mt: 0.5, cursor: 'pointer' }}
                                 />
+                              )}
+                              {lotDetails.parentPurchases?.length > 1 && (
+                                <Box sx={{ mt: 0.5 }}>
+                                  <Typography variant="caption" sx={{ fontWeight: 700, color: '#475569', display: 'block', mb: 0.5 }}>
+                                    All Blended Parent Purchases ({lotDetails.parentPurchases.length}):
+                                  </Typography>
+                                  <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                                    {lotDetails.parentPurchases.map((pp, pIdx) => (
+                                      <Chip
+                                        key={`pp-step1-${pIdx}`}
+                                        label={`${pp.parentLotNo || pp.lotNo}: ${pp.supplierName} (#${pp.voucherNo})`}
+                                        size="small"
+                                        variant="outlined"
+                                        color="primary"
+                                        onClick={() => selectLot(pp.parentLotNo || pp.lotNo)}
+                                        sx={{ fontSize: '10px', fontWeight: 600, cursor: 'pointer' }}
+                                      />
+                                    ))}
+                                  </Stack>
+                                </Box>
                               )}
                               {lotDetails.qc ? (
                                 <Box sx={{ mt: 1, p: 1, bgcolor: '#f0fdf4', borderRadius: '6px', border: '1px solid #bbf7d0' }}>
@@ -435,7 +526,7 @@ const LotGenealogyDashboard = () => {
                             </Typography>
                           </Stack>
                           <Divider sx={{ mb: 1.5 }} />
-                          {(lotDetails?.millingConsumptions?.length > 0 || lotDetails?.millingOutputs?.length > 0 || lotDetails?.weightConversionConsumptions?.length > 0 || lotDetails?.weightConversionOutputs?.length > 0) ? (
+                          {(lotDetails?.millingBatches?.length > 0 || lotDetails?.millingConsumptions?.length > 0 || lotDetails?.millingOutputs?.length > 0 || lotDetails?.weightConversionConsumptions?.length > 0 || lotDetails?.weightConversionOutputs?.length > 0) ? (
                             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
                               {/* Weight Conversion Consumptions */}
                               {lotDetails.weightConversionConsumptions?.map((wc, i) => (
@@ -457,7 +548,7 @@ const LotGenealogyDashboard = () => {
                                       size="small"
                                       variant="outlined"
                                       color="primary"
-                                      onClick={() => setSelectedLotNo(wc.output_lot_no)}
+                                      onClick={() => selectLot(wc.output_lot_no)}
                                       sx={{ mt: 0.8, textTransform: 'none', fontWeight: 700, fontSize: '11px', py: 0.2 }}
                                     >
                                       → Produced Output Lot #{wc.output_lot_no} ({wc.output_weight || wc.output_qty} KG {wc.output_item}) [Inspect]
@@ -486,7 +577,7 @@ const LotGenealogyDashboard = () => {
                                       size="small"
                                       variant="outlined"
                                       color="secondary"
-                                      onClick={() => setSelectedLotNo(wc.input_lot_no)}
+                                      onClick={() => selectLot(wc.input_lot_no)}
                                       sx={{ mt: 0.8, textTransform: 'none', fontWeight: 700, fontSize: '11px', py: 0.2 }}
                                     >
                                       ← Converted from Parent Lot #{wc.input_lot_no} ({wc.input_item}) [Inspect]
@@ -495,61 +586,183 @@ const LotGenealogyDashboard = () => {
                                 </Box>
                               ))}
 
-                              {/* Milling consumptions */}
-                              {lotDetails.millingConsumptions?.map((wo, i) => (
-                                <Box key={`mc-${i}`} sx={{ p: 1.5, bgcolor: '#f8fafc', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
-                                  <Stack direction="row" justifyContent="space-between" alignItems="center">
-                                    <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a' }}>
-                                      Batch #{wo.work_order_no}
-                                    </Typography>
-                                    <Chip label="CONSUMED" size="small" sx={{ fontSize: '10px', height: '20px', fontWeight: 700, bgcolor: '#e0f2fe', color: '#0369a1' }} />
-                                  </Stack>
-                                  <Typography variant="caption" sx={{ color: '#64748b', display: 'block', mt: 0.5 }}>
-                                    Flour Mill: <strong>{wo.work_unit}</strong> | Date: <strong>{wo.work_order_date}</strong>
-                                  </Typography>
-                                  <Typography variant="caption" sx={{ color: '#334155', display: 'block' }}>
-                                    Consumed: <strong>{wo.input_qty} KG</strong> | Target: <strong>{wo.target_product}</strong>
-                                  </Typography>
-                                  {wo.output_lot_no && (
-                                    <Chip
-                                      label={`→ Output Lot #${wo.output_lot_no} (${wo.output_weight || wo.input_qty} KG)`}
-                                      size="small"
-                                      color="primary"
-                                      onClick={() => setSelectedLotNo(wo.output_lot_no)}
-                                      sx={{ mt: 0.8, fontWeight: 600, fontSize: '11px', cursor: 'pointer' }}
-                                    />
-                                  )}
-                                </Box>
-                              ))}
+                              {/* Deduplicated Production / Milling Batches with Inputs, Outputs & Wastages */}
+                              {lotDetails.millingBatches?.length > 0 ? (
+                                lotDetails.millingBatches.map((batch, bIdx) => {
+                                  const isSelectedOutput = (batch.outputs || []).some(o => o.is_selected_lot);
+                                  const isSelectedInput = (batch.inputs || []).some(i => i.is_selected_lot);
+                                  const roleLabel = isSelectedOutput && isSelectedInput
+                                    ? 'INPUT & OUTPUT'
+                                    : isSelectedOutput
+                                      ? 'PRODUCED'
+                                      : isSelectedInput
+                                        ? 'CONSUMED'
+                                        : 'WASTAGE / BY-PRODUCT';
+                                  const roleColor = isSelectedOutput ? 'success' : (isSelectedInput ? 'primary' : 'warning');
 
-                              {/* Milling outputs */}
-                              {lotDetails.millingOutputs?.map((mo, i) => (
-                                <Box key={`mo-${i}`} sx={{ p: 1.5, bgcolor: '#f0fdf4', borderRadius: '6px', border: '1px solid #bbf7d0' }}>
-                                  <Stack direction="row" justifyContent="space-between" alignItems="center">
-                                    <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a' }}>
-                                      Batch #{mo.work_order_no}
-                                    </Typography>
-                                    <Chip label="PRODUCED" size="small" color="success" sx={{ fontSize: '10px', height: '20px', fontWeight: 700 }} />
-                                  </Stack>
-                                  <Typography variant="caption" sx={{ color: '#166534', display: 'block', mt: 0.5 }}>
-                                    Flour Mill: <strong>{mo.work_unit}</strong> | Date: <strong>{mo.work_order_date}</strong>
-                                  </Typography>
-                                  <Typography variant="caption" sx={{ color: '#14532d', display: 'block' }}>
-                                    Produced: <strong>{mo.output_kgs} KG</strong> {mo.finished_product}
-                                  </Typography>
-                                  <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.8 }}>
-                                    {(mo.inputs && mo.inputs.length > 0 ? mo.inputs : (mo.input_lot_no ? [{ lot_no: mo.input_lot_no, item_name: mo.input_item }] : [])).map((inp, j) => (
-                                      <Chip
-                                        key={`mo-inp-${j}`}
-                                        label={`← Input #${inp.lot_no} (${inp.item_name || ''})`}
-                                        size="small"
-                                        onClick={() => setSelectedLotNo(inp.lot_no)}
-                                        sx={{ fontWeight: 600, fontSize: '11px', bgcolor: '#dbeafe', color: '#1e40af', cursor: 'pointer' }}
-                                      />
-                                    ))}
-                                  </Stack>
-                                </Box>
-                              ))}
+                                  return (
+                                    <Box key={`mb-${bIdx}`} sx={{ p: 1.5, bgcolor: isSelectedOutput ? '#f0fdf4' : '#f8fafc', borderRadius: '8px', border: isSelectedOutput ? '1px solid #bbf7d0' : '1px solid #cbd5e1' }}>
+                                      <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={0.5}>
+                                        <Typography variant="body2" sx={{ fontWeight: 800, color: '#0f172a' }}>
+                                          Batch #{batch.work_order_no}
+                                        </Typography>
+                                        <Stack direction="row" spacing={0.5}>
+                                          {batch.process_mode && (
+                                            <Chip label={batch.process_mode} size="small" variant="outlined" sx={{ fontSize: '10px', height: '20px', fontWeight: 600 }} />
+                                          )}
+                                          <Chip label={roleLabel} size="small" color={roleColor} sx={{ fontSize: '10px', height: '20px', fontWeight: 700 }} />
+                                        </Stack>
+                                      </Stack>
+                                      <Typography variant="caption" sx={{ color: '#475569', display: 'block', mt: 0.5 }}>
+                                        Facility: <strong>{batch.work_unit}</strong> | Date: <strong>{batch.work_order_date}</strong>
+                                        {batch.outpass_no ? ` | Outpass: ${batch.outpass_no}` : ''}
+                                        {batch.inpass_no ? ` | Inpass: ${batch.inpass_no}` : ''}
+                                      </Typography>
+
+                                      <Typography variant="caption" sx={{ color: '#0f172a', display: 'block', mt: 0.5, fontWeight: 700 }}>
+                                        Mass Balance: In {Number(batch.total_input_kg || 0).toLocaleString()} KG → Out {Number(batch.total_output_kg || 0).toLocaleString()} KG
+                                        {batch.total_wastage_kg > 0 ? ` | Wastage ${Number(batch.total_wastage_kg).toLocaleString()} KG` : ''}
+                                        {batch.unaccounted_loss_kg > 0 ? ` | Process Loss ${Number(batch.unaccounted_loss_kg).toLocaleString()} KG` : ''}
+                                        {` (${batch.yield_percent ?? 0}% Yield)`}
+                                      </Typography>
+
+                                      {/* Inputs */}
+                                      {batch.inputs?.length > 0 && (
+                                        <Box sx={{ mt: 0.75 }}>
+                                          <Typography variant="caption" sx={{ fontWeight: 700, color: '#1e40af', display: 'block' }}>
+                                            Inputs Consumed:
+                                          </Typography>
+                                          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.3 }}>
+                                            {batch.inputs.map((inp, j) => (
+                                              <Chip
+                                                key={`mb-in-${j}`}
+                                                label={`${inp.lot_no}: ${inp.item_name} (${inp.qty} Bags / ${Number(inp.total_wt || 0).toLocaleString()} KG)`}
+                                                size="small"
+                                                onClick={() => inp.lot_no && selectLot(inp.lot_no)}
+                                                sx={{
+                                                  fontSize: '10.5px',
+                                                  fontWeight: 600,
+                                                  cursor: inp.lot_no ? 'pointer' : 'default',
+                                                  bgcolor: inp.is_selected_lot ? '#bfdbfe' : '#e0f2fe',
+                                                  color: '#1e3a8a',
+                                                  border: inp.is_selected_lot ? '1px solid #2563eb' : 'none'
+                                                }}
+                                              />
+                                            ))}
+                                          </Stack>
+                                        </Box>
+                                      )}
+
+                                      {/* Outputs */}
+                                      {batch.outputs?.length > 0 && (
+                                        <Box sx={{ mt: 0.75 }}>
+                                          <Typography variant="caption" sx={{ fontWeight: 700, color: '#15803d', display: 'block' }}>
+                                            Finished / Processed Outputs:
+                                          </Typography>
+                                          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.3 }}>
+                                            {batch.outputs.map((out, j) => (
+                                              <Chip
+                                                key={`mb-out-${j}`}
+                                                label={`→ ${out.lot_no}: ${out.item_name} (${out.qty} Bags / ${Number(out.total_wt || 0).toLocaleString()} KG)`}
+                                                size="small"
+                                                color={out.is_selected_lot ? 'success' : 'primary'}
+                                                variant={out.is_selected_lot ? 'filled' : 'outlined'}
+                                                onClick={() => out.lot_no && selectLot(out.lot_no)}
+                                                sx={{ fontSize: '10.5px', fontWeight: 700, cursor: out.lot_no ? 'pointer' : 'default' }}
+                                              />
+                                            ))}
+                                          </Stack>
+                                        </Box>
+                                      )}
+
+                                      {/* Wastages / By-products */}
+                                      {batch.wastages?.length > 0 && (
+                                        <Box sx={{ mt: 0.75 }}>
+                                          <Typography variant="caption" sx={{ fontWeight: 700, color: '#b45309', display: 'block' }}>
+                                            Wastage &amp; By-Product Recovery:
+                                          </Typography>
+                                          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.3 }}>
+                                            {batch.wastages.map((wst, j) => {
+                                              const hasValidLot = wst.lot_no && wst.lot_no !== '-' && String(wst.lot_no).toUpperCase() !== 'LOSS';
+                                              return (
+                                                <Chip
+                                                  key={`mb-wst-${j}`}
+                                                  label={`${wst.item_name} [${wst.category || 'Wastage'}]${hasValidLot ? ` (${wst.lot_no})` : ''}: ${wst.qty ? `${wst.qty} Bags / ` : ''}${Number(wst.total_wt || 0).toLocaleString()} KG`}
+                                                  size="small"
+                                                  onClick={() => hasValidLot && selectLot(wst.lot_no)}
+                                                  sx={{
+                                                    fontSize: '10.5px',
+                                                    fontWeight: 600,
+                                                    bgcolor: '#fef3c7',
+                                                    color: '#92400e',
+                                                    border: '1px solid #fde68a',
+                                                    cursor: hasValidLot ? 'pointer' : 'default'
+                                                  }}
+                                                />
+                                              );
+                                            })}
+                                          </Stack>
+                                        </Box>
+                                      )}
+                                    </Box>
+                                  );
+                                })
+                              ) : (
+                                <>
+                                  {lotDetails.millingConsumptions?.map((wo, i) => (
+                                    <Box key={`mc-${i}`} sx={{ p: 1.5, bgcolor: '#f8fafc', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                                      <Stack direction="row" justifyContent="space-between" alignItems="center">
+                                        <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a' }}>
+                                          Batch #{wo.work_order_no}
+                                        </Typography>
+                                        <Chip label="CONSUMED" size="small" sx={{ fontSize: '10px', height: '20px', fontWeight: 700, bgcolor: '#e0f2fe', color: '#0369a1' }} />
+                                      </Stack>
+                                      <Typography variant="caption" sx={{ color: '#64748b', display: 'block', mt: 0.5 }}>
+                                        Flour Mill: <strong>{wo.work_unit}</strong> | Date: <strong>{wo.work_order_date}</strong>
+                                      </Typography>
+                                      <Typography variant="caption" sx={{ color: '#334155', display: 'block' }}>
+                                        Consumed: <strong>{wo.input_qty} KG</strong> | Target: <strong>{wo.target_product}</strong>
+                                      </Typography>
+                                      {wo.output_lot_no && (
+                                        <Chip
+                                          label={`→ Output Lot #${wo.output_lot_no} (${wo.output_weight || wo.input_qty} KG)`}
+                                          size="small"
+                                          color="primary"
+                                          onClick={() => selectLot(wo.output_lot_no)}
+                                          sx={{ mt: 0.8, fontWeight: 600, fontSize: '11px', cursor: 'pointer' }}
+                                        />
+                                      )}
+                                    </Box>
+                                  ))}
+                                  {lotDetails.millingOutputs?.map((mo, i) => (
+                                    <Box key={`mo-${i}`} sx={{ p: 1.5, bgcolor: '#f0fdf4', borderRadius: '6px', border: '1px solid #bbf7d0' }}>
+                                      <Stack direction="row" justifyContent="space-between" alignItems="center">
+                                        <Typography variant="body2" sx={{ fontWeight: 700, color: '#0f172a' }}>
+                                          Batch #{mo.work_order_no}
+                                        </Typography>
+                                        <Chip label="PRODUCED" size="small" color="success" sx={{ fontSize: '10px', height: '20px', fontWeight: 700 }} />
+                                      </Stack>
+                                      <Typography variant="caption" sx={{ color: '#166534', display: 'block', mt: 0.5 }}>
+                                        Flour Mill: <strong>{mo.work_unit}</strong> | Date: <strong>{mo.work_order_date}</strong>
+                                      </Typography>
+                                      <Typography variant="caption" sx={{ color: '#14532d', display: 'block' }}>
+                                        Produced: <strong>{mo.output_kgs} KG</strong> {mo.finished_product}
+                                      </Typography>
+                                      <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.8 }}>
+                                        {(mo.inputs && mo.inputs.length > 0 ? mo.inputs : (mo.input_lot_no ? [{ lot_no: mo.input_lot_no, item_name: mo.input_item }] : [])).map((inp, j) => (
+                                          <Chip
+                                            key={`mo-inp-${j}`}
+                                            label={`← Input #${inp.lot_no} (${inp.item_name || ''})`}
+                                            size="small"
+                                            onClick={() => selectLot(inp.lot_no)}
+                                            sx={{ fontWeight: 600, fontSize: '11px', bgcolor: '#dbeafe', color: '#1e40af', cursor: 'pointer' }}
+                                          />
+                                        ))}
+                                      </Stack>
+                                    </Box>
+                                  ))}
+                                </>
+                              )}
                             </Box>
                           ) : (
                             <Box sx={{ p: 1, bgcolor: '#f8fafc', borderRadius: '6px' }}>
@@ -580,7 +793,7 @@ const LotGenealogyDashboard = () => {
                                     <Typography variant="body2" sx={{ fontWeight: 700, color: '#1e40af' }}>
                                       Cold Storage {cs.voucher_type} #{cs.voucher_no}
                                     </Typography>
-                                    <Chip label={cs.cold_storage_lot_no} size="small" color="info" onClick={() => setSelectedLotNo(cs.cold_storage_lot_no)} sx={{ fontSize: '10px', height: '20px', fontWeight: 700, cursor: 'pointer' }} />
+                                    <Chip label={cs.cold_storage_lot_no} size="small" color="info" onClick={() => selectLot(cs.cold_storage_lot_no)} sx={{ fontSize: '10px', height: '20px', fontWeight: 700, cursor: 'pointer' }} />
                                   </Stack>
                                   <Typography variant="caption" sx={{ color: '#1e3a8a', display: 'block', mt: 0.25 }}>
                                     {cs.source_godown_name || cs.cold_storage_name} → {cs.voucher_type === 'IN' ? cs.cold_storage_name : cs.destination_godown_name} | {cs.quantity} Bags ({cs.total_wt || 0} KG) | {cs.voucher_date}
@@ -786,12 +999,12 @@ const LotGenealogyDashboard = () => {
                                 <Chip
                                   label={`Input Lot #${inp.lot_no}`}
                                   size="small"
-                                  onClick={() => setSelectedLotNo(inp.lot_no)}
+                                  onClick={() => selectLot(inp.lot_no)}
                                   sx={{ fontWeight: 700, cursor: 'pointer', mr: 1, bgcolor: '#e0f2fe', color: '#0369a1' }}
                                 />
                               </TableCell>
                               <TableCell>{inp.item_name || 'Raw Grain'}</TableCell>
-                              <TableCell sx={{ fontWeight: 700 }}>{inp.total_wt || mo.output_kgs} KG</TableCell>
+                              <TableCell sx={{ fontWeight: 700 }}>{Number(inp.total_wt || mo.output_kgs || 0).toLocaleString()} KG ({inp.qty || 0} Bags)</TableCell>
                               <TableCell>
                                 <Chip label={lotDetails?.qcStatus || 'ACCEPTED'} size="small" color="success" sx={{ fontWeight: 600 }} />
                               </TableCell>
@@ -799,6 +1012,28 @@ const LotGenealogyDashboard = () => {
                             </TableRow>
                           ));
                         })}
+
+                        {/* 2b. Co-Outputs & Wastages from Generating Batches */}
+                        {lotDetails?.millingOutputs?.flatMap((mo, moIdx) =>
+                          (mo.wastages || []).map((wst, wIdx) => (
+                            <TableRow key={`back-wst-${moIdx}-${wIdx}`} sx={{ bgcolor: '#fffbeb' }}>
+                              <TableCell>
+                                <Chip label="Batch Wastage / By-product" size="small" color="warning" sx={{ fontWeight: 600 }} />
+                              </TableCell>
+                              <TableCell sx={{ fontWeight: 600 }}>
+                                Batch #{mo.work_order_no}{wst.lot_no && wst.lot_no !== '-' ? ` (${wst.lot_no})` : ''}
+                              </TableCell>
+                              <TableCell>{wst.item_name} [{wst.category || 'Wastage'}]</TableCell>
+                              <TableCell sx={{ fontWeight: 700, color: '#b45309' }}>
+                                {Number(wst.total_wt || 0).toLocaleString()} KG{wst.qty ? ` (${wst.qty} Bags)` : ''}
+                              </TableCell>
+                              <TableCell>
+                                <Chip label="RECOVERY / LOSS" size="small" color="warning" variant="outlined" sx={{ fontWeight: 600 }} />
+                              </TableCell>
+                              <TableCell>{mo.work_order_date || 'N/A'}</TableCell>
+                            </TableRow>
+                          ))
+                        )}
 
                         {/* 3. Purchase Return / Debit Note Stage */}
                         {lotDetails?.purchaseReturns?.map((pr, idx) => (
@@ -841,14 +1076,14 @@ const LotGenealogyDashboard = () => {
                         ))}
 
                         {/* Fallback if no purchase, return, or milling records exist */}
-                        {!lotDetails?.purchase && (!lotDetails?.purchaseReturns || lotDetails.purchaseReturns.length === 0) && (!lotDetails?.millingOutputs || lotDetails.millingOutputs.length === 0) && (
+                        {!lotDetails?.purchase && (!lotDetails?.purchaseReturns || lotDetails.purchaseReturns.length === 0) && (!lotDetails?.millingOutputs || lotDetails.millingOutputs.length === 0) && (!lotDetails?.weightConversionOutputs || lotDetails.weightConversionOutputs.length === 0) && (
                           <TableRow>
                             <TableCell>
                               <Chip label="Stock Lot" size="small" color="default" sx={{ fontWeight: 600 }} />
                             </TableCell>
                             <TableCell>Initial Stock Inward</TableCell>
                             <TableCell>{lotDetails?.itemName}</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>{lotDetails?.quantity} KG</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>{lotDetails?.quantity ?? 0} Bags ({Number(lotDetails?.originalWeightKg || 0).toLocaleString()} KG)</TableCell>
                             <TableCell>
                               <Chip label={lotDetails?.qcStatus || 'ACCEPTED'} size="small" color="success" sx={{ fontWeight: 600 }} />
                             </TableCell>
@@ -913,7 +1148,7 @@ const LotGenealogyDashboard = () => {
                             <strong>Godown Location:</strong> {lotDetails?.godown || '-'}
                           </Typography>
                           <Typography variant="body2">
-                            <strong>On-Hand Stock to Quarantine:</strong> {lotDetails?.remainingQuantity ?? 0} KG
+                            <strong>On-Hand Stock to Quarantine:</strong> {lotDetails?.remainingQuantity ?? 0} Bags ({Number(lotDetails?.currentWeightKg || 0).toLocaleString()} KG)
                           </Typography>
                           <Typography variant="body2">
                             <strong>Current QC Lock:</strong> {lotDetails?.qcStatus || 'ACCEPTED'}
@@ -927,9 +1162,9 @@ const LotGenealogyDashboard = () => {
                       <Card variant="outlined" sx={{ borderRadius: '10px' }}>
                         <CardContent>
                           <Typography variant="subtitle1" sx={{ fontWeight: 700, color: '#0f172a', mb: 1.5 }}>
-                            Affected Milling, Production & Weight Conversion Batches
+                            Affected Milling, Production, Wastage &amp; Weight Conversion Batches
                           </Typography>
-                          {(lotDetails?.millingConsumptions?.length > 0 || lotDetails?.millingOutputs?.length > 0 || lotDetails?.weightConversionConsumptions?.length > 0 || lotDetails?.weightConversionOutputs?.length > 0) ? (
+                          {(lotDetails?.millingBatches?.length > 0 || lotDetails?.millingConsumptions?.length > 0 || lotDetails?.millingOutputs?.length > 0 || lotDetails?.weightConversionConsumptions?.length > 0 || lotDetails?.weightConversionOutputs?.length > 0) ? (
                             <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: '6px' }}>
                               <Table size="small">
                                 <TableHead sx={{ bgcolor: '#f8fafc' }}>
@@ -937,7 +1172,7 @@ const LotGenealogyDashboard = () => {
                                     <TableCell sx={{ fontWeight: 700 }}>Work Order / Conversion #</TableCell>
                                     <TableCell sx={{ fontWeight: 700 }}>Operation / Location</TableCell>
                                     <TableCell sx={{ fontWeight: 700 }}>Date</TableCell>
-                                    <TableCell sx={{ fontWeight: 700 }}>Quantity (KG)</TableCell>
+                                    <TableCell sx={{ fontWeight: 700 }}>Inputs / Outputs / Wastage (KG)</TableCell>
                                     <TableCell sx={{ fontWeight: 700 }}>Type / Role</TableCell>
                                   </TableRow>
                                 </TableHead>
@@ -947,7 +1182,7 @@ const LotGenealogyDashboard = () => {
                                       <TableCell sx={{ fontWeight: 600, color: '#1e40af' }}>WC #{wc.conversion_s_no || wc.conversion_id}</TableCell>
                                       <TableCell>Weight Conversion ({wc.conversion_type || 'Conversion'})</TableCell>
                                       <TableCell>{wc.conversion_date}</TableCell>
-                                      <TableCell sx={{ fontWeight: 600 }}>{wc.input_weight || wc.input_qty} KG</TableCell>
+                                      <TableCell sx={{ fontWeight: 600 }}>{wc.input_weight || wc.input_qty} KG → {wc.output_lot_no}</TableCell>
                                       <TableCell><Chip label="WC INPUT CONSUMED" size="small" sx={{ fontSize: '10px', height: '22px', bgcolor: '#dbeafe', color: '#1e40af', fontWeight: 700 }} /></TableCell>
                                     </TableRow>
                                   ))}
@@ -956,28 +1191,58 @@ const LotGenealogyDashboard = () => {
                                       <TableCell sx={{ fontWeight: 600, color: '#15803d' }}>WC #{wc.conversion_s_no || wc.conversion_id}</TableCell>
                                       <TableCell>Weight Conversion ({wc.conversion_type || 'Conversion'})</TableCell>
                                       <TableCell>{wc.conversion_date}</TableCell>
-                                      <TableCell sx={{ fontWeight: 600 }}>{wc.output_weight || wc.output_qty} KG</TableCell>
+                                      <TableCell sx={{ fontWeight: 600 }}>{wc.output_weight || wc.output_qty} KG ← {wc.input_lot_no}</TableCell>
                                       <TableCell><Chip label="WC OUTPUT FG" size="small" color="success" sx={{ fontSize: '10px', height: '22px', fontWeight: 700 }} /></TableCell>
                                     </TableRow>
                                   ))}
-                                  {lotDetails.millingConsumptions?.map((mc, idx) => (
-                                    <TableRow key={`aff-mc-${idx}`}>
-                                      <TableCell sx={{ fontWeight: 600, color: '#0284c7' }}>{mc.work_order_no}</TableCell>
-                                      <TableCell>{mc.work_unit}</TableCell>
-                                      <TableCell>{mc.work_order_date}</TableCell>
-                                      <TableCell sx={{ fontWeight: 600 }}>{mc.input_qty} KG</TableCell>
-                                      <TableCell><Chip label="CONSUMED" size="small" sx={{ fontSize: '11px', height: '22px' }} /></TableCell>
-                                    </TableRow>
-                                  ))}
-                                  {lotDetails.millingOutputs?.map((mo, idx) => (
-                                    <TableRow key={`aff-mo-${idx}`}>
-                                      <TableCell sx={{ fontWeight: 600, color: '#0284c7' }}>{mo.work_order_no}</TableCell>
-                                      <TableCell>{mo.work_unit}</TableCell>
-                                      <TableCell>{mo.work_order_date}</TableCell>
-                                      <TableCell sx={{ fontWeight: 600 }}>{mo.output_kgs} KG</TableCell>
-                                      <TableCell><Chip label="PRODUCED" size="small" color="success" sx={{ fontSize: '11px', height: '22px' }} /></TableCell>
-                                    </TableRow>
-                                  ))}
+                                  {lotDetails.millingBatches?.length > 0 ? (
+                                    lotDetails.millingBatches.map((mb, idx) => (
+                                      <TableRow key={`aff-mb-${idx}`}>
+                                        <TableCell sx={{ fontWeight: 700, color: '#0284c7' }}>{mb.work_order_no}</TableCell>
+                                        <TableCell>{mb.work_unit} ({mb.process_mode || 'MILL'})</TableCell>
+                                        <TableCell>{mb.work_order_date}</TableCell>
+                                        <TableCell sx={{ fontSize: '12px' }}>
+                                          <strong>In:</strong> {Number(mb.total_input_kg || 0).toLocaleString()} KG
+                                          {' | '}
+                                          <strong>Out:</strong> {Number(mb.total_output_kg || 0).toLocaleString()} KG ({(mb.outputs || []).map(o => o.lot_no).join(', ') || '-'})
+                                          {mb.wastages?.length > 0 && (
+                                            <Box sx={{ color: '#b45309', mt: 0.25 }}>
+                                              <strong>Wastage:</strong> {mb.wastages.map(w => `${w.item_name}${w.lot_no && w.lot_no !== '-' ? ` (${w.lot_no})` : ''}: ${w.total_wt} KG`).join(', ')}
+                                            </Box>
+                                          )}
+                                        </TableCell>
+                                        <TableCell>
+                                          <Chip
+                                            label={(mb.outputs || []).some(o => o.is_selected_lot) ? 'PRODUCED' : 'CONSUMED'}
+                                            size="small"
+                                            color={(mb.outputs || []).some(o => o.is_selected_lot) ? 'success' : 'primary'}
+                                            sx={{ fontSize: '11px', height: '22px', fontWeight: 700 }}
+                                          />
+                                        </TableCell>
+                                      </TableRow>
+                                    ))
+                                  ) : (
+                                    <>
+                                      {lotDetails.millingConsumptions?.map((mc, idx) => (
+                                        <TableRow key={`aff-mc-${idx}`}>
+                                          <TableCell sx={{ fontWeight: 600, color: '#0284c7' }}>{mc.work_order_no}</TableCell>
+                                          <TableCell>{mc.work_unit}</TableCell>
+                                          <TableCell>{mc.work_order_date}</TableCell>
+                                          <TableCell sx={{ fontWeight: 600 }}>{mc.input_qty} KG</TableCell>
+                                          <TableCell><Chip label="CONSUMED" size="small" sx={{ fontSize: '11px', height: '22px' }} /></TableCell>
+                                        </TableRow>
+                                      ))}
+                                      {lotDetails.millingOutputs?.map((mo, idx) => (
+                                        <TableRow key={`aff-mo-${idx}`}>
+                                          <TableCell sx={{ fontWeight: 600, color: '#0284c7' }}>{mo.work_order_no}</TableCell>
+                                          <TableCell>{mo.work_unit}</TableCell>
+                                          <TableCell>{mo.work_order_date}</TableCell>
+                                          <TableCell sx={{ fontWeight: 600 }}>{mo.output_kgs} KG</TableCell>
+                                          <TableCell><Chip label="PRODUCED" size="small" color="success" sx={{ fontSize: '11px', height: '22px' }} /></TableCell>
+                                        </TableRow>
+                                      ))}
+                                    </>
+                                  )}
                                 </TableBody>
                               </Table>
                             </TableContainer>
@@ -1018,7 +1283,7 @@ const LotGenealogyDashboard = () => {
                             <Chip label={lot.qcStatus || 'ACCEPTED'} size="small" color={lot.qcStatus === 'REJECTED' || lot.qcStatus === 'RETURNED' ? 'error' : 'success'} sx={{ fontWeight: 600 }} />
                           </TableCell>
                           <TableCell>
-                            <Button size="small" variant="text" onClick={() => { setSelectedLotNo(lot.lotNo); setActiveTab(0); }} sx={{ textTransform: 'none', fontWeight: 600 }}>
+                            <Button size="small" variant="text" onClick={() => { selectLot(lot.lotNo); setActiveTab(0); }} sx={{ textTransform: 'none', fontWeight: 600 }}>
                               Inspect
                             </Button>
                           </TableCell>
@@ -1038,7 +1303,7 @@ const LotGenealogyDashboard = () => {
         <DialogTitle sx={{ fontWeight: 700 }}>Split Lot: {selectedLotNo}</DialogTitle>
         <DialogContent dividers>
           <Typography variant="body2" sx={{ color: '#64748b', mb: 2 }}>
-            Available balance: <strong>{lotDetails?.remainingQuantity ?? 0} KG</strong>. Specify sub-lot IDs and target quantities.
+            Available balance: <strong>{lotDetails?.remainingQuantity ?? 0} Bags ({Number(lotDetails?.currentWeightKg || 0).toLocaleString()} KG)</strong>. Specify sub-lot IDs and target quantities.
           </Typography>
           {splitRows.map((row, idx) => (
             <Stack key={`split-row-${idx}`} direction="row" spacing={1.5} sx={{ mb: 1.5 }}>

@@ -1647,7 +1647,7 @@ router.get('/traceability', async (req, res) => {
     const runner = db.forCompany(Number.isSafeInteger(activeCompanyId) && activeCompanyId > 0 ? activeCompanyId : 1);
     const partyDir = await loadPartyDirectory(activeCompanyId, runner);
 
-    const searchQuery = String(req.query.query || '').trim();
+    const searchQuery = String(req.query.query || req.query.lotNo || req.query.lot || req.query.lot_no || '').trim();
     const hasSearch = searchQuery.length > 0;
     const q = `%${searchQuery}%`;
 
@@ -1935,12 +1935,15 @@ router.get('/traceability', async (req, res) => {
         t.transfers.push(...(gtRes.rows || []));
       } catch (_) {}
 
-      // Milling / Production batches (separate queries per grain_id)
+      // Milling / Production batches (separate queries per grain_id + wastage + inpass + standalone work orders)
+      t.weight_conversions = [];
       try {
         const mgRes = await runner.query(`
-          SELECT DISTINCT g.id AS grain_id, g.s_no, SUBSTR(CAST(g.date AS TEXT), 1, 10) AS date,
+          SELECT DISTINCT g.id AS grain_id, g.s_no, g.work_order_id, g.work_order_no,
+                 SUBSTR(CAST(g.date AS TEXT), 1, 10) AS date,
                  COALESCE(g.work_order_no, 'GRD-' || CAST(g.s_no AS TEXT)) AS batch_no,
-                 COALESCE(fmm.flourmill, g.flour_mill, 'Flour Mill') AS mill_name
+                 COALESCE(fmm.flourmill, g.flour_mill, 'Flour Mill') AS mill_name,
+                 g.process_mode, g.mill_type, g.inpass_no, g.outpass_no
           FROM grains g
           JOIN grain_input_items gii ON gii.grain_id = g.id
           LEFT JOIN flour_mill_master fmm ON (CAST(fmm.id AS TEXT) = CAST(g.flour_mill AS TEXT) OR fmm.flourmill = g.flour_mill)
@@ -1948,20 +1951,120 @@ router.get('/traceability', async (req, res) => {
           ORDER BY g.date ASC, g.id ASC
         `, lotListUpper);
         let prodInputQty = 0;
+        const coveredWoIds = new Set();
+        const coveredWoNos = new Set();
         for (const m of (mgRes.rows || [])) {
-          const inRes = await runner.query(`SELECT item_name, lot_no, qty, total_wt FROM grain_input_items WHERE grain_id = ?`, [m.grain_id]);
-          const outRes = await runner.query(`SELECT item_name, lot_no, qty, total_wt FROM grain_output_items WHERE grain_id = ?`, [m.grain_id]);
-          const myIn = (inRes.rows || []).filter(i => lotListUpper.includes(String(i.lot_no || '').trim().toUpperCase()));
+          if (m.work_order_id) coveredWoIds.add(Number(m.work_order_id));
+          if (m.batch_no) coveredWoNos.add(String(m.batch_no).trim().toUpperCase());
+
+          const inRes = await runner.query(`SELECT item_name, lot_no, qty, weight, total_wt FROM grain_input_items WHERE grain_id = ?`, [m.grain_id]);
+          const outRes = await runner.query(`SELECT item_name, lot_no, qty, weight, total_wt FROM grain_output_items WHERE grain_id = ?`, [m.grain_id]);
+          const wstRes = await runner.query(`SELECT item_name, category, lot_no, qty, weight, total_wt FROM grain_wastage_items WHERE grain_id = ?`, [m.grain_id]);
+
+          const allIn = inRes.rows || [];
+          let allOut = outRes.rows || [];
+          let allWst = wstRes.rows || [];
+
+          if (m.inpass_no) {
+            try {
+              const ipRes = await runner.query(`SELECT item_name, lot_no, output_type, qty, weight, total_weight FROM inpass_items WHERE UPPER(TRIM(inpass_no)) = UPPER(?) ORDER BY id ASC`, [m.inpass_no]);
+              const ipRows = ipRes.rows || [];
+              const ipOut = ipRows.filter(r => r.output_type === 'PROCESSED_OUTPUT');
+              if (ipOut.length > 0 && (allOut.length === 0 || allOut.every(o => String(o.lot_no || '').toUpperCase() === String(m.inpass_no).toUpperCase()))) {
+                allOut = ipOut.map(r => ({ item_name: r.item_name, lot_no: r.lot_no || m.inpass_no, qty: r.qty, weight: r.weight, total_wt: r.total_weight }));
+              }
+              if (allWst.length === 0) {
+                allWst = ipRows.filter(r => r.output_type === 'BYPRODUCT' || r.output_type === 'PROCESS_LOSS').map(r => ({
+                  item_name: r.item_name,
+                  category: r.output_type === 'PROCESS_LOSS' ? 'Process Loss' : 'By-product (External Mill)',
+                  lot_no: r.lot_no,
+                  qty: r.qty,
+                  weight: r.weight,
+                  total_wt: r.total_weight
+                }));
+              }
+            } catch (_) {}
+          }
+
+          const myIn = allIn.filter(i => lotListUpper.includes(String(i.lot_no || '').trim().toUpperCase()));
           prodInputQty += myIn.reduce((s, i) => s + (parseFloat(i.qty) || 0), 0);
+          const totInKg = allIn.reduce((s, i) => s + (parseFloat(i.total_wt) || 0), 0);
+          const totOutKg = allOut.reduce((s, o) => s + (parseFloat(o.total_wt) || 0), 0);
+          const totWstKg = allWst.reduce((s, w) => s + (parseFloat(w.total_wt) || 0), 0);
+
           t.milling_batches.push({
             batch_no: m.batch_no,
             date: m.date,
             mill_name: m.mill_name,
-            inputs: myIn,
-            outputs: outRes.rows || []
+            process_mode: m.mill_type || m.process_mode || 'Inside Mill',
+            outpass_no: m.outpass_no || null,
+            inpass_no: m.inpass_no || null,
+            inputs: allIn,
+            matched_inputs: myIn,
+            outputs: allOut,
+            wastages: allWst,
+            total_input_kg: totInKg,
+            total_output_kg: totOutKg,
+            total_wastage_kg: totWstKg,
+            yield_percent: totInKg > 0 ? Number(((totOutKg / totInKg) * 100).toFixed(1)) : 0
+          });
+        }
+
+        // Standalone Work Orders not covered by grains
+        const woRes = await runner.query(`
+          SELECT DISTINCT wo.*
+          FROM work_orders wo
+          WHERE EXISTS (SELECT 1 FROM work_order_items woi WHERE woi.work_order_id = wo.id AND UPPER(TRIM(woi.lot_no)) IN (${lotPh}))
+        `, lotListUpper);
+        for (const wo of (woRes.rows || [])) {
+          if (coveredWoIds.has(Number(wo.id)) || (wo.work_order_no && coveredWoNos.has(String(wo.work_order_no).trim().toUpperCase()))) {
+            continue;
+          }
+          const woIn = (await runner.query(`SELECT item_name, lot_no, input_qty AS qty, weight, kgs AS total_wt FROM work_order_items WHERE work_order_id = ?`, [wo.id])).rows || [];
+          const woOut = (await runner.query(`SELECT output_item AS item_name, fg_lot_no AS lot_no, expected_qty AS qty, weight, output_kgs AS total_wt FROM work_order_outputs WHERE work_order_id = ?`, [wo.id])).rows || [];
+          const woWst = (await runner.query(`SELECT item_name, category, lot_no, qty, weight, total_wt FROM work_order_wastages WHERE work_order_id = ?`, [wo.id])).rows || [];
+          const myIn = woIn.filter(i => lotListUpper.includes(String(i.lot_no || '').trim().toUpperCase()));
+          prodInputQty += myIn.reduce((s, i) => s + (parseFloat(i.qty) || 0), 0);
+          const totInKg = woIn.reduce((s, i) => s + (parseFloat(i.total_wt) || 0), 0);
+          const totOutKg = woOut.reduce((s, o) => s + (parseFloat(o.total_wt) || 0), 0);
+          const totWstKg = woWst.reduce((s, w) => s + (parseFloat(w.total_wt) || 0), 0);
+
+          t.milling_batches.push({
+            batch_no: wo.work_order_no,
+            date: wo.date,
+            mill_name: wo.work_unit || 'Production Floor',
+            process_mode: 'Work Order',
+            inputs: woIn,
+            matched_inputs: myIn,
+            outputs: woOut,
+            wastages: woWst,
+            total_input_kg: totInKg,
+            total_output_kg: totOutKg,
+            total_wastage_kg: totWstKg,
+            yield_percent: totInKg > 0 ? Number(((totOutKg / totInKg) * 100).toFixed(1)) : 0
           });
         }
         if (prodInputQty > 0) issuedProdQty = prodInputQty;
+      } catch (_) {}
+
+      // Weight conversions for CS lot family
+      try {
+        const wcRes = await runner.query(`
+          SELECT DISTINCT wc.id, wc.s_no, SUBSTR(CAST(wc.date AS TEXT), 1, 10) AS date, wc.type
+          FROM weight_conversion_items wci
+          JOIN weight_conversion wc ON CAST(wc.id AS TEXT) = CAST(wci.weight_conversion_id AS TEXT)
+          WHERE UPPER(TRIM(wci.lot_no)) IN (${lotPh})
+        `, lotListUpper);
+        for (const wc of (wcRes.rows || [])) {
+          const items = (await runner.query(`SELECT * FROM weight_conversion_items WHERE CAST(weight_conversion_id AS TEXT) = CAST(? AS TEXT)`, [wc.id])).rows || [];
+          t.weight_conversions.push({
+            voucher_no: `WC-${wc.s_no || wc.id}`,
+            date: wc.date,
+            type: wc.type,
+            inputs: items.filter(i => (i.type || 'input') === 'input'),
+            outputs: items.filter(i => i.type === 'output')
+          });
+        }
       } catch (_) {}
 
       // Sales dispatches (resolved customer names)

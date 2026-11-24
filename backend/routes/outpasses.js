@@ -555,6 +555,15 @@ router.put('/:id', async (req, res) => {
         destination = COALESCE(?, destination),
         expected_return_date = COALESCE(?, expected_return_date),
         status = COALESCE(?, status),
+        vehicle_gross_weight = COALESCE(?, vehicle_gross_weight),
+        vehicle_tare_weight = COALESCE(?, vehicle_tare_weight),
+        net_load_weight = COALESCE(?, net_load_weight),
+        weighment_slip_no = COALESCE(?, weighment_slip_no),
+        lr_no = COALESCE(?, lr_no),
+        lr_date = COALESCE(?, lr_date),
+        transport_mode = COALESCE(?, transport_mode),
+        freight_amount = COALESCE(?, freight_amount),
+        freight_paid_by = COALESCE(?, freight_paid_by),
         remarks = COALESCE(?, remarks),
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
@@ -570,6 +579,15 @@ router.put('/:id', async (req, res) => {
       resolvedDest || null,
       formData.expected_return_date !== undefined ? formData.expected_return_date : null,
       formData.status || null,
+      formData.vehicle_gross_weight !== undefined ? Number(formData.vehicle_gross_weight) : null,
+      formData.vehicle_tare_weight !== undefined ? Number(formData.vehicle_tare_weight) : null,
+      formData.net_load_weight !== undefined ? Number(formData.net_load_weight) : null,
+      formData.weighment_slip_no !== undefined ? formData.weighment_slip_no : null,
+      formData.lr_no !== undefined ? formData.lr_no : null,
+      formData.lr_date !== undefined ? formData.lr_date : null,
+      formData.transport_mode !== undefined ? formData.transport_mode : null,
+      formData.freight_amount !== undefined ? Number(formData.freight_amount) : null,
+      formData.freight_paid_by !== undefined ? formData.freight_paid_by : null,
       formData.remarks !== undefined ? formData.remarks : null,
       id
     ], activeCompanyId);
@@ -635,6 +653,17 @@ router.delete('/:id', async (req, res) => {
     const { id } = req.params;
 
     await db.forCompany(activeCompanyId).withTransaction(async () => {
+      const opCheck = await db.query(
+        `SELECT id, outpass_no, reference_type, reference_id, reference_no FROM outpasses WHERE id = ? LIMIT 1`,
+        [id],
+        activeCompanyId
+      );
+      if (opCheck.rows && opCheck.rows[0] && opCheck.rows[0].reference_type === 'SALES') {
+        const err = new Error(`Outpass ${opCheck.rows[0].outpass_no} is auto-linked to Sales Invoice #${opCheck.rows[0].reference_no || opCheck.rows[0].reference_id}. Modify or delete the Sales Invoice instead so stock is restored safely.`);
+        err.statusCode = 400;
+        throw err;
+      }
+
       const checkInpass = await db.query(`SELECT id, inpass_no FROM inpasses WHERE outpass_id = ?`, [id], activeCompanyId);
       if (checkInpass.rows && checkInpass.rows.length > 0) {
         const err = new Error(`Cannot delete Outpass because Inpass ${checkInpass.rows[0].inpass_no} has already been received against it.`);
