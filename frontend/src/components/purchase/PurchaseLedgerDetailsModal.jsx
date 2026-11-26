@@ -12,7 +12,16 @@ import { printHtml } from '../../utils/printHelper';
  * 3. Individual Ledgers (Supplier, Transporter, Loadman, Purchase Account, GST Input)
  * 4. Party Liabilities & Running Outstanding Balances
  */
-const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData = null }) => {
+const PurchaseLedgerDetailsModal = ({
+  isOpen,
+  onClose,
+  purchaseId,
+  purchaseData = null,
+  individualLedgerOnly = false,
+  selectedLedgerName = '',
+  selectedLedgerType = '',
+  rowData = null
+}) => {
   const [activeTab, setActiveTab] = useState('summary'); // 'summary' | 'details' | 'individual' | 'parties'
   const [individualLedgerTab, setIndividualLedgerTab] = useState('supplier');
   const [loading, setLoading] = useState(false);
@@ -364,31 +373,195 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
     return str || 'Supplier';
   }, [statementData, rawPurchase, suppliersMap]);
 
-  // Clean Journal Entries to eliminate any numeric supplier ledger names
+  // Clean Journal Entries to eliminate any numeric supplier/transporter ledger names
   const cleanJournalEntries = useMemo(() => {
     if (!statementData?.journal_entries) return [];
     return statementData.journal_entries.map(row => {
       let lName = row.ledger_name;
-      if (/^\d+$/.test(String(lName).trim())) {
-        lName = resolvedSupplierName;
+      const trimmed = String(lName || '').trim();
+      if (/^\d+$/.test(trimmed)) {
+        const isTransportRow = String(row.account_head || '').toLowerCase().includes('transport');
+        lName = isTransportRow
+          ? (statementData?.party_balances?.transporter?.name || transportersMap[trimmed] || 'Transporter Payable')
+          : resolvedSupplierName;
       }
       return {
         ...row,
         ledger_name: lName
       };
     });
-  }, [statementData, resolvedSupplierName]);
+  }, [statementData, resolvedSupplierName, transportersMap]);
 
   const pData = statementData?.purchase || rawPurchase || {};
   const transportAmount = Number(pData.net_transport_amount || pData.transport_charges || pData.freight_amount || statementData?.party_balances?.transporter?.transport_credit || 0);
   const loadmanAmount = Number(pData.loadman_charges || statementData?.party_balances?.loadman?.loadman_credit || 0);
-  const transporterDisplayName = pData.transporter || pData.transport || statementData?.party_balances?.transporter?.name || 'Transporter Payable';
-  const loadmanDisplayName = pData.loadman_name || statementData?.party_balances?.loadman?.name || 'Loadman Team';
+  const rawTransporterVal = statementData?.party_balances?.transporter?.name || pData.transporter_name || pData.transporter || pData.transport || '';
+  const transporterDisplayName = /^\d+$/.test(String(rawTransporterVal).trim())
+    ? (transportersMap[String(rawTransporterVal).trim()] || 'Transporter Payable')
+    : (String(rawTransporterVal).trim() || 'Transporter Payable');
+  const loadmanDisplayName = statementData?.party_balances?.loadman?.name || pData.loadman_name || 'Loadman Team';
+
+  const individualViewData = useMemo(() => {
+    if (!individualLedgerOnly || !selectedLedgerName) return null;
+
+    const norm = (val) => String(val || '').trim().toLowerCase();
+    const selNorm = norm(selectedLedgerName);
+    const typeNorm = norm(selectedLedgerType);
+    const rowLedgerNorm = norm(rowData?.ledger_name);
+
+    const candidateNames = new Set([selNorm, rowLedgerNorm].filter(Boolean));
+
+    const isSupplierMatch =
+      typeNorm === 'supplier' ||
+      typeNorm.includes('creditor') ||
+      (selNorm && selNorm === norm(resolvedSupplierName)) ||
+      (selNorm && selNorm === norm(pData.supplier_name)) ||
+      (selNorm && selNorm === norm(pData.supplier));
+
+    if (isSupplierMatch) {
+      if (resolvedSupplierName && norm(resolvedSupplierName) !== 'supplier') {
+        candidateNames.add(norm(resolvedSupplierName));
+      }
+      if (pData.supplier_name) candidateNames.add(norm(pData.supplier_name));
+      if (pData.supplier && !/^\d+$/.test(String(pData.supplier).trim())) {
+        candidateNames.add(norm(pData.supplier));
+      }
+    }
+
+    const isTransporterMatch =
+      typeNorm.includes('transport') ||
+      (selNorm && selNorm === norm(transporterDisplayName)) ||
+      (selNorm && selNorm === norm(pData.transporter)) ||
+      (selNorm && selNorm === norm(pData.transport));
+
+    if (isTransporterMatch) {
+      if (transporterDisplayName && norm(transporterDisplayName) !== 'transporter payable') {
+        candidateNames.add(norm(transporterDisplayName));
+      }
+      if (pData.transporter_name) candidateNames.add(norm(pData.transporter_name));
+    }
+
+    const isLoadmanMatch =
+      ['loadman', 'loadmen', 'worker', 'labour'].some((k) => typeNorm.includes(k)) ||
+      (selNorm && selNorm === norm(loadmanDisplayName)) ||
+      (selNorm && selNorm === norm(pData.loadman_name));
+
+    if (isLoadmanMatch) {
+      if (loadmanDisplayName && norm(loadmanDisplayName) !== 'loadman team') {
+        candidateNames.add(norm(loadmanDisplayName));
+      }
+      if (pData.loadman_name) candidateNames.add(norm(pData.loadman_name));
+    }
+
+    let entries = cleanJournalEntries.filter((row) => candidateNames.has(norm(row.ledger_name)));
+
+    // Fallback to matching individual_ledgers bucket only if journal rows didn't match by name
+    if (entries.length === 0 && statementData?.individual_ledgers) {
+      const ind = statementData.individual_ledgers;
+      if (isSupplierMatch && Array.isArray(ind.supplier?.rows) && ind.supplier.rows.length > 0) {
+        entries = ind.supplier.rows.map((r, i) => ({
+          no: i + 1,
+          ledger_name: resolvedSupplierName || selectedLedgerName,
+          account_head: ind.supplier.category || 'Sundry Creditors',
+          debit: Number(r.debit || 0),
+          credit: Number(r.credit || 0),
+          particulars: r.particulars || '-'
+        }));
+      } else if (isTransporterMatch && Array.isArray(ind.transporter?.rows) && ind.transporter.rows.length > 0) {
+        entries = ind.transporter.rows.map((r, i) => ({
+          no: i + 1,
+          ledger_name: transporterDisplayName || selectedLedgerName,
+          account_head: ind.transporter.category || 'Transporter Liabilities',
+          debit: Number(r.debit || 0),
+          credit: Number(r.credit || 0),
+          particulars: r.particulars || '-'
+        }));
+      } else if (isLoadmanMatch && Array.isArray(ind.loadman?.rows) && ind.loadman.rows.length > 0) {
+        entries = ind.loadman.rows.map((r, i) => ({
+          no: i + 1,
+          ledger_name: loadmanDisplayName || selectedLedgerName,
+          account_head: ind.loadman.category || 'Labour Liabilities',
+          debit: Number(r.debit || 0),
+          credit: Number(r.credit || 0),
+          particulars: r.particulars || '-'
+        }));
+      } else if (selNorm === 'purchase account' && Array.isArray(ind.purchase_account?.rows) && ind.purchase_account.rows.length > 0) {
+        entries = ind.purchase_account.rows.map((r, i) => ({
+          no: i + 1,
+          ledger_name: 'Purchase Account',
+          account_head: ind.purchase_account.category || 'Direct Expenses',
+          debit: Number(r.debit || 0),
+          credit: Number(r.credit || 0),
+          particulars: r.particulars || '-'
+        }));
+      } else if (Array.isArray(ind.gst_input?.rows)) {
+        const gstMatches = ind.gst_input.rows.filter((r) => candidateNames.has(norm(r.ledger)));
+        if (gstMatches.length > 0) {
+          entries = gstMatches.map((r, i) => ({
+            no: i + 1,
+            ledger_name: r.ledger || selectedLedgerName,
+            account_head: ind.gst_input.category || 'Duties & Taxes',
+            debit: Number(r.debit || 0),
+            credit: Number(r.credit || 0),
+            particulars: r.particulars || '-'
+          }));
+        }
+      }
+    }
+
+    // Final single-ledger fallback using the statement row itself if still empty
+    if (entries.length === 0 && rowData && (Number(rowData.debit || 0) > 0 || Number(rowData.credit || 0) > 0)) {
+      entries = [{
+        no: 1,
+        ledger_name: rowData.ledger_name || selectedLedgerName,
+        account_head: selectedLedgerType || 'Ledger Account',
+        debit: Number(rowData.debit || 0),
+        credit: Number(rowData.credit || 0),
+        particulars: rowData.particulars || rowData.subtext || statementData?.voucher?.voucher_no || '-'
+      }];
+    }
+
+    const debitTotal = Number(entries.reduce((s, r) => s + Number(r.debit || 0), 0).toFixed(2));
+    const creditTotal = Number(entries.reduce((s, r) => s + Number(r.credit || 0), 0).toFixed(2));
+    const signedNet = Number((debitTotal - creditTotal).toFixed(2));
+    const netAmount = Math.abs(signedNet);
+    const netType = signedNet >= 0 ? 'Dr' : 'Cr';
+    const accountGroup = entries[0]?.account_head || selectedLedgerType || 'Ledger Account';
+
+    return {
+      ledgerDisplayName: selectedLedgerName,
+      accountGroup,
+      entries,
+      debitTotal,
+      creditTotal,
+      netAmount,
+      netType
+    };
+  }, [
+    individualLedgerOnly,
+    selectedLedgerName,
+    selectedLedgerType,
+    rowData,
+    cleanJournalEntries,
+    statementData,
+    resolvedSupplierName,
+    transporterDisplayName,
+    loadmanDisplayName,
+    pData.supplier_name,
+    pData.supplier,
+    pData.transporter,
+    pData.transport,
+    pData.transporter_name,
+    pData.loadman_name
+  ]);
 
   const handlePrint = () => {
     const printArea = document.getElementById('purchase-ledger-statement-print-area');
     if (!printArea) return;
-    printHtml(printArea.innerHTML, `Purchase_Ledger_Statement_${statementData?.voucher?.voucher_no || 'PUR'}`);
+    const prefix = individualLedgerOnly && selectedLedgerName
+      ? `Individual_Ledger_${selectedLedgerName.replace(/\s+/g, '_')}`
+      : 'Purchase_Ledger_Statement';
+    printHtml(printArea.innerHTML, `${prefix}_${statementData?.voucher?.voucher_no || 'PUR'}`);
   };
 
   if (!isOpen) return null;
@@ -433,13 +606,24 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
             </div>
             <div>
               <div className="flex items-center space-x-2">
-                <h2 className="text-lg font-bold tracking-tight">Purchase Transaction Ledger Statement</h2>
+                <h2 className="text-lg font-bold tracking-tight">
+                  {individualViewData ? `Individual Ledger Details – ${individualViewData.ledgerDisplayName}` : 'Purchase Transaction Ledger Statement'}
+                </h2>
                 <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-semibold border border-emerald-400/30">
-                  Double-Entry Accounting
+                  {individualViewData ? 'Individual Ledger' : 'Double-Entry Accounting'}
                 </span>
               </div>
               <p className="text-xs text-blue-200 font-medium">
-                Voucher: {statementData?.voucher?.voucher_no || pData.inv_no || 'PUR-0001'} · Supplier: <strong className="text-white font-bold">{resolvedSupplierName}</strong> · Date: {statementData?.voucher?.date || pData.date || '-'}
+                {individualViewData ? (
+                  <>
+                    Ledger: <strong className="text-white font-bold">{individualViewData.ledgerDisplayName}</strong> · Voucher: {statementData?.voucher?.voucher_no || pData.inv_no || 'PUR-0001'}
+                    {pData.inv_no ? <> · Inv #{pData.inv_no}</> : null} · Date: {statementData?.voucher?.date || pData.date || '-'}
+                  </>
+                ) : (
+                  <>
+                    Voucher: {statementData?.voucher?.voucher_no || pData.inv_no || 'PUR-0001'} · Supplier: <strong className="text-white font-bold">{resolvedSupplierName}</strong> · Date: {statementData?.voucher?.date || pData.date || '-'}
+                  </>
+                )}
               </p>
             </div>
           </div>
@@ -488,6 +672,141 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
             }}
             className="space-y-4"
           >
+            {individualViewData ? (
+              <>
+                {/* Individual Ledger Summary Cards */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
+                  <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
+                    <div>
+                      <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">Selected Ledger</span>
+                      <div className="text-base font-black text-slate-900 mt-1 truncate" title={individualViewData.ledgerDisplayName}>
+                        {individualViewData.ledgerDisplayName}
+                      </div>
+                    </div>
+                    <div className="text-[11px] font-medium text-blue-700 mt-1.5">
+                      Group: <strong>{individualViewData.accountGroup}</strong>
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
+                    <div>
+                      <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">Ledger Debit (Dr)</span>
+                      <div className="text-lg font-black text-emerald-700 mt-1 font-mono tabular-nums">
+                        ₹{Number(individualViewData.debitTotal || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </div>
+                    </div>
+                    <div className="text-[11px] font-medium text-slate-500 mt-1.5">
+                      Voucher: {statementData?.voucher?.voucher_no || pData.inv_no || '-'}
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
+                    <div>
+                      <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">Ledger Credit (Cr)</span>
+                      <div className="text-lg font-black text-amber-700 mt-1 font-mono tabular-nums">
+                        ₹{Number(individualViewData.creditTotal || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </div>
+                    </div>
+                    <div className="text-[11px] font-medium text-slate-500 mt-1.5">
+                      Date: {statementData?.voucher?.date || pData.date || '-'}
+                    </div>
+                  </div>
+
+                  <div className="bg-indigo-50/40 p-3.5 rounded-xl border border-indigo-200 shadow-sm flex flex-col justify-between">
+                    <div>
+                      <span className="text-[11px] font-semibold text-indigo-800 uppercase tracking-wider block">Net Ledger Balance</span>
+                      <div className="text-lg font-black text-indigo-900 mt-1 font-mono tabular-nums">
+                        ₹{Number(individualViewData.netAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })} {individualViewData.netType}
+                      </div>
+                    </div>
+                    <div className="text-[11px] font-medium text-indigo-700 mt-1.5">
+                      Individual Ledger Impact Only
+                    </div>
+                  </div>
+                </div>
+
+                {/* Single Individual Ledger Table */}
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+                  <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex flex-wrap justify-between items-center gap-2 shrink-0">
+                    <div>
+                      <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                        Individual Ledger Entries – {individualViewData.ledgerDisplayName}
+                      </h3>
+                      <p className="text-[11px] text-slate-500">
+                        Voucher Reference: <span className="font-mono font-bold text-slate-700">{statementData.voucher?.voucher_no || pData.inv_no}</span>
+                        {pData.inv_no ? <> · Invoice #{pData.inv_no}</> : null}
+                      </p>
+                    </div>
+                    <span className="text-xs font-semibold px-2.5 py-1 bg-blue-100 text-blue-800 rounded-md border border-blue-200">
+                      Net: ₹{Number(individualViewData.netAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })} {individualViewData.netType}
+                    </span>
+                  </div>
+
+                  <div className="overflow-x-auto w-full">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-slate-100 text-slate-700 border-b border-slate-200 font-bold uppercase tracking-wider text-[11px]">
+                          <th className="py-2.5 px-3 w-12 text-center">No.</th>
+                          <th className="py-2.5 px-3">Date</th>
+                          <th className="py-2.5 px-4">Ledger Account</th>
+                          <th className="py-2.5 px-3">Account Group</th>
+                          <th className="py-2.5 px-4 text-right">Debit (Dr)</th>
+                          <th className="py-2.5 px-4 text-right">Credit (Cr)</th>
+                          <th className="py-2.5 px-4">Particulars / Transaction Trace</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {individualViewData.entries.length === 0 ? (
+                          <tr>
+                            <td colSpan={7} className="py-8 text-center text-slate-400">
+                              No entries found for {individualViewData.ledgerDisplayName} on this voucher.
+                            </td>
+                          </tr>
+                        ) : (
+                          individualViewData.entries.map((row, idx) => (
+                            <tr
+                              key={idx}
+                              className={`hover:bg-blue-50/40 transition-colors ${
+                                idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'
+                              }`}
+                            >
+                              <td className="py-2.5 px-3 text-center text-slate-400 font-semibold">{idx + 1}</td>
+                              <td className="py-2.5 px-3 text-slate-600 font-medium">{statementData?.voucher?.date || pData.date || '-'}</td>
+                              <td className="py-2.5 px-4 font-bold text-slate-800">{row.ledger_name}</td>
+                              <td className="py-2.5 px-3 text-slate-500 text-[11px]">{row.account_head || 'General'}</td>
+                              <td className="py-2.5 px-4 text-right font-bold text-emerald-700 font-mono tabular-nums">
+                                {Number(row.debit) > 0 ? `₹${Number(row.debit).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}
+                              </td>
+                              <td className="py-2.5 px-4 text-right font-bold text-amber-700 font-mono tabular-nums">
+                                {Number(row.credit) > 0 ? `₹${Number(row.credit).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}
+                              </td>
+                              <td className="py-2.5 px-4 text-slate-600 text-[11px]">{row.particulars || '-'}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                      <tfoot>
+                        <tr className="bg-slate-100 font-bold text-slate-900 border-t-2 border-slate-300">
+                          <td colSpan={4} className="py-3 px-4 text-right uppercase tracking-wider text-xs">
+                            Ledger Total ({individualViewData.ledgerDisplayName}):
+                          </td>
+                          <td className="py-3 px-4 text-right text-emerald-700 text-sm font-extrabold font-mono tabular-nums">
+                            ₹{Number(individualViewData.debitTotal || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="py-3 px-4 text-right text-amber-700 text-sm font-extrabold font-mono tabular-nums">
+                            ₹{Number(individualViewData.creditTotal || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="py-3 px-4 text-xs text-blue-800 font-bold">
+                            Net Balance: ₹{Number(individualViewData.netAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })} {individualViewData.netType}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
             {/* Top Cards: Total Dr, Total Cr & Outstanding Balances */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
               <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
@@ -949,6 +1268,8 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
                 </div>
               </div>
             )}
+              </>
+            )}
           </div>
         ) : null}
 
@@ -971,7 +1292,11 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
             <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981' }}></span>
             <span>Traceable Voucher: <strong style={{ color: '#0f172a', fontFamily: 'monospace', fontSize: '13px' }}>{statementData?.voucher?.voucher_no || pData.inv_no || 'PUR-0001'}</strong></span>
             <span style={{ color: '#cbd5e1' }}>|</span>
-            <span style={{ color: '#059669', fontWeight: 600 }}>Double-Entry Standard Compliance (Dr === Cr) ✅</span>
+            <span style={{ color: individualViewData ? '#1e40af' : '#059669', fontWeight: 600 }}>
+              {individualViewData
+                ? `Individual Ledger: ${individualViewData.ledgerDisplayName}`
+                : 'Double-Entry Standard Compliance (Dr === Cr) ✅'}
+            </span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <button

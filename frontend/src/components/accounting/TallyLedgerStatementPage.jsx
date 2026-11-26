@@ -25,6 +25,7 @@ const TallyLedgerStatementPage = () => {
 
   // Voucher details modal state
   const [activeVoucherId, setActiveVoucherId] = useState(null);
+  const [activeVoucherRow, setActiveVoucherRow] = useState(null);
   const [voucherModalOpen, setVoucherModalOpen] = useState(false);
   const [selectedVoucherSlip, setSelectedVoucherSlip] = useState(null);
 
@@ -324,6 +325,7 @@ const TallyLedgerStatementPage = () => {
                       const handleRowDetails = () => {
                         if (isPur) {
                           setActiveVoucherId(r.purchase_id || r.reference_id || r.voucher_no);
+                          setActiveVoucherRow(r);
                           setVoucherModalOpen(true);
                         } else {
                           setSelectedVoucherSlip({
@@ -421,12 +423,19 @@ const TallyLedgerStatementPage = () => {
         </div>
       ) : null}
 
-      {/* Voucher Detail Journal Modal */}
+      {/* Voucher Detail Modal (Individual Ledger Only) */}
       {voucherModalOpen && (
         <PurchaseLedgerDetailsModal
           isOpen={voucherModalOpen}
-          onClose={() => setVoucherModalOpen(false)}
+          onClose={() => {
+            setVoucherModalOpen(false);
+            setActiveVoucherRow(null);
+          }}
           purchaseId={activeVoucherId}
+          rowData={activeVoucherRow}
+          individualLedgerOnly={true}
+          selectedLedgerName={statement?.ledger?.ledger_name || selectedLedgerName}
+          selectedLedgerType={statement?.ledger?.group_name || ''}
         />
       )}
 
@@ -439,6 +448,8 @@ const TallyLedgerStatementPage = () => {
           voucherNo={selectedVoucherSlip.voucherNo}
           voucherType={selectedVoucherSlip.voucherType}
           rowData={selectedVoucherSlip.rowData}
+          individualLedgerOnly={true}
+          selectedLedgerName={statement?.ledger?.ledger_name || selectedLedgerName}
         />
       )}
     </div>

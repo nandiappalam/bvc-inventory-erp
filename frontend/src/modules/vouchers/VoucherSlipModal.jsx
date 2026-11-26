@@ -52,7 +52,16 @@ function formatCurrency(val) {
   return Number(val || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-const VoucherSlipModal = ({ isOpen, onClose, voucherId = null, voucherNo = '', voucherType = '', rowData = null }) => {
+const VoucherSlipModal = ({
+  isOpen,
+  onClose,
+  voucherId = null,
+  voucherNo = '',
+  voucherType = '',
+  rowData = null,
+  individualLedgerOnly = false,
+  selectedLedgerName = ''
+}) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [voucher, setVoucher] = useState(null);
@@ -108,50 +117,100 @@ const VoucherSlipModal = ({ isOpen, onClose, voucherId = null, voucherNo = '', v
     const v = voucher || {};
     const vType = String(v.voucher_type || voucherType || 'Payment').trim();
     const tLower = vType.toLowerCase();
-    const entries = Array.isArray(v.entries) ? v.entries : [];
+    const allEntries = Array.isArray(v.entries) ? v.entries : [];
 
-    const drEntries = entries.filter(e => Number(e.debit || 0) > 0);
-    const crEntries = entries.filter(e => Number(e.credit || 0) > 0);
+    const norm = (val) => String(val || '').trim().toLowerCase();
+    const isIndividualMode = Boolean(individualLedgerOnly && selectedLedgerName);
+    const targetNames = new Set([norm(selectedLedgerName), norm(rowData?.ledger_name)].filter(Boolean));
+    const filteredEntries = isIndividualMode
+      ? allEntries.filter((e) => targetNames.has(norm(e.ledger_name)))
+      : allEntries;
 
-    const totalDebit = entries.reduce((s, e) => s + Number(e.debit || 0), 0) || Number(v.total_debit || 0) || Number(rowData?.debit || rowData?.credit || 0);
-    const totalCredit = entries.reduce((s, e) => s + Number(e.credit || 0), 0) || Number(v.total_credit || 0) || totalDebit;
-    const primaryAmount = Math.max(totalDebit, totalCredit);
+    const entries = isIndividualMode
+      ? (filteredEntries.length > 0
+          ? filteredEntries
+          : (rowData && (Number(rowData.debit || 0) > 0 || Number(rowData.credit || 0) > 0)
+              ? [{
+                  ledger_name: rowData.ledger_name || selectedLedgerName,
+                  group_name: rowData.group_name || 'Ledger Account',
+                  debit: Number(rowData.debit || 0),
+                  credit: Number(rowData.credit || 0),
+                  remarks: rowData.particulars || rowData.remarks || v.narration || ''
+                }]
+              : []))
+      : allEntries;
 
-    let slipTitle = 'VOUCHER SLIP';
-    let partyLabel = 'Party / Account';
+    const drEntries = allEntries.filter(e => Number(e.debit || 0) > 0);
+    const crEntries = allEntries.filter(e => Number(e.credit || 0) > 0);
+
+    const totalDebit = entries.reduce((s, e) => s + Number(e.debit || 0), 0) || (!isIndividualMode ? Number(v.total_debit || 0) : Number(rowData?.debit || 0));
+    const totalCredit = entries.reduce((s, e) => s + Number(e.credit || 0), 0) || (!isIndividualMode ? Number(v.total_credit || 0) : Number(rowData?.credit || 0));
+    const netSigned = totalDebit - totalCredit;
+    const netAmount = Math.abs(netSigned);
+    const netType = netSigned >= 0 ? 'Dr' : 'Cr';
+    const primaryAmount = isIndividualMode ? (netAmount || Math.max(totalDebit, totalCredit)) : Math.max(totalDebit, totalCredit);
+
+    let slipTitle = isIndividualMode ? `INDIVIDUAL LEDGER SLIP – ${selectedLedgerName}` : 'VOUCHER SLIP';
+    let partyLabel = isIndividualMode ? 'Selected Ledger' : 'Party / Account';
     let modeLabel = 'Counter Account';
-    let partyValue = drEntries.map(e => e.ledger_name).filter(Boolean).join(', ') || rowData?.ledger_name || '-';
+    let partyValue = isIndividualMode
+      ? selectedLedgerName
+      : (drEntries.map(e => e.ledger_name).filter(Boolean).join(', ') || rowData?.ledger_name || '-');
     let modeValue = crEntries.map(e => e.ledger_name).filter(Boolean).join(', ') || '-';
     let accentGradient = 'linear-gradient(135deg, #1e3a8a 0%, #312e81 100%)';
 
     if (tLower.includes('payment') || tLower.includes('advance')) {
-      slipTitle = 'PAYMENT VOUCHER SLIP';
-      partyLabel = 'Paid To (Receiver)';
-      modeLabel = 'Paid From (Cash / Bank)';
-      partyValue = drEntries.map(e => e.ledger_name).filter(Boolean).join(', ') || rowData?.ledger_name || '-';
-      modeValue = crEntries.map(e => e.ledger_name).filter(Boolean).join(', ') || '-';
+      slipTitle = isIndividualMode ? `PAYMENT LEDGER DETAILS – ${selectedLedgerName}` : 'PAYMENT VOUCHER SLIP';
+      if (!isIndividualMode) {
+        partyLabel = 'Paid To (Receiver)';
+        modeLabel = 'Paid From (Cash / Bank)';
+        partyValue = drEntries.map(e => e.ledger_name).filter(Boolean).join(', ') || rowData?.ledger_name || '-';
+        modeValue = crEntries.map(e => e.ledger_name).filter(Boolean).join(', ') || '-';
+      } else {
+        modeLabel = 'Voucher Type';
+        modeValue = vType;
+      }
       accentGradient = 'linear-gradient(135deg, #1e3a8a 0%, #4338ca 100%)';
     } else if (tLower.includes('receipt')) {
-      slipTitle = 'RECEIPT VOUCHER SLIP';
-      partyLabel = 'Received From';
-      modeLabel = 'Deposited Into (Cash / Bank)';
-      partyValue = crEntries.map(e => e.ledger_name).filter(Boolean).join(', ') || '-';
-      modeValue = drEntries.map(e => e.ledger_name).filter(Boolean).join(', ') || '-';
+      slipTitle = isIndividualMode ? `RECEIPT LEDGER DETAILS – ${selectedLedgerName}` : 'RECEIPT VOUCHER SLIP';
+      if (!isIndividualMode) {
+        partyLabel = 'Received From';
+        modeLabel = 'Deposited Into (Cash / Bank)';
+        partyValue = crEntries.map(e => e.ledger_name).filter(Boolean).join(', ') || '-';
+        modeValue = drEntries.map(e => e.ledger_name).filter(Boolean).join(', ') || '-';
+      } else {
+        modeLabel = 'Voucher Type';
+        modeValue = vType;
+      }
       accentGradient = 'linear-gradient(135deg, #065f46 0%, #047857 100%)';
     } else if (tLower.includes('contra')) {
-      slipTitle = 'CONTRA VOUCHER SLIP';
-      partyLabel = 'Transferred / Deposited To';
-      modeLabel = 'Withdrawn / From Account';
+      slipTitle = isIndividualMode ? `CONTRA LEDGER DETAILS – ${selectedLedgerName}` : 'CONTRA VOUCHER SLIP';
+      if (!isIndividualMode) {
+        partyLabel = 'Transferred / Deposited To';
+        modeLabel = 'Withdrawn / From Account';
+      } else {
+        modeLabel = 'Voucher Type';
+        modeValue = vType;
+      }
     } else if (tLower.includes('journal')) {
-      slipTitle = 'JOURNAL VOUCHER SLIP';
-      partyLabel = 'Debit Accounts';
-      modeLabel = 'Credit Accounts';
+      slipTitle = isIndividualMode ? `JOURNAL LEDGER DETAILS – ${selectedLedgerName}` : 'JOURNAL VOUCHER SLIP';
+      if (!isIndividualMode) {
+        partyLabel = 'Debit Accounts';
+        modeLabel = 'Credit Accounts';
+      } else {
+        modeLabel = 'Voucher Type';
+        modeValue = vType;
+      }
+    } else if (isIndividualMode) {
+      modeLabel = 'Voucher Type';
+      modeValue = vType;
     }
 
     const invoiceRef = v.linked_purchase?.inv_no || v.reference_no || rowData?.inv_no || rowData?.reference_no || '-';
 
     return {
       vType,
+      isIndividualMode,
       slipTitle,
       partyLabel,
       modeLabel,
@@ -161,10 +220,12 @@ const VoucherSlipModal = ({ isOpen, onClose, voucherId = null, voucherNo = '', v
       entries,
       totalDebit,
       totalCredit,
+      netAmount,
+      netType,
       primaryAmount,
       invoiceRef
     };
-  }, [voucher, voucherType, rowData]);
+  }, [voucher, voucherType, rowData, individualLedgerOnly, selectedLedgerName]);
 
   const handlePrintSlip = () => {
     if (!voucher) return;
@@ -224,7 +285,7 @@ const VoucherSlipModal = ({ isOpen, onClose, voucherId = null, voucherNo = '', v
               <td colspan="3" style="padding:8px 10px; border:1px solid #cbd5e1; text-align:right;">TOTAL:</td>
               <td style="padding:8px 10px; border:1px solid #cbd5e1; text-align:right; color:#b91c1c;">₹${formatCurrency(slipMeta.totalDebit)}</td>
               <td style="padding:8px 10px; border:1px solid #cbd5e1; text-align:right; color:#15803d;">₹${formatCurrency(slipMeta.totalCredit)}</td>
-              <td style="padding:8px 10px; border:1px solid #cbd5e1; color:#15803d;">Balanced ✔</td>
+              <td style="padding:8px 10px; border:1px solid #cbd5e1; color:#15803d;">${slipMeta.isIndividualMode ? `Net: ₹${formatCurrency(slipMeta.netAmount)} ${slipMeta.netType}` : 'Balanced ✔'}</td>
             </tr>
           </tfoot>
         </table>
@@ -445,10 +506,10 @@ const VoucherSlipModal = ({ isOpen, onClose, voucherId = null, voucherNo = '', v
             <div style={{ backgroundColor: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '10px', marginBottom: '14px' }}>
               <div style={{ padding: '9px 14px', backgroundColor: '#f1f5f9', borderBottom: '1px solid #cbd5e1', borderTopLeftRadius: '9px', borderTopRightRadius: '9px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
                 <span style={{ fontSize: '11px', fontWeight: 800, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  Double-Entry Accounting Postings
+                  {slipMeta.isIndividualMode ? `Individual Ledger Entry – ${selectedLedgerName}` : 'Double-Entry Accounting Postings'}
                 </span>
-                <span style={{ fontSize: '11px', fontWeight: 700, color: '#047857', backgroundColor: '#dcfce7', padding: '2px 8px', borderRadius: '4px', border: '1px solid #86efac' }}>
-                  Debit = Credit (Balanced ✔)
+                <span style={{ fontSize: '11px', fontWeight: 700, color: slipMeta.isIndividualMode ? '#1e40af' : '#047857', backgroundColor: slipMeta.isIndividualMode ? '#dbeafe' : '#dcfce7', padding: '2px 8px', borderRadius: '4px', border: `1px solid ${slipMeta.isIndividualMode ? '#93c5fd' : '#86efac'}` }}>
+                  {slipMeta.isIndividualMode ? 'Individual Ledger View' : 'Debit = Credit (Balanced ✔)'}
                 </span>
               </div>
               <div style={{ overflowX: 'auto' }}>
@@ -517,8 +578,8 @@ const VoucherSlipModal = ({ isOpen, onClose, voucherId = null, voucherNo = '', v
                       <td style={{ padding: '8px 12px', textAlign: 'right', color: '#15803d', fontFamily: 'monospace', fontSize: '13px' }}>
                         ₹{formatCurrency(slipMeta.totalCredit)}
                       </td>
-                      <td style={{ padding: '8px 12px', fontSize: '11px', color: '#047857' }}>
-                        Balanced ✔
+                      <td style={{ padding: '8px 12px', fontSize: '11px', color: slipMeta.isIndividualMode ? '#1e40af' : '#047857' }}>
+                        {slipMeta.isIndividualMode ? `Net: ₹${formatCurrency(slipMeta.netAmount)} ${slipMeta.netType}` : 'Balanced ✔'}
                       </td>
                     </tr>
                   </tfoot>

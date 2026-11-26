@@ -509,7 +509,10 @@ const LedgerStatementReport = () => {
                     const handleVoucherClick = () => {
                       if (!isClickable) return;
                       if (isPurchaseType) {
-                        setSelectedPurchaseModal(row.purchase_id || row.reference_id || row.voucher_no);
+                        setSelectedPurchaseModal({
+                          purchaseId: row.purchase_id || row.reference_id || row.voucher_no,
+                          rowData: row
+                        });
                       } else if (typeLower.includes('sales')) {
                         navigate(`/entry/sales-display?search=${encodeURIComponent(row.voucher_no)}`);
                       } else {
@@ -635,12 +638,16 @@ const LedgerStatementReport = () => {
         </div>
       )}
 
-      {/* Direct Modal for Purchase Transaction Ledger & Double-Entry Details */}
+      {/* Individual Ledger Transaction Details Modal */}
       {selectedPurchaseModal && (
         <PurchaseLedgerDetailsModal
           isOpen={Boolean(selectedPurchaseModal)}
           onClose={() => setSelectedPurchaseModal(null)}
-          purchaseId={selectedPurchaseModal}
+          purchaseId={typeof selectedPurchaseModal === 'object' ? selectedPurchaseModal.purchaseId : selectedPurchaseModal}
+          rowData={typeof selectedPurchaseModal === 'object' ? selectedPurchaseModal.rowData : null}
+          individualLedgerOnly={true}
+          selectedLedgerName={reportData?.ledgerName || selectedLedger}
+          selectedLedgerType={selectedType}
         />
       )}
 
@@ -653,6 +660,8 @@ const LedgerStatementReport = () => {
           voucherNo={selectedVoucherSlip.voucherNo}
           voucherType={selectedVoucherSlip.voucherType}
           rowData={selectedVoucherSlip.rowData}
+          individualLedgerOnly={true}
+          selectedLedgerName={reportData?.ledgerName || selectedLedger}
         />
       )}
     </div>
