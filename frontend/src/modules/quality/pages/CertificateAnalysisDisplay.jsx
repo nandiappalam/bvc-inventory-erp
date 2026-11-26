@@ -82,11 +82,13 @@ export default function CertificateAnalysisDisplay() {
 
   const rawQcResults = data.qcResults || [];
   const seenParamKeys = new Set();
+  const seenParamNames = new Set();
   const qcResults = rawQcResults.filter((r) => {
-    const key = (r.parameterKey || r.parameterName || r.parameter || r.id || '').toString().toLowerCase().trim();
-    if (!key) return true;
-    if (seenParamKeys.has(key)) return false;
-    seenParamKeys.add(key);
+    const key = (r.parameterKey || r.id || '').toString().toLowerCase().trim();
+    const name = (r.parameterName || r.parameter || '').toString().toLowerCase().trim();
+    if ((key && seenParamKeys.has(key)) || (name && seenParamNames.has(name))) return false;
+    if (key) seenParamKeys.add(key);
+    if (name) seenParamNames.add(name);
     return true;
   });
   const overallResult = data.overallResult || 'ACCEPTED';

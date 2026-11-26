@@ -172,9 +172,11 @@ module.exports = async function autoMigrate() {
                 inspector TEXT,
                 overall_result TEXT,
                 remarks TEXT,
+                evidence_json TEXT DEFAULT ''[]'',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."qc_inspections" ADD COLUMN IF NOT EXISTS "evidence_json" TEXT DEFAULT ''[]'''; EXCEPTION WHEN OTHERS THEN END;
 
             BEGIN EXECUTE 'CREATE TABLE IF NOT EXISTS "' || sch || '"."qc_inspection_params" (
                 id SERIAL PRIMARY KEY,
@@ -184,6 +186,7 @@ module.exports = async function autoMigrate() {
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."qc_inspection_params" DROP CONSTRAINT IF EXISTS qc_inspection_params_qc_id_fkey CASCADE'; EXCEPTION WHEN OTHERS THEN END;
 
             BEGIN EXECUTE 'CREATE TABLE IF NOT EXISTS "' || sch || '"."incoming_quality_reports" (
                 id SERIAL PRIMARY KEY,
@@ -208,6 +211,7 @@ module.exports = async function autoMigrate() {
                 remarks TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )'; EXCEPTION WHEN OTHERS THEN END;
+            BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."qc_approval_history" DROP CONSTRAINT IF EXISTS qc_approval_history_qc_id_fkey CASCADE'; EXCEPTION WHEN OTHERS THEN END;
 
             -- stock_lots columns
             BEGIN EXECUTE 'ALTER TABLE "' || sch || '"."stock_lots" ADD COLUMN IF NOT EXISTS "unloading_status" TEXT DEFAULT ''PENDING_DECISION'''; EXCEPTION WHEN OTHERS THEN END;
@@ -1203,6 +1207,7 @@ module.exports = async function autoMigrate() {
         inspector TEXT,
         overall_result TEXT,
         remarks TEXT,
+        evidence_json TEXT DEFAULT '[]',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
@@ -1211,6 +1216,8 @@ module.exports = async function autoMigrate() {
   } catch (err) {
     console.log('✗ Error creating qc_inspections:', err.message);
   }
+
+  await safeAddColumn('qc_inspections', 'evidence_json', "TEXT DEFAULT '[]'");
 
   try {
     await db.run(`

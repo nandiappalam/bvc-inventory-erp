@@ -36,136 +36,118 @@ const asyncHandler = (fn) => (req, res, next) => {
   Promise.resolve(fn(req, res, next)).catch(next);
 };
 
-// Ensure PostgreSQL multi-tenant constraints on qc_inspection_params do not block writes
-const ensureQcCleanConstraints = async () => {
-  try {
-    await db.run("ALTER TABLE qc_inspection_params DROP CONSTRAINT IF EXISTS qc_inspection_params_qc_id_fkey CASCADE");
-  } catch (e) {}
-  try {
-    await db.run("ALTER TABLE qc_approval_history DROP CONSTRAINT IF EXISTS qc_approval_history_qc_id_fkey CASCADE");
-  } catch (e) {}
-};
-ensureQcCleanConstraints();
-
-// Dynamic tenant table guard - runs once on startup or when needed, never blocking every request
-let qcTablesPromise = null;
-const ensureQcTables = async () => {
-  if (qcTablesPromise) return qcTablesPromise;
-  qcTablesPromise = (async () => {
-    try {
-      await db.run(`
-        CREATE TABLE IF NOT EXISTS qc_inspections (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          qc_no TEXT UNIQUE,
-          purchase_id INTEGER,
-          purchase_item_id INTEGER,
-          rm_lot_no TEXT NOT NULL,
-          inspection_date TEXT,
-          inspector TEXT,
-          overall_result TEXT,
-          remarks TEXT,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-      `);
-    } catch (e) {}
-
-    try {
-      await db.run("ALTER TABLE qc_inspections ADD COLUMN evidence_json TEXT");
-    } catch (e) {}
-
-    try {
-      await db.run(`
-        CREATE TABLE IF NOT EXISTS qc_inspection_params (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          qc_id INTEGER NOT NULL,
-          param_key TEXT NOT NULL,
-          param_value TEXT,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-      `);
-    } catch (e) {}
-
-    try {
-      await db.run(`
-        CREATE TABLE IF NOT EXISTS incoming_quality_reports (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          iqr_no TEXT UNIQUE,
-          qc_id INTEGER NOT NULL,
-          rm_lot_no TEXT NOT NULL,
-          report_file TEXT,
-          uploaded_date TEXT,
-          uploaded_by TEXT,
-          version INTEGER DEFAULT 1,
-          remarks TEXT,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-      `);
-    } catch (e) {}
-
-    try {
-      await db.run(`
-        CREATE TABLE IF NOT EXISTS qc_approval_history (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          qc_id INTEGER NOT NULL,
-          approval_level TEXT NOT NULL,
-          approved_by TEXT,
-          approved_date TEXT,
-          remarks TEXT,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-      `);
-    } catch (e) {}
-
-    try {
-      await db.run("ALTER TABLE stock_lots ADD COLUMN unloading_status TEXT DEFAULT 'PENDING_DECISION'");
-    } catch (e) {}
-    try {
-      await db.run("ALTER TABLE stock_lots ADD COLUMN godown_id INTEGER");
-    } catch (e) {}
-    try {
-      await db.run("ALTER TABLE stock_lots ADD COLUMN godown_name TEXT");
-    } catch (e) {}
-    try {
-      await db.run("ALTER TABLE stock_lots ADD COLUMN qc_status TEXT DEFAULT 'QC_PENDING'");
-    } catch (e) {}
-    try {
-      await db.run("ALTER TABLE stock_lots ADD COLUMN rate REAL DEFAULT 0");
-    } catch (e) {}
-    try {
-      await db.run("ALTER TABLE stock_lots ADD COLUMN purchase_id INTEGER");
-    } catch (e) {}
-    try {
-      await db.run("ALTER TABLE stock_lots ADD COLUMN usable_for_production INTEGER DEFAULT 0");
-    } catch (e) {}
-    try {
-      await db.run("ALTER TABLE stock_lots ADD COLUMN approval_status TEXT DEFAULT 'PENDING_APPROVAL'");
-    } catch (e) {}
-    try {
-      await db.run("ALTER TABLE stock_lots ADD COLUMN approval_date TEXT");
-    } catch (e) {}
-    try {
-      await db.run("ALTER TABLE purchase_returns ADD COLUMN return_inv_no TEXT");
-    } catch (e) {}
-    try {
-      await db.run("ALTER TABLE purchase_return_items ADD COLUMN lot_no TEXT");
-    } catch (e) {}
-  })();
-  return qcTablesPromise;
-};
-
-// Initialize tables once on background startup
-ensureQcTables();
-
-// Lightweight middleware: ensures startup has completed without re-executing DDL on every single request
-router.use(async (req, res, next) => {
-  if (qcTablesPromise) {
-    try {
-      await qcTablesPromise;
-    } catch (e) {}
+// Dynamic per-tenant table & column guard - caches completion per companyId so multi-tenant PG schemas (e.g. KIYA) and SQLite files are always migrated
+const qcTablesReadyByCompany = new Map();
+const ensureQcTables = async (companyId = 1) => {
+  const cId = parseInt(companyId, 10) || 1;
+  if (qcTablesReadyByCompany.has(cId)) {
+    return qcTablesReadyByCompany.get(cId);
   }
+
+  const migrationPromise = (async () => {
+    const runSafe = async (sql) => {
+      try {
+        await db.run(sql, [], cId);
+      } catch (e) {}
+    };
+
+    const addColumnSafe = async (tableName, columnName, columnDef) => {
+      if (db.isPostgres) {
+        await runSafe(`ALTER TABLE ${tableName} ADD COLUMN IF NOT EXISTS ${columnName} ${columnDef}`);
+      } else {
+        await runSafe(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDef}`);
+      }
+    };
+
+    await runSafe(`
+      CREATE TABLE IF NOT EXISTS qc_inspections (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        qc_no TEXT UNIQUE,
+        purchase_id INTEGER,
+        purchase_item_id INTEGER,
+        rm_lot_no TEXT NOT NULL,
+        inspection_date TEXT,
+        inspector TEXT,
+        overall_result TEXT,
+        remarks TEXT,
+        evidence_json TEXT DEFAULT '[]',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await addColumnSafe('qc_inspections', 'evidence_json', "TEXT DEFAULT '[]'");
+
+    await runSafe(`
+      CREATE TABLE IF NOT EXISTS qc_inspection_params (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        qc_id INTEGER NOT NULL,
+        param_key TEXT NOT NULL,
+        param_value TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    await runSafe(`
+      CREATE TABLE IF NOT EXISTS incoming_quality_reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        iqr_no TEXT UNIQUE,
+        qc_id INTEGER NOT NULL,
+        rm_lot_no TEXT NOT NULL,
+        report_file TEXT,
+        uploaded_date TEXT,
+        uploaded_by TEXT,
+        version INTEGER DEFAULT 1,
+        remarks TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    await runSafe(`
+      CREATE TABLE IF NOT EXISTS qc_approval_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        qc_id INTEGER NOT NULL,
+        approval_level TEXT NOT NULL,
+        approved_by TEXT,
+        approved_date TEXT,
+        remarks TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    if (db.isPostgres) {
+      await runSafe("ALTER TABLE qc_inspection_params DROP CONSTRAINT IF EXISTS qc_inspection_params_qc_id_fkey CASCADE");
+      await runSafe("ALTER TABLE qc_approval_history DROP CONSTRAINT IF EXISTS qc_approval_history_qc_id_fkey CASCADE");
+    }
+
+    await addColumnSafe('stock_lots', 'unloading_status', "TEXT DEFAULT 'PENDING_DECISION'");
+    await addColumnSafe('stock_lots', 'godown_id', 'INTEGER');
+    await addColumnSafe('stock_lots', 'godown_name', 'TEXT');
+    await addColumnSafe('stock_lots', 'qc_status', "TEXT DEFAULT 'QC_PENDING'");
+    await addColumnSafe('stock_lots', 'rate', 'REAL DEFAULT 0');
+    await addColumnSafe('stock_lots', 'purchase_id', 'INTEGER');
+    await addColumnSafe('stock_lots', 'usable_for_production', 'INTEGER DEFAULT 0');
+    await addColumnSafe('stock_lots', 'approval_status', "TEXT DEFAULT 'PENDING_APPROVAL'");
+    await addColumnSafe('stock_lots', 'approval_date', 'TEXT');
+    await addColumnSafe('purchase_returns', 'return_inv_no', 'TEXT');
+    await addColumnSafe('purchase_return_items', 'lot_no', 'TEXT');
+  })().catch((err) => {
+    qcTablesReadyByCompany.delete(cId);
+    console.warn(`[QC EnsureTables] Notice migrating company ${cId}:`, err.message);
+  });
+
+  qcTablesReadyByCompany.set(cId, migrationPromise);
+  return migrationPromise;
+};
+
+// Initialize default company tables once in background on startup
+ensureQcTables(1);
+
+// Lightweight middleware: ensures active tenant's QC tables & columns exist before any route runs
+router.use(async (req, res, next) => {
+  const activeCompanyId = parseInt(req.companyId || req.headers['x-company-id'] || '1', 10) || 1;
+  await ensureQcTables(activeCompanyId);
   next();
 });
 
@@ -595,13 +577,6 @@ router.get(['/inspection/:id', '/purchase-lab-testing/:id', '/coa/:id', '/iqr/:i
   const idStr = String(id).trim();
   const idClean = idStr.replace(/^PUR-?/i, '').replace(/^QC-?/i, '').replace(/^LOT-?/i, '').replace(/^INV-?/i, '').trim();
 
-  try {
-    await db.run("ALTER TABLE stock_lots ADD COLUMN godown_id INTEGER");
-  } catch (e) {}
-  try {
-    await db.run("ALTER TABLE stock_lots ADD COLUMN godown_name TEXT");
-  } catch (e) {}
-
   const defaultStandardParameters = [
     { parameterKey: 'moisture', parameterName: 'Moisture Content', category: 'Physical', min: 0, max: 12, actualResult: '10.5', unit: '%', method: 'IS 4333 (Part 2)', status: 'PASS' },
     { parameterKey: 'foreign_matter', parameterName: 'Foreign Matter', category: 'Physical', min: 0, max: 1.0, actualResult: '0.2', unit: '%', method: 'IS 4333 (Part 1)', status: 'PASS' },
@@ -659,7 +634,21 @@ router.get(['/inspection/:id', '/purchase-lab-testing/:id', '/coa/:id', '/iqr/:i
          OR qi.qc_no = ('QC-' || ?)
          OR qi.rm_lot_no = ('LOT-' || ?)
          OR CAST(qi.purchase_id AS TEXT) = ?
-    `, [idStr, idStr, idStr, idStr, idStr, idClean, idClean, idClean, idClean]);
+      ORDER BY
+        CASE
+          WHEN CAST(qi.id AS TEXT) = ? THEN 0
+          WHEN qi.qc_no = ? THEN 1
+          WHEN qi.rm_lot_no = ? THEN 2
+          WHEN CAST(qi.id AS TEXT) = ? THEN 3
+          WHEN qi.qc_no = ('QC-' || ?) THEN 4
+          WHEN qi.rm_lot_no = ('LOT-' || ?) THEN 5
+          ELSE 6
+        END,
+        CASE WHEN LOWER(TRIM(COALESCE(sl.lot_no, ''))) = LOWER(TRIM(COALESCE(qi.rm_lot_no, ''))) THEN 0 ELSE 1 END,
+        CASE WHEN LOWER(TRIM(COALESCE(pi.lot_no, ''))) = LOWER(TRIM(COALESCE(qi.rm_lot_no, ''))) THEN 0 ELSE 1 END,
+        qi.id DESC
+      LIMIT 1
+    `, [idStr, idStr, idStr, idStr, idStr, idClean, idClean, idClean, idClean, idStr, idStr, idStr, idClean, idClean, idClean]);
   } catch (e) {
     console.warn('Error querying qc_inspections table:', e.message);
   }
@@ -917,10 +906,12 @@ router.get(['/inspection/:id', '/purchase-lab-testing/:id', '/coa/:id', '/iqr/:i
     const paramsResult = await db.query(`
       SELECT param_key, param_value 
       FROM qc_inspection_params 
-      WHERE CAST(qc_id AS TEXT) = ? OR CAST(qc_id AS TEXT) = ?
-    `, [String(rowData.id), idStr]);
+      WHERE CAST(qc_id AS TEXT) = ?
+      ORDER BY id ASC
+    `, [String(rowData.id)]);
 
     const seenParamKeys = new Set();
+    const seenParamNames = new Set();
     qcResults = [];
     for (const row of paramsResult.rows) {
       let parsed = null;
@@ -933,9 +924,11 @@ router.get(['/inspection/:id', '/purchase-lab-testing/:id', '/coa/:id', '/iqr/:i
           status: 'PASS'
         };
       }
-      const pKey = (parsed.parameterKey || parsed.parameterName || parsed.parameter || row.param_key || '').toString().toLowerCase().trim();
-      if (pKey && seenParamKeys.has(pKey)) continue;
+      const pKey = (parsed.parameterKey || row.param_key || '').toString().toLowerCase().trim();
+      const pName = (parsed.parameterName || parsed.parameter || '').toString().toLowerCase().trim();
+      if ((pKey && seenParamKeys.has(pKey)) || (pName && seenParamNames.has(pName))) continue;
       if (pKey) seenParamKeys.add(pKey);
+      if (pName) seenParamNames.add(pName);
       qcResults.push(parsed);
     }
   } catch (e) {}
@@ -1103,11 +1096,34 @@ router.post(['/submit', '/purchase-lab-testing'], asyncHandler(async (req, res) 
         } catch (_) {}
       }
 
-      // 4. If still not matched to an existing purchases row, do NOT fail or rollback the transaction!
-      // In an ERP, manual QC, sample tests, or external batch tests may reference unlinked vouchers.
       if (resolvedPurchaseId === null) {
-        console.info(`[QC Submit] Purchase reference '${purchaseReference}' not linked to an existing purchase record; proceeding with unlinked inspection.`);
+        console.info(`[QC Submit] Purchase reference '${purchaseReference}' not matched directly; checking lot linkage.`);
       }
+    }
+
+    // 4. Always resolve purchase_id from purchase_items or stock_lots by lotNo if still unresolved
+    if (!resolvedPurchaseId && lotNo) {
+      try {
+        const piRes = await connection.query(
+          `SELECT purchase_id FROM purchase_items 
+           WHERE LOWER(TRIM(lot_no)) = LOWER(TRIM(?)) AND purchase_id IS NOT NULL 
+           ORDER BY id DESC LIMIT 1`,
+          [lotNo]
+        );
+        if (piRes.rows?.[0]?.purchase_id) {
+          resolvedPurchaseId = piRes.rows[0].purchase_id;
+        } else {
+          const slRes = await connection.query(
+            `SELECT purchase_id FROM stock_lots 
+             WHERE LOWER(TRIM(lot_no)) = LOWER(TRIM(?)) AND purchase_id IS NOT NULL 
+             ORDER BY id DESC LIMIT 1`,
+            [lotNo]
+          );
+          if (slRes.rows?.[0]?.purchase_id) {
+            resolvedPurchaseId = slRes.rows[0].purchase_id;
+          }
+        }
+      } catch (_) {}
     }
 
     // 1. Update or Insert stock_lots table in the database
@@ -1128,20 +1144,6 @@ router.post(['/submit', '/purchase-lab-testing'], asyncHandler(async (req, res) 
       usable_for_production = 0;
       approval_status = 'PENDING_APPROVAL';
     }
-
-    // Ensure columns exist in SQLite database
-    try {
-      await connection.run("ALTER TABLE stock_lots ADD COLUMN usable_for_production INTEGER DEFAULT 0");
-    } catch (e) {}
-    try {
-      await connection.run("ALTER TABLE stock_lots ADD COLUMN approval_status TEXT DEFAULT 'PENDING_APPROVAL'");
-    } catch (e) {}
-    try {
-      await connection.run("ALTER TABLE stock_lots ADD COLUMN approval_date TEXT");
-    } catch (e) {}
-    try {
-      await connection.run("ALTER TABLE stock_lots ADD COLUMN unloading_status TEXT DEFAULT 'PENDING_DECISION'");
-    } catch (e) {}
 
     // Check if lot exists
     const lotCheck = await connection.query("SELECT id FROM stock_lots WHERE lot_no = ?", [lotNo]);
@@ -1227,19 +1229,23 @@ router.post(['/submit', '/purchase-lab-testing'], asyncHandler(async (req, res) 
     // Clear existing params before writing new ones to prevent duplicate rows
     await connection.run(`DELETE FROM qc_inspection_params WHERE CAST(qc_id AS TEXT) = ?`, [String(savedQcId)]);
 
-    // 2. Insert params with deduplication
+    // 2. Insert params with deduplication by key & parameter name
     const seenParamKeys = new Set();
+    const seenParamNames = new Set();
     for (const resItem of (qcResults || [])) {
       const key = resItem.parameterKey || resItem.id || resItem.parameter || resItem.parameterName;
       if (!key) continue;
+      const paramName = resItem.parameter || resItem.parameterName || key;
       const normalizedKey = String(key).toLowerCase().trim();
-      if (seenParamKeys.has(normalizedKey)) continue;
+      const normalizedName = String(paramName).toLowerCase().trim();
+      if (seenParamKeys.has(normalizedKey) || (normalizedName && seenParamNames.has(normalizedName))) continue;
       seenParamKeys.add(normalizedKey);
+      if (normalizedName) seenParamNames.add(normalizedName);
 
       // Serialize full param result details into param_value to avoid data duplication
       const serializedValue = JSON.stringify({
         parameterKey: key,
-        parameterName: resItem.parameter || resItem.parameterName || key,
+        parameterName: paramName,
         category: resItem.category || '',
         actualResult: resItem.actualResult !== undefined ? resItem.actualResult : (resItem.actual || ''),
         status: resItem.status || 'PENDING',
@@ -1292,8 +1298,17 @@ router.post('/iqr/generate', asyncHandler(async (req, res) => {
          OR CAST(purchase_id AS TEXT) = ?
          OR ('PUR-' || CAST(purchase_id AS TEXT)) = ?
          OR CAST(id AS TEXT) = ?
+      ORDER BY
+        CASE
+          WHEN CAST(id AS TEXT) = ? THEN 0
+          WHEN qc_no = ? THEN 1
+          WHEN rm_lot_no = ? THEN 2
+          WHEN CAST(id AS TEXT) = ? THEN 3
+          ELSE 4
+        END,
+        id DESC
       LIMIT 1
-    `, [targetStr, targetStr, targetStr, targetStr, targetStr, idClean]);
+    `, [targetStr, targetStr, targetStr, targetStr, targetStr, idClean, targetStr, targetStr, targetStr, idClean]);
   } catch (e) {}
 
   const resolvedLotNo = inspection.rows[0]?.rm_lot_no || (targetStr.startsWith('LOT') ? targetStr : `LOT-${idClean || targetStr}`);
@@ -1305,9 +1320,10 @@ router.post('/iqr/generate', asyncHandler(async (req, res) => {
     const existingReport = await db.query(`
       SELECT id, iqr_no 
       FROM incoming_quality_reports 
-      WHERE CAST(qc_id AS TEXT) = ? OR CAST(qc_id AS TEXT) = ? OR rm_lot_no = ?
+      WHERE CAST(qc_id AS TEXT) = ? OR rm_lot_no = ?
+      ORDER BY CASE WHEN CAST(qc_id AS TEXT) = ? THEN 0 ELSE 1 END, id DESC
       LIMIT 1
-    `, [String(resolvedQcId), targetStr, resolvedLotNo]);
+    `, [String(resolvedQcId), resolvedLotNo, String(resolvedQcId)]);
     
     if (existingReport.rows.length > 0) {
       return res.json({ 
@@ -1356,8 +1372,17 @@ router.post('/coa/generate', asyncHandler(async (req, res) => {
          OR CAST(purchase_id AS TEXT) = ?
          OR ('PUR-' || CAST(purchase_id AS TEXT)) = ?
          OR CAST(id AS TEXT) = ?
+      ORDER BY
+        CASE
+          WHEN CAST(id AS TEXT) = ? THEN 0
+          WHEN qc_no = ? THEN 1
+          WHEN rm_lot_no = ? THEN 2
+          WHEN CAST(id AS TEXT) = ? THEN 3
+          ELSE 4
+        END,
+        id DESC
       LIMIT 1
-    `, [targetStr, targetStr, targetStr, targetStr, targetStr, idClean]);
+    `, [targetStr, targetStr, targetStr, targetStr, targetStr, idClean, targetStr, targetStr, targetStr, idClean]);
   } catch (e) {}
 
   const resolvedQcNo = inspection.rows[0]?.qc_no || (targetStr.startsWith('QC-') ? targetStr : `QC-${idClean || targetStr}`);
@@ -1378,14 +1403,6 @@ router.post('/unload', asyncHandler(async (req, res) => {
   if (!lotNo || !status) {
     return res.status(400).json({ success: false, message: 'lotNo and status are required' });
   }
-
-  // Ensure columns exist in SQLite
-  try {
-    await db.run("ALTER TABLE stock_lots ADD COLUMN unloading_status TEXT DEFAULT 'PENDING_DECISION'", [], activeCompanyId);
-  } catch (e) {}
-  try {
-    await db.run("ALTER TABLE stock_lots ADD COLUMN godown_name TEXT", [], activeCompanyId);
-  } catch (e) {}
 
   if (status === 'RETURNED') {
     await db.run(
@@ -1687,14 +1704,6 @@ router.post('/confirm-disposal', asyncHandler(async (req, res) => {
   if (!lotNo || finalAllocations.length === 0) {
     return res.status(400).json({ success: false, message: 'lotNo and valid godown allocations are required' });
   }
-
-  // Ensure columns exist
-  try {
-    await db.run("ALTER TABLE stock_lots ADD COLUMN unloading_status TEXT DEFAULT 'PENDING_DECISION'");
-  } catch (e) {}
-  try {
-    await db.run("ALTER TABLE stock_lots ADD COLUMN godown_id INTEGER");
-  } catch (e) {}
 
   // 1. Get base info for this lot
   const lotCheck = await db.query('SELECT * FROM stock_lots WHERE lot_no = ? LIMIT 1', [lotNo]);
