@@ -498,6 +498,12 @@ function inferLedgerClassification(ledgerName, groupName = null, ledgerType = nu
     return { groupName, ledgerType: nature, openingType: (nature === 'Liability' || nature === 'Income') ? 'Cr' : 'Dr' };
   }
 
+  if (lower.includes('weight cash') || lower.includes('cash charges')) {
+    return { groupName: 'Direct Expenses', ledgerType: 'Expense', openingType: 'Dr' };
+  }
+  if (lower.includes('transport advance')) {
+    return { groupName: 'Current Assets', ledgerType: 'Asset', openingType: 'Dr' };
+  }
   if (lower.includes('cash')) return { groupName: 'Cash-in-hand', ledgerType: 'Asset', openingType: 'Dr' };
   if (lower.includes('bank')) return { groupName: 'Bank Accounts', ledgerType: 'Asset', openingType: 'Dr' };
   if (lower.includes('input cgst') || lower.includes('input sgst') || lower.includes('input igst') || lower.includes('cgst input') || lower.includes('sgst input') || lower.includes('igst input') || lower.includes('input tax') || lower.includes('vat input')) {
@@ -1557,12 +1563,20 @@ async function syncLegacyPurchaseVouchers(companyId = null) {
         await txConn.run(`UPDATE purchases SET voucher_no = ? WHERE id = ?`, [resolvedVoucherNo, pId]).catch(() => {});
       }
 
-      // Inspect existing voucher entries for missing Transport, Loadman, or Deduction lines
+      // Inspect existing voucher entries for missing or misposted Transport, Loadman, or Deduction lines
       let needsRepost = false;
       const transportAmt = Number(p.net_transport_amount || p.transport_charges || p.freight_amount || 0);
+      const freightAmt = Number(p.freight_amount || 0);
+      const freightAdvAmt = Number(p.advance_amount || 0);
+      const mamoolAmt = Number(p.mamool_amount || 0);
+      const wtCashAmt = Number(p.weight_cash || p.weight_cash_amount || 0);
+      const otherAddlAmt = Number(p.other_additional_charges || 0);
+      const otherDedAmt = Number(p.other_deductions || 0);
       const loadmanAmt = Number(p.loadman_charges || 0);
       const transPayType = String(p.transport_payable_type || 'SEPARATE').toUpperCase();
       const loadmanPayType = String(p.loadman_payable_type || 'SEPARATE').toUpperCase();
+      const isTransIncluded = transPayType === 'SUPPLIER_INVOICE' || transPayType === 'SUPPLIER' || transPayType.includes('SUPPLIER') || transPayType.includes('INCLUDED');
+      const isLoadmanIncluded = loadmanPayType === 'SUPPLIER_INVOICE' || loadmanPayType === 'SUPPLIER' || loadmanPayType.includes('SUPPLIER') || loadmanPayType.includes('INCLUDED');
 
       const dedRes = await txConn.query(`SELECT * FROM purchase_deductions WHERE purchase_id = ?`, [pId]).catch(() => ({ rows: [] }));
       const deductions = dedRes.rows || [];
@@ -1572,21 +1586,51 @@ async function syncLegacyPurchaseVouchers(companyId = null) {
           needsRepost = true;
         }
       } else {
-        const veRes = await txConn.query(`SELECT ledger_name, debit, credit FROM voucher_entry WHERE voucher_id = ?`, [vRow.id]);
+        const veRes = await txConn.query(`SELECT ledger_name, debit, credit, remarks FROM voucher_entry WHERE voucher_id = ?`, [vRow.id]);
         const veRows = veRes.rows || [];
         if (veRows.length === 0) {
           needsRepost = true;
         } else {
           const namesLower = new Set(veRows.map((e) => String(e.ledger_name || '').trim().toLowerCase()));
-          if (transportAmt > 0 && transPayType !== 'SUPPLIER_INVOICE' && !namesLower.has('transport charges')) {
+          if ((transportAmt > 0 || freightAmt > 0) && !isTransIncluded && !namesLower.has('transport charges')) {
             needsRepost = true;
           }
-          if (loadmanAmt > 0 && loadmanPayType !== 'SUPPLIER_INVOICE' && !namesLower.has('loadman charges')) {
+          if (loadmanAmt > 0 && !isLoadmanIncluded && !namesLower.has('loadman charges')) {
             needsRepost = true;
           }
           const hasLessDed = deductions.some((d) => (!d.type || String(d.type).toUpperCase() === 'LESS') && Number(d.amount || 0) > 0);
-          if (hasLessDed && !namesLower.has('purchase deduction recovery') && !namesLower.has('mamool recovery')) {
+          if (hasLessDed && !namesLower.has('purchase deduction recovery')) {
             needsRepost = true;
+          }
+          // Heal legacy purchase vouchers where transport mamool / weight cash / other transport ded/addl affected Supplier ledger instead of Transporter ledger
+          const hasTransportAdj = mamoolAmt > 0 || wtCashAmt > 0 || otherAddlAmt > 0 || otherDedAmt > 0 || freightAdvAmt > 0;
+          if (hasTransportAdj) {
+            if (namesLower.has('weight cash recovery') || namesLower.has('other purchase charges')) {
+              needsRepost = true;
+            }
+            const { getPartyName } = require('../utils/ledgerHelper');
+            const supplierResolved = await getPartyName(p.supplier, 'supplier', cId).catch(() => String(p.supplier || '').trim());
+            const supplierLower = String(supplierResolved || '').trim().toLowerCase();
+            const actualSupplierDr = veRows
+              .filter((e) => String(e.ledger_name || '').trim().toLowerCase() === supplierLower)
+              .reduce((s, e) => s + Number(e.debit || 0), 0);
+            const expectedSupplierDr = deductions
+              .filter((d) => !d.type || String(d.type).toUpperCase() === 'LESS')
+              .reduce((s, d) => s + Number(d.amount || 0), 0);
+            if (Math.abs(actualSupplierDr - expectedSupplierDr) > 0.01) {
+              needsRepost = true;
+            }
+            if (!isTransIncluded) {
+              const transporterResolved = await getPartyName(p.transporter || p.transport || '', 'transporter', cId).catch(() => String(p.transporter || p.transport || '').trim());
+              const transLower = String(transporterResolved || 'Transporter Payable').trim().toLowerCase();
+              const actualTransDr = veRows
+                .filter((e) => String(e.ledger_name || '').trim().toLowerCase() === transLower)
+                .reduce((s, e) => s + Number(e.debit || 0), 0);
+              const expectedTransDr = mamoolAmt + otherDedAmt + freightAdvAmt;
+              if (Math.abs(actualTransDr - expectedTransDr) > 0.01) {
+                needsRepost = true;
+              }
+            }
           }
         }
       }
@@ -1616,10 +1660,12 @@ async function syncLegacyPurchaseVouchers(companyId = null) {
             netAmount: Number(p.grand_total || p.net_amount || 0),
             deductions,
             roundOff: Number(p.round_off || 0),
-            mamoolAmount: Number(p.mamool_amount || 0),
-            weightCashAmount: Number(p.weight_cash || p.weight_cash_amount || 0),
-            otherAdditionalCharges: Number(p.other_additional_charges || 0),
-            otherDeductions: Number(p.other_deductions || 0),
+            mamoolAmount: mamoolAmt,
+            weightCashAmount: wtCashAmt,
+            otherAdditionalCharges: otherAddlAmt,
+            otherDeductions: otherDedAmt,
+            freightAmount: freightAmt,
+            freightAdvanceAmount: freightAdvAmt,
             transporter: p.transporter || p.transport || '',
             transportCharges: transportAmt,
             transportPayableType: transPayType,

@@ -175,20 +175,42 @@ async function createPurchaseVoucherChain(purchaseData) {
     basePaise = Math.max(0, toPaise(netAmount) - effectiveTaxPaise - vatPaise + discPaise);
   }
 
-  const transportPaise = toPaise(purchaseData.transportCharges || purchaseData.freightAmount || purchaseData.transport_charges || 0);
+  const freightAdvancePaise = Math.max(0, toPaise(purchaseData.freightAdvanceAmount ?? purchaseData.advanceAmount ?? purchaseData.advance_amount ?? 0));
+  const mamoolPaise = Math.max(0, toPaise(mamoolAmount));
+  const weightCashPaise = Math.max(0, toPaise(weightCashAmount));
+  const otherAddPaise = Math.max(0, toPaise(otherAdditionalCharges));
+  const otherDedPaise = Math.max(0, toPaise(otherDeductions));
+
+  const transportDedPaise = freightAdvancePaise + mamoolPaise + otherDedPaise;
+  const transportAddPaise = weightCashPaise + otherAddPaise;
+
+  const explicitFreightPaise = Math.max(0, toPaise(purchaseData.freightAmount ?? purchaseData.freight_amount ?? 0));
+  const netTransportInputPaise = Math.max(0, toPaise(purchaseData.transportCharges ?? purchaseData.net_transport_amount ?? purchaseData.transport_charges ?? 0));
+  let grossFreightPaise = explicitFreightPaise;
+  if (grossFreightPaise === 0 && (netTransportInputPaise > 0 || transportDedPaise > 0 || transportAddPaise > 0)) {
+    grossFreightPaise = Math.max(0, netTransportInputPaise + transportDedPaise - transportAddPaise);
+  }
+  const hasTransportActivity = grossFreightPaise > 0 || transportAddPaise > 0 || transportDedPaise > 0;
+
   const rawTransporter = purchaseData.transporter || purchaseData.transporterName || purchaseData.transport || '';
   const transporterName = await getPartyName(rawTransporter, 'transporter', cId);
   const transportPayableType = String(purchaseData.transportPayableType || purchaseData.transport_payable_type || 'SEPARATE').toUpperCase();
+  const isTransportIncludedInSupplier =
+    transportPayableType === 'SUPPLIER_INVOICE' ||
+    transportPayableType === 'SUPPLIER' ||
+    transportPayableType.includes('SUPPLIER') ||
+    transportPayableType.includes('INCLUDED');
 
-  const loadmanPaise = toPaise(purchaseData.loadmanCharges || purchaseData.loadman_charges || 0);
+  const loadmanPaise = Math.max(0, toPaise(purchaseData.loadmanCharges || purchaseData.loadman_charges || 0));
   const rawLoadman = purchaseData.loadmanName || purchaseData.loadman_name || '';
   const loadmanName = await getPartyName(rawLoadman, 'worker', cId);
   const loadmanPayableType = String(purchaseData.loadmanPayableType || purchaseData.loadman_payable_type || 'SEPARATE').toUpperCase();
+  const isLoadmanIncludedInSupplier =
+    loadmanPayableType === 'SUPPLIER_INVOICE' ||
+    loadmanPayableType === 'SUPPLIER' ||
+    loadmanPayableType.includes('SUPPLIER') ||
+    loadmanPayableType.includes('INCLUDED');
 
-  const mamoolPaise = toPaise(mamoolAmount);
-  const weightCashPaise = toPaise(weightCashAmount);
-  const otherAddPaise = toPaise(otherAdditionalCharges);
-  const otherDedPaise = toPaise(otherDeductions);
   let roundOffPaise = toPaise(roundOff);
 
   const lines = [];
@@ -221,7 +243,7 @@ async function createPurchaseVoucherChain(purchaseData) {
     lines.push({ ledgerName: 'Discount Received', ledgerType: 'Income', debit: 0, credit: fromPaise(discPaise), remarks: `Discount on Purchase #${invLabel}` });
   }
 
-  // Deductions & Additional Charges
+  // Purchase Deductions & Additional Charges (ONLY these affect Supplier Ledger)
   let addChargesToSupplierPaise = 0;
   let lessDeductionsFromSupplierPaise = 0;
 
@@ -236,6 +258,7 @@ async function createPurchaseVoucherChain(purchaseData) {
         lines.push({
           ledgerName: d.account_head || 'Purchase Deduction Recovery',
           ledgerType: 'Income',
+          groupName: 'Direct Income',
           debit: 0,
           credit: fromPaise(dPaise),
           remarks: `Deduction recovery (${dName}) on #${invLabel}`,
@@ -245,6 +268,7 @@ async function createPurchaseVoucherChain(purchaseData) {
         lines.push({
           ledgerName: dName,
           ledgerType: 'Expense',
+          groupName: 'Direct Expenses',
           debit: fromPaise(dPaise),
           credit: 0,
           remarks: `${dName} on #${invLabel}`,
@@ -253,48 +277,159 @@ async function createPurchaseVoucherChain(purchaseData) {
     }
   }
 
-  if (mamoolPaise > 0) {
-    lessDeductionsFromSupplierPaise += mamoolPaise;
-    lines.push({ ledgerName: 'Mamool Recovery', ledgerType: 'Income', debit: 0, credit: fromPaise(mamoolPaise), remarks: `Mamool on #${invLabel}` });
-  }
-  if (weightCashPaise > 0) {
-    lessDeductionsFromSupplierPaise += weightCashPaise;
-    lines.push({ ledgerName: 'Weight Cash Recovery', ledgerType: 'Income', debit: 0, credit: fromPaise(weightCashPaise), remarks: `Weight cash on #${invLabel}` });
-  }
-  if (otherDedPaise > 0) {
-    lessDeductionsFromSupplierPaise += otherDedPaise;
-    lines.push({ ledgerName: 'Purchase Deduction Recovery', ledgerType: 'Income', debit: 0, credit: fromPaise(otherDedPaise), remarks: `Other deductions on #${invLabel}` });
-  }
-  if (otherAddPaise > 0) {
-    addChargesToSupplierPaise += otherAddPaise;
-    lines.push({ ledgerName: 'Other Purchase Charges', ledgerType: 'Expense', debit: fromPaise(otherAddPaise), credit: 0, remarks: `Other charges on #${invLabel}` });
-  }
-
-  // Transport Charges
-  if (transportPaise > 0) {
-    lines.push({ ledgerName: 'Transport Charges', ledgerType: 'Expense', debit: fromPaise(transportPaise), credit: 0, remarks: `Transport charges for #${invLabel}` });
-    if (transportPayableType === 'SUPPLIER_INVOICE') {
-      addChargesToSupplierPaise += transportPaise;
+  // Transport Charges & Transport Adjustments (Mamool, Weight Cash, Advance, Other Transport Ded/Addl)
+  // Freight transport adjustments affect ONLY the Transport / Transporter ledger, NEVER the Supplier ledger.
+  if (hasTransportActivity) {
+    const effectiveTransporterLedger = transporterName || 'Transporter Payable';
+    if (!isTransportIncludedInSupplier) {
+      if (grossFreightPaise > 0) {
+        lines.push({
+          ledgerName: 'Transport Charges',
+          ledgerType: 'Expense',
+          groupName: 'Direct Expenses',
+          debit: fromPaise(grossFreightPaise),
+          credit: 0,
+          remarks: `Transport freight charges for #${invLabel}`,
+        });
+        lines.push({
+          ledgerName: effectiveTransporterLedger,
+          ledgerType: 'Transporter',
+          groupName: 'Sundry Creditors',
+          debit: 0,
+          credit: fromPaise(grossFreightPaise),
+          remarks: `Transport freight payable for #${invLabel}`,
+        });
+      }
+      if (weightCashPaise > 0) {
+        lines.push({
+          ledgerName: 'Weight Cash Charges',
+          ledgerType: 'Expense',
+          groupName: 'Direct Expenses',
+          debit: fromPaise(weightCashPaise),
+          credit: 0,
+          remarks: `Weight cash addition for transport #${invLabel}`,
+        });
+        lines.push({
+          ledgerName: effectiveTransporterLedger,
+          ledgerType: 'Transporter',
+          groupName: 'Sundry Creditors',
+          debit: 0,
+          credit: fromPaise(weightCashPaise),
+          remarks: `Weight cash payable to transporter for #${invLabel}`,
+        });
+      }
+      if (otherAddPaise > 0) {
+        lines.push({
+          ledgerName: 'Other Transport Charges',
+          ledgerType: 'Expense',
+          groupName: 'Direct Expenses',
+          debit: fromPaise(otherAddPaise),
+          credit: 0,
+          remarks: `Other transport charges for #${invLabel}`,
+        });
+        lines.push({
+          ledgerName: effectiveTransporterLedger,
+          ledgerType: 'Transporter',
+          groupName: 'Sundry Creditors',
+          debit: 0,
+          credit: fromPaise(otherAddPaise),
+          remarks: `Other transport charges payable for #${invLabel}`,
+        });
+      }
+      if (mamoolPaise > 0) {
+        lines.push({
+          ledgerName: effectiveTransporterLedger,
+          ledgerType: 'Transporter',
+          groupName: 'Sundry Creditors',
+          debit: fromPaise(mamoolPaise),
+          credit: 0,
+          remarks: `Mamool deduction on transport #${invLabel}`,
+        });
+        lines.push({
+          ledgerName: 'Mamool Recovery',
+          ledgerType: 'Income',
+          groupName: 'Direct Income',
+          debit: 0,
+          credit: fromPaise(mamoolPaise),
+          remarks: `Mamool recovery on transport #${invLabel}`,
+        });
+      }
+      if (otherDedPaise > 0) {
+        lines.push({
+          ledgerName: effectiveTransporterLedger,
+          ledgerType: 'Transporter',
+          groupName: 'Sundry Creditors',
+          debit: fromPaise(otherDedPaise),
+          credit: 0,
+          remarks: `Other transport deduction on #${invLabel}`,
+        });
+        lines.push({
+          ledgerName: 'Transport Deduction Recovery',
+          ledgerType: 'Income',
+          groupName: 'Direct Income',
+          debit: 0,
+          credit: fromPaise(otherDedPaise),
+          remarks: `Transport deduction recovery on #${invLabel}`,
+        });
+      }
+      if (freightAdvancePaise > 0) {
+        lines.push({
+          ledgerName: effectiveTransporterLedger,
+          ledgerType: 'Transporter',
+          groupName: 'Sundry Creditors',
+          debit: fromPaise(freightAdvancePaise),
+          credit: 0,
+          remarks: `Transport advance adjusted on #${invLabel}`,
+        });
+        lines.push({
+          ledgerName: 'Transport Advance',
+          ledgerType: 'Asset',
+          groupName: 'Current Assets',
+          debit: 0,
+          credit: fromPaise(freightAdvancePaise),
+          remarks: `Transport advance adjusted on #${invLabel}`,
+        });
+      }
     } else {
-      lines.push({
-        ledgerName: transporterName || 'Transporter Payable',
-        ledgerType: 'Transporter',
-        debit: 0,
-        credit: fromPaise(transportPaise),
-        remarks: `Transport charges payable for #${invLabel}`,
-      });
+      // Transport included on Supplier Bill (Option A): net transport affects Transport Charges/Recoveries cleanly without creating supplier deduction adjustments
+      const grossTransportTotalPaise = grossFreightPaise + transportAddPaise;
+      if (grossTransportTotalPaise >= transportDedPaise && grossTransportTotalPaise > 0) {
+        if (grossFreightPaise > 0) {
+          lines.push({ ledgerName: 'Transport Charges', ledgerType: 'Expense', groupName: 'Direct Expenses', debit: fromPaise(grossFreightPaise), credit: 0, remarks: `Transport charges for #${invLabel}` });
+        }
+        if (weightCashPaise > 0) {
+          lines.push({ ledgerName: 'Weight Cash Charges', ledgerType: 'Expense', groupName: 'Direct Expenses', debit: fromPaise(weightCashPaise), credit: 0, remarks: `Weight cash for transport #${invLabel}` });
+        }
+        if (otherAddPaise > 0) {
+          lines.push({ ledgerName: 'Other Transport Charges', ledgerType: 'Expense', groupName: 'Direct Expenses', debit: fromPaise(otherAddPaise), credit: 0, remarks: `Other transport charges for #${invLabel}` });
+        }
+        if (mamoolPaise > 0) {
+          lines.push({ ledgerName: 'Mamool Recovery', ledgerType: 'Income', groupName: 'Direct Income', debit: 0, credit: fromPaise(mamoolPaise), remarks: `Mamool recovery on transport #${invLabel}` });
+        }
+        if (otherDedPaise > 0) {
+          lines.push({ ledgerName: 'Transport Deduction Recovery', ledgerType: 'Income', groupName: 'Direct Income', debit: 0, credit: fromPaise(otherDedPaise), remarks: `Transport deduction recovery on #${invLabel}` });
+        }
+        if (freightAdvancePaise > 0) {
+          lines.push({ ledgerName: 'Transport Advance', ledgerType: 'Asset', groupName: 'Current Assets', debit: 0, credit: fromPaise(freightAdvancePaise), remarks: `Transport advance adjusted on #${invLabel}` });
+        }
+        addChargesToSupplierPaise += (grossTransportTotalPaise - transportDedPaise);
+      } else if (netTransportInputPaise > 0) {
+        lines.push({ ledgerName: 'Transport Charges', ledgerType: 'Expense', groupName: 'Direct Expenses', debit: fromPaise(netTransportInputPaise), credit: 0, remarks: `Transport charges for #${invLabel}` });
+        addChargesToSupplierPaise += netTransportInputPaise;
+      }
     }
   }
 
   // Loadman Charges
   if (loadmanPaise > 0) {
-    lines.push({ ledgerName: 'Loadman Charges', ledgerType: 'Expense', debit: fromPaise(loadmanPaise), credit: 0, remarks: `Loading/unloading charges for #${invLabel}` });
-    if (loadmanPayableType === 'SUPPLIER_INVOICE') {
+    lines.push({ ledgerName: 'Loadman Charges', ledgerType: 'Expense', groupName: 'Direct Expenses', debit: fromPaise(loadmanPaise), credit: 0, remarks: `Loading/unloading charges for #${invLabel}` });
+    if (isLoadmanIncludedInSupplier) {
       addChargesToSupplierPaise += loadmanPaise;
     } else {
       lines.push({
         ledgerName: loadmanName || 'Loadman Payable',
         ledgerType: 'Worker',
+        groupName: 'Current Liabilities',
         debit: 0,
         credit: fromPaise(loadmanPaise),
         remarks: `Loading charges payable for #${invLabel}`,

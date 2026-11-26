@@ -175,6 +175,7 @@ async function restoreFromRecycleBin(id, activeCompanyId = null) {
         const { createPurchaseLedgerEntries } = require('../utils/ledgerHelper');
         if (createPurchaseLedgerEntries) {
           await createPurchaseLedgerEntries({
+            companyId: activeCompanyId,
             supplier: record.supplier,
             date: record.date || record.inv_date,
             invNo: record.inv_no || record.s_no || '',
@@ -184,12 +185,20 @@ async function restoreFromRecycleBin(id, activeCompanyId = null) {
             cgstAmount: parseFloat(record.cgst_amount || 0) || 0,
             sgstAmount: parseFloat(record.sgst_amount || 0) || 0,
             igstAmount: parseFloat(record.igst_amount || 0) || 0,
-            grandTotal: parseFloat(record.grand_total || record.net_amount || record.total_amount || 0) || 0,
-            transportCharges: parseFloat(record.transport_charges || record.freight_amount || 0) || 0,
+            netAmount: parseFloat(record.grand_total || record.net_amount || record.total_amount || 0) || 0,
+            mamoolAmount: parseFloat(record.mamool_amount || 0) || 0,
+            weightCashAmount: parseFloat(record.weight_cash || record.weight_cash_amount || 0) || 0,
+            otherAdditionalCharges: parseFloat(record.other_additional_charges || 0) || 0,
+            otherDeductions: parseFloat(record.other_deductions || 0) || 0,
+            freightAmount: parseFloat(record.freight_amount || 0) || 0,
+            freightAdvanceAmount: parseFloat(record.advance_amount || 0) || 0,
+            transportCharges: parseFloat(record.net_transport_amount || record.transport_charges || record.freight_amount || 0) || 0,
             transporter: record.transporter || record.transport || '',
+            transportPayableType: record.transport_payable_type || 'SEPARATE',
             loadmanCharges: parseFloat(record.loadman_charges || 0) || 0,
-            loadmanName: record.loadman_name || null
-          }, activeCompanyId);
+            loadmanName: record.loadman_name || null,
+            loadmanPayableType: record.loadman_payable_type || 'SEPARATE'
+          });
         }
       } catch (ledgErr) {
         console.warn('Notice recreating ledger entries for restored purchase:', ledgErr.message);

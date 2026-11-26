@@ -177,6 +177,7 @@ async function healAllTransactions() {
       );
       if (!vResult.rows || vResult.rows.length === 0) {
         console.log(`Syncing missing Purchase ID ${p.id} to voucher/ledger...`);
+        const dedRes = await db.query('SELECT * FROM purchase_deductions WHERE purchase_id = ?', [p.id]).catch(() => ({ rows: [] }));
         await createPurchaseVoucherChain({
           supplier: p.supplier,
           date: p.date,
@@ -186,6 +187,19 @@ async function healAllTransactions() {
           taxAmount: p.tax_amount || 0,
           discAmount: p.disc_amount || 0,
           netAmount: p.grand_total || p.net_amount || p.total_amount,
+          deductions: dedRes.rows || [],
+          mamoolAmount: Number(p.mamool_amount || 0),
+          weightCashAmount: Number(p.weight_cash || p.weight_cash_amount || 0),
+          otherAdditionalCharges: Number(p.other_additional_charges || 0),
+          otherDeductions: Number(p.other_deductions || 0),
+          freightAmount: Number(p.freight_amount || 0),
+          freightAdvanceAmount: Number(p.advance_amount || 0),
+          transporter: p.transporter || p.transport || '',
+          transportCharges: Number(p.net_transport_amount || p.transport_charges || p.freight_amount || 0),
+          transportPayableType: p.transport_payable_type || 'SEPARATE',
+          loadmanCharges: Number(p.loadman_charges || 0),
+          loadmanName: p.loadman_name || null,
+          loadmanPayableType: p.loadman_payable_type || 'SEPARATE',
           narration: p.remarks || `Purchase Invoice #${p.inv_no || p.s_no}`
         });
       }
@@ -366,7 +380,8 @@ async function reconcilePurchaseTransporterAndLoadmanEntries() {
       const transAmt = parseFloat(p.transport_charges || 0);
       const transPayType = String(p.transport_payable_type).toUpperCase();
 
-      if (transAmt > 0 && transPayType !== 'SUPPLIER_INVOICE' && transName) {
+      const isTransIncluded = transPayType === 'SUPPLIER_INVOICE' || transPayType === 'SUPPLIER' || transPayType.includes('SUPPLIER') || transPayType.includes('INCLUDED');
+      if (transAmt > 0 && !isTransIncluded && transName) {
         const check = await db.query(`
           SELECT id FROM ledger_entries 
           WHERE (ledger_id IN (SELECT id FROM ledgermaster WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))) OR LOWER(TRIM(ledger_name)) = LOWER(TRIM(?)))

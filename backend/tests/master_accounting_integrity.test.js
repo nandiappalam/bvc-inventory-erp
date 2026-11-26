@@ -11,27 +11,8 @@ if (!fs.existsSync(tempTestDir)) {
 
 const db = require('../config/database');
 const AccountingEngine = require('../services/AccountingEngine');
-const { createPurchaseVoucherChain } = require('../utils/ledgerHelper');
-
-const INITIAL_LEDGER_GROUPS = [
-  { name: 'Capital Account', nature: 'Liability', statement: 'Balance Sheet', balance: 'Cr', parent: null },
-  { name: 'Fixed Assets', nature: 'Asset', statement: 'Balance Sheet', balance: 'Dr', parent: null },
-  { name: 'Current Assets', nature: 'Asset', statement: 'Balance Sheet', balance: 'Dr', parent: null },
-  { name: 'Current Liabilities', nature: 'Liability', statement: 'Balance Sheet', balance: 'Cr', parent: null },
-  { name: 'Sundry Debtors', nature: 'Asset', statement: 'Balance Sheet', balance: 'Dr', parent: 'Current Assets' },
-  { name: 'Sundry Creditors', nature: 'Liability', statement: 'Balance Sheet', balance: 'Cr', parent: 'Current Liabilities' },
-  { name: 'Bank Accounts', nature: 'Asset', statement: 'Balance Sheet', balance: 'Dr', parent: 'Current Assets' },
-  { name: 'Cash-in-hand', nature: 'Asset', statement: 'Balance Sheet', balance: 'Dr', parent: 'Current Assets' },
-  { name: 'Purchase Accounts', nature: 'Expense', statement: 'Trading Account', balance: 'Dr', parent: null },
-  { name: 'Sales Accounts', nature: 'Income', statement: 'Trading Account', balance: 'Cr', parent: null },
-  { name: 'Direct Expenses', nature: 'Expense', statement: 'Profit & Loss', balance: 'Dr', parent: null },
-  { name: 'Indirect Expenses', nature: 'Expense', statement: 'Profit & Loss', balance: 'Dr', parent: null },
-  { name: 'Direct Income', nature: 'Income', statement: 'Trading Account', balance: 'Cr', parent: null },
-  { name: 'Indirect Income', nature: 'Income', statement: 'Profit & Loss', balance: 'Cr', parent: null },
-  { name: 'Duties & Taxes', nature: 'Liability', statement: 'Balance Sheet', balance: 'Cr', parent: 'Current Liabilities' },
-  { name: 'Loans & Borrowings', nature: 'Liability', statement: 'Balance Sheet', balance: 'Cr', parent: null },
-  { name: 'Suspense Accounts', nature: 'Liability', statement: 'Balance Sheet', balance: 'Cr', parent: null },
-];
+const LedgerService = require('../services/LedgerService');
+const { createPurchaseVoucherChain, deleteLedgerEntries } = require('../utils/ledgerHelper');
 
 async function runMasterAccountingIntegrityTests() {
   console.log('🧪 ==========================================================');
@@ -39,20 +20,12 @@ async function runMasterAccountingIntegrityTests() {
   console.log('🧪 ==========================================================\n');
 
   try {
-    // Test 1: Database Schema & Company 1 Initialization
-    console.log('Test 1: Ensuring accounting schema and initial ledger groups for Company 1...');
-    const comp1 = db.forCompany(1);
-    await AccountingEngine.ensureAccountingSchema(comp1);
+    // Test 1: Database Schema & Master Initialization
+    console.log('Test 1: Ensuring accounting schema and initial ledger groups...');
+    const conn = await db.getConnection(1);
+    await AccountingEngine.ensureAccountingSchema(conn);
 
-    // Seed ledger groups
-    for (const g of INITIAL_LEDGER_GROUPS) {
-      await comp1.run(
-        `INSERT OR IGNORE INTO ledger_groups (group_name, account_nature, financial_statement, normal_balance) VALUES (?, ?, ?, ?)`,
-        [g.name, g.nature, g.statement, g.balance]
-      );
-    }
-
-    const groupsRes = await comp1.query("SELECT COUNT(*) as cnt FROM ledger_groups");
+    const groupsRes = await conn.query("SELECT COUNT(*) as cnt FROM ledger_groups");
     const groupCount = Number(groupsRes.rows?.[0]?.cnt || 0);
     assert.ok(groupCount >= 15, `Initial ledger groups should be seeded (found ${groupCount})`);
     console.log(`[PASS] Test 1: Ledger groups seeded successfully (${groupCount} groups).`);
@@ -90,14 +63,14 @@ async function runMasterAccountingIntegrityTests() {
       narration: 'Master purchase test #1 updated',
     });
 
-    const vCheck = await comp1.query("SELECT COUNT(*) as cnt FROM voucher WHERE reference_no = ? AND voucher_type = 'Purchase'", [String(5001)]);
+    const vCheck = await conn.query("SELECT COUNT(*) as cnt FROM voucher WHERE reference_no = ? AND voucher_type = 'Purchase'", [String(5001)]);
     assert.strictEqual(Number(vCheck.rows[0].cnt), 1, 'Idempotency must maintain exactly 1 purchase voucher without duplicates');
     console.log(`[PASS] Test 2: Idempotent purchase posting verified (${postRes2.voucherNo}).`);
 
     // Test 3: Loadman / Worker Numeric Name Isolation (`'5'` and `'3'`)
     console.log('Test 3: Testing numeric worker name isolation vs ledgermaster IDs...');
     const workerLedger = await AccountingEngine.resolveOrCreateLedger({
-      conn: comp1,
+      conn,
       companyId: 1,
       name: '5',
       ledgerType: 'Worker',
@@ -133,13 +106,13 @@ async function runMasterAccountingIntegrityTests() {
 
     // Test 5: Contra Voucher Validation (Cash to Bank)
     console.log('Test 5: Testing Contra voucher validation rules...');
-    const cashLedger = await AccountingEngine.resolveOrCreateLedger({ conn: comp1, companyId: 1, name: 'Cash in Hand', ledgerType: 'Cash' });
-    const bankLedger = await AccountingEngine.resolveOrCreateLedger({ conn: comp1, companyId: 1, name: 'HDFC Bank', ledgerType: 'Bank' });
+    const cashLedger = await AccountingEngine.resolveOrCreateLedger({ conn, companyId: 1, name: 'Cash in Hand', ledgerType: 'Cash' });
+    const bankLedger = await AccountingEngine.resolveOrCreateLedger({ conn, companyId: 1, name: 'HDFC Bank', ledgerType: 'Bank' });
 
     let contraErr = null;
     try {
       await AccountingEngine.postVoucher({
-        conn: comp1,
+        conn,
         companyId: 1,
         voucherType: 'Contra',
         prefix: 'CON',
@@ -155,7 +128,7 @@ async function runMasterAccountingIntegrityTests() {
     assert.ok(contraErr, 'Contra voucher to same account must be rejected');
 
     const contraValid = await AccountingEngine.postVoucher({
-      conn: comp1,
+      conn,
       companyId: 1,
       voucherType: 'Contra',
       prefix: 'CON',
@@ -181,21 +154,21 @@ async function runMasterAccountingIntegrityTests() {
     }
     assert.strictEqual(rolledBack, true, 'Transaction threw expected error');
 
-    const failCheck = await comp1.query("SELECT * FROM purchases WHERE inv_no = 'INV-FAIL'", []);
+    const failCheck = await conn.query("SELECT * FROM purchases WHERE inv_no = 'INV-FAIL'", []);
     assert.strictEqual(failCheck.rows.length, 0, 'Failed purchase transaction must roll back completely');
     console.log('[PASS] Test 6: Transaction rollback atomicity verified.');
 
     // Test 7: Formal Voucher Reversal
     console.log('Test 7: Testing formal voucher reversal semantics...');
     const revRes = await AccountingEngine.reverseVoucher({
-      conn: comp1,
+      conn,
       companyId: 1,
       voucherId: postRes1.voucherId,
       reason: 'Testing cancellation reversal',
     });
     assert.ok(revRes?.reversalVoucherNo, 'Reversal journal created successfully');
 
-    const origV = await comp1.query("SELECT is_reversed, status FROM voucher WHERE id = ?", [postRes1.voucherId]);
+    const origV = await conn.query("SELECT is_reversed, status FROM voucher WHERE id = ?", [postRes1.voucherId]);
     assert.strictEqual(Number(origV.rows[0].is_reversed), 1, 'Original voucher is marked is_reversed = 1');
     assert.strictEqual(origV.rows[0].status, 'REVERSED', 'Original voucher status is REVERSED');
     console.log('[PASS] Test 7: Voucher reversal and audit trail cancellation verified.');

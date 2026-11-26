@@ -124,8 +124,28 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
     const sgstAmount = Number(t.sgstAmount || f.sgst_amount || (isInterstate ? 0 : taxAmount - cgstAmount));
     const igstAmount = Number(t.igstAmount || f.igst_amount || (isInterstate ? taxAmount : 0));
     const discAmount = Number(t.discAmount || f.disc_amount || 0);
-    const transportCharges = Number(f.transport_charges || f.transportCharges || f.net_transport_amount || f.freight_amount || 0);
+    const roundOff = Number(t.roundOff || f.round_off || 0);
+
+    const mamoolAmount = Math.max(0, Number(f.mamool_amount || 0));
+    const weightCashAmount = Math.max(0, Number(f.weight_cash || f.weight_cash_amount || 0));
+    const otherAdditionalCharges = Math.max(0, Number(f.other_additional_charges || 0));
+    const otherDeductions = Math.max(0, Number(f.other_deductions || 0));
+    const freightAdvanceAmount = Math.max(0, Number(f.advance_amount || 0));
+    const transportAdditions = Number((weightCashAmount + otherAdditionalCharges).toFixed(2));
+    const transportDeductions = Number((mamoolAmount + otherDeductions + freightAdvanceAmount).toFixed(2));
+
+    const netTransportStored = Number(f.net_transport_amount || f.transport_charges || f.transportCharges || f.freight_amount || 0);
+    let grossFreightAmount = Math.max(0, Number(f.freight_amount || 0));
+    if (grossFreightAmount === 0 && (netTransportStored > 0 || transportDeductions > 0 || transportAdditions > 0)) {
+      grossFreightAmount = Math.max(0, Number((netTransportStored + transportDeductions - transportAdditions).toFixed(2)));
+    }
+    const transportCharges = Math.max(0, Number((grossFreightAmount + transportAdditions - transportDeductions).toFixed(2))) || netTransportStored;
     const loadmanCharges = Number(f.loadman_charges || f.loadmanCharges || 0);
+
+    const transPayType = String(f.transport_payable_type || 'SEPARATE').toUpperCase();
+    const loadmanPayType = String(f.loadman_payable_type || 'SEPARATE').toUpperCase();
+    const isTransIncluded = transPayType === 'SUPPLIER_INVOICE' || transPayType === 'SUPPLIER' || transPayType.includes('SUPPLIER') || transPayType.includes('INCLUDED');
+    const isLoadmanIncluded = loadmanPayType === 'SUPPLIER_INVOICE' || loadmanPayType === 'SUPPLIER' || loadmanPayType.includes('SUPPLIER') || loadmanPayType.includes('INCLUDED');
 
     let supplierName = f.supplier_name || f.supplier || 'Supplier';
     if (/^\d+$/.test(String(supplierName).trim())) {
@@ -144,38 +164,97 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
     const loadmanName = f.loadman_name || 'Loadman Payable';
     const voucherNo = f.inv_no || f.invNo || 'PUR-PREVIEW';
 
-    const totalDeds = deds.reduce((sum, d) => sum + Number(d.amount || 0), 0);
-    const grossInvoice = Number(
-      (f.grand_total && Number(f.grand_total) > 0)
-        ? Number(f.grand_total)
-        : (baseAmount + taxAmount - discAmount).toFixed(2)
-    );
+    const lessDeds = deds
+      .filter((d) => !d.type || String(d.type).toUpperCase() === 'LESS')
+      .reduce((sum, d) => sum + Number(d.amount || 0), 0);
+    const addDeds = deds
+      .filter((d) => d.type && String(d.type).toUpperCase() === 'ADD')
+      .reduce((sum, d) => sum + Number(d.amount || 0), 0);
+    const totalDeds = lessDeds;
 
+    const includedExtras = (isTransIncluded ? transportCharges : 0) + (isLoadmanIncluded ? loadmanCharges : 0);
+    const grossInvoice = Number((baseAmount + taxAmount - discAmount + addDeds + includedExtras + roundOff).toFixed(2));
+
+    let entryNo = 1;
     const entries = [
-      { no: 1, ledger_name: 'Purchase Account', account_head: 'Direct Expenses / Inventory', debit: baseAmount, credit: 0, particulars: `${supplierName} taxable purchase` },
-      ...(isInterstate && igstAmount > 0 ? [{ no: 2, ledger_name: 'Input IGST', account_head: 'Duties & Taxes', debit: igstAmount, credit: 0, particulars: `IGST on ${voucherNo}` }] : [
-        ...(cgstAmount > 0 ? [{ no: 2, ledger_name: 'Input CGST', account_head: 'Duties & Taxes', debit: cgstAmount, credit: 0, particulars: `CGST on ${voucherNo}` }] : []),
-        ...(sgstAmount > 0 ? [{ no: 3, ledger_name: 'Input SGST', account_head: 'Duties & Taxes', debit: sgstAmount, credit: 0, particulars: `SGST on ${voucherNo}` }] : [])
+      { no: entryNo++, ledger_name: 'Purchase Account', account_head: 'Direct Expenses / Inventory', debit: baseAmount, credit: 0, particulars: `${supplierName} taxable purchase` },
+      ...(isInterstate && igstAmount > 0 ? [{ no: entryNo++, ledger_name: 'Input IGST', account_head: 'Duties & Taxes', debit: igstAmount, credit: 0, particulars: `IGST on ${voucherNo}` }] : [
+        ...(cgstAmount > 0 ? [{ no: entryNo++, ledger_name: 'Input CGST', account_head: 'Duties & Taxes', debit: cgstAmount, credit: 0, particulars: `CGST on ${voucherNo}` }] : []),
+        ...(sgstAmount > 0 ? [{ no: entryNo++, ledger_name: 'Input SGST', account_head: 'Duties & Taxes', debit: sgstAmount, credit: 0, particulars: `SGST on ${voucherNo}` }] : [])
       ]),
-      { no: 4, ledger_name: supplierName, account_head: 'Sundry Creditors', debit: 0, credit: grossInvoice, particulars: `Purchase invoice ${voucherNo}` },
-      ...(transportCharges > 0 ? [
-        { no: 5, ledger_name: 'Transport Charges', account_head: 'Direct Expenses / Freight Inward', debit: transportCharges, credit: 0, particulars: `Freight charges on ${voucherNo}` },
-        { no: 6, ledger_name: transporterName, account_head: 'Transporter Payable', debit: 0, credit: transportCharges, particulars: `Freight payable on ${voucherNo}` }
-      ] : []),
-      ...(loadmanCharges > 0 ? [
-        { no: 7, ledger_name: 'Loadman Charges', account_head: 'Direct Expenses / Labour Charges', debit: loadmanCharges, credit: 0, particulars: `Loading/unloading charges on ${voucherNo}` },
-        { no: 8, ledger_name: loadmanName, account_head: 'Loadman Payable', debit: 0, credit: loadmanCharges, particulars: `Loading charges payable on ${voucherNo}` }
-      ] : []),
-      ...(totalDeds > 0 ? [
-        { no: 9, ledger_name: `${supplierName} (Supplier – deduction)`, account_head: 'Sundry Creditors Adjustment', debit: totalDeds, credit: 0, particulars: `Quality/shortage claim deduction on ${voucherNo}` },
-        { no: 10, ledger_name: 'Purchase Deduction Recovery', account_head: 'Indirect Incomes / Claims Recovery', debit: 0, credit: totalDeds, particulars: `Recovery for supplier deduction on ${voucherNo}` }
-      ] : [])
+      ...(discAmount > 0 ? [{ no: entryNo++, ledger_name: 'Discount Received', account_head: 'Indirect Income', debit: 0, credit: discAmount, particulars: `Discount on ${voucherNo}` }] : []),
     ];
+
+    if (grossFreightAmount > 0 || transportAdditions > 0 || transportDeductions > 0) {
+      if (!isTransIncluded) {
+        if (grossFreightAmount > 0) {
+          entries.push({ no: entryNo++, ledger_name: 'Transport Charges', account_head: 'Direct Expenses / Freight Inward', debit: grossFreightAmount, credit: 0, particulars: `Agreed freight charges on ${voucherNo}` });
+          entries.push({ no: entryNo++, ledger_name: transporterName, account_head: 'Transporter Payable', debit: 0, credit: grossFreightAmount, particulars: `Freight payable on ${voucherNo}` });
+        }
+        if (weightCashAmount > 0) {
+          entries.push({ no: entryNo++, ledger_name: 'Weight Cash Charges', account_head: 'Direct Expenses', debit: weightCashAmount, credit: 0, particulars: `Weight cash addition for transport on ${voucherNo}` });
+          entries.push({ no: entryNo++, ledger_name: transporterName, account_head: 'Transporter Payable', debit: 0, credit: weightCashAmount, particulars: `Weight cash payable to transporter on ${voucherNo}` });
+        }
+        if (otherAdditionalCharges > 0) {
+          entries.push({ no: entryNo++, ledger_name: 'Other Transport Charges', account_head: 'Direct Expenses', debit: otherAdditionalCharges, credit: 0, particulars: `Other transport charges on ${voucherNo}` });
+          entries.push({ no: entryNo++, ledger_name: transporterName, account_head: 'Transporter Payable', debit: 0, credit: otherAdditionalCharges, particulars: `Other transport charges payable on ${voucherNo}` });
+        }
+        if (mamoolAmount > 0) {
+          entries.push({ no: entryNo++, ledger_name: transporterName, account_head: 'Transporter Payable', debit: mamoolAmount, credit: 0, particulars: `Mamool deduction on transport ${voucherNo}` });
+          entries.push({ no: entryNo++, ledger_name: 'Mamool Recovery', account_head: 'Direct Income', debit: 0, credit: mamoolAmount, particulars: `Mamool recovery on transport ${voucherNo}` });
+        }
+        if (otherDeductions > 0) {
+          entries.push({ no: entryNo++, ledger_name: transporterName, account_head: 'Transporter Payable', debit: otherDeductions, credit: 0, particulars: `Other transport deduction on ${voucherNo}` });
+          entries.push({ no: entryNo++, ledger_name: 'Transport Deduction Recovery', account_head: 'Direct Income', debit: 0, credit: otherDeductions, particulars: `Transport deduction recovery on ${voucherNo}` });
+        }
+        if (freightAdvanceAmount > 0) {
+          entries.push({ no: entryNo++, ledger_name: transporterName, account_head: 'Transporter Payable', debit: freightAdvanceAmount, credit: 0, particulars: `Transport advance adjusted on ${voucherNo}` });
+          entries.push({ no: entryNo++, ledger_name: 'Transport Advance', account_head: 'Current Assets', debit: 0, credit: freightAdvanceAmount, particulars: `Transport advance adjusted on ${voucherNo}` });
+        }
+      } else {
+        if (grossFreightAmount > 0) entries.push({ no: entryNo++, ledger_name: 'Transport Charges', account_head: 'Direct Expenses / Freight Inward', debit: grossFreightAmount, credit: 0, particulars: `Freight charges on ${voucherNo}` });
+        if (weightCashAmount > 0) entries.push({ no: entryNo++, ledger_name: 'Weight Cash Charges', account_head: 'Direct Expenses', debit: weightCashAmount, credit: 0, particulars: `Weight cash for transport on ${voucherNo}` });
+        if (otherAdditionalCharges > 0) entries.push({ no: entryNo++, ledger_name: 'Other Transport Charges', account_head: 'Direct Expenses', debit: otherAdditionalCharges, credit: 0, particulars: `Other transport charges on ${voucherNo}` });
+        if (mamoolAmount > 0) entries.push({ no: entryNo++, ledger_name: 'Mamool Recovery', account_head: 'Direct Income', debit: 0, credit: mamoolAmount, particulars: `Mamool recovery on transport ${voucherNo}` });
+        if (otherDeductions > 0) entries.push({ no: entryNo++, ledger_name: 'Transport Deduction Recovery', account_head: 'Direct Income', debit: 0, credit: otherDeductions, particulars: `Transport deduction recovery on ${voucherNo}` });
+        if (freightAdvanceAmount > 0) entries.push({ no: entryNo++, ledger_name: 'Transport Advance', account_head: 'Current Assets', debit: 0, credit: freightAdvanceAmount, particulars: `Transport advance adjusted on ${voucherNo}` });
+      }
+    }
+
+    if (loadmanCharges > 0) {
+      entries.push({ no: entryNo++, ledger_name: 'Loadman Charges', account_head: 'Direct Expenses / Labour Charges', debit: loadmanCharges, credit: 0, particulars: `Loading/unloading charges on ${voucherNo}` });
+      if (!isLoadmanIncluded) {
+        entries.push({ no: entryNo++, ledger_name: loadmanName, account_head: 'Loadman Payable', debit: 0, credit: loadmanCharges, particulars: `Loading charges payable on ${voucherNo}` });
+      }
+    }
+
+    entries.push({ no: entryNo++, ledger_name: supplierName, account_head: 'Sundry Creditors', debit: 0, credit: grossInvoice, particulars: `Purchase invoice ${voucherNo}` });
+    if (totalDeds > 0) {
+      entries.push({ no: entryNo++, ledger_name: supplierName, account_head: 'Sundry Creditors Adjustment', debit: totalDeds, credit: 0, particulars: `Purchase quality/shortage claim deduction on ${voucherNo}` });
+      entries.push({ no: entryNo++, ledger_name: 'Purchase Deduction Recovery', account_head: 'Direct Income', debit: 0, credit: totalDeds, particulars: `Recovery for supplier deduction on ${voucherNo}` });
+    }
 
     const drTotal = entries.reduce((s, e) => s + (e.debit || 0), 0);
     const crTotal = entries.reduce((s, e) => s + (e.credit || 0), 0);
     const supplierOutstanding = Number((grossInvoice - totalDeds).toFixed(2));
-    const totalOutstanding = Number((supplierOutstanding + transportCharges + loadmanCharges).toFixed(2));
+    const netTransportOutstanding = isTransIncluded ? 0 : transportCharges;
+    const netLoadmanOutstanding = isLoadmanIncluded ? 0 : loadmanCharges;
+    const totalOutstanding = Number((supplierOutstanding + netTransportOutstanding + netLoadmanOutstanding).toFixed(2));
+
+    const transporterRows = [];
+    if (!isTransIncluded) {
+      if (grossFreightAmount > 0) transporterRows.push({ date: f.date || '-', particulars: `Agreed freight charges on ${voucherNo}`, voucher: voucherNo, debit: 0, credit: grossFreightAmount });
+      if (weightCashAmount > 0) transporterRows.push({ date: f.date || '-', particulars: `Weight cash addition on ${voucherNo}`, voucher: voucherNo, debit: 0, credit: weightCashAmount });
+      if (otherAdditionalCharges > 0) transporterRows.push({ date: f.date || '-', particulars: `Other transport additional charges on ${voucherNo}`, voucher: voucherNo, debit: 0, credit: otherAdditionalCharges });
+      if (mamoolAmount > 0) transporterRows.push({ date: f.date || '-', particulars: `Mamool deduction on ${voucherNo}`, voucher: voucherNo, debit: mamoolAmount, credit: 0 });
+      if (otherDeductions > 0) transporterRows.push({ date: f.date || '-', particulars: `Other transport deduction on ${voucherNo}`, voucher: voucherNo, debit: otherDeductions, credit: 0 });
+      if (freightAdvanceAmount > 0) transporterRows.push({ date: f.date || '-', particulars: `Transport advance adjusted on ${voucherNo}`, voucher: voucherNo, debit: freightAdvanceAmount, credit: 0 });
+    }
+
+    const recoveryRows = [];
+    if (totalDeds > 0) recoveryRows.push({ date: f.date || '-', particulars: 'Purchase deduction recovery (Supplier)', voucher: voucherNo, debit: 0, credit: totalDeds });
+    if (mamoolAmount > 0) recoveryRows.push({ date: f.date || '-', particulars: 'Mamool recovery (Transporter)', voucher: voucherNo, debit: 0, credit: mamoolAmount });
+    if (otherDeductions > 0) recoveryRows.push({ date: f.date || '-', particulars: 'Transport deduction recovery (Transporter)', voucher: voucherNo, debit: 0, credit: otherDeductions });
 
     return {
       purchase: { ...f, supplier_name: supplierName, supplier: supplierName, voucher_no: voucherNo, gross_supplier_invoice: grossInvoice, supplier_payable: supplierOutstanding },
@@ -184,8 +263,16 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
       totals: { debit_total: drTotal, credit_total: crTotal, is_balanced: Math.abs(drTotal - crTotal) < 0.01 },
       party_balances: {
         supplier: { name: supplierName, invoice_credit: grossInvoice, deduction_debit: totalDeds, payments_debit: 0, outstanding: supplierOutstanding },
-        transporter: { name: transporterName, transport_credit: transportCharges, payments_debit: 0, outstanding: transportCharges },
-        loadman: { name: loadmanName, loadman_credit: loadmanCharges, payments_debit: 0, outstanding: loadmanCharges },
+        transporter: {
+          name: transporterName,
+          freight_amount: grossFreightAmount,
+          additions_credit: transportAdditions,
+          deductions_debit: transportDeductions,
+          transport_credit: netTransportOutstanding,
+          payments_debit: 0,
+          outstanding: netTransportOutstanding
+        },
+        loadman: { name: loadmanName, loadman_credit: netLoadmanOutstanding, payments_debit: 0, outstanding: netLoadmanOutstanding },
         total_outstanding: totalOutstanding
       },
       individual_ledgers: {
@@ -195,7 +282,7 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
           category: 'Sundry Creditors',
           rows: [
             { date: f.date || '-', particulars: 'Purchase invoice', voucher: voucherNo, debit: 0, credit: grossInvoice },
-            ...(totalDeds > 0 ? [{ date: f.date || '-', particulars: 'Quality/shortage deduction', voucher: voucherNo, debit: totalDeds, credit: 0 }] : [])
+            ...(totalDeds > 0 ? [{ date: f.date || '-', particulars: 'Purchase deduction (quality/shortage)', voucher: voucherNo, debit: totalDeds, credit: 0 }] : [])
           ],
           closing_balance: supplierOutstanding,
           closing_balance_type: 'Cr',
@@ -205,23 +292,21 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
           title: `Transporter Ledger – ${transporterName}`,
           ledger_name: transporterName,
           category: 'Transporter Payable (Current Liabilities)',
-          rows: transportCharges > 0 ? [
-            { date: f.date || '-', particulars: `Freight charges on ${voucherNo}`, voucher: voucherNo, debit: 0, credit: transportCharges }
-          ] : [],
-          closing_balance: transportCharges,
+          rows: transporterRows,
+          closing_balance: netTransportOutstanding,
           closing_balance_type: 'Cr',
-          explanation: `Freight outstanding: ₹${transportCharges.toLocaleString('en-IN')}`
+          explanation: `Freight outstanding: ₹${netTransportOutstanding.toLocaleString('en-IN')}`
         },
         loadman: {
           title: `Loadman Ledger – ${loadmanName}`,
           ledger_name: loadmanName,
           category: 'Loadman Payable (Current Liabilities)',
-          rows: loadmanCharges > 0 ? [
+          rows: netLoadmanOutstanding > 0 ? [
             { date: f.date || '-', particulars: `Loading/unloading charges on ${voucherNo}`, voucher: voucherNo, debit: 0, credit: loadmanCharges }
           ] : [],
-          closing_balance: loadmanCharges,
+          closing_balance: netLoadmanOutstanding,
           closing_balance_type: 'Cr',
-          explanation: `Unloading charges outstanding: ₹${loadmanCharges.toLocaleString('en-IN')}`
+          explanation: `Unloading charges outstanding: ₹${netLoadmanOutstanding.toLocaleString('en-IN')}`
         },
         purchase_account: {
           title: 'Purchase Account',
@@ -247,15 +332,13 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
           explanation: `Input tax credit: ₹${taxAmount.toLocaleString('en-IN')}`
         },
         deduction_recovery: {
-          title: 'Deduction Recovery Ledger',
+          title: 'Deduction & Recovery Ledgers',
           ledger_name: 'Purchase Deduction Recovery',
           category: 'Recovery / Claims Reserve',
-          rows: totalDeds > 0 ? [
-            { date: f.date || '-', particulars: 'Supplier claim recovery', voucher: voucherNo, debit: 0, credit: totalDeds }
-          ] : [],
-          closing_balance: totalDeds,
+          rows: recoveryRows,
+          closing_balance: Number((totalDeds + mamoolAmount + otherDeductions).toFixed(2)),
           closing_balance_type: 'Cr',
-          explanation: `Recovery from supplier: ₹${totalDeds.toLocaleString('en-IN')}`
+          explanation: `Supplier recovery: ₹${totalDeds.toLocaleString('en-IN')} · Transport recovery: ₹${(mamoolAmount + otherDeductions).toLocaleString('en-IN')}`
         }
       }
     };
@@ -804,19 +887,35 @@ const PurchaseLedgerDetailsModal = ({ isOpen, onClose, purchaseId, purchaseData 
                   </div>
                   <div className="mt-4 pt-3 border-t border-slate-100 space-y-1.5 text-xs">
                     <div className="flex justify-between">
-                      <span className="text-slate-500">Freight Charges:</span>
+                      <span className="text-slate-500">Agreed Freight:</span>
                       <span className="font-semibold text-slate-800">
-                        ₹{transportAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        ₹{Number(statementData.party_balances?.transporter?.freight_amount ?? transportAmount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                       </span>
                     </div>
-                    <div className="flex justify-between text-emerald-600">
+                    {Number(statementData.party_balances?.transporter?.additions_credit || 0) > 0 && (
+                      <div className="flex justify-between text-emerald-700">
+                        <span>Additions (Weight Cash / Other):</span>
+                        <span className="font-semibold">
+                          +₹{Number(statementData.party_balances?.transporter?.additions_credit || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    )}
+                    {Number(statementData.party_balances?.transporter?.deductions_debit || 0) > 0 && (
+                      <div className="flex justify-between text-red-600">
+                        <span>Deductions (Mamool / Adv / Other):</span>
+                        <span className="font-semibold">
+                          -₹{Number(statementData.party_balances?.transporter?.deductions_debit || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-slate-500">
                       <span>Vehicle:</span>
-                      <span className="font-semibold">{pData.vehicle_no || pData.lorry_no || 'N/A'}</span>
+                      <span className="font-semibold text-slate-700">{pData.vehicle_no || pData.lorry_no || 'N/A'}</span>
                     </div>
                     <div className="pt-2 border-t border-slate-200 flex justify-between font-bold text-slate-900">
                       <span>Transporter Outstanding:</span>
                       <span className="text-sm text-amber-800">
-                        ₹{transportAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} Cr
+                        ₹{Number(statementData.party_balances?.transporter?.outstanding ?? transportAmount).toLocaleString('en-IN', { minimumFractionDigits: 2 })} Cr
                       </span>
                     </div>
                   </div>
